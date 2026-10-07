@@ -11,6 +11,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,21 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
 
 
 class ReleaseAssetRetentionTest(unittest.TestCase):
+    def test_registry_publication_waits_for_all_package_checks(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        for name, required in (
+            ("crates-io", {"resolve", "python", "javascript"}),
+            ("release", {"resolve", "python", "javascript", "crates-io"}),
+        ):
+            with self.subTest(job=name):
+                job = workflow.split(f"\n  {name}:\n", 1)[1]
+                job = re.split(r"\n  [a-z][a-z-]*:\n", job, maxsplit=1)[0]
+                dependencies = re.search(r"^    needs: \[([^]]+)\]$", job, re.M)
+                self.assertIsNotNone(dependencies)
+                self.assertTrue(required.issubset(set(dependencies.group(1).split(", "))))
+                self.assertIsNone(re.search(r"^    if:", job, re.M),
+                                  "Publication must retain GitHub's default successful-needs gate")
+
     def test_completion_keeps_published_bytes_and_uploads_only_missing_assets(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
 
