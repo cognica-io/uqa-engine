@@ -21,7 +21,7 @@ fn completed_commit_hints_preserve_pending_cleanup_diagnostics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     *connection.session.cleanup_failure.lock() = Some("failed rollback probe".into());
     assert!(connection.completed_commit().is_none());
-    assert!(connection.committed_data_revision().unwrap().is_none());
+    assert!(connection.committed_data_revision().is_none());
     assert!(matches!(
         connection.read_view_revision(),
         Err(SQLiteError::SessionCleanupFailed(message)) if message == "failed rollback probe"

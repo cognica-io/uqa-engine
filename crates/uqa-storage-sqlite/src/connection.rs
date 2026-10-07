@@ -615,16 +615,15 @@ impl ManagedConnection {
 
     pub(crate) fn committed_data_revision(
         &self,
-    ) -> Result<Option<uqa_storage::CommittedDataRevision>> {
+    ) -> Option<uqa_storage::CommittedDataRevision> {
         if self.session.cleanup_failure.lock().is_some() {
-            return Ok(None);
+            return None;
         }
         let _gate = self.session.gate.read();
-        Ok(self
-            .session
+        self.session
             .logical
             .get()
-            .and_then(|logical| logical.committed_data_revision()))
+            .and_then(|logical| logical.committed_data_revision())
     }
 
     /// Establish the database snapshot for the active transaction without
