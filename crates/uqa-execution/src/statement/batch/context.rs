@@ -42,6 +42,20 @@ pub struct CachedStatement {
 }
 
 pub trait StatementCache {
+    /// Look up analysis after the statement's snapshot and writer refreshes, with current catalog and scope validation. Ordinary cache implementations may decline this capability.
+    fn cached_sql_analysis(
+        &self,
+        _sql: &str,
+    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+        None
+    }
+    fn cache_sql_analysis(
+        &self,
+        _sql: &str,
+        _analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+    ) {
+    }
+
     fn cached_sql_statement(&self, sql: &str) -> Option<CachedStatement>;
     fn cache_sql_statement(
         &self,

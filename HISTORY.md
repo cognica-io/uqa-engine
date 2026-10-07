@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse ordinary statement analysis across data-only commits when the selected snapshot, definitions and parameter types still permit it. Re-optimize against current data on every invocation, preserving fresh parameter values, temporal input lifetimes, rollback and schema diagnostics.
+
 - Reuse completed data-commit receipts for session cache adoption on native SQLite, SQLite Key/Value and redb, avoiding an extra read transaction and catalog-generation scan after a data-only commit. Preserve refresh after intervening commits, definition changes, rollback and uncertain completion.
 
 - Store SQLite MVCC version payloads by stable physical address, with keyed metadata for historical reads and reclamation, reducing WAL write amplification when a commit changes several record families. Initial open atomically converts SQLite record format 58 and earlier to 59 while preserving histories, receipts, snapshots and FULL synchronization.

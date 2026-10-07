@@ -36,6 +36,33 @@ pub struct StatementPlanningContext<'a> {
 }
 
 impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
+    fn plan_with_cached_analysis(
+        &self,
+        plan: UnifiedPlan,
+        params: &[SQLParam],
+        cached: Option<std::sync::Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+    ) -> Result<
+        (
+            UnifiedPlan,
+            Option<std::sync::Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+        ),
+        SQLError,
+    > {
+        let (plan, retained) = if let Some((plan, cached)) =
+            cached.and_then(|cached| cached.plan_for(params).cloned().map(|plan| (plan, cached)))
+        {
+            (plan, Some(cached))
+        } else {
+            let (plan, retained) = uqa_sql::binding::statements::analyze_for_statement_reuse(
+                &self.analysis,
+                plan,
+                params,
+            )?;
+            (plan, retained.map(std::sync::Arc::new))
+        };
+        Ok((optimize_plan(self, plan)?, retained))
+    }
+
     fn plan_for_statement_cache(
         &self,
         mut plan: UnifiedPlan,

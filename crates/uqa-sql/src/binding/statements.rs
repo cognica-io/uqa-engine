@@ -73,6 +73,8 @@ pub fn analyze_executable_plan(
 
 mod procedural;
 pub use procedural::{analyze_procedural_plan, ProceduralPlanAnalysis};
+mod cache;
+pub use cache::{analyze_for_statement_reuse, AnalyzedStatement};
 
 /// Analyze once and report whether the converted inputs can be reused by a later
 /// ordinary message. Prepared definitions use their separate creation lifetime.
@@ -81,15 +83,23 @@ pub fn analyze_executable_plan_for_cache(
     plan: &mut UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<(AnalyzedResult, bool), SQLError> {
+    analyze_reusable_inputs(context, plan, params)
+        .map(|(result, reusable)| (result, reusable && params.is_empty()))
+}
+
+fn analyze_reusable_inputs(
+    context: &StatementAnalysisContext<'_>,
+    plan: &mut UnifiedPlan,
+    params: &[SQLParam],
+) -> Result<(AnalyzedResult, bool), SQLError> {
     let mut result = None;
-    let mut reusable = params.is_empty();
+    let mut reusable = true;
     context.scopes.with_scope(&mut |scope| {
         result = Some(match plan {
             UnifiedPlan::Command(command) => match command.as_mut() {
                 // The explained statement retains a scope of its own.
                 CommandPlan::Explain { body, .. } => {
-                    let (_, body_reusable) =
-                        analyze_executable_plan_for_cache(context, body, params)?;
+                    let (_, body_reusable) = analyze_reusable_inputs(context, body, params)?;
                     reusable &= body_reusable;
                     AnalyzedResult::Command
                 }
