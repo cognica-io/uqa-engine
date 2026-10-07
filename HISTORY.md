@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Probe complete composite UNIQUE tuples during mutation checks instead of reading all rows sharing the leading key. Preserve partial predicates, NULL semantics, command-local changes and rollback; initial open repairs missing tuple postings atomically, and SQLite record format 58 and redb record format 56 exclude older writers.
+- Prepare operator-join predicates in each input relation’s own scope, restoring unified-search examples across language bindings while retaining constant-error ordering and namespace checks.
+- Reduce nested routine execution stack frames so shallow recursion succeeds in development builds without weakening the native stack guard or recursive-error recovery.
+
 - Preserve legacy key constraint names when initial analyzer restoration saves a table before its owned index registry is converted. Databases combining predecessor column keys and full-text fields now reopen with their constraints, documents and search index intact; converted catalogs continue to store key names only on owned indexes.
 
 ## [0.5.0] - 2026-10-07

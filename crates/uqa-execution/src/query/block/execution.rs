@@ -18,10 +18,6 @@ use super::{
     SingleRelation, SourceContext, SourcePlan, SourceProjection,
 };
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     block: &'a QueryBlockPlan,
@@ -86,6 +82,40 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
         outer.as_ref(),
     )?;
 
+    run_from_query_block(
+        context,
+        block,
+        stmt,
+        params,
+        ctes,
+        output_mode,
+        &expression_schema,
+        outer.as_ref(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "borrows the already validated query scopes"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
+fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    block: &'a QueryBlockPlan,
+    stmt: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &'a mut CteScope<S>,
+    output_mode: QueryOutputMode<'a>,
+    expression_schema: &crate::RowSchema,
+    outer: Option<&crate::RowSchema>,
+) -> Result<QueryOutput, SQLError> {
+    let from = stmt
+        .from
+        .as_ref()
+        .expect("FROM source checked before dispatch");
     // Set-op branches, CTEs, and derived-table bodies still need the same
     // search-aware single-table physical access path as top-level queries;
     // otherwise registry-backed predicates such as
@@ -112,10 +142,10 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                 validate_query_block_references(
                     context.ctes.routines,
                     stmt,
-                    &expression_schema,
+                    expression_schema,
                     params,
                     ctes,
-                    outer.as_ref(),
+                    outer,
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_foreign_select_output(
@@ -163,14 +193,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                     )?;
                 }
                 let reference_schema = if schemaless {
-                    schemaless_reference_schema(
-                        context,
-                        stmt,
-                        from,
-                        qualifier,
-                        outer.as_ref(),
-                        ctes,
-                    )?
+                    schemaless_reference_schema(context, stmt, from, qualifier, outer, ctes)?
                 } else {
                     expression_schema.clone()
                 };
@@ -180,7 +203,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                     &reference_schema,
                     params,
                     ctes,
-                    outer.as_ref(),
+                    outer,
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
@@ -220,10 +243,10 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
         validate_query_block_references(
             context.ctes.routines,
             stmt,
-            &expression_schema,
+            expression_schema,
             params,
             ctes,
-            outer.as_ref(),
+            outer,
         )?;
     }
     let column_prune = context.planning.column_prune(stmt, from, ctes)?;
@@ -250,14 +273,14 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
     };
     let source_schema = operator.row_schema().clone();
     let projection_schema = with_query_table_pseudo_columns(&source_schema);
-    let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
+    let projection_schema = overlay_outer_schema(&projection_schema, outer);
     validate_query_block_references(
         context.ctes.routines,
         stmt,
         &projection_schema,
         params,
         ctes,
-        outer.as_ref(),
+        outer,
     )?;
     let physical_filter =
         context

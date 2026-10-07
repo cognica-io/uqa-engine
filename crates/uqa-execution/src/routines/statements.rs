@@ -17,54 +17,19 @@ impl Interpreter<'_> {
         self.services.runtime.cancellation_token().check()?;
         match stmt {
             PLpgSQLStmt::Block(block) => self.exec_block(block),
-            PLpgSQLStmt::Assign { target, expr } => {
-                let record_types = self.record_expression_types(expr)?;
-                let (value, source) = self.eval_expr_with_type(expr)?;
-                self.assign_datum_typed(*target, value, source.as_ref(), record_types)?;
-                Ok(Flow::Normal)
-            }
+            PLpgSQLStmt::Assign { target, expr } => self.exec_assignment(*target, expr),
             PLpgSQLStmt::If {
                 cond,
                 then_body,
                 elsifs,
                 else_body,
-            } => {
-                if self.eval_boolean(cond)?.unwrap_or(false) {
-                    return self.exec_stmts(then_body);
-                }
-                for (elsif_cond, body) in elsifs {
-                    if self.eval_boolean(elsif_cond)?.unwrap_or(false) {
-                        return self.exec_stmts(body);
-                    }
-                }
-                match else_body {
-                    Some(body) => self.exec_stmts(body),
-                    None => Ok(Flow::Normal),
-                }
-            }
+            } => self.exec_if(cond, then_body, elsifs, else_body.as_deref()),
             PLpgSQLStmt::Case {
                 t_expr,
                 t_varno,
                 arms,
                 else_body,
-            } => {
-                if let (Some(t_expr), Some(varno)) = (t_expr, t_varno) {
-                    let value = self.eval_expr(t_expr)?;
-                    self.values[*varno] = value;
-                }
-                for (cond, body) in arms {
-                    if self.eval_boolean(cond)?.unwrap_or(false) {
-                        return self.exec_stmts(body);
-                    }
-                }
-                match else_body {
-                    Some(body) => self.exec_stmts(body),
-                    None => Err(SQLError::Routine {
-                        sqlstate: "20000".into(),
-                        message: "case not found".into(),
-                    }),
-                }
-            }
+            } => self.exec_case(t_expr.as_ref(), *t_varno, arms, else_body.as_deref()),
             PLpgSQLStmt::Loop { label, body } => loop {
                 match self.exec_loop_body(label.as_deref(), body)? {
                     LoopSignal::Continue => {}
@@ -204,25 +169,7 @@ impl Interpreter<'_> {
                 params,
                 into,
                 strict,
-            } => {
-                let result = self.exec_dynamic(query, params)?;
-                let row_count = result_row_count(&result)?;
-                self.last_row_count = row_count;
-                if let Some(target) = into {
-                    if *strict {
-                        strict_into_check(row_count)?;
-                    }
-                    let values = result_row_values(&result, 0);
-                    self.assign_into(
-                        target,
-                        &result.columns,
-                        &result.column_types,
-                        values.as_deref(),
-                    )?;
-                }
-                // PostgreSQL: EXECUTE never changes FOUND.
-                Ok(Flow::Normal)
-            }
+            } => self.exec_dynamic_into(query, params, into.as_ref(), *strict),
             PLpgSQLStmt::Perform { query } => {
                 let result = self.exec_query(query)?;
                 let row_count = result_row_count(&result)?;
@@ -272,5 +219,88 @@ impl Interpreter<'_> {
                 Ok(Flow::Normal)
             }
         }
+    }
+
+    fn exec_assignment(
+        &mut self,
+        target: usize,
+        expr: &super::PLpgSQLExpression,
+    ) -> Result<Flow, SQLError> {
+        let record_types = self.record_expression_types(expr)?;
+        let (value, source) = self.eval_expr_with_type(expr)?;
+        self.assign_datum_typed(target, value, source.as_ref(), record_types)?;
+        Ok(Flow::Normal)
+    }
+
+    fn exec_if(
+        &mut self,
+        cond: &super::PLpgSQLExpression,
+        then_body: &[PLpgSQLStmt],
+        elsifs: &[(super::PLpgSQLExpression, Vec<PLpgSQLStmt>)],
+        else_body: Option<&[PLpgSQLStmt]>,
+    ) -> Result<Flow, SQLError> {
+        if self.eval_boolean(cond)?.unwrap_or(false) {
+            return self.exec_stmts(then_body);
+        }
+        for (elsif_cond, body) in elsifs {
+            if self.eval_boolean(elsif_cond)?.unwrap_or(false) {
+                return self.exec_stmts(body);
+            }
+        }
+        match else_body {
+            Some(body) => self.exec_stmts(body),
+            None => Ok(Flow::Normal),
+        }
+    }
+
+    fn exec_case(
+        &mut self,
+        t_expr: Option<&super::PLpgSQLExpression>,
+        t_varno: Option<usize>,
+        arms: &[(super::PLpgSQLExpression, Vec<PLpgSQLStmt>)],
+        else_body: Option<&[PLpgSQLStmt]>,
+    ) -> Result<Flow, SQLError> {
+        if let (Some(t_expr), Some(varno)) = (t_expr, t_varno) {
+            let value = self.eval_expr(t_expr)?;
+            self.values[varno] = value;
+        }
+        for (cond, body) in arms {
+            if self.eval_boolean(cond)?.unwrap_or(false) {
+                return self.exec_stmts(body);
+            }
+        }
+        match else_body {
+            Some(body) => self.exec_stmts(body),
+            None => Err(SQLError::Routine {
+                sqlstate: "20000".into(),
+                message: "case not found".into(),
+            }),
+        }
+    }
+
+    fn exec_dynamic_into(
+        &mut self,
+        query: &super::PLpgSQLExpression,
+        params: &[super::PLpgSQLExpression],
+        into: Option<&super::IntoTarget>,
+        strict: bool,
+    ) -> Result<Flow, SQLError> {
+        let result = self.exec_dynamic(query, params)?;
+        let row_count = result_row_count(&result)?;
+        self.last_row_count = row_count;
+        if let Some(target) = into {
+            if strict {
+                strict_into_check(row_count)?;
+            }
+            let values = result_row_values(&result, 0);
+            self.assign_into(
+                target,
+                &result.columns,
+                &result.column_types,
+                values.as_deref(),
+            )?;
+        }
+        // PostgreSQL: EXECUTE never changes FOUND.
+        Ok(Flow::Normal)
     }
 }

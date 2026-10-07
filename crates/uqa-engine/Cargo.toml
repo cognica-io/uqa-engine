@@ -139,6 +139,11 @@ name = "query_matrix"
 harness = false
 
 [[bench]]
+name = "release_inventory"
+harness = false
+bench = false
+
+[[bench]]
 name = "text_top_k"
 harness = false
 
