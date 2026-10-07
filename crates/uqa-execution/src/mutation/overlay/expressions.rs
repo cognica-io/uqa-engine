@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Evaluate expression keys before borrowing command frames; retain them with their row version.
+//! Evaluate physical tuple keys before borrowing command frames; retain them with their row version.
 
 use super::{
     resource_error, Arc, BudgetedVec, CommandMutationOverlay, CommandStoredDocument, DocId,
@@ -43,7 +43,7 @@ impl CommandStoredDocument {
     }
 }
 
-/// Exact expression matches and the same command view that masks older stored keys. Transaction-private stored rows are already represented by the mutation index reader.
+/// Exact physical tuple matches and the same command view that masks older stored keys. Transaction-private stored rows are already represented by the mutation index reader.
 pub struct CommandIndexProbe {
     pub matches: BudgetedVec<DocId>,
     pub changes: DocumentChanges,

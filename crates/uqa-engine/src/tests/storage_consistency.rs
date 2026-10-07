@@ -7,6 +7,7 @@
 use super::*;
 use uqa_storage_sqlite::{Catalog, SQLiteStorageBackend};
 
+mod composite_unique;
 mod indexed_queries;
 mod legacy_vectors;
 mod referential;
