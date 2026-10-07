@@ -4,7 +4,7 @@
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
-The manual on `main` also describes unreleased changes after 0.4.9: configuration parameters and timeouts, routine-body validation, and key, foreign-key, trigger and data-modifying CTE corrections. Follow [Unreleased](HISTORY.md#unreleased) and the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049); use the version-tagged manual for published-package behavior.
+The manual on `main` also describes unreleased changes after 0.4.9: user-defined enum and composite types, composite attribute addition, foreign-data wrapper lifecycle, configuration parameters and timeouts, routine-body validation, and key, foreign-key, trigger and data-modifying CTE corrections. Follow [Unreleased](HISTORY.md#unreleased) and the [unreleased upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-changes-after-049); use the version-tagged manual for published-package behavior.
 
 UQA Engine 0.4.9 provides native DiskANN through memory, native SQLite, SQLite Key/Value and redb. Use the [DDL options](docs/manual/sql/02-ddl.md#diskann-vector-indexes), [retrieval/scoring contract](docs/manual/sql/06-retrieval.md#diskann-plan-diagnostics) and [binding examples](examples/README.md). PQ guides candidate selection; returned scores remain canonical cosine, and existing probability conversion stays at its original fusion boundary. The [implementation ledger](docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) records artifact, fixed-fixture quality and provider/resource evidence; do not infer a general recall floor or measured speedup.
 
@@ -49,14 +49,14 @@ Implementation tests follow their owning crates. Engine catalog, session, guard,
 - [Manual overview](docs/manual/README.md): Scope, reading paths, conventions, and compatibility target.
 - [Quick start](docs/manual/reference/01-quick-start.md): Minimal Rust and SQL workflow.
 - [Supported SQL](docs/manual/sql/README.md): SQL surface, parameters, names, ranking columns, and the function contract format.
-- [Compatibility](docs/manual/sql/09-compatibility.md): PostgreSQL alignment, deliberate differences, and unsupported behavior.
+- [Compatibility](docs/manual/sql/09-compatibility.md): Verified PostgreSQL alignment, open compatibility bugs, and UQA-specific extensions.
 - [Runnable examples](examples/README.md): Matching unified-search, vector-KNN, graph/Cypher, storage/transaction, and extensibility programs for Rust, Python, Node.js, and Browser WASM.
 - [UQA Engine agent skill](.agents/skills/uqa-engine/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
 
 ## SQL contracts
 
-- [Data types](docs/manual/sql/01-data-types.md): Scalars, floating-point conversion and arithmetic widths, temporal precision, interval fields, domains, [enum types](docs/manual/sql/01-data-types.md#enum-types) and their current labels, JSON, arrays, vectors, tensors, NULL, conversions, and `unknown` literals typed by their operators and functions.
-- [DDL](docs/manual/sql/02-ddl.md): Schemas, stored relation/routine and column dependencies, durable source aliases, renames and deletion, domain declarations and dependency-aware deletion, [enum type declarations](docs/manual/sql/02-ddl.md#enum-types), relations, constraints, partition bounds typed by their partition keys, indexes, views, sequences, and foreign tables.
+- [Data types](docs/manual/sql/01-data-types.md): Scalars, floating-point conversion and arithmetic widths, temporal precision, interval fields, domains, [enum types](docs/manual/sql/01-data-types.md#enum-types) and their current labels, [composite records](docs/manual/sql/01-data-types.md#composite-types), built-in ranges and multiranges, JSON, arrays, vectors, tensors, NULL, conversions, and `unknown` literals typed by their operators and functions.
+- [DDL](docs/manual/sql/02-ddl.md): Schemas, stored relation/routine and column dependencies, durable source aliases, renames and deletion, domain declarations and dependency-aware deletion, [enum type declarations](docs/manual/sql/02-ddl.md#enum-types), [composite types and attribute addition](docs/manual/sql/02-ddl.md#composite-types), relations, constraints, partition bounds typed by their partition keys, indexes, views, sequences, and [foreign wrappers, servers and tables](docs/manual/sql/02-ddl.md#foreign-servers-and-tables).
 - [Queries and DML](docs/manual/sql/03-queries-and-dml.md): SELECT, joins, recursive and data-modifying CTEs, grouping, windows, sets, and mutation.
 - [Expressions and functions](docs/manual/sql/04-expressions-and-functions.md): Operators, scalar functions, statement and transaction clocks, aggregates, windows, and general table functions.
 - [Analyzer SQL](docs/manual/sql/05-analyzers.md): Exact analyzer JSON, built-ins including `standard_cjk`, lifecycle functions, GIN binding, and diagnostics.
