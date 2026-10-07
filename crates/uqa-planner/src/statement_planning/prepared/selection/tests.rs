@@ -196,6 +196,44 @@ impl StatementBindingScope for Inputs {
 }
 
 #[test]
+fn routine_owned_definition_selects_once_without_the_named_registry() {
+    let inputs = Inputs {
+        mode: "force_generic_plan",
+        ..Inputs::default()
+    };
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    for value in 1..=32 {
+        let selected = select_entry(
+            &inputs.context(),
+            &entry,
+            &[SQLParam::typed_scalar(
+                Value::Int(value),
+                ColumnType::Integer,
+            )],
+        )
+        .unwrap();
+        assert!(has_parameter(&selected.plan));
+        entry.record_execution(selected.update);
+    }
+    let events = inputs.events.borrow();
+    assert!(!events.contains(&"lookup"));
+    assert!(!events.contains(&"publish"));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| **event == "optimize.generic")
+            .count(),
+        1
+    );
+    assert_eq!(
+        events.iter().filter(|event| **event == "analysis").count(),
+        1
+    );
+    assert_eq!(entry.generic_plans, 32);
+    assert_eq!(inputs.entry.borrow().as_ref().unwrap().generic_plans, 0);
+}
+
+#[test]
 fn first_generic_cost_is_rechecked_before_selecting_the_executable_plan() {
     let inputs = Inputs::default();
     let selected = inputs.select().unwrap().unwrap();

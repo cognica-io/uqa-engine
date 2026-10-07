@@ -15,6 +15,9 @@ mod body_results;
 #[path = "sql_function_bodies/series_binding.rs"]
 mod series_binding;
 
+#[path = "sql_function_bodies/plan_reuse.rs"]
+mod plan_reuse;
+
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::{SQLError, SQLResult};

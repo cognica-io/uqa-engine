@@ -32,15 +32,42 @@ pub(super) struct SQLStatements<'a> {
     pub inputs: Option<SQLRoutineInputContext<'a>>,
 }
 
+pub(super) enum SQLBodyPlan {
+    Selected(UnifiedPlan),
+    Uncached(UnifiedPlan),
+}
+
+impl SQLBodyPlan {
+    pub(super) fn plan(&self) -> &UnifiedPlan {
+        match self {
+            Self::Selected(plan) | Self::Uncached(plan) => plan,
+        }
+    }
+
+    pub(super) fn execute(
+        self,
+        context: RoutineContext<'_>,
+        params: &[SQLParam],
+        check: Option<StatementResultCheck<'_>>,
+    ) -> Result<uqa_sql::SQLResult, SQLError> {
+        match self {
+            Self::Selected(plan) => context.statements.execute_selected_body_plan(&plan, params),
+            Self::Uncached(plan) => context
+                .statements
+                .execute_body_statement(plan, params, check),
+        }
+    }
+}
+
 impl SQLStatements<'_> {
     pub(super) fn prepare(
         &self,
         plan: &UnifiedPlan,
         position: usize,
         check: Option<StatementResultCheck<'_>>,
-    ) -> Result<UnifiedPlan, SQLError> {
+    ) -> Result<SQLBodyPlan, SQLError> {
         let Some(inputs) = &self.inputs else {
-            return self.bind(plan);
+            return self.bind(plan).map(SQLBodyPlan::Uncached);
         };
         let analyzed = inputs.cache.statement(
             self.identity,
@@ -67,7 +94,18 @@ impl SQLStatements<'_> {
                 Ok(definition)
             },
         )?;
-        Ok(analyzed.logical_plan.clone())
+        if let Some(check) = check {
+            check(
+                &analyzed
+                    .definition
+                    .result_schema
+                    .clone()
+                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema),
+            )?;
+        }
+        analyzed
+            .select(|entry| self.context.statements.select_body_plan(entry, self.params))
+            .map(SQLBodyPlan::Selected)
     }
 
     fn bind(&self, plan: &UnifiedPlan) -> Result<UnifiedPlan, SQLError> {

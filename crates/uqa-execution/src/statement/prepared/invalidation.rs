@@ -20,6 +20,14 @@ pub fn invalidate_execution_plans<'a>(
     }
 }
 
+pub fn invalidate_execution_plans_with_routines<'a>(
+    entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
+    routines: &crate::routines::invocation::bodies::SessionRoutineBodies,
+) {
+    invalidate_execution_plans(entries);
+    routines.invalidate_execution_plans();
+}
+
 /// Registry publication distinguishes executable definitions from builtin ACL tuples. Surviving calls check their ACL at execution initialization; already-folded calls have no remaining execution permission dependency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CatalogRegistryChange {
@@ -28,6 +36,16 @@ pub enum CatalogRegistryChange {
 }
 
 impl CatalogRegistryChange {
+    pub fn invalidate_with_routines<'a>(
+        self,
+        entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>,
+        routines: &crate::routines::invocation::bodies::SessionRoutineBodies,
+    ) {
+        if self == Self::Definitions {
+            invalidate_execution_plans_with_routines(entries, routines);
+        }
+    }
+
     pub fn invalidate<'a>(self, entries: impl IntoIterator<Item = &'a mut PreparedStatementPlan>) {
         if self == Self::Definitions {
             invalidate_execution_plans(entries);

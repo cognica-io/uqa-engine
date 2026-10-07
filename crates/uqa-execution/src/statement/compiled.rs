@@ -41,6 +41,18 @@ pub fn execute_plan<S: Clone + Send + Sync + 'static>(
         .execute(&plan)
 }
 
+/// A prepared owner has already analyzed and selected this executable. Capture
+/// fresh execution inputs without binding or optimizing it a second time.
+pub fn execute_selected_plan<S: Clone + Send + Sync + 'static>(
+    context: &CompiledStatementContext<'_, S>,
+    plan: &UnifiedPlan,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let _temporal_input = super::context::temporal_input_scope(context.statements);
+    UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
+        .execute(plan)
+}
+
 /// Run a statement once `check` accepts what its analysis derives about its result.
 pub fn execute_checked_plan<S: Clone + Send + Sync + 'static>(
     context: &CompiledStatementContext<'_, S>,

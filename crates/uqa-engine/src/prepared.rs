@@ -44,8 +44,9 @@ impl Engine {
     /// Catalog changes are checked when each statement is next executed, so a
     /// dropped dependency cannot make unrelated commands or rollback fail.
     pub(crate) fn invalidate_prepared_plans(&self) {
-        uqa_execution::statement::prepared::invalidation::invalidate_execution_plans(
+        uqa_execution::statement::prepared::invalidation::invalidate_execution_plans_with_routines(
             self.session.prepared.write().values_mut(),
+            &self.session.routine_bodies,
         );
     }
 

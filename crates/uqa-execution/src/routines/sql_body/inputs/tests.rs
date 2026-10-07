@@ -167,3 +167,72 @@ fn publication_and_undo_events_invalidate_only_selected_analysis_dependencies() 
         "transaction completion resends the same publication event"
     );
 }
+
+fn selected(entry: &PreparedStatementPlan) -> uqa_sql::prepared::planning::PreparedPlanSelection {
+    let plan = entry
+        .plan
+        .clone()
+        .unwrap_or_else(|| (*entry.logical_plan).clone());
+    uqa_sql::prepared::planning::PreparedPlanSelection {
+        plan: plan.clone(),
+        update: uqa_sql::prepared::planning::PreparedPlanUpdate {
+            reanalyzed: None,
+            generic_plan: Some(plan),
+            generic_cost: Some(1.0),
+            custom_cost: None,
+        },
+    }
+}
+
+#[test]
+fn successful_plan_selection_is_retained_but_failed_selection_does_not_change_usage() {
+    let statement = SQLRoutineStatement::new(definition().unwrap());
+    for used in 0..32 {
+        statement
+            .select(|entry| {
+                assert_eq!(entry.generic_plans, used);
+                assert_eq!(entry.plan.is_some(), used != 0);
+                Ok(selected(entry))
+            })
+            .unwrap();
+    }
+    assert!(statement
+        .select(|_| Err(SQLError::Internal("planning failed".into())))
+        .is_err());
+    let current = statement.variants.lock();
+    assert_eq!(current.generic_plans, 32);
+    assert!(current.plan.is_some());
+}
+
+#[test]
+fn execution_invalidation_preserves_inputs_and_rejects_reentrant_plan_publication() {
+    use crate::statement::prepared::invalidation::CatalogRegistryChange;
+    let bodies = crate::routines::invocation::bodies::SessionRoutineBodies::default();
+    let cache = bodies.sql_inputs();
+    let identity = SQLBodyIdentity {
+        object: [7; 16],
+        version: 1,
+    };
+    let statement = cache
+        .statement(identity, 0, &[], &context(), definition)
+        .unwrap();
+    statement.select(|entry| Ok(selected(entry))).unwrap();
+    CatalogRegistryChange::BuiltinRoutinePrivileges
+        .invalidate_with_routines(std::iter::empty(), &bodies);
+    assert!(statement.variants.lock().plan.is_some());
+    statement
+        .select(|entry| {
+            CatalogRegistryChange::Definitions
+                .invalidate_with_routines(std::iter::empty(), &bodies);
+            Ok(selected(entry))
+        })
+        .unwrap();
+    let current = statement.variants.lock();
+    assert!(current.plan.is_none());
+    assert_eq!(current.generic_plans, 1);
+    drop(current);
+    let repeated = cache
+        .statement(identity, 0, &[], &context(), || panic!("inputs survive"))
+        .unwrap();
+    assert!(Arc::ptr_eq(&statement, &repeated));
+}

@@ -30,3 +30,10 @@ pub struct PreparedPlanUpdate {
     pub generic_cost: Option<f64>,
     pub custom_cost: Option<f64>,
 }
+
+/// A selected executable and the cache update that produced it. The owner
+/// publishes the update only against the definition it supplied to selection.
+pub struct PreparedPlanSelection {
+    pub plan: UnifiedPlan,
+    pub update: PreparedPlanUpdate,
+}
