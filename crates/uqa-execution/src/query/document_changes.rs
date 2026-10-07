@@ -87,6 +87,15 @@ pub struct DocumentChanges {
 }
 
 impl DocumentChanges {
+    /// Keep only the retained transaction/portal versions below command frames.
+    pub(crate) fn without_staged(&self) -> Self {
+        Self {
+            selection: self.selection.clone(),
+            identities: self.identities.clone(),
+            staged: None,
+        }
+    }
+
     /// Serialized providers copy selected private rows while their live handle is guarded; immutable providers use `with_retained` instead.
     pub fn capture_owned(
         source: &dyn DocumentStore,

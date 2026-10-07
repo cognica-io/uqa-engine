@@ -50,6 +50,18 @@ pub struct CommandIndexProbe {
 }
 
 impl CommandMutationOverlay {
+    pub fn column_matches(
+        overlays: &mut [Self],
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+        control: &StorageReadControl,
+    ) -> Result<CommandIndexProbe, SQLError> {
+        let matches = Self::matches(overlays, table, fields, values, control)?;
+        let changes = Self::changes(overlays, table, DocumentChanges::default(), control)?;
+        Ok(CommandIndexProbe { matches, changes })
+    }
+
     pub fn expression_matches(
         overlays: &mut [Self],
         table: &str,

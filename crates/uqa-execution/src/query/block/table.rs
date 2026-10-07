@@ -227,12 +227,35 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             )
         }) {
             let serializable = context.scans.tables.serializable_read(table)?;
+            let changes = if ctes.reads_command_overlay() {
+                context.scans.tables.command_overlay_changes(table)?
+            } else {
+                None
+            };
             let documents = table_state.read_documents();
             let mut entries = Vec::with_capacity(identities.len());
             for doc_id in identities {
-                if documents.contains_doc_id(doc_id).map_err(|error| {
-                    crate::storage_errors::storage_error("probe a named document identity", &error)
-                })? {
+                let changed = changes
+                    .as_ref()
+                    .map(|changes| changes.change_presence(doc_id))
+                    .transpose()
+                    .map_err(|error| {
+                        crate::storage_errors::storage_error(
+                            "probe a changed document identity",
+                            &error,
+                        )
+                    })?
+                    .flatten();
+                let present = match changed {
+                    Some(present) => present,
+                    None => documents.contains_doc_id(doc_id).map_err(|error| {
+                        crate::storage_errors::storage_error(
+                            "probe a named document identity",
+                            &error,
+                        )
+                    })?,
+                };
+                if present {
                     entries.push(uqa_core::ScoredEntry { doc_id, score: 0.0 });
                 } else if let Some(serializable) = serializable.as_ref() {
                     // The read of a named identity that holds no row still depends on that identity; the source observes the rows it returns.
@@ -241,6 +264,29 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             }
             drop(documents);
             scored = ScoredInput::entries(entries, false);
+        }
+    }
+    if matches!(scored, ScoredInput::All) {
+        if let Some(filter) = physical_filter.as_ref() {
+            if let Some(identities) = (crate::query::index_candidates::IndexCandidates {
+                reads: context.scans.tables,
+                table,
+                columns: &table_snapshot.columns,
+                visible: &str::to_owned,
+                params,
+                command_visible: ctes.reads_command_overlay(),
+                cancellation: &context.scans.runtime.cancellation_token(),
+            })
+            .select(filter)?
+            {
+                scored = ScoredInput::entries(
+                    identities
+                        .into_iter()
+                        .map(|doc_id| uqa_core::ScoredEntry { doc_id, score: 0.0 })
+                        .collect(),
+                    false,
+                );
+            }
         }
     }
     let ordered_primary_key = match table_snapshot

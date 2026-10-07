@@ -43,10 +43,6 @@ pub trait RetrievalRelations: Sync {
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
     fn column_type(&self, table: &str, field: &str) -> StorageBackendResult<Option<ColumnType>>;
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError>;
-    fn command_overlay_changes(
-        &self,
-        table: &str,
-    ) -> Result<Option<crate::query::document_changes::DocumentChanges>, SQLError>;
     fn get_document_fields(
         &self,
         table: &str,
@@ -70,7 +66,7 @@ pub trait RetrievalSnapshots: Sync {
     ) -> Result<BTreeMap<DocId, Document>, SQLError>;
 }
 
-pub trait RetrievalIndexes: Sync {
+pub trait RetrievalIndexes: crate::query::indexed_filter::QueryIndexRead {
     fn query_table_indexes(
         &self,
         table: &str,
@@ -81,12 +77,6 @@ pub trait RetrievalIndexes: Sync {
     ) -> StorageBackendResult<Option<Box<dyn RetrievalIndexState>>>;
     fn catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>>;
     fn resolve_table_name(&self, table: &str) -> StorageBackendResult<Option<String>>;
-    fn value_index_scan(
-        &self,
-        table: &str,
-        field: &str,
-        predicate: &uqa_core::Predicate,
-    ) -> Result<Option<uqa_core::PostingList>, SQLError>;
 }
 
 pub trait PhysicalTextRetrieval: Sync {
