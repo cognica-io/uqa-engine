@@ -81,3 +81,48 @@ fn latest_payload_join_matches_predecessors_with_less_sqlite_work() {
         measured[0]
     );
 }
+
+#[test]
+fn wrong_payload_addresses_cannot_substitute_another_records_bytes() {
+    use crate::mvcc::{read, schema};
+    use rusqlite::params;
+    use uqa_storage::{mvcc::CommitSequence, read_control::StorageReadControl};
+
+    for length in [2, usize::from(read::INLINE_PAYLOAD_BYTES) + 1] {
+        let connection = Connection::open_in_memory().unwrap();
+        schema::initialize(&connection).unwrap();
+        let _permit = schema::WritePermit::acquire(&connection).unwrap();
+        for (key, byte) in [(b"a", 1_u8), (b"b", 2_u8)] {
+            connection.execute(
+                "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, x'0000000000000001', ?2)",
+                params![key.as_slice(), vec![byte; length]],
+            ).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO _uqa_mvcc_heads (key, sequence) VALUES (?1, x'0000000000000001')",
+                    [key.as_slice()],
+                )
+                .unwrap();
+        }
+        connection.execute_batch("UPDATE _uqa_mvcc_version_metadata SET version_id = (SELECT version_id FROM _uqa_mvcc_versions WHERE key = x'62') WHERE key = x'61'").unwrap();
+        let control = StorageReadControl::with_limit(1 << 20);
+        let boundary = CommitSequence::from_u64(1);
+        assert!(
+            read::value(&connection, b"a", boundary, &control, &mut |_| {
+                panic!("a corrupt physical address exposed another record")
+            })
+            .is_err()
+        );
+        assert!(super::visit(
+            &connection,
+            b"a",
+            None,
+            1,
+            boundary,
+            &control,
+            &mut |_, _| panic!("a corrupt address escaped the ordered reader")
+        )
+        .is_err());
+        assert_eq!(control.memory().used(), 0);
+    }
+}
