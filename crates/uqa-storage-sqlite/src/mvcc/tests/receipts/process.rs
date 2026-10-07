@@ -42,27 +42,33 @@ fn child(path: &std::path::Path, mode: usize, stage: usize) {
     if stage == 0 {
         store
             .with_receipt_admission(&control, |leases| {
-                let mut owner = None;
+                let mut owners = Vec::new();
                 store.with_write(&control, |connection| {
-                    crate::mvcc::write::allocate_with_owner(
+                    crate::mvcc::write::allocate_batch(
                         connection,
                         store.identity,
                         store.native,
                         true,
+                        16,
                         &control,
                         |id| {
-                            owner = Some(leases.retain(receipt_lease_id(id), &control)?);
-                            block();
+                            owners.push(leases.retain(receipt_lease_id(id), &control)?);
+                            if owners.len() == 16 {
+                                block();
+                            }
                             Ok(())
                         },
                     )
                 })?;
-                drop(owner);
+                drop(owners);
                 Ok(())
             })
             .unwrap();
     } else {
         let owner = store.allocate_managed_transaction(&control).unwrap();
+        // The second call retains a spare Pending receipt as well as both
+        // returned owners, so process loss must recover all three.
+        let second = store.allocate_managed_transaction(&control).unwrap();
         if stage == 2 {
             store
                 .commit(
@@ -73,7 +79,7 @@ fn child(path: &std::path::Path, mode: usize, stage: usize) {
                 .unwrap();
         }
         block();
-        drop(owner);
+        drop((owner, second));
     }
 }
 
@@ -129,7 +135,7 @@ fn process_loss_before_and_after_pending_publication_releases_only_managed_recei
             reader.join().unwrap();
             assert_eq!(
                 store.reclaim_transaction_receipts(&control).unwrap(),
-                u64::from(stage != 0)
+                3 * u64::from(stage != 0)
             );
             assert_eq!(
                 store.commit_status(manual, &control).unwrap(),
@@ -144,10 +150,23 @@ fn process_loss_before_and_after_pending_publication_releases_only_managed_recei
                     .is_some(),
                 stage == 2
             );
+            if stage != 0 {
+                for allocation in 2..=4 {
+                    assert_eq!(
+                        store
+                            .commit_status(
+                                StorageTransactionId::new(store.identity, allocation).unwrap(),
+                                &control,
+                            )
+                            .unwrap(),
+                        CommitStatus::Unknown
+                    );
+                }
+            }
             let next = store.allocate_managed_transaction(&control).unwrap();
             assert_eq!(
                 next.transaction().allocation(),
-                if stage == 0 { 2 } else { 3 }
+                if stage == 0 { 2 } else { 5 }
             );
             assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 0);
             drop(next);

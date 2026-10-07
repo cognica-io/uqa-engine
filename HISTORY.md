@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Share SQLite managed transaction allocation commits through a bounded reserve of already durable receipts, preserving receipt quotas, per-call memory and cancellation checks, process-loss recovery and SERIALIZABLE publication ordering.
+
 - Publish automatic ANALYZE samples while concurrent row writes continue, retaining changes after the sample for the next refresh. Reject obsolete samples after a newer ANALYZE, column changes or relation replacement across native SQLite, SQLite Key/Value and redb.
 
 ## [0.5.1] - 2026-10-07

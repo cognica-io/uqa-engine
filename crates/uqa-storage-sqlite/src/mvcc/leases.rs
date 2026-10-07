@@ -28,7 +28,7 @@ const ADMISSION: u64 = 0;
 const HEADER: u64 = 8;
 const HEADER_SIZE: usize = 32;
 const SLOT_BASE: u64 = 64;
-const SLOT_COUNT: u32 = 65_536;
+pub(in crate::mvcc) const SLOT_COUNT: u32 = 65_536;
 const LEASE_BASE: u64 = 1 << 20;
 
 #[cfg(test)]

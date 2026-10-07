@@ -6,7 +6,9 @@
 
 //! Explicit acknowledgement and managed owner recovery preserve durable SSI references.
 
+mod allocations;
 mod liveness;
+pub(in crate::mvcc) use allocations::ManagedAllocations;
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 pub(in crate::mvcc) use liveness::local_file_registry;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -51,6 +53,16 @@ impl SQLiteRecordStore {
     }
 
     pub(super) fn allocate_receipt_owner(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<RetainedTransactionAllocation> {
+        if self.connection.database_path().is_some() {
+            return self.managed_allocations.allocate(self, control);
+        }
+        self.allocate_one_receipt_owner(control)
+    }
+
+    fn allocate_one_receipt_owner(
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<RetainedTransactionAllocation> {
