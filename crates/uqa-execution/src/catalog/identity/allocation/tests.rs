@@ -259,6 +259,7 @@ fn occupied(oid: i64) -> CatalogReadView {
             columns,
             checks: Vec::new(),
             options: std::collections::BTreeMap::default(),
+            option_order: Vec::new(),
         },
     )])
     .into();

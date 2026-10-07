@@ -221,16 +221,13 @@ fn foreign_tables(
     catalog: &dyn CatalogFacade,
     resolve: &mut TypeIdentityResolver<'_>,
 ) -> Result<(), SQLError> {
+    let reference_format =
+        crate::catalog::foreign::reference::check_format(catalog).map_err(storage)?;
     for mut row in catalog.load_foreign_tables().map_err(storage)? {
-        let options = serde_json::from_str(&row.options_json).map_err(storage)?;
         // A legacy layout is written back in the current one, whose missing identity a later restoration step allocates.
-        let (mut table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
-            row.relation.qualified_name(),
-            row.server_name.clone(),
-            options,
-            &row.columns_json,
-        )
-        .map_err(storage)?;
+        let (mut table, _) =
+            crate::catalog::foreign::StoredForeignTable::from_catalog_row(&row, reference_format)
+                .map_err(storage)?;
         let mut changed = columns_type_names(&mut table.columns, resolve)?;
         changed |= checks_type_names(&mut table.checks, resolve)?;
         if changed {

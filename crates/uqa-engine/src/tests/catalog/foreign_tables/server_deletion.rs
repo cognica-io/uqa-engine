@@ -381,7 +381,7 @@ fn foreign_table_server_reference_upgrade_is_atomic_initial_only_and_durable() {
         let encoded = raw.catalog.load_foreign_tables().unwrap()[0].clone();
         assert_eq!(
             serde_json::from_str::<Value>(&encoded.columns_json).unwrap()["version"],
-            2
+            3
         );
         drop(upgraded);
         // Missing identities in an already converted database are corruption, not a request to bind a new server by name.

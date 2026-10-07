@@ -128,11 +128,65 @@ fn reference_format_marker_rejects_unknown_formats() {
     let catalog = uqa_storage::KeyValueCatalog::new(std::sync::Arc::new(
         uqa_storage::MemoryKeyValueStore::new(),
     ));
-    assert!(!check_format(&catalog).unwrap());
+    assert_eq!(check_format(&catalog).unwrap(), None);
     initialize_format(&catalog).unwrap();
-    assert!(check_format(&catalog).unwrap());
+    assert_eq!(check_format(&catalog).unwrap(), Some(2));
     catalog
-        .set_metadata(FORMAT_KEY, r#"{"version":2}"#)
+        .set_metadata(FORMAT_KEY, r#"{"version":99}"#)
         .unwrap();
     assert!(check_format(&catalog).is_err());
+}
+
+#[test]
+fn foreign_option_order_round_trips_and_legacy_maps_convert_without_inventing_history() {
+    let mut table = table();
+    table.server_reference = Some(ForeignServerReference::from(&definition()));
+    table.options = BTreeMap::from([("a".into(), "first".into()), ("z".into(), "last".into())]);
+    table.option_order = vec!["z".into(), "a".into()];
+    let encoded = table.schema_json().unwrap();
+    let read = |encoded: &str| {
+        StoredForeignTable::from_catalog(
+            table.name.clone(),
+            table.server_name.clone(),
+            table.options.clone(),
+            encoded,
+        )
+    };
+    let (restored, legacy) = read(&encoded).unwrap();
+    assert!(!legacy);
+    assert_eq!(restored.option_order, table.option_order);
+    for order in [
+        serde_json::json!(["a", "a"]),
+        serde_json::json!(["a"]),
+        serde_json::json!(["a", "missing"]),
+        serde_json::Value::Null,
+    ] {
+        let mut invalid: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        invalid["option_order"] = order;
+        assert!(read(&invalid.to_string()).is_err());
+    }
+    let mut previous: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    previous["version"] = 2.into();
+    previous.as_object_mut().unwrap().remove("option_order");
+    let (converted, legacy) = read(&previous.to_string()).unwrap();
+    assert!(legacy);
+    assert_eq!(converted.option_order, vec!["a", "z"]);
+    assert_eq!(converted.options, table.options);
+    assert_eq!(converted.server_reference, table.server_reference);
+    assert!(validate_schema_format(Some(2), legacy, &table.name).is_err());
+}
+
+#[test]
+fn preceding_reference_marker_requires_initial_conversion_without_early_publication() {
+    let catalog = uqa_storage::KeyValueCatalog::new(std::sync::Arc::new(
+        uqa_storage::MemoryKeyValueStore::new(),
+    ));
+    catalog
+        .set_metadata(FORMAT_KEY, r#"{"version":1}"#)
+        .unwrap();
+    assert!(restore_format(&catalog, false).is_err());
+    assert_eq!(restore_format(&catalog, true).unwrap(), Some(1));
+    assert_eq!(check_format(&catalog).unwrap(), Some(1));
+    initialize_format(&catalog).unwrap();
+    assert_eq!(restore_format(&catalog, false).unwrap(), Some(2));
 }

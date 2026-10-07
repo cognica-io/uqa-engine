@@ -15,15 +15,10 @@ pub fn migrate_foreign_table_identities(
 ) -> StorageBackendResult<()> {
     let attribute_format =
         crate::schema::constraints::restoration::require_attribute_format(catalog, true)?;
+    let reference_format = crate::catalog::foreign::reference::check_format(catalog)?;
     for mut row in catalog.load_foreign_tables()? {
-        let relation_name = row.relation.qualified_name();
-        let options = serde_json::from_str(&row.options_json)?;
-        let (mut table, legacy_schema) = StoredForeignTable::from_catalog(
-            relation_name,
-            row.server_name.clone(),
-            options,
-            &row.columns_json,
-        )?;
+        let (mut table, legacy_schema) =
+            StoredForeignTable::from_catalog_row(&row, reference_format)?;
         if attribute_format == crate::schema::constraints::restoration::AttributeFormat::Numbered {
             uqa_sql::catalog::relation_attributes::validate(
                 &table.columns,

@@ -9,6 +9,73 @@ use crate::Engine;
 use std::sync::Arc;
 use uqa_sql::catalog::foreign_wrapper::{native_wrappers, ForeignWrapperHandler};
 
+#[test]
+fn foreign_option_order_upgrade_is_initial_only_and_rolls_back_with_catalog_restoration() {
+    for provider in 1..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = open(
+            provider,
+            &directory.path().join("foreign-option-upgrade.db"),
+        );
+        engine.sql("CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE ordered_rows(id integer) SERVER source OPTIONS (z 'last',a 'first')", &[]).unwrap();
+        let factory = Arc::clone(engine.storage.provider.as_ref().unwrap());
+        let raw = factory.open_session().unwrap();
+        let mut previous = raw.catalog.load_foreign_tables().unwrap().remove(0);
+        let mut schema: serde_json::Value = serde_json::from_str(&previous.columns_json).unwrap();
+        schema["version"] = 2.into();
+        schema.as_object_mut().unwrap().remove("option_order");
+        previous.columns_json = schema.to_string();
+        raw.backend.begin_transaction().unwrap();
+        raw.catalog.save_foreign_table(&previous).unwrap();
+        raw.catalog
+            .set_metadata("foreign-table-server-reference-format", r#"{"version":1}"#)
+            .unwrap();
+        raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
+        raw.backend.commit_transaction().unwrap();
+        assert!(engine.new_session().is_err());
+        drop(engine);
+        assert!(Engine::from_persistent_provider(Arc::clone(&factory)).is_err());
+        assert_eq!(
+            raw.catalog.load_foreign_tables().unwrap()[0].columns_json,
+            previous.columns_json
+        );
+        assert_eq!(
+            raw.catalog
+                .get_metadata("foreign-table-server-reference-format")
+                .unwrap()
+                .as_deref(),
+            Some(r#"{"version":1}"#)
+        );
+        raw.catalog.delete_metadata("sql_triggers_json").unwrap();
+        let engine = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();
+        let restored = raw.catalog.load_foreign_tables().unwrap().remove(0);
+        let schema: serde_json::Value = serde_json::from_str(&restored.columns_json).unwrap();
+        assert_eq!(schema["version"], 3);
+        assert_eq!(schema["option_order"], serde_json::json!(["a", "z"]));
+        assert_eq!(restored.options_json, previous.options_json);
+        assert_eq!(
+            raw.catalog
+                .get_metadata("foreign-table-server-reference-format")
+                .unwrap()
+                .as_deref(),
+            Some(r#"{"version":2}"#)
+        );
+        drop(engine);
+        raw.catalog.save_foreign_table(&previous).unwrap();
+        let error = Engine::from_persistent_provider(factory).err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("legacy schema under the current option-order marker"),
+            "{error}"
+        );
+        assert_eq!(
+            raw.catalog.load_foreign_tables().unwrap()[0].columns_json,
+            previous.columns_json
+        );
+    }
+}
+
 pub(super) fn remove_wrapper_format(catalog: &dyn uqa_storage::CatalogFacade) {
     for (key, _) in catalog.metadata_with_prefix("foreign-wrapper/").unwrap() {
         catalog.delete_metadata(&key).unwrap();

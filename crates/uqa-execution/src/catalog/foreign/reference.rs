@@ -13,7 +13,7 @@ use uqa_sql::{catalog::foreign_server::ForeignServerDefinition, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 const FORMAT_KEY: &str = "foreign-table-server-reference-format";
-const FORMAT_MARKER: &str = r#"{"version":1}"#;
+const FORMAT_MARKER: &str = r#"{"version":2}"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,7 +80,7 @@ pub(super) fn validate_schema_reference(
 ) -> StorageBackendResult<()> {
     let valid = match (version, reference) {
         (1, None) => true,
-        (2, Some(reference)) => reference.oid >= 16_384 && reference.object_id != [0; 16],
+        (2 | 3, Some(reference)) => reference.oid >= 16_384 && reference.object_id != [0; 16],
         _ => false,
     };
     if valid {
@@ -92,20 +92,49 @@ pub(super) fn validate_schema_reference(
     }
 }
 
-pub(super) fn check_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<bool> {
+pub(crate) fn check_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<Option<u32>> {
     let Some(marker) = catalog.get_metadata(FORMAT_KEY)? else {
-        return Ok(false);
+        return Ok(None);
     };
-    if serde_json::from_str::<serde_json::Value>(&marker)? != serde_json::json!({"version": 1}) {
-        return Err(invalid(
-            "unsupported foreign-table server-reference format marker",
-        ));
+    let marker: serde_json::Value = serde_json::from_str(&marker)?;
+    for version in [1, 2] {
+        if marker == serde_json::json!({"version":version}) {
+            return Ok(Some(version));
+        }
     }
-    Ok(true)
+    Err(invalid(
+        "unsupported foreign-table server-reference format marker",
+    ))
 }
 
 pub(super) fn initialize_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
     catalog.set_metadata(FORMAT_KEY, FORMAT_MARKER)
+}
+
+pub(super) fn restore_format(
+    catalog: &dyn CatalogFacade,
+    allow_migration: bool,
+) -> StorageBackendResult<Option<u32>> {
+    let version = check_format(catalog)?;
+    if version != Some(2) && !allow_migration {
+        return Err(invalid(
+            "foreign-table option order requires an initial-open migration",
+        ));
+    }
+    Ok(version)
+}
+
+pub(super) fn validate_schema_format(
+    version: Option<u32>,
+    legacy: bool,
+    name: &str,
+) -> StorageBackendResult<()> {
+    if version == Some(2) && legacy {
+        return Err(invalid(format!(
+            "foreign table `{name}` has a legacy schema under the current option-order marker"
+        )));
+    }
+    Ok(())
 }
 
 /// Legacy names bind once, within complete initial restoration. Current references may name a concurrently deleted server and must never bind a replacement.

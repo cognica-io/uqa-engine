@@ -5,12 +5,12 @@
 //
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{ColumnDef, TableCheck};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 2;
+const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 3;
 
 pub mod reference;
 pub mod wrappers;
@@ -32,6 +32,7 @@ pub struct StoredForeignTable {
     pub dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
     pub checks: Vec<TableCheck>,
     pub options: BTreeMap<String, String>,
+    pub option_order: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,6 +46,8 @@ struct PersistedForeignTableSchema {
     row_type_array_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     server_reference: Option<ForeignServerReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    option_order: Option<Vec<String>>,
     columns: Vec<ColumnDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
@@ -60,6 +63,21 @@ enum ForeignTableSchemaFormat {
 }
 
 impl StoredForeignTable {
+    /// Check the reader fence before any restoration step can rewrite a legacy row.
+    pub(crate) fn from_catalog_row(
+        row: &uqa_storage::ForeignTableRow,
+        reference_format: Option<u32>,
+    ) -> StorageBackendResult<(Self, bool)> {
+        let (table, legacy) = Self::from_catalog(
+            row.relation.qualified_name(),
+            row.server_name.clone(),
+            serde_json::from_str(&row.options_json)?,
+            &row.columns_json,
+        )?;
+        reference::validate_schema_format(reference_format, legacy, &table.name)?;
+        Ok((table, legacy))
+    }
+
     pub fn from_catalog(
         name: String,
         server_name: String,
@@ -69,7 +87,7 @@ impl StoredForeignTable {
         let schema = serde_json::from_str::<ForeignTableSchemaFormat>(schema_json)?;
         let (schema, legacy) = match schema {
             ForeignTableSchemaFormat::Current(schema) => {
-                if !matches!(schema.version, 1 | FOREIGN_TABLE_SCHEMA_VERSION) {
+                if !matches!(schema.version, 1 | 2 | FOREIGN_TABLE_SCHEMA_VERSION) {
                     return Err(StorageBackendError::Other(format!(
                         "foreign table `{name}` has unsupported schema version {}",
                         schema.version
@@ -89,7 +107,8 @@ impl StoredForeignTable {
                         "foreign table `{name}` records invalid catalog OIDs"
                     )));
                 }
-                (schema, false)
+                let legacy = schema.version != FOREIGN_TABLE_SCHEMA_VERSION;
+                (schema, legacy)
             }
             ForeignTableSchemaFormat::Legacy(columns) => (
                 PersistedForeignTableSchema {
@@ -98,6 +117,7 @@ impl StoredForeignTable {
                     catalog_oids: None,
                     row_type_array_name: None,
                     server_reference: None,
+                    option_order: None,
                     columns,
                     dropped_attributes: Vec::new(),
                     checks: Vec::new(),
@@ -105,6 +125,24 @@ impl StoredForeignTable {
                 true,
             ),
         };
+        let option_order = match schema.option_order {
+            Some(order) => order,
+            None if legacy => options.keys().cloned().collect(),
+            None => {
+                return Err(StorageBackendError::Other(format!(
+                    "foreign table `{name}` has no option order"
+                )))
+            }
+        };
+        let names: BTreeSet<_> = option_order.iter().collect();
+        if names.len() != option_order.len()
+            || names.len() != options.len()
+            || names.iter().any(|name| !options.contains_key(*name))
+        {
+            return Err(StorageBackendError::Other(format!(
+                "foreign table `{name}` option order disagrees with stored options"
+            )));
+        }
         Ok((
             Self {
                 name,
@@ -118,6 +156,7 @@ impl StoredForeignTable {
                 dropped_attributes: schema.dropped_attributes,
                 checks: schema.checks,
                 options,
+                option_order,
             },
             legacy,
         ))
@@ -144,6 +183,7 @@ impl StoredForeignTable {
             catalog_oids: self.catalog_oids,
             row_type_array_name: self.row_type_array_name.clone(),
             server_reference: self.server_reference,
+            option_order: Some(self.option_order.clone()),
             columns: self.columns.clone(),
             dropped_attributes: self.dropped_attributes.clone(),
             checks: self.checks.clone(),

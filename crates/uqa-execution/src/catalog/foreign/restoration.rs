@@ -73,19 +73,15 @@ pub fn restore(
         allow_migration,
     )?;
     let servers = &restored_servers.definitions;
-    let current_references = super::reference::check_format(catalog)?;
+    let reference_format = super::reference::restore_format(catalog, allow_migration)?;
+    let current_references = reference_format.is_some();
     let mut migrations = Vec::new();
     let mut tables = BTreeMap::new();
     let mut securities = BTreeMap::new();
     for row in catalog.load_foreign_tables()? {
         let relation_name = row.relation.qualified_name();
-        let options: BTreeMap<String, String> = serde_json::from_str(&row.options_json)?;
-        let (mut table, legacy_schema) = super::StoredForeignTable::from_catalog(
-            relation_name.clone(),
-            row.server_name.clone(),
-            options,
-            &row.columns_json,
-        )?;
+        let (mut table, legacy_schema) =
+            super::StoredForeignTable::from_catalog_row(&row, reference_format)?;
         let reference_migration =
             super::reference::restore(&mut table, servers, current_references, allow_migration)?;
         if table.object_id == [0; 16] {
@@ -151,7 +147,7 @@ pub fn restore(
     for row in migrations {
         catalog.save_foreign_table(&row)?;
     }
-    if !current_references && allow_migration {
+    if reference_format != Some(2) && allow_migration {
         super::reference::initialize_format(catalog)?;
     }
     let mut restored = RestoredForeignCatalog {
