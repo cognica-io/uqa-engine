@@ -154,7 +154,10 @@ impl EnforcedKeyExecution for EnforcedKey {
         {
             return find_conflict_excluding(self, context, table, values, ignored);
         }
-        if self.keys.iter().any(|key| key.column().is_none()) {
+        // A catalog-backed composite key has its complete tuple in both the stored index and the command cache. Column-only probes would repeatedly read every row sharing a prefix. Descriptors not yet attached to an index retain the evaluated column path.
+        if self.keys.iter().any(|key| key.column().is_none())
+            || (self.keys.len() > 1 && self.index_catalog.is_some())
+        {
             let key = local_physical_key(self, context, table)?;
             let indexed = context
                 .indexes
@@ -165,7 +168,7 @@ impl EnforcedKeyExecution for EnforcedKey {
                 )?
                 .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
             let uqa_storage::ValueIndexKey::Index(physical_key) = &key else {
-                unreachable!("expression index has a physical identity")
+                unreachable!("tuple index has a physical identity")
             };
             let staged = context
                 .indexes
@@ -293,7 +296,7 @@ fn local_physical_key(
     let identity = index
         .index_catalog
         .as_ref()
-        .ok_or_else(|| SQLError::Internal("expression index has no physical identity".into()))?;
+        .ok_or_else(|| SQLError::Internal("unique index has no physical identity".into()))?;
     let local_keys = context
         .catalog
         .enforced_keys(table)
