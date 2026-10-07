@@ -9,6 +9,11 @@
 mod path_watch;
 pub use path_watch::PathChangeWatch;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod shared_mapping;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use shared_mapping::SharedFileMapping;
+
 #[cfg(windows)]
 use std::os::windows::{fs::FileExt, io::AsRawHandle};
 #[cfg(unix)]

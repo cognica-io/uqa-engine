@@ -92,6 +92,9 @@ fn an_entry_and_a_header_survive_their_encoding() {
         Slot::decode(&Slot::Tombstone.encode()).unwrap(),
         Slot::Tombstone
     );
+    let mut interrupted = [0xff; ENTRY_SIZE as usize];
+    interrupted[STATE_OFFSET] = STATE_TOMBSTONE;
+    assert_eq!(Slot::decode(&interrupted).unwrap(), Slot::Tombstone);
     assert_eq!(
         Slot::decode(&[0; ENTRY_SIZE as usize]).unwrap(),
         Slot::Empty
