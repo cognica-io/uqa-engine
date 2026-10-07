@@ -42,6 +42,7 @@ pub fn build_pg_class(
         false,
     )];
     out.push(super::pg_catalog::language_class_row(catalog));
+    out.extend(super::pg_catalog::foreign::class_rows(catalog));
     let catalog_indexes = catalog_index_relations(catalog, resolution)?;
     for name in catalog.table_names() {
         let (schema, table) = split_schema_name(&name)?;

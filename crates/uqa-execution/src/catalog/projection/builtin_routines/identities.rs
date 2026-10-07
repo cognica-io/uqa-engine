@@ -14,6 +14,8 @@ pub fn builtin_routine_identities() -> impl Iterator<Item = BuiltinRoutineIdenti
     PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
+        .copied()
+        .chain(super::native_foreign_handlers())
         .map(|routine| BuiltinRoutineIdentity {
             oid: u32::try_from(routine.oid).expect("builtin catalog OID"),
             name: routine.name,

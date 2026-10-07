@@ -84,6 +84,9 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgEnum => build_pg_enum(catalog),
         VirtualRelation::PgProc => build_pg_proc(catalog, resolution)?,
         VirtualRelation::PgLanguage => build_pg_language(),
+        VirtualRelation::PgForeignDataWrapper => pg_catalog::foreign::wrappers(catalog)?,
+        VirtualRelation::PgForeignServer => pg_catalog::foreign::servers(catalog)?,
+        VirtualRelation::PgForeignTable => pg_catalog::foreign::tables(catalog)?,
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
         VirtualRelation::PgAuthid => build_pg_authid(catalog),
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
@@ -109,6 +112,7 @@ pub fn build_info_schema_rows(
 mod ag_catalog;
 pub(crate) use ag_catalog::named_label_relation_oid;
 mod builtin_routines;
+pub(crate) use builtin_routines::native_foreign_handlers;
 pub(crate) use builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 pub use builtin_routines::{
     builtin_routine_identities, builtin_routine_identity, BuiltinRoutineIdentity,

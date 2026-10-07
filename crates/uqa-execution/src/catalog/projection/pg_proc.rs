@@ -79,6 +79,8 @@ fn build_pg_proc_rows(
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
+        .copied()
+        .chain(super::builtin_routines::native_foreign_handlers())
         .map(|routine| {
             Ok(row([
                 ("oid", int_value(routine.oid)),

@@ -13,6 +13,22 @@ use super::{
 pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
     [
         (
+            3115,
+            "fdw_handler",
+            4,
+            true,
+            "p",
+            "P",
+            0,
+            0,
+            3116,
+            3117,
+            0,
+            0,
+            "i",
+            "p",
+        ),
+        (
             2275, "cstring", -2, false, "p", "P", 0, 1263, 2292, 2293, 2500, 2501, "c", "p",
         ),
         (

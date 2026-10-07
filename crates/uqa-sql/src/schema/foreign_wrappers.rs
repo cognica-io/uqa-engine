@@ -49,21 +49,52 @@ pub fn duplicate_wrapper(name: &str) -> SQLError {
     }
 }
 
+pub fn ensure_drop_authority(
+    wrapper: &crate::catalog::foreign_wrapper::ForeignWrapperDefinition,
+    session: &dyn crate::catalog::roles::RoleReferenceNames,
+    catalog: &dyn crate::catalog::roles::guards::RoleCatalogGuards,
+) -> Result<(), SQLError> {
+    if crate::catalog::roles::role_inherits(
+        &catalog.role_definitions(),
+        &catalog.role_memberships(),
+        &session.current_role(),
+        &wrapper.owner,
+    ) {
+        return Ok(());
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42501".into(),
+        message: format!("must be owner of foreign-data wrapper {}", wrapper.name),
+    })
+}
+
+pub fn missing_wrapper(name: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("foreign-data wrapper \"{name}\" does not exist"),
+    }
+}
+
+pub fn missing_wrapper_notice(name: &str) -> crate::SQLNotice {
+    crate::SQLNotice::notice(format!(
+        "foreign-data wrapper \"{name}\" does not exist, skipping"
+    ))
+}
+
 pub fn ensure_wrapper_usage(
     wrapper: &crate::catalog::foreign_wrapper::ForeignWrapperDefinition,
     role: &RoleReference,
     catalog: &dyn crate::catalog::roles::guards::RoleCatalogGuards,
 ) -> Result<(), SQLError> {
     // Host-provided native wrappers retain their existing public registration contract.
-    if matches!(
-        wrapper.handler,
-        crate::catalog::foreign_wrapper::ForeignWrapperHandler::Native(_)
-    ) || crate::catalog::roles::role_inherits(
-        &catalog.role_definitions(),
-        &catalog.role_memberships(),
-        role,
-        &wrapper.owner,
-    ) {
+    if matches!(wrapper.handler, crate::catalog::foreign_wrapper::ForeignWrapperHandler::Native(native) if wrapper.identity == native.reference())
+        || crate::catalog::roles::role_inherits(
+            &catalog.role_definitions(),
+            &catalog.role_memberships(),
+            role,
+            &wrapper.owner,
+        )
+    {
         return Ok(());
     }
     Err(SQLError::Routine {

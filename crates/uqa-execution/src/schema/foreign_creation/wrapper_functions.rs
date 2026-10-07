@@ -72,6 +72,8 @@ impl ForeignCreationContext<'_> {
         for routine in PG18_BUILTIN_ROUTINE_GROUPS
             .iter()
             .flat_map(|group| group.iter())
+            .copied()
+            .chain(crate::catalog::projection::native_foreign_handlers())
             .filter(|routine| routine.argument_types == arguments)
         {
             let oid = u32::try_from(routine.oid).map_err(|e| SQLError::Internal(e.to_string()))?;

@@ -147,6 +147,7 @@ pub struct DropStmt {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DropKind {
+    ForeignWrapper,
     Table,
     ForeignTable,
     Index,

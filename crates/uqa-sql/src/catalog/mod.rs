@@ -10,6 +10,7 @@ use crate::ast::ColumnType;
 
 pub mod access_methods;
 pub mod expression_text;
+pub mod foreign_relations;
 pub mod languages;
 pub mod node_tree;
 pub mod oids;
@@ -44,6 +45,9 @@ impl VirtualRelation {
                 | Self::PgEnum
                 | Self::PgProc
                 | Self::PgLanguage
+                | Self::PgForeignDataWrapper
+                | Self::PgForeignServer
+                | Self::PgForeignTable
                 | Self::PgDatabase
                 | Self::PgAuthid
                 | Self::PgAuthMembers
@@ -67,6 +71,9 @@ impl VirtualRelation {
         }
 
         match self {
+            Self::PgForeignDataWrapper | Self::PgForeignServer | Self::PgForeignTable => {
+                foreign_relations::schema(self)
+            }
             Self::InformationSchemaCatalogName => columns![
                 "catalog_name" => sql_identifier(),
             ],

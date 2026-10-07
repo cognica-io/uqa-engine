@@ -10,6 +10,7 @@ mod attributes;
 mod composites;
 mod constraint_definitions;
 mod constraints;
+pub(crate) mod foreign;
 mod indexes;
 mod languages;
 mod relations;

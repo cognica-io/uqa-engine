@@ -142,10 +142,7 @@ impl CatalogObjects {
                 wrapper.identity.oid,
                 (wrapper.name.clone(), wrapper.identity.object_id),
             );
-            if !matches!(
-                wrapper.handler,
-                uqa_sql::catalog::foreign_wrapper::ForeignWrapperHandler::Native(_)
-            ) {
+            if wrapper.identity.oid >= uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID {
                 objects.unpin(ObjectAddress::whole(
                     uqa_sql::catalog::dependencies::FOREIGN_WRAPPER_CLASS,
                     wrapper.identity.oid,
