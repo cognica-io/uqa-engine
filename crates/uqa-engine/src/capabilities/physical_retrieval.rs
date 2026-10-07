@@ -60,12 +60,6 @@ impl RetrievalRelations for Engine {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.query_table_doc_ids(table)
     }
-    fn command_overlay_changes(
-        &self,
-        table: &str,
-    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
-        self.command_overlay_changes(table)
-    }
     fn get_document_fields(
         &self,
         table: &str,
@@ -119,14 +113,6 @@ impl RetrievalIndexes for Engine {
     }
     fn resolve_table_name(&self, table: &str) -> StorageBackendResult<Option<String>> {
         self.resolve_table_name(table)
-    }
-    fn value_index_scan(
-        &self,
-        table: &str,
-        field: &str,
-        predicate: &uqa_core::Predicate,
-    ) -> Result<Option<uqa_core::PostingList>, SQLError> {
-        self.value_index_query_scan(table, field, predicate)
     }
 }
 

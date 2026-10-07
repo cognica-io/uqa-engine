@@ -48,7 +48,7 @@ pub trait TableRead: Send + Sync {
 }
 
 /// The chosen transaction snapshot supplies a table generation and the command's row overlay separately.
-pub trait QueryTableAccess: Sync {
+pub trait QueryTableAccess: super::indexed_filter::QueryIndexRead {
     fn serializable_read(
         &self,
         name: &str,
@@ -66,10 +66,6 @@ pub trait QueryTableAccess: Sync {
         let _ = (name, table, fields);
         Ok(false)
     }
-    fn command_overlay_changes(
-        &self,
-        name: &str,
-    ) -> Result<Option<super::document_changes::DocumentChanges>, uqa_sql::SQLError>;
     /// An estimate of the rows a read of the table sees, which costs no work in the number of changes it merges; scans size their output by it.
     fn table_row_estimate(&self, name: &str) -> Result<u64, uqa_sql::SQLError>;
 }

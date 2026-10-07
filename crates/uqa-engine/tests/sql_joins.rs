@@ -14,6 +14,8 @@ use uqa_engine::Engine;
 
 #[path = "sql_joins/aliases.rs"]
 mod aliases;
+#[path = "sql_joins/indexed.rs"]
+mod indexed;
 #[path = "sql_joins/lateral.rs"]
 mod lateral;
 

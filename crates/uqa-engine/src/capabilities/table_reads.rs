@@ -100,14 +100,42 @@ impl QueryTableAccess for Engine {
     ) -> Result<bool, SQLError> {
         self.prepare_index_only_read(name, table, fields)
     }
-    fn command_overlay_changes(
-        &self,
-        name: &str,
-    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
-        self.command_overlay_changes(name)
-    }
     fn table_row_estimate(&self, name: &str) -> Result<u64, SQLError> {
         self.table_row_estimate(name)
+    }
+}
+impl uqa_execution::query::indexed_filter::QueryIndexRead for Engine {
+    fn value_index_scan(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+    ) -> Result<Option<uqa_core::PostingList>, SQLError> {
+        self.value_index_query_scan(table, field, predicate)
+    }
+
+    fn command_overlay_changes(
+        &self,
+        table: &str,
+    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
+        self.command_overlay_changes(table)
+    }
+
+    fn exact_command_matches(
+        &self,
+        table: &str,
+        field: &str,
+        value: &uqa_core::Value,
+    ) -> Result<uqa_execution::mutation::overlay::CommandIndexProbe, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::column_matches(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            &[field.to_owned()],
+            std::slice::from_ref(value),
+            &control,
+        )
     }
 }
 impl RetrievalAccess for Engine {

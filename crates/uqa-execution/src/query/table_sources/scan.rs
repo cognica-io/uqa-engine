@@ -304,7 +304,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
             });
         // A filter that names its rows by identity, or by an integer primary key whose values are the identities, reads only those rows, from storage or from the changes above it, instead of scanning the table.
-        let candidates = if recheck_pins.is_none() {
+        let mut candidates = if recheck_pins.is_none() {
             predicate_expression.as_ref().and_then(|filter| {
                 crate::query::key_candidates::key_candidates(
                     filter,
@@ -319,6 +319,25 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         } else {
             None
         };
+        if candidates.is_none() && recheck_pins.is_none() {
+            if let Some(filter) = &predicate_expression {
+                candidates = crate::query::index_candidates::IndexCandidates {
+                    reads: context.tables,
+                    table: &table_name,
+                    columns: &column_definitions,
+                    visible: &|name| {
+                        visible_names
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| name.to_owned())
+                    },
+                    params,
+                    command_visible: ctes.reads_command_overlay(),
+                    cancellation: &context.runtime.cancellation_token(),
+                }
+                .select(filter)?;
+            }
+        }
         let command_changes = if ctes.reads_command_overlay() {
             context.tables.command_overlay_changes(&table_name)?
         } else {
