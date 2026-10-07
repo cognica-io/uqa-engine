@@ -111,6 +111,73 @@ fn ordinary_plan_reuse_retains_only_immutable_input_conversions() {
 }
 
 #[test]
+fn analyzed_statement_reuse_matches_parameter_types_without_retaining_values() {
+    let scopes = Scopes::default();
+    let context = StatementAnalysisContext {
+        scopes: &scopes,
+        routines: &NoRoutines,
+        aliases: &NoRoutines,
+    };
+    let sql = "INSERT INTO items VALUES ($1) RETURNING id";
+    let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+    let (_, cached) =
+        analyze_for_statement_reuse(&context, plan, &[SQLParam::Scalar(Value::Int(1))]).unwrap();
+    let cached = cached.unwrap();
+    assert!(cached
+        .plan_for(&[SQLParam::Scalar(Value::Int(99))])
+        .is_some());
+    for params in [
+        vec![],
+        vec![SQLParam::Scalar(Value::Str("1".into()))],
+        vec![SQLParam::Scalar(Value::Bool(true))],
+        vec![SQLParam::typed_scalar(Value::Int(1), ColumnType::Integer)],
+        vec![
+            SQLParam::Scalar(Value::Int(1)),
+            SQLParam::Scalar(Value::Int(2)),
+        ],
+    ] {
+        assert!(cached.plan_for(&params).is_none());
+    }
+    for (sql, reusable) in [
+        ("SELECT 'now'::timestamp", false),
+        ("SELECT '{now}'::timestamp[]", false),
+        ("SELECT '42'::integer", true),
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let (_, cached) = analyze_for_statement_reuse(&context, plan, &[]).unwrap();
+        assert_eq!(cached.is_some(), reusable, "{sql}");
+    }
+}
+
+#[test]
+fn analyzed_statement_distinguishes_declared_text_and_unknown_parameters() {
+    let scopes = Scopes::default();
+    let context = StatementAnalysisContext {
+        scopes: &scopes,
+        routines: &NoRoutines,
+        aliases: &NoRoutines,
+    };
+    let plan = UnifiedPlan::lower(crate::compile("SELECT $1").unwrap().remove(0));
+    let (_, cached) = analyze_for_statement_reuse(
+        &context,
+        plan,
+        &[SQLParam::Scalar(Value::Str("old".into()))],
+    )
+    .unwrap();
+    let cached = cached.unwrap();
+    assert!(cached
+        .plan_for(&[SQLParam::Scalar(Value::Str("new".into()))])
+        .is_some());
+    assert!(cached
+        .plan_for(&[SQLParam::typed_scalar(
+            Value::Str("new".into()),
+            ColumnType::Text
+        )])
+        .is_none());
+    assert!(cached.plan_for(&[SQLParam::Scalar(Value::Null)]).is_none());
+}
+
+#[test]
 fn query_schema_errors_do_not_evaluate_constants() {
     let scopes = Scopes::default();
     let error = analyze(&scopes, "SELECT missing, 1 / 0").unwrap_err();
