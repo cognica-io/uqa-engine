@@ -6,8 +6,12 @@
 
 //! Ordered FROM analysis, including lateral scopes and join coercion.
 
-use super::super::{overlay_outer_schema, rename_schema, JoinSchemaBinding, SourcePlan};
-use super::{Preparation, QueryPlan, RowSchema, SQLError};
+use super::super::{
+    operator_join_relation_schemas, overlay_outer_schema, rename_schema, JoinSchemaBinding,
+    SourcePlan,
+};
+use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
+use crate::ast::{FunctionBinding, OperatorJoinRelations};
 
 impl Preparation<'_> {
     pub(super) fn source(
@@ -52,11 +56,18 @@ impl Preparation<'_> {
             SourcePlan::Function {
                 name,
                 binding,
+                relations,
                 args,
                 ..
             } => {
-                let input = outer.cloned().unwrap_or_default();
-                self.call(name, binding.as_ref(), args, &input, subqueries)?;
+                self.source_function(
+                    name,
+                    binding.as_ref(),
+                    relations.as_ref(),
+                    args,
+                    subqueries,
+                    outer,
+                )?;
             }
             SourcePlan::FunctionGroup { functions, .. } => {
                 self.source_functions(functions, subqueries, outer)?;
@@ -117,16 +128,47 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
-        let input = outer.cloned().unwrap_or_default();
         for function in functions {
-            self.call(
+            self.source_function(
                 &function.name,
                 function.binding.as_ref(),
+                function.relations.as_ref(),
                 &function.args,
-                &input,
                 subqueries,
+                outer,
             )?;
         }
         Ok(())
+    }
+
+    fn source_function(
+        &mut self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        relations: Option<&OperatorJoinRelations>,
+        args: &[ScalarExpr],
+        subqueries: &[QueryPlan],
+        outer: Option<&RowSchema>,
+    ) -> Result<(), SQLError> {
+        let local = crate::semantics::builtin_function_dispatch_name(name);
+        if crate::registry::is_operator_join_table_function(&local) {
+            let (left, right) = operator_join_relation_schemas(
+                &self.scope.catalog,
+                &self.scope.resolution,
+                relations,
+            )?;
+            let constant = RowSchema::default();
+            for (position, argument) in args.iter().enumerate() {
+                let input = match position {
+                    0 => &left,
+                    1 => &right,
+                    _ => &constant,
+                };
+                self.expression(argument, input, subqueries)?;
+            }
+            return Ok(());
+        }
+        let input = outer.cloned().unwrap_or_default();
+        self.call(name, binding, args, &input, subqueries)
     }
 }

@@ -12,6 +12,7 @@ mod array_transforms;
 mod body_inputs;
 mod defaults;
 mod dependencies;
+mod operator_joins;
 mod ordered_calls;
 
 struct NoRoutines;
