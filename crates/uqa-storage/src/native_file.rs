@@ -6,6 +6,9 @@
 
 //! Native byte locks and positioned I/O shared by physical coordination adapters. On POSIX, each adapter must keep one process-wide descriptor per coordination file: closing any other descriptor would release that process's record locks. Callers own local arbitration, lock ordering and cancellation.
 
+mod path_watch;
+pub use path_watch::PathChangeWatch;
+
 #[cfg(windows)]
 use std::os::windows::{fs::FileExt, io::AsRawHandle};
 #[cfg(unix)]

@@ -12,6 +12,7 @@ use std::{
 };
 
 use rusqlite::Connection;
+use uqa_storage::native_file::PathChangeWatch;
 
 use super::{ConnectionSpec, Result, SQLiteError};
 
@@ -84,6 +85,9 @@ pub(super) struct DatabaseSource {
     path: PathBuf,
     identity: platform::Identity,
     changed: AtomicBool,
+    watch: parking_lot::Mutex<Option<PathChangeWatch>>,
+    #[cfg(test)]
+    identity_reads: std::sync::atomic::AtomicUsize,
 }
 
 impl DatabaseSource {
@@ -100,10 +104,15 @@ impl DatabaseSource {
         };
         // Freeze relative paths and symlink selection for every subsequent open.
         *path = path.canonicalize()?;
+        // Install notifications before observing the identity they protect.
+        let watch = PathChangeWatch::new(path).ok();
         let source = Self {
             path: path.clone(),
             identity: platform::path_identity(path)?,
             changed: AtomicBool::new(false),
+            watch: parking_lot::Mutex::new(watch),
+            #[cfg(test)]
+            identity_reads: std::sync::atomic::AtomicUsize::new(1),
         };
         source.check_connection(initial)?;
         Ok(Some(source))
@@ -118,6 +127,28 @@ impl DatabaseSource {
         if self.changed.load(Ordering::Acquire) {
             return Err(SQLiteError::DatabaseSourceChanged);
         }
+        let mut watch = self.watch.lock();
+        let revalidate = watch
+            .as_mut()
+            .is_none_or(|current| current.changed().unwrap_or(true));
+        if revalidate {
+            // Install before checking, but adopt only after success. A transient
+            // identity error must not leave a clean watch authorizing reuse.
+            let replacement = watch
+                .as_ref()
+                .and_then(|_| PathChangeWatch::new(&self.path).ok());
+            self.check_identity()?;
+            *watch = replacement;
+        }
+        if self.changed.load(Ordering::Acquire) {
+            return Err(SQLiteError::DatabaseSourceChanged);
+        }
+        Ok(())
+    }
+
+    fn check_identity(&self) -> Result<()> {
+        #[cfg(test)]
+        self.identity_reads.fetch_add(1, Ordering::Relaxed);
         match platform::path_identity(&self.path) {
             Ok(identity) if identity == self.identity => {
                 if self.changed.load(Ordering::Acquire) {
@@ -152,3 +183,6 @@ impl DatabaseSource {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
