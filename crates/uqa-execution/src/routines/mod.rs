@@ -44,6 +44,7 @@ mod blocks;
 mod control_flow;
 mod cursors;
 mod datum;
+mod plans;
 pub mod preparation;
 mod records;
 mod resolver;

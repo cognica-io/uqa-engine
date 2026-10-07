@@ -279,7 +279,9 @@ pub(super) fn eval_operand_borrowed<'a>(
             Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => {
                 Ok(Some(EvalOperand::Borrowed(value)))
             }
-            Some(SQLParam::Vector(_)) | Some(SQLParam::Tensor(_)) => Ok(None),
+            Some(SQLParam::Vector(_) | SQLParam::Tensor(_) | SQLParam::DeferredError { .. }) => {
+                Ok(None)
+            }
             None => Err(SQLError::MissingParam(*i)),
         },
         Expr::Column(name) => {

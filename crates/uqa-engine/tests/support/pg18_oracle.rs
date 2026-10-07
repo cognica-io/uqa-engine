@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Replay checked-in `PostgreSQL` 18.4 simple-query oracles: command tags, SQLSTATE and message, DETAIL and HINT when the transcript records them, every result row as `PostgreSQL` text, and the notices and warnings when the transcript records them.
+//! Replay checked-in `PostgreSQL` 18 simple-query oracles: command tags, SQLSTATE and message, DETAIL and HINT when the transcript records them, every result row as `PostgreSQL` text, and the notices and warnings when the transcript records them.
 
 use uqa_core::Value;
 use uqa_engine::sql::{format_postgres_text, postgres_result_type};
@@ -120,7 +120,7 @@ pub fn verify(engine: &Engine, transcript: &str) {
     assert!(oracle["postgresql_version"]
         .as_str()
         .unwrap()
-        .starts_with("PostgreSQL 18.4"));
+        .starts_with("PostgreSQL 18."));
     let mut differences = Vec::new();
     for case in oracle["cases"].as_array().unwrap() {
         let sql = case["sql"].as_str().unwrap();

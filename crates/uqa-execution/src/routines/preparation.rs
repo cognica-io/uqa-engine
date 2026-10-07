@@ -35,10 +35,11 @@ pub struct PLpgSQLPreparations {
 
 pub(super) struct PreparedFragment {
     pub syntax: Statement,
-    pub plan: UnifiedPlan,
     pub analysis: ProceduralPlanAnalysis,
     valid: AtomicBool,
     pub variables: Vec<PLpgSQLVariableReference>,
+    parameter_types: Vec<Option<uqa_sql::ColumnType>>,
+    variants: super::plans::RoutinePlanVariants,
 }
 /// Weak owners include anonymous blocks and old routine activations that remain
 /// live after replacement. Their prepared inputs receive the same publication events.
@@ -47,6 +48,17 @@ pub(crate) struct PLpgSQLPreparationRegistry {
     owners: Mutex<Vec<Weak<PLpgSQLPreparations>>>,
 }
 impl PLpgSQLPreparationRegistry {
+    pub(crate) fn invalidate_execution_plans(&self) {
+        self.owners.lock().retain(|owner| {
+            let Some(owner) = owner.upgrade() else {
+                return false;
+            };
+            for fragment in owner.fragments.lock().values() {
+                fragment.variants.invalidate();
+            }
+            true
+        });
+    }
     pub(crate) fn register(&self) -> Arc<PLpgSQLPreparations> {
         let owner = Arc::new(PLpgSQLPreparations::default());
         let mut owners = self.owners.lock();
@@ -190,14 +202,17 @@ impl Interpreter<'_> {
                     .services
                     .statements
                     .analyze_static_plan(&mut plan, &bound.parameters)?;
+                let definition = analysis.prepared_definition(&plan, &bound.parameters)?;
+                let variants = super::plans::RoutinePlanVariants::new(&definition);
                 // Only a completely analyzed statement is retained. Parse and input
                 // failures retry; runtime errors cannot undo an already prepared site.
                 Ok(PreparedFragment {
                     syntax,
-                    plan,
                     analysis,
                     valid: AtomicBool::new(true),
                     variables: bound.references,
+                    parameter_types: definition.parameter_types,
+                    variants,
                 })
             },
         )
@@ -210,7 +225,37 @@ impl Interpreter<'_> {
         fragment
             .variables
             .iter()
-            .map(|reference| reference.read(&mut resolver))
+            .zip(&fragment.parameter_types)
+            .map(|(reference, expected)| {
+                let parameter = match reference.read(&mut resolver) {
+                    Err(error)
+                        if expected.is_some()
+                            && matches!(error.sqlstate(), Some("42703" | "55000")) =>
+                    {
+                        return Ok(SQLParam::DeferredError {
+                            ty: expected.clone().expect("retained parameter type"),
+                            error: (&error).into(),
+                        });
+                    }
+                    result => result?,
+                };
+                let (Some(expected), Some(actual)) = (expected, parameter.declared_scalar_type())
+                else {
+                    return Ok(parameter);
+                };
+                if uqa_sql::catalog::type_metadata::pg_type_oid(expected)
+                    == uqa_sql::catalog::type_metadata::pg_type_oid(actual)
+                {
+                    return Ok(parameter);
+                }
+                let number = resolver.parameter_number(reference).ok_or_else(|| {
+                    SQLError::Internal("prepared PL/pgSQL parameter has no datum identity".into())
+                })?;
+                Ok(SQLParam::DeferredError {
+                    ty: expected.clone(),
+                    error: uqa_sql::plpgsql::parameter_type_mismatch(number, actual, expected),
+                })
+            })
             .collect()
     }
     pub(super) fn execute_fragment(
@@ -221,9 +266,20 @@ impl Interpreter<'_> {
         let _guard = prepared
             .direct_routine()
             .then(|| super::DirectRoutineCommandGuard::enter(self.services.session));
+        let plan = self.select_fragment_plan(prepared, &parameters)?;
         self.services
             .statements
-            .execute_body_statement(prepared.plan.clone(), &parameters, None)
+            .execute_selected_body_plan(&plan, &parameters)
+    }
+
+    pub(super) fn select_fragment_plan(
+        &self,
+        prepared: &PreparedFragment,
+        parameters: &[SQLParam],
+    ) -> Result<UnifiedPlan, SQLError> {
+        prepared
+            .variants
+            .select(|entry| self.services.statements.select_body_plan(entry, parameters))
     }
 }
 

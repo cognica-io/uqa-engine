@@ -79,7 +79,9 @@ impl TryFrom<&SQLParam> for SQLParameter {
                     value: value.clone(),
                 })
             }
-            SQLParam::Vector(_) | SQLParam::Tensor(_) => Err(HttpEngineError::InvalidParameter),
+            SQLParam::Vector(_) | SQLParam::Tensor(_) | SQLParam::DeferredError { .. } => {
+                Err(HttpEngineError::InvalidParameter)
+            }
         }
     }
 }

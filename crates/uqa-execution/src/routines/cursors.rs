@@ -42,9 +42,10 @@ impl Interpreter<'_> {
                 source_sql,
             } => {
                 let prepared = self.prepare_statement(query)?;
+                let params = self.fragment_parameters(&prepared)?;
                 (
-                    prepared.plan.clone(),
-                    self.fragment_parameters(&prepared)?,
+                    self.select_fragment_plan(&prepared, &params)?,
+                    params,
                     *scroll,
                     std::sync::Arc::clone(source_sql),
                 )
@@ -56,16 +57,13 @@ impl Interpreter<'_> {
             } => {
                 let (text, params) = self.eval_dynamic_sql(query, params)?;
                 (
-                    UnifiedPlan::lower_with(self.compile_dynamic_cursor(&text)?, &|name: &str| {
-                        self.services.runtime.has_aggregate_function(name)
-                    }),
+                    self.lower_cursor_plan(self.compile_dynamic_cursor(&text)?)?,
                     params,
                     *scroll,
                     text.into(),
                 )
             }
         };
-        let plan = self.services.statements.optimize_plan(plan)?;
         self.services
             .portals
             .open(&params, &portal_name, scroll, &plan, &source_sql)?;
@@ -143,10 +141,7 @@ impl Interpreter<'_> {
     ) -> Result<Flow, SQLError> {
         let prepared = self.prepare_statement(query)?;
         let params = self.fragment_parameters(&prepared)?;
-        let plan = self
-            .services
-            .statements
-            .optimize_plan(prepared.plan.clone())?;
+        let plan = self.select_fragment_plan(&prepared, &params)?;
         let portal_name = self.open_internal_for_portal(&params, &plan, source_sql)?;
         self.exec_pinned_for_portal(&portal_name, label, target, body, true)
     }
@@ -381,9 +376,10 @@ impl Interpreter<'_> {
         for field in fields {
             self.push_binding(&field.name, field.varno);
         }
-        let query = self
-            .prepare_statement(&query)
-            .and_then(|prepared| Ok((prepared.plan.clone(), self.fragment_parameters(&prepared)?)));
+        let query = self.prepare_statement(&query).and_then(|prepared| {
+            let params = self.fragment_parameters(&prepared)?;
+            Ok((self.select_fragment_plan(&prepared, &params)?, params))
+        });
         for field in fields.iter().rev() {
             self.pop_binding(&field.name);
         }

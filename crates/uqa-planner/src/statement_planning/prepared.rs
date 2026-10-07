@@ -44,7 +44,7 @@ pub fn specialize_parameters(plan: &mut crate::UnifiedPlan, parameters: &[uqa_sq
                 parameter_index: Some(*index),
             },
             SQLParam::Scalar(value) => ScalarExpr::Literal(value.clone()),
-            SQLParam::Vector(_) | SQLParam::Tensor(_) => return,
+            SQLParam::Vector(_) | SQLParam::Tensor(_) | SQLParam::DeferredError { .. } => return,
         };
     });
 }

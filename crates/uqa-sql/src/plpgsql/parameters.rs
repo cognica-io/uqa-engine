@@ -16,6 +16,21 @@ use crate::{
     SQLError, SQLParam,
 };
 
+pub fn parameter_type_mismatch(
+    number: usize,
+    actual: &crate::ColumnType,
+    expected: &crate::ColumnType,
+) -> crate::ast::DeferredSQLError {
+    crate::ast::DeferredSQLError {
+        sqlstate: "42804".into(),
+        message: format!(
+            "type of parameter {number} ({}) does not match that when preparing the plan ({})",
+            actual.display_name(),
+            expected.display_name()
+        ),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum PLpgSQLVariableReference {
     Name(String),

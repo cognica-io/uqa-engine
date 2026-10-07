@@ -46,6 +46,7 @@ pub struct SessionRoutineBodies {
 impl SessionRoutineBodies {
     pub(crate) fn invalidate_execution_plans(&self) {
         self.sql_inputs.invalidate_execution_plans();
+        self.procedural.invalidate_execution_plans();
     }
 
     pub(crate) fn invalidate(

@@ -176,3 +176,17 @@ fn procedural_cursor_scope_and_anonymous_invalidation_match_postgresql(#[case] p
         include_str!("../../../../tests/parity/pg18/plpgsql_scope_oracle.expected.json"),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn procedural_retained_parameter_types_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("procedural-plans.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/plpgsql_plan_reuse_oracle.expected.json"),
+    );
+}
