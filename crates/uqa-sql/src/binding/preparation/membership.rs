@@ -93,6 +93,22 @@ impl Preparation<'_> {
             }
             let mut left = needle.clone();
             self.binary(op, &mut left, item)?;
+            // PostgreSQL checks each boolean comparison after operator resolution; its array comparison permits set-valued inputs.
+            let params = self.parameters.values();
+            for operand in [expr.as_ref(), &list[index]] {
+                if crate::semantics::sets::validation::expression_may_return_set(
+                    self.routines,
+                    self.routines,
+                    operand,
+                    input,
+                    &params,
+                )? {
+                    return Err(super::parameters::error(
+                        "42804",
+                        "argument of IN must not return a set".into(),
+                    ));
+                }
+            }
             analysis
                 .left_constants
                 .push(self.parameters.take_literal(expr));
