@@ -4,19 +4,19 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.5.0). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
+UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.5.1). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
 
 ```toml
 [dependencies]
-uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.5.0" }
+uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.5.1" }
 ```
 
-The same version can be taken from the registry as `uqa = "0.5.0"`, `uqa-client = "0.5.0"`, or `uqa-engine = "0.5.0"`.
+The same version can be taken from the registry as `uqa = "0.5.1"`, `uqa-client = "0.5.1"`, or `uqa-engine = "0.5.1"`.
 
 ```sh
-python -m pip install uqa==0.5.0
-npm install @cognica-io/uqa@0.5.0
-npm install @cognica-io/uqa-wasm@0.5.0
+python -m pip install uqa==0.5.1
+npm install @cognica-io/uqa@0.5.1
+npm install @cognica-io/uqa-wasm@0.5.1
 ```
 
 The small `@cognica-io/uqa` root package contains JavaScript and TypeScript declarations and selects one exact-version native package under `@cognica-io` for Linux glibc x64 or arm64, macOS x64 or arm64, or Windows MSVC x64 or arm64. The same root, platform, and WASM tarballs remain attached to the GitHub release for archive verification. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
@@ -199,7 +199,7 @@ The client bounds each NDJSON frame at 64 MiB, rejects invalid frame order, requ
 
 ## Rust notification subscriptions
 
-UQA Engine 0.5.0 implements `HttpEngine::subscribe_notifications(&[&str], HttpNotificationOptions).await` and `subscribe_notifications_with_cancellation(..., &NotificationCancellation).await`. They return an owned `HttpNotificationSubscription` only after validating ready for every requested channel. The Client transport is exercised against the actual authenticated Cloud Node endpoint as well as independent protocol peers. The [Cloud server contract](https://github.com/cognica-io/uqa-cloud/blob/main/docs/design/node-notification-sse.md) documents its bounded queues, retained authority, timing policy and local qualification. Select compatible server and SDK artifacts; client support does not establish an installed server capability or qualify a deployed ingress.
+UQA Engine 0.5.1 implements `HttpEngine::subscribe_notifications(&[&str], HttpNotificationOptions).await` and `subscribe_notifications_with_cancellation(..., &NotificationCancellation).await`. They return an owned `HttpNotificationSubscription` only after validating ready for every requested channel. The Client transport is exercised against the actual authenticated Cloud Node endpoint as well as independent protocol peers. The [Cloud server contract](https://github.com/cognica-io/uqa-cloud/blob/main/docs/design/node-notification-sse.md) documents its bounded queues, retained authority, timing policy and local qualification. Select compatible server and SDK artifacts; client support does not establish an installed server capability or qualify a deployed ingress.
 
 The options require positive `max_channels`, `max_queued_events`, `max_queued_bytes`, `max_transport_chunk_bytes`, `connect_timeout`, `ready_timeout` and `max_idle_timeout`. The queue byte limit includes reserved slots and retained string/request-ID allocations. Transport chunk capacity must be at least 65,536 bytes and is separate from the per-event wire bound, parser storage and native HTTP/TLS buffers. Durations are whole milliseconds, no greater than `2^36 - 1` milliseconds and representable by the native monotonic clock; connection timeout cannot exceed readiness timeout. Ready advertises the actual idle timeout, which must satisfy `I > 3H + M` and the caller's idle ceiling. Receiving data after ready does not extend the initial readiness deadline into a total subscription lifetime.
 
@@ -235,7 +235,7 @@ Applications must handle gap and reconnection observations explicitly; they must
 
 ## Node.js HTTP notification subscriptions
 
-UQA Engine 0.5.0 exposes `await engine.subscribeNotifications(channels, options)` from both `@cognica-io/uqa` and `@cognica-io/uqa/http`. This HTTP path requires no native addon. Creation returns an `HttpNotificationSubscription` only after validating ready. The actual authenticated Cloud Node and public JavaScript client are tested together; older server releases may not expose this endpoint. Required options are `maxChannels`, `maxQueuedEvents`, `maxQueuedBytes`, `maxTransportChunkBytes`, `connectTimeoutMs`, `readyTimeoutMs` and `maxIdleTimeoutMs`. Supply explicit positive integer limits; transport chunks must allow at least 65,536 bytes, connection timeout cannot exceed readiness timeout, and individual timers cannot exceed Node's 2,147,483,647-millisecond range. Queue bytes charge reference slots and encoded records; they do not claim to bound total process RSS.
+UQA Engine 0.5.1 exposes `await engine.subscribeNotifications(channels, options)` from both `@cognica-io/uqa` and `@cognica-io/uqa/http`. This HTTP path requires no native addon. Creation returns an `HttpNotificationSubscription` only after validating ready. The actual authenticated Cloud Node and public JavaScript client are tested together; older server releases may not expose this endpoint. Required options are `maxChannels`, `maxQueuedEvents`, `maxQueuedBytes`, `maxTransportChunkBytes`, `connectTimeoutMs`, `readyTimeoutMs` and `maxIdleTimeoutMs`. Supply explicit positive integer limits; transport chunks must allow at least 65,536 bytes, connection timeout cannot exceed readiness timeout, and individual timers cannot exceed Node's 2,147,483,647-millisecond range. Queue bytes charge reference slots and encoded records; they do not claim to bound total process RSS.
 
 Optional `retry` supplies `maxAttempts`, `episodeTimeoutMs`, `initialBackoffMs`, `maxBackoffMs` and `maxRetryAfterMs`, all positive, with initial backoff no greater than maximum backoff. Omission or `null` disables retry. A failed initial registration returns its typed error. Post-ready retries expose `resync_required` with the previous identity and failure code, then `reconnected` with the new identity before replacement data. `epoch` and `requestId` advance when reconnection is consumed. Events are frozen; notification `sequence` is a `bigint`, `processId` is an exact signed 32-bit `number`, and `channel` and `payload` retain their original text. Inapplicable variant fields return `null`.
 
@@ -260,7 +260,7 @@ async function receiveOne(url, token, options) {
 
 ## Browser notification subscriptions
 
-The 0.5.0 browser package exposes `await engine.subscribeNotifications(channels, options)` on `@cognica-io/uqa-wasm`'s `HttpEngine`, returning the exported `HttpNotificationSubscription`. Its options, frozen event fields, exact `bigint` sequence, `NotificationError`, asynchronous iterator and close/AbortSignal behavior follow the [Node HTTP contract](#nodejs-http-notification-subscriptions). The browser uses the same generated decoder, queue and subscription owner. Embedded WASM uses the separate [direct subscription API](08-bindings-and-extensions.md#direct-browser-notification-subscriptions).
+The 0.5.1 browser package exposes `await engine.subscribeNotifications(channels, options)` on `@cognica-io/uqa-wasm`'s `HttpEngine`, returning the exported `HttpNotificationSubscription`. Its options, frozen event fields, exact `bigint` sequence, `NotificationError`, asynchronous iterator and close/AbortSignal behavior follow the [Node HTTP contract](#nodejs-http-notification-subscriptions). The browser uses the same generated decoder, queue and subscription owner. Embedded WASM uses the separate [direct subscription API](08-bindings-and-extensions.md#direct-browser-notification-subscriptions).
 
 The browser sends its bearer header with `fetch`, omits cookies and other ambient credentials, sends no Referer, and never follows a redirect. A cross-origin server must permit the authorization/content-type preflight and expose `X-Request-Id`, `Retry-After` and `Content-Encoding`; CORS permission does not authenticate the request. The serving path must use identity encoding and the specified no-store/no-transform policy. JavaScript can inspect only CORS-visible headers. The Cloud Node implements these headers and has been exercised with the actual browser package. Deployed ingress, TLS and selected-host qualification remain release requirements.
 
@@ -268,7 +268,7 @@ Fetch does not expose a TCP/TLS connection callback: `connectTimeoutMs` bounds t
 
 ## Notification protocol primitives
 
-UQA Engine 0.5.0 exposes the low-level Rust module `uqa_client::notifications` for the [notification protocol](../../design/sql-notifications-and-sse.md). `SubscriptionRequest::new(channels, maximum_channels)` constructs an exact channel set and `encode()` produces its bounded version-one JSON request. `from_json(body, maximum_channels, last_event_id)` validates incoming request bytes, including the depth-two envelope and rejection of nonempty resume headers. The maximum is 65,536 raw bytes for a request or complete SSE block; channel names are exact nonempty UTF-8 strings of at most 63 bytes without NUL or duplicates.
+UQA Engine 0.5.1 exposes the low-level Rust module `uqa_client::notifications` for the [notification protocol](../../design/sql-notifications-and-sse.md). `SubscriptionRequest::new(channels, maximum_channels)` constructs an exact channel set and `encode()` produces its bounded version-one JSON request. `from_json(body, maximum_channels, last_event_id)` validates incoming request bytes, including the depth-two envelope and rejection of nonempty resume headers. The maximum is 65,536 raw bytes for a request or complete SSE block; channel names are exact nonempty UTF-8 strings of at most 63 bytes without NUL or duplicates.
 
 `NotificationDecoder::new(Arc<SubscriptionRequest>, response_request_id, timer_limits)` constructs one response decoder using Core's validated `NotificationRequestId` and explicit `TimerLimits`. `decode(bytes)` returns `DecodeStep { consumed, event }`; retain and resubmit the unconsumed suffix until the supplied bytes are consumed. Each call yields at most one ready, notification, heartbeat or terminal observation. An event can have zero consumed bytes when a preceding exact-limit CR awaits a non-LF lookahead; process the event and resubmit the same suffix. At EOF call `finish()`, and call it again if it returns an event. A missing terminal frame is an error.
 

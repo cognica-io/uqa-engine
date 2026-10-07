@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-07
+
+### Fixed
+
+- Initialize CREATE TABLE AS column identities and attribute slots through ordinary schema publication, preserving valid catalogs after relation-name waits, across sessions and on persistent reopen.
+- Probe complete composite UNIQUE tuples during mutation checks instead of reading all rows sharing the leading key. Preserve partial predicates, NULL semantics, command-local changes and rollback; initial open repairs missing tuple postings atomically, and SQLite record format 58 and redb record format 56 exclude older writers.
+- Prepare operator-join predicates in each input relation’s own scope, restoring unified-search examples across language bindings while retaining constant-error ordering and namespace checks.
+- Reduce nested routine execution stack frames so shallow recursion succeeds in development builds without weakening the native stack guard or recursive-error recovery.
+- Preserve legacy key constraint names when initial analyzer restoration saves a table before its owned index registry is converted. Databases combining predecessor column keys and full-text fields now reopen with their constraints, documents and search index intact; converted catalogs continue to store key names only on owned indexes.
+
 ## [0.5.0] - 2026-10-07
 
 ### Added
@@ -48,12 +58,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Run `CREATE TABLE` in `DefineRelation`'s order: `MergeAttributes`, `transformColumnDefinition` and `PARTITION OF` column options with PostgreSQL's diagnostics and notices, CHECK constraints named and merged in written order, defaults and generation expressions cooked as `cookDefault` cooks them, and the OIDs of the relation, its defaults, constraints and indexes allocated where `heap_create_with_catalog` and `DefineRelation` allocate them.
 
 ### Fixed
-
-- Initialize CREATE TABLE AS column identities and attribute slots through ordinary schema publication, preserving valid catalogs after relation-name waits, across sessions and on persistent reopen.
-- Probe complete composite UNIQUE tuples during mutation checks instead of reading all rows sharing the leading key. Preserve partial predicates, NULL semantics, command-local changes and rollback; initial open repairs missing tuple postings atomically, and SQLite record format 58 and redb record format 56 exclude older writers.
-- Prepare operator-join predicates in each input relation’s own scope, restoring unified-search examples across language bindings while retaining constant-error ordering and namespace checks.
-- Reduce nested routine execution stack frames so shallow recursion succeeds in development builds without weakening the native stack guard or recursive-error recovery.
-- Preserve legacy key constraint names when initial analyzer restoration saves a table before its owned index registry is converted. Databases combining predecessor column keys and full-text fields now reopen with their constraints, documents and search index intact; converted catalogs continue to store key names only on owned indexes.
 
 - Compile SQLite path watching only on supported native targets, restoring browser WASM builds while preserving direct file-identity checks and replacement rejection on other targets.
 
