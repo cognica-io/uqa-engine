@@ -19,6 +19,8 @@ pub enum ValueSite {
     Membership { array_items: Vec<usize> },
     /// A cast, with the type name binding gave it.
     Cast(String),
+    /// A ROW constructor bound to its original composite attribute positions.
+    CompositeRow(crate::ast::CompositeRowBinding),
     /// An `unknown` literal that binding left unconverted.
     Literal,
     /// An `unknown` literal that binding converted to a typed constant.
@@ -411,6 +413,22 @@ impl Walk {
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        if let ScalarExpr::CompositeRow { items, binding, .. } = bound {
+            let source = match lowered {
+                ScalarExpr::Cast { expr, .. } => expr.as_ref(),
+                expression => expression,
+            };
+            if let ScalarExpr::Row(original)
+            | ScalarExpr::CompositeRow {
+                items: original, ..
+            } = source
+            {
+                self.sites
+                    .values
+                    .push(ValueSite::CompositeRow(binding.clone()));
+                return self.scalars(original, items, subqueries);
+            }
+        }
         if let Some(shape) = crate::type_resolution::membership::stored_shape(lowered, bound) {
             let ScalarExpr::InList {
                 expr,

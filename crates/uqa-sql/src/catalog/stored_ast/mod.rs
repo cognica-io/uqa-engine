@@ -357,8 +357,15 @@ where
         if let Some(visit) = self.expression.as_mut() {
             visit(expression)?;
         }
-        if let (Some(visit), Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. }) =
-            (self.ty.as_mut(), expression)
+        if let (
+            Some(visit),
+            Expr::Cast { ty, .. }
+            | Expr::TypedLiteral { ty, .. }
+            | Expr::CompositeRow {
+                binding: crate::ast::CompositeRowBinding { ty, .. },
+                ..
+            },
+        ) = (self.ty.as_mut(), expression)
         {
             visit(ty);
         }
@@ -432,7 +439,11 @@ where
                 }
                 (self.routine)(name, Some(binding))?;
             }
-            Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+            Expr::Array(items)
+            | Expr::Row(items)
+            | Expr::CompositeRow { items, .. }
+            | Expr::And(items)
+            | Expr::Or(items) => {
                 for item in items {
                     self.bind_expr(item, visible_ctes)?;
                 }

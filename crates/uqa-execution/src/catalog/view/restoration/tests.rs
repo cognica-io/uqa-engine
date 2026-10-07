@@ -131,6 +131,7 @@ impl Fixture {
             bindings: self,
             schemas: self,
             sequences: self,
+            types: &crate::catalog::test_support::NoRoutines,
         }
     }
     fn snapshot(

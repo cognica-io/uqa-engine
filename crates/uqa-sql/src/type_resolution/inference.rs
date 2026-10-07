@@ -119,6 +119,24 @@ pub(super) fn scalar_type_inner_with_control(
             common::read_unknown_literals(items.iter(), &element)?;
             Ok(Some(ColumnType::array_with_control(element, control)?))
         }
+        ScalarExpr::CompositeRow {
+            binding,
+            bound_type,
+            ..
+        } => {
+            if let Some(resolver) = resolver {
+                let ty = resolver.resolve_type_name(&binding.ty)?.ok_or_else(|| {
+                    SQLError::Internal("composite constructor type disappeared".into())
+                })?;
+                Ok(Some(control.finish(ty, None)?))
+            } else if let Some(ty) = bound_type {
+                copy_type(Some(ty), control)
+            } else {
+                Err(SQLError::Internal(
+                    "composite constructor result type was not bound".into(),
+                ))
+            }
+        }
         ScalarExpr::Row(items) => {
             for item in items {
                 scalar_type_inner_with_control(item, schema, params, resolver, control)?;

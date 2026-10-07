@@ -300,6 +300,7 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().any(contains_retrieval),
         ScalarExpr::Binary { lhs, rhs, .. } => contains_retrieval(lhs) || contains_retrieval(rhs),

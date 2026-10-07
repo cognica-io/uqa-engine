@@ -6,6 +6,9 @@
 
 use uqa_engine::Engine;
 
+#[path = "addition_restoration.rs"]
+mod restoration;
+
 fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::new(),
@@ -53,4 +56,18 @@ fn composite_attribute_additions_match_postgresql(#[case] provider: usize) {
         .unwrap()
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
+}
+
+#[rstest::rstest]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_type_and_lifecycle_references_match_key_value_providers(#[case] provider: usize) {
+    for reference in [
+        include_str!("../../../../../tests/parity/pg18/composite_type_oracle.expected.json"),
+        include_str!("../../../../../tests/parity/pg18/type_lifecycle_oracle.expected.json"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = open(provider, &directory.path().join("composite-reference.db"));
+        crate::pg18_oracle::verify(&engine, reference);
+    }
 }

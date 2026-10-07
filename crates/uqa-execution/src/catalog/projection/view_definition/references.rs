@@ -282,7 +282,11 @@ fn reference_expression(expression: &ScalarExpr, scope: &Scope, references: &mut
                 references.constants.push((ty.clone(), *oid));
             }
         }
-        ScalarExpr::Cast { ty, .. } => references.types.push(ty.clone()),
+        ScalarExpr::Cast { ty, .. }
+        | ScalarExpr::CompositeRow {
+            binding: uqa_sql::ast::CompositeRowBinding { ty, .. },
+            ..
+        } => references.types.push(ty.clone()),
         ScalarExpr::Func {
             name,
             binding,

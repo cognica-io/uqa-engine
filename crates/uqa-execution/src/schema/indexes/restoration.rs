@@ -169,7 +169,9 @@ fn candidate_catalog(
 #[cfg(test)]
 mod tests;
 
+mod constructors;
 mod legacy;
+pub use constructors::restore_constructors;
 mod registry;
 mod tables;
 pub use registry::{restore, RestoredIndexCatalog};

@@ -81,9 +81,11 @@ impl StoredColumnBinder<'_> {
                 filter,
                 ..
             } => self.bind_function_parts(args, order_by, filter.as_deref_mut(), scopes, context),
-            Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
-                self.bind_exprs(items, scopes, context)
-            }
+            Expr::Array(items)
+            | Expr::Row(items)
+            | Expr::CompositeRow { items, .. }
+            | Expr::And(items)
+            | Expr::Or(items) => self.bind_exprs(items, scopes, context),
             Expr::Binary { lhs, rhs, .. } => {
                 self.bind_expr(lhs, scopes, context)?;
                 self.bind_expr(rhs, scopes, context)

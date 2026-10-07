@@ -640,7 +640,11 @@ fn validate_rule_expr_scopes(catalog: &dyn RuleSourceCatalog, expr: &Expr) -> Re
                 validate_rule_expr_scopes(catalog, filter)?;
             }
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             for expr in items {
                 validate_rule_expr_scopes(catalog, expr)?;
             }

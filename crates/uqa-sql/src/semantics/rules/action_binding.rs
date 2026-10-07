@@ -248,6 +248,10 @@ fn bind_rule_expr_with_scope(
         Expr::Func { .. } => bind_rule_function_expression(expr, resolver, scope, context)?,
         Expr::Array(items) => Expr::Array(bind_exprs(items, resolver, scope, context)?),
         Expr::Row(items) => Expr::Row(bind_expanding_exprs(items, resolver, scope, context)?),
+        Expr::CompositeRow { items, binding } => Expr::CompositeRow {
+            items: bind_expanding_exprs(items, resolver, scope, context)?,
+            binding: binding.clone(),
+        },
         Expr::Binary { op, lhs, rhs } => Expr::Binary {
             op: *op,
             lhs: Box::new(bind_rule_expr_with_scope(lhs, resolver, scope, context)?),

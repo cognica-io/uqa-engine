@@ -39,13 +39,21 @@ impl Engine {
             let mut generated_requires_migration = false;
             for column in &columns {
                 if let Some(generated) = column.generated.as_ref() {
-                    generated_requires_migration |=
-                        generated.function_dependencies.iter().any(|binding| {
+                    generated_requires_migration |= generated.function_dependencies.iter().any(
+                        |binding| {
                             !binding.builtin
                                 && binding.dispatch.is_none()
                                 && binding.resolution_error.is_none()
                                 && binding.object_id.is_none()
-                        }) || schema_expr_has_legacy_routine_identity(&generated.expression)?;
+                        },
+                    ) || schema_expr_has_legacy_routine_identity(
+                        &generated.expression,
+                    )?
+                        || uqa_sql::type_resolution::composite_rows::expression_requires_binding(
+                            &generated.expression,
+                            self,
+                        )
+                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                 }
             }
             let relation_requires_migration =
@@ -57,7 +65,19 @@ impl Engine {
                     &mut checks,
                 )?
                 | self.bind_legacy_default_sequence_constants(&mut columns)?;
-            if !generated_requires_migration && !expression_requires_migration {
+            let mut hierarchy = table.hierarchy.read().clone();
+            let partition_requires_migration =
+                uqa_sql::schema::inheritance::restoration::restore_composite_constructors(
+                    self.schema_dependency_binding_context().schema,
+                    &columns,
+                    &mut checks,
+                    &mut hierarchy,
+                )
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            if !generated_requires_migration
+                && !expression_requires_migration
+                && !partition_requires_migration
+            {
                 continue;
             }
             if !mode.allows_migration() {
@@ -67,7 +87,6 @@ impl Engine {
             }
             let key_constraints = table.key_constraints.read().clone();
             let foreign_keys = table.foreign_keys.read().clone();
-            let hierarchy = table.hierarchy.read().clone();
             if generated_requires_migration {
                 let context = self.schema_dependency_binding_context();
                 let mut migrate = || {
@@ -99,11 +118,12 @@ impl Engine {
                     &hierarchy,
                 )?;
             }
-            updates.push((table, columns, checks));
+            updates.push((table, columns, checks, hierarchy));
         }
-        for (table, columns, checks) in updates {
+        for (table, columns, checks, hierarchy) in updates {
             *table.columns.write() = columns;
             *table.table_checks.write() = checks;
+            *table.hierarchy.write() = hierarchy;
         }
         Ok(())
     }

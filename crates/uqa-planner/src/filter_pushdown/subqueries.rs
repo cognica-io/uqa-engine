@@ -88,6 +88,7 @@ pub(super) fn outer_expression_contains_volatile_function(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items
             .iter()

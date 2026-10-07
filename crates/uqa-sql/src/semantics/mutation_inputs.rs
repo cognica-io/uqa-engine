@@ -20,6 +20,7 @@ pub fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
         ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().all(expr_is_row_independent),
         ScalarExpr::Binary { lhs, rhs, .. } => {

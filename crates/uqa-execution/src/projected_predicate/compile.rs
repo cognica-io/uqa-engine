@@ -161,6 +161,7 @@ pub(super) fn compile(
         | ScalarExpr::Func { .. }
         | ScalarExpr::Array(_)
         | ScalarExpr::Row(_)
+        | ScalarExpr::CompositeRow { .. }
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::Case { .. }
         | ScalarExpr::ScalarSubquery(_)

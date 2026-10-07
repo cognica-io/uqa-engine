@@ -62,6 +62,13 @@ pub enum ScalarExpr {
     },
     Array(Vec<Self>),
     Row(Vec<Self>),
+    CompositeRow {
+        items: Vec<Self>,
+        binding: crate::ast::CompositeRowBinding,
+        /// Resolved result identity for physical inference without catalog callbacks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bound_type: Option<ColumnType>,
+    },
     Binary {
         op: BinaryOp,
         lhs: Box<Self>,

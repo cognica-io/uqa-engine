@@ -69,7 +69,11 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
                 collect_expression_columns(filter, output);
             }
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             for item in items {
                 collect_expression_columns(item, output);
             }

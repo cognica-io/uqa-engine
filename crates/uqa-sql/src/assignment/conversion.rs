@@ -20,7 +20,7 @@ pub fn coerce_assignment_value(
     target: &ColumnType,
     source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
-    if source.is_some_and(|source| same_domain_identity(source, target)) {
+    if source.is_some_and(|source| same_catalog_value_type(source, target)) {
         return normalize_existing(value, target);
     }
     let value = if target.is_character_string() {
@@ -36,13 +36,17 @@ pub fn coerce_assignment_value(
     convert_value_to_column_type_with_context(context, value, target)
 }
 
-fn same_domain_identity(source: &ColumnType, target: &ColumnType) -> bool {
+fn same_catalog_value_type(source: &ColumnType, target: &ColumnType) -> bool {
     match (source, target) {
         (ColumnType::Domain { oid: source, .. }, ColumnType::Domain { oid: target, .. }) => {
             source == target
         }
+        (ColumnType::Composite(source), ColumnType::Composite(target)) => source.oid == target.oid,
+        (ColumnType::Domain { base, .. }, ColumnType::Composite(_)) => {
+            same_catalog_value_type(base, target)
+        }
         (ColumnType::Array(source), ColumnType::Array(target)) => {
-            same_domain_identity(source, target)
+            same_catalog_value_type(source, target)
         }
         _ => false,
     }

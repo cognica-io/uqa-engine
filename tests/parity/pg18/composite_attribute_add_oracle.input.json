@@ -153,6 +153,22 @@
       "sql": "CREATE VIEW ca_constant AS SELECT ROW(9,'constant',NULL,NULL,NULL,NULL)::ca_pair AS v"
     },
     {
+      "id": "dynamic_view",
+      "sql": "CREATE VIEW ca_dynamic AS SELECT id,ROW(id,'dynamic',NULL,NULL,NULL,NULL)::ca_pair AS v FROM ca_rows"
+    },
+    {
+      "id": "domain_view",
+      "sql": "CREATE VIEW ca_domain_view AS SELECT ROW(8,'domain',NULL,NULL,NULL,NULL)::ca_domain AS v"
+    },
+    {
+      "id": "stored_row_routine",
+      "sql": "CREATE FUNCTION ca_constructor() RETURNS ca_pair LANGUAGE SQL RETURN ROW(7,'routine',NULL,NULL,NULL,NULL)::ca_pair"
+    },
+    {
+      "id": "stored_row_default",
+      "sql": "CREATE TABLE ca_defaults (v ca_pair DEFAULT ROW(6,'default',NULL,NULL,NULL,NULL)::ca_pair)"
+    },
+    {
       "id": "prepared",
       "sql": "PREPARE ca_prepared AS SELECT id,v FROM ca_rows ORDER BY id"
     },
@@ -171,6 +187,26 @@
     {
       "id": "read_constant",
       "sql": "SELECT v FROM ca_constant"
+    },
+    {
+      "id": "read_dynamic",
+      "sql": "SELECT id,v FROM ca_dynamic ORDER BY id"
+    },
+    {
+      "id": "read_domain_view",
+      "sql": "SELECT v FROM ca_domain_view"
+    },
+    {
+      "id": "read_row_routine",
+      "sql": "SELECT ca_constructor()"
+    },
+    {
+      "id": "read_row_default",
+      "sql": "INSERT INTO ca_defaults DEFAULT VALUES; SELECT v FROM ca_defaults"
+    },
+    {
+      "id": "constructor_deparse",
+      "sql": "SELECT pg_get_viewdef('ca_constant'::regclass),pg_get_viewdef('ca_domain_view'::regclass)"
     },
     {
       "id": "read_prepared",
@@ -260,6 +296,31 @@
     {
       "id": "reopen_catalog",
       "sql": "SELECT a.attnum,a.attname,a.atttypid::regtype::text,a.attnotnull,a.attisdropped,a.attcollation FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='ca_pair' AND a.attnum>0 ORDER BY a.attnum",
+      "reopen": true
+    },
+    {
+      "id": "reopen_read_dynamic",
+      "sql": "SELECT id,v FROM ca_dynamic ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_read_domain_view",
+      "sql": "SELECT v FROM ca_domain_view",
+      "reopen": true
+    },
+    {
+      "id": "reopen_read_row_routine",
+      "sql": "SELECT ca_constructor()",
+      "reopen": true
+    },
+    {
+      "id": "reopen_constructor_deparse",
+      "sql": "SELECT pg_get_viewdef('ca_constant'::regclass),pg_get_viewdef('ca_domain_view'::regclass)",
+      "reopen": true
+    },
+    {
+      "id": "reopen_row_default",
+      "sql": "SELECT v FROM ca_defaults",
       "reopen": true
     }
   ]

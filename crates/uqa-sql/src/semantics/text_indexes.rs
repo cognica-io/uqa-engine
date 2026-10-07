@@ -64,7 +64,8 @@ fn walk_text_match_fields(
         ScalarExpr::And(items)
         | ScalarExpr::Or(items)
         | ScalarExpr::Array(items)
-        | ScalarExpr::Row(items) => {
+        | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. } => {
             for item in items {
                 walk_text_match_fields(item, validate)?;
             }

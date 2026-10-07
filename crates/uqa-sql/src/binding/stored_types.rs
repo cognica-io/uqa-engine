@@ -46,7 +46,13 @@ pub fn bind_scalar_type_identities(
         if failure.is_some() {
             return;
         }
-        if let ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } = node {
+        if let ScalarExpr::Cast { ty, .. }
+        | ScalarExpr::TypedLiteral { ty, .. }
+        | ScalarExpr::CompositeRow {
+            binding: crate::ast::CompositeRowBinding { ty, .. },
+            ..
+        } = node
+        {
             match identity(ty, resolve) {
                 Ok(Some(identity)) => *ty = identity,
                 Ok(None) => {}
@@ -82,7 +88,13 @@ fn bind_plan_type_identities(
         if failure.is_some() {
             return;
         }
-        if let ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } = expression {
+        if let ScalarExpr::Cast { ty, .. }
+        | ScalarExpr::TypedLiteral { ty, .. }
+        | ScalarExpr::CompositeRow {
+            binding: crate::ast::CompositeRowBinding { ty, .. },
+            ..
+        } = expression
+        {
             match identity(ty, resolve) {
                 Ok(Some(identity)) => *ty = identity,
                 Ok(None) => {}
@@ -332,7 +344,12 @@ pub fn upgrade_expression_plan_type_names(
 
 fn upgrade_scalar(upgrade: &TypeNameUpgrade<'_, '_>, expression: &mut ScalarExpr) {
     match expression {
-        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => upgrade.rename(ty),
+        ScalarExpr::Cast { ty, .. }
+        | ScalarExpr::TypedLiteral { ty, .. }
+        | ScalarExpr::CompositeRow {
+            binding: crate::ast::CompositeRowBinding { ty, .. },
+            ..
+        } => upgrade.rename(ty),
         ScalarExpr::Func {
             binding: Some(binding),
             ..

@@ -153,6 +153,10 @@ where
             Expr::Array(bind_rule_condition_expressions(context, items, resolver)?)
         }
         Expr::Row(items) => Expr::Row(bind_rule_condition_expressions(context, items, resolver)?),
+        Expr::CompositeRow { items, binding } => Expr::CompositeRow {
+            items: bind_rule_condition_expressions(context, items, resolver)?,
+            binding: binding.clone(),
+        },
         Expr::Binary { op, lhs, rhs } => Expr::Binary {
             op: *op,
             lhs: Box::new(bind_rule_condition_expression(context, lhs, resolver)?),

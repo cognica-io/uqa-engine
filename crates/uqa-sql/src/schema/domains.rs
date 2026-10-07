@@ -104,6 +104,33 @@ pub fn prepare_added_not_null(
     Ok(named.not_null.expect("new domain NOT NULL"))
 }
 
+/// Bind only predecessor composite constructors; retain every other stored default, constraint and catalog identity.
+pub fn restore_composite_constructors(
+    context: &SchemaBindingContext<'_, '_>,
+    definition: &mut CreateDomain,
+) -> Result<bool, SQLError> {
+    let mut changed = false;
+    if let Some(default) = &mut definition.default {
+        if crate::type_resolution::composite_rows::expression_requires_binding(
+            default,
+            context.catalog,
+        )? {
+            changed |=
+                super::defaults::bind_stored_schema_expression(context, default, default.clone())?;
+        }
+    }
+    for check in &mut definition.checks {
+        if crate::type_resolution::composite_rows::expression_requires_binding(
+            &check.expression,
+            context.catalog,
+        )? {
+            bind_domain_check(context, &definition.base, &mut check.expression)?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 struct DomainValueResolver<'a>(&'a ColumnType);
 
 impl VariableResolver for DomainValueResolver<'_> {

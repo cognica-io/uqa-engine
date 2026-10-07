@@ -120,6 +120,13 @@ impl Lowering<'_> {
             Node::Array(items) => ScalarExpr::Array(self.map(items, |this, item| {
                 this.expression(item, aggregates, subqueries)
             })?),
+            Node::CompositeRow { items, binding } => ScalarExpr::CompositeRow {
+                items: self.map(items, |this, item| {
+                    this.expression(item, aggregates, subqueries)
+                })?,
+                binding: self.composite_binding(binding)?,
+                bound_type: None,
+            },
             Node::Row(items) => ScalarExpr::Row(self.map(items, |this, item| {
                 this.expression(item, aggregates, subqueries)
             })?),

@@ -132,6 +132,9 @@ pub(super) fn render_expr_in(
             rendered
         }
         Expr::Array(items) => format!("ARRAY[{}]", expr_list(items)?),
+        Expr::CompositeRow { items, binding } => {
+            format!("ROW({})::{}", expr_list(items)?, binding.ty)
+        }
         Expr::Row(items) => format!("ROW({})", expr_list(items)?),
         Expr::Binary { op, lhs, rhs } => format!(
             "({} {} {})",

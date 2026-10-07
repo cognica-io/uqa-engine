@@ -566,6 +566,7 @@ fn collect_resolved_aliases(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().all(recur),
         ScalarExpr::Binary { lhs, rhs, .. } => recur(lhs) && recur(rhs),
@@ -840,6 +841,7 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {

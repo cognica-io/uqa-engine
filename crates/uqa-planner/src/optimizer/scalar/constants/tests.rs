@@ -6,6 +6,25 @@
 
 use super::*;
 
+#[test]
+fn typed_row_constructors_require_the_live_catalog_even_with_constant_arguments() {
+    let row = ScalarExpr::CompositeRow {
+        bound_type: None,
+        items: vec![ScalarExpr::Literal(Value::Int(1))],
+        binding: uqa_sql::ast::CompositeRowBinding {
+            ty: "composite#20001".into(),
+            attributes: vec![1],
+        },
+    };
+    for expression in [row.clone(), ScalarExpr::Array(vec![row])] {
+        assert_eq!(
+            fold_literal_expression(expression.clone(), |_| panic!("catalog-free evaluation"))
+                .unwrap(),
+            expression
+        );
+    }
+}
+
 fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
     let selected = match name {
         "lower" | "upper" | "replace" => uqa_sql::resolve_fixed_builtin_call(

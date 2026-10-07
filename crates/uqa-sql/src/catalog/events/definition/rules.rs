@@ -489,6 +489,17 @@ impl EventAnalysisContext<'_> {
         dependencies: &mut RuleDependencies,
     ) -> Result<(), SQLError> {
         if let Some(plan) = condition_plan {
+            if crate::type_resolution::composite_rows::expression_requires_binding(
+                condition,
+                self.routines,
+            )? {
+                let lowered =
+                    crate::plan::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
+                        self.routines.has_registered_aggregate_function(name)
+                    });
+                let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, plan)?;
+                crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
+            }
             crate::catalog::events::dependencies::collect_expression_routine_dependencies(
                 plan,
                 dependencies,

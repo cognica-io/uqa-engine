@@ -6,6 +6,10 @@
 
 //! Traverse stored expressions and recognize their column dependencies.
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one traversal covers every stored expression child"
+)]
 pub fn walk_schema_expr_mut(
     expression: &mut crate::ast::Expr,
     visit: &mut impl FnMut(&mut crate::ast::Expr) -> Result<(), String>,
@@ -30,7 +34,11 @@ pub fn walk_schema_expr_mut(
                 walk_schema_expr_mut(filter, visit)?;
             }
         }
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => {
             for item in items {
                 walk_schema_expr_mut(item, visit)?;
             }

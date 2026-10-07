@@ -235,6 +235,26 @@ impl Binder<'_, '_> {
                 self.common_expressions(&mut items)?;
                 ScalarExpr::Array(items)
             }
+            ScalarExpr::CompositeRow {
+                mut items,
+                binding,
+                mut bound_type,
+            } => {
+                self.items(&mut items)?;
+                if let Some(resolver) = self.resolver {
+                    if let Some(ty) = self
+                        .semantic(resolver.resolve_type_name(&binding.ty))?
+                        .flatten()
+                    {
+                        bound_type = Some(ty);
+                    }
+                }
+                ScalarExpr::CompositeRow {
+                    items,
+                    binding,
+                    bound_type,
+                }
+            }
             ScalarExpr::Row(mut items) => {
                 self.items(&mut items)?;
                 ScalarExpr::Row(items)

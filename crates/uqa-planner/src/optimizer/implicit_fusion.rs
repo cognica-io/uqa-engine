@@ -370,6 +370,7 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().any(contains_explicit_fusion),
         ScalarExpr::Binary { lhs, rhs, .. } => {

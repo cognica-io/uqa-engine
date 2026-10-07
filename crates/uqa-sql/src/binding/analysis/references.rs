@@ -179,7 +179,9 @@ pub(super) fn validate_expression(
                 resolver,
             )
         }
-        ScalarExpr::Array(items) | ScalarExpr::Row(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. } => {
             validate_items(routines, items, schema, params, resolver)
         }
         ScalarExpr::And(items) | ScalarExpr::Or(items) => {

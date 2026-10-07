@@ -231,6 +231,7 @@ pub fn expression_may_return_set(
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             expressions_may_return_set(engine, resolver, items, schema, params)
@@ -542,7 +543,9 @@ fn validate_set_context(
                 "argument of AND must not return a set",
             )?;
         }
-        ScalarExpr::Array(items) | ScalarExpr::Row(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. } => {
             for item in items {
                 validate_set_context(engine, resolver, item, schema, params)?;
             }

@@ -171,3 +171,61 @@ pub fn descriptor(
         attributes,
     })))
 }
+
+/// Live field positions of a named row type, including stable table numbers and a view's fixed public output positions.
+pub(crate) fn attribute_numbers(
+    catalog: &CatalogReadView,
+    reference: &CompositeTypeReference,
+) -> Result<Vec<i16>, SQLError> {
+    if let Some(definition) = catalog
+        .composites()
+        .find(|definition| definition.oid == reference.oid)
+    {
+        return Ok(definition
+            .live_attributes()
+            .map(|attribute| attribute.number)
+            .collect());
+    }
+    let identity = RelationIdentity::new(&reference.schema, &reference.name);
+    let snapshot = catalog.snapshot();
+    let columns = snapshot
+        .tables
+        .get(&identity)
+        .map(|table| table.columns.as_slice())
+        .or_else(|| {
+            snapshot
+                .definitions
+                .foreign_tables
+                .get(&identity)
+                .map(|table| table.columns.as_slice())
+        });
+    if let Some(columns) = columns {
+        return columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| {
+                column.attribute_number.map(Ok).unwrap_or_else(|| {
+                    i16::try_from(index + 1).map_err(|_| {
+                        SQLError::Internal("row type attribute number overflow".into())
+                    })
+                })
+            })
+            .collect();
+    }
+    if let Some(columns) = snapshot
+        .definitions
+        .views
+        .get(&identity)
+        .and_then(|view| view.output_columns.as_ref())
+    {
+        return (1..=columns.len())
+            .map(|number| {
+                i16::try_from(number)
+                    .map_err(|_| SQLError::Internal("view attribute number overflow".into()))
+            })
+            .collect();
+    }
+    Err(SQLError::Internal(
+        "composite constructor descriptor disappeared".into(),
+    ))
+}

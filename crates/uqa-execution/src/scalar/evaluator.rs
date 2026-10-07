@@ -119,6 +119,15 @@ pub(super) fn eval_scalar_inner(
                 .finish(Value::Array(array), memory)
                 .map_err(Into::into)
         }
+        ScalarExpr::CompositeRow { items, binding, .. } => {
+            uqa_sql::expr::composites::constructor::evaluate_with_control(
+                binding,
+                items.len(),
+                context.function_hook(),
+                control,
+                |index| eval_scalar_inner(&items[index], context, control),
+            )
+        }
         ScalarExpr::Row(items) => {
             let mut fields = ProductionVec::new(*control);
             fields.reserve(items.len())?;

@@ -105,6 +105,10 @@ struct OperatorCoercions<'a> {
 
 impl Folding for OperatorCoercions<'_> {
     fn array_domain_input(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
+        if super::composite_rows::bind_stored_row(stored, self.schema, self.params, self.resolver)?
+        {
+            return Ok(true);
+        }
         if !matches!(stored, ScalarExpr::Cast { expr, .. } if matches!(**expr, ScalarExpr::Array(_)))
         {
             return Ok(false);
@@ -308,6 +312,7 @@ fn transfer_children(
         }
         (ScalarExpr::Array(items), ScalarExpr::Array(bound))
         | (ScalarExpr::Row(items), ScalarExpr::Row(bound))
+        | (ScalarExpr::CompositeRow { items, .. }, ScalarExpr::CompositeRow { items: bound, .. })
         | (ScalarExpr::And(items), ScalarExpr::And(bound))
         | (ScalarExpr::Or(items), ScalarExpr::Or(bound)) => transfer_all(items, bound, folding)?,
         (

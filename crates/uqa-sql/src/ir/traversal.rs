@@ -56,7 +56,11 @@ impl ScalarExpr {
             return Ok(());
         }
         match self {
-            Self::And(parts) | Self::Or(parts) | Self::Array(parts) | Self::Row(parts) => {
+            Self::And(parts)
+            | Self::Or(parts)
+            | Self::Array(parts)
+            | Self::Row(parts)
+            | Self::CompositeRow { items: parts, .. } => {
                 for part in parts {
                     part.try_visit(visitor)?;
                 }
@@ -164,7 +168,11 @@ impl ScalarExpr {
     pub fn visit_mut(&mut self, visitor: &mut impl FnMut(&mut Self)) {
         visitor(self);
         match self {
-            Self::And(parts) | Self::Or(parts) | Self::Array(parts) | Self::Row(parts) => {
+            Self::And(parts)
+            | Self::Or(parts)
+            | Self::Array(parts)
+            | Self::Row(parts)
+            | Self::CompositeRow { items: parts, .. } => {
                 for part in parts {
                     part.visit_mut(visitor);
                 }
@@ -281,7 +289,11 @@ impl ScalarExpr {
                 }
                 Ok(true)
             }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
+            Self::Array(items)
+            | Self::Row(items)
+            | Self::CompositeRow { items, .. }
+            | Self::And(items)
+            | Self::Or(items) => {
                 for item in items {
                     if !item.try_visit_columns(visitor)? {
                         return Ok(false);
@@ -352,9 +364,11 @@ impl ScalarExpr {
                     || order_by.iter().any(|order| order.expr.contains_window())
                     || filter.as_deref().is_some_and(Self::contains_window)
             }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_window)
-            }
+            Self::Array(items)
+            | Self::Row(items)
+            | Self::CompositeRow { items, .. }
+            | Self::And(items)
+            | Self::Or(items) => items.iter().any(Self::contains_window),
             Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
             Self::UnaryMinus(expr)
             | Self::Not(expr)
@@ -407,9 +421,11 @@ impl ScalarExpr {
                     || order_by.iter().any(|order| order.expr.contains_subquery())
                     || filter.as_deref().is_some_and(Self::contains_subquery)
             }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_subquery)
-            }
+            Self::Array(items)
+            | Self::Row(items)
+            | Self::CompositeRow { items, .. }
+            | Self::And(items)
+            | Self::Or(items) => items.iter().any(Self::contains_subquery),
             Self::Binary { lhs, rhs, .. } => lhs.contains_subquery() || rhs.contains_subquery(),
             Self::UnaryMinus(expr)
             | Self::Not(expr)
@@ -474,9 +490,11 @@ impl ScalarExpr {
                     || order_by.iter().any(|order| order.expr.contains_parameter())
                     || filter.as_deref().is_some_and(Self::contains_parameter)
             }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_parameter)
-            }
+            Self::Array(items)
+            | Self::Row(items)
+            | Self::CompositeRow { items, .. }
+            | Self::And(items)
+            | Self::Or(items) => items.iter().any(Self::contains_parameter),
             Self::Binary { lhs, rhs, .. } => lhs.contains_parameter() || rhs.contains_parameter(),
             Self::UnaryMinus(expr)
             | Self::Not(expr)
@@ -550,7 +568,11 @@ impl ScalarExpr {
                         .as_deref()
                         .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
             }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => items
+            Self::Array(items)
+            | Self::Row(items)
+            | Self::CompositeRow { items, .. }
+            | Self::And(items)
+            | Self::Or(items) => items
                 .iter()
                 .any(|expression| expression.contains_aggregate(is_aggregate)),
             Self::Binary { lhs, rhs, .. } => {

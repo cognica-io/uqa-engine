@@ -91,6 +91,11 @@ fn apply_value_site<'a>(
             "stored catalog binding does not match the {what} of its syntax"
         ))
     };
+    if let Some(ValueSite::CompositeRow(binding)) = sites.peek() {
+        let binding = (*binding).clone();
+        sites.next();
+        return bind_composite_constructor(node, binding);
+    }
     if let Some(ValueSite::Membership { array_items }) = sites.peek() {
         let shape = crate::type_resolution::membership::MembershipShape {
             array_items: array_items.clone(),
@@ -169,6 +174,32 @@ fn apply_value_site<'a>(
             _ => Err(mismatch("expression")),
         },
     }
+}
+
+fn bind_composite_constructor(
+    node: &mut Expr,
+    binding: crate::ast::CompositeRowBinding,
+) -> Result<bool, SQLError> {
+    if let Expr::CompositeRow {
+        binding: current, ..
+    } = node
+    {
+        let changed = *current != binding;
+        *current = binding;
+        return Ok(changed);
+    }
+    let original = std::mem::replace(node, Expr::Literal(Value::Null));
+    let row = match original {
+        Expr::Cast { expr, .. } => *expr,
+        row => row,
+    };
+    let Expr::Row(items) = row else {
+        return Err(SQLError::Internal(
+            "stored catalog binding does not match the composite constructor of its syntax".into(),
+        ));
+    };
+    *node = Expr::CompositeRow { items, binding };
+    Ok(true)
 }
 
 #[cfg(test)]

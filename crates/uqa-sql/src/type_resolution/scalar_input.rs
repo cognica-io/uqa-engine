@@ -130,7 +130,12 @@ fn operand_type_name(
                 .as_ref()
                 .and_then(|invocation| invocation.return_type.as_deref())
         }
-        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => Some(ty.as_str()),
+        ScalarExpr::Cast { ty, .. }
+        | ScalarExpr::TypedLiteral { ty, .. }
+        | ScalarExpr::CompositeRow {
+            binding: crate::ast::CompositeRowBinding { ty, .. },
+            ..
+        } => Some(ty.as_str()),
         ScalarExpr::UnaryMinus(inner) => {
             return scalar_operand_type_name_with_control(inner, schema, params, control);
         }

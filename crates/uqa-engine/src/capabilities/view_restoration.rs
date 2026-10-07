@@ -66,6 +66,7 @@ impl Engine {
             bindings: self,
             schemas: self,
             sequences: self,
+            types: self,
         }
     }
     pub(crate) fn restore_views_from_catalog(

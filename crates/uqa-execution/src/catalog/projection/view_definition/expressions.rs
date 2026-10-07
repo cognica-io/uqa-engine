@@ -71,6 +71,9 @@ impl Deparser<'_> {
                 "ARRAY[{}]",
                 self.expressions(items, scope, subqueries)?
             )),
+            ScalarExpr::CompositeRow { items, binding, .. } => {
+                self.composite_row(items, binding, scope, subqueries, true)
+            }
             ScalarExpr::Row(items) => Ok(format!(
                 "ROW({})",
                 self.expressions(items, scope, subqueries)?
@@ -286,7 +289,15 @@ impl Deparser<'_> {
                 return Ok(format!("{value}::{display}"));
             }
         }
-        let value = self.expression(expr, scope, subqueries)?;
+        let value = if let ScalarExpr::CompositeRow { items, binding, .. } = expr {
+            if matches!(self.resolved_type(ty), Some(ColumnType::Domain { .. })) {
+                self.composite_row(items, binding, scope, subqueries, false)?
+            } else {
+                self.expression(expr, scope, subqueries)?
+            }
+        } else {
+            self.expression(expr, scope, subqueries)?
+        };
         // A row constructor coerced to a named type is one `RowExpr`, which prints its type after the row.
         if matches!(expr, ScalarExpr::Row(_)) {
             return Ok(format!("{value}::{display}"));

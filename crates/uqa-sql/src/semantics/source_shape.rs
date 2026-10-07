@@ -92,6 +92,7 @@ pub fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {

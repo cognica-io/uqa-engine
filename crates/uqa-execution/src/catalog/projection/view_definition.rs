@@ -307,7 +307,7 @@ fn expression_name(expression: &ScalarExpr) -> String {
         }
         ScalarExpr::Case { .. } => "case".into(),
         ScalarExpr::Array(_) => "array".into(),
-        ScalarExpr::Row(_) => "row".into(),
+        ScalarExpr::Row(_) | ScalarExpr::CompositeRow { .. } => "row".into(),
         ScalarExpr::Exists { .. } => "exists".into(),
         _ => "?column?".into(),
     }

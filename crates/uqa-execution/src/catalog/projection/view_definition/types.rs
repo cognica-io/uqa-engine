@@ -17,6 +17,42 @@ use crate::catalog::projection::regtypes::{
 };
 
 impl Deparser<'_> {
+    pub(super) fn composite_row(
+        &self,
+        items: &[ScalarExpr],
+        binding: &uqa_sql::ast::CompositeRowBinding,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+        show_type: bool,
+    ) -> Result<String, SQLError> {
+        let Some(ColumnType::Composite(reference)) = self.resolved_type(&binding.ty) else {
+            return Err(SQLError::Internal(
+                "stored constructor has no composite type".into(),
+            ));
+        };
+        let numbers =
+            crate::catalog::composite_type::relations::attribute_numbers(self.catalog, &reference)?;
+        let values = numbers
+            .iter()
+            .map(|number| match binding.attributes.binary_search(number) {
+                Ok(index) => self.expression(
+                    items.get(index).ok_or_else(|| {
+                        SQLError::Internal("invalid stored constructor positions".into())
+                    })?,
+                    scope,
+                    subqueries,
+                ),
+                Err(_) => Ok("NULL".into()),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let row = format!("ROW({})", values.join(", "));
+        Ok(if show_type {
+            format!("{row}::{}", self.type_display(&binding.ty))
+        } else {
+            row
+        })
+    }
+
     /// The type a stored type name denotes: an identity resolves through the catalog, a built-in name by itself.
     pub(super) fn resolved_type(&self, ty: &str) -> Option<ColumnType> {
         match UserTypeIdentity::parse(ty) {

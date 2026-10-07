@@ -134,9 +134,11 @@ fn children(expression: &Expr) -> Vec<&Expr> {
             .chain(order_by.iter().map(|order| &order.expr))
             .chain(filter.as_deref())
             .collect(),
-        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
-            items.iter().collect()
-        }
+        Expr::Array(items)
+        | Expr::Row(items)
+        | Expr::CompositeRow { items, .. }
+        | Expr::And(items)
+        | Expr::Or(items) => items.iter().collect(),
         Expr::Binary { lhs, rhs, .. } => vec![lhs, rhs],
         Expr::Not(inner)
         | Expr::UnaryMinus(inner)

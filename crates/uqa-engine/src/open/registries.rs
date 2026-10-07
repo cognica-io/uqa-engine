@@ -57,6 +57,12 @@ impl Engine {
             .restore_rules_from_metadata(catalog, mode.allows_migration())?;
         self.restore_catalog_indexes_from_catalog(catalog, mode)?;
         self.finish_domain_restoration(catalog, domains)?;
+        uqa_execution::catalog::domain::restore_constructors(
+            &self.schema_dependency_binding_context(),
+            self,
+            mode.allows_migration(),
+        )
+        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())
     }
@@ -111,13 +117,13 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let mut resolution = self.session_execution_view().relation_name_resolution();
         resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
-        let rows = uqa_execution::schema::indexes::restoration::restore(
+        let mut rows = uqa_execution::schema::indexes::restoration::restore(
             catalog,
             &self.catalog_read_view(),
             &resolution,
             mode.allows_migration(),
         )?;
-        for (relation, columns, constraints) in rows.schemas {
+        for (relation, columns, constraints) in std::mem::take(&mut rows.schemas) {
             let state = uqa_execution::schema::publication::TableSchemaCatalog::table_state(
                 self,
                 &relation.qualified_name(),
@@ -125,6 +131,12 @@ impl Engine {
             .ok_or_else(|| StorageBackendError::Other("restored index owner disappeared".into()))?;
             state.publish_constraints(columns, constraints);
         }
+        uqa_execution::schema::indexes::restoration::restore_constructors(
+            catalog,
+            &self.schema_dependency_binding_context(),
+            &mut rows,
+            mode.allows_migration(),
+        )?;
         uqa_execution::schema::indexes::registry::build_restored_partition_indexes(
             &self.index_registry_context(),
             &rows.builds,

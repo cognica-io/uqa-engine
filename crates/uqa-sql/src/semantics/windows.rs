@@ -23,6 +23,7 @@ pub fn expr_has_window(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
+        | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => items.iter().any(expr_has_window),
         ScalarExpr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),

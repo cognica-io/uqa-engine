@@ -71,6 +71,8 @@ fn is_constant(expression: &ScalarExpr) -> bool {
                         })
                 })
         }
+        // A named ROW constructor reads its current catalog descriptor even when every argument is a constant.
+        ScalarExpr::CompositeRow { .. } => false,
         ScalarExpr::Binary { lhs, rhs, .. } => is_constant(lhs) && is_constant(rhs),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
