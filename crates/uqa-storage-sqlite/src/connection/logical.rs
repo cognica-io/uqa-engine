@@ -42,6 +42,26 @@ impl BoundRecordSession {
 }
 
 impl ManagedConnection {
+    pub(crate) fn completed_commit(&self) -> Option<uqa_storage::mvcc::CommitReceipt> {
+        // An optional cache hint must not consume the next operation's cleanup diagnostic.
+        if self.session.cleanup_failure.lock().is_some() {
+            return None;
+        }
+        let _gate = self.session.gate.read();
+        self.session.logical.get()?.completed_commit()
+    }
+
+    pub(crate) fn committed_data_revision(&self) -> Option<uqa_storage::CommittedDataRevision> {
+        if self.session.cleanup_failure.lock().is_some() {
+            return None;
+        }
+        let _gate = self.session.gate.read();
+        self.session
+            .logical
+            .get()
+            .and_then(|logical| logical.committed_data_revision())
+    }
+
     pub(crate) fn snapshot_registry(
         &self,
         identity: DatabaseId,

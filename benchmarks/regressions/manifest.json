@@ -325,6 +325,19 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "data_commit_evidence_matches_the_exact_receipt_and_rejects_definition_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native commit evidence",
+      "workload": "Native document update followed by a registry metadata write; compare the completed receipt with altered identity.",
+      "invariant": "Adoption evidence performs zero record reads, matches only the exact receipt, and rejects definition changes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
