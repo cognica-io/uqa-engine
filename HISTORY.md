@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Read unchanged native SQLite rows sequentially in retained snapshots and resolve historical values only for newer row versions, preserving private changes, deleted rows, pagination and selected BLOB hydration.
+
 - Stream native GIN document keys with memory bounded by one document’s indexed fields instead of retaining and sorting the entire corpus; preserve exact counts, private snapshots and ordered key pagination.
 
 - Read consecutive native SQLite index results through one bounded document cursor instead of resolving each row separately. Preserve missing rows, private changes, historical snapshots, selected BLOB hydration and early cancellation. GIN corpus counts traverse document identities without fetching every field length or retaining a distinct-document set; count-only result presence can use the latest committed document projection.

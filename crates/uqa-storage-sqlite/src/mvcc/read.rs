@@ -56,6 +56,20 @@ impl Snapshot {
             operation(connection)
         })
     }
+
+    /// Read the current projection and retained history in one physical view.
+    /// The caller must reconcile changes newer than this snapshot's boundary.
+    pub(super) fn read_historical<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
+    ) -> VersionResult<Option<T>> {
+        self.read(|connection| {
+            if codec::header(connection, self.store.identity)?.sequence <= self.sequence {
+                return Ok(None);
+            }
+            operation(connection)
+        })
+    }
 }
 
 impl CommittedRecordSnapshot for Snapshot {
