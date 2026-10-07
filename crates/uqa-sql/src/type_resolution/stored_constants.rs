@@ -172,7 +172,11 @@ impl Folding for OperatorCoercions<'_> {
                 .ok()
                 .map(|ty| ty.without_type_modifiers());
             // Runtime binding annotates erased carrier widths with identity casts. The catalog retains actual analysis conversions, including domain-to-base relabels, without inventing those annotations in stored SQL.
-            if source.is_none() || source != target {
+            let record_carrier = matches!(
+                (&source, &target),
+                (Some(ColumnType::Composite(_)), Some(ColumnType::Record))
+            );
+            if !record_carrier && (source.is_none() || source != target) {
                 changed |= store_casts(stored, std::slice::from_ref(ty));
             }
             source = target;

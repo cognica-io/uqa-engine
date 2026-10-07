@@ -301,3 +301,23 @@ fn stored_array_inspection_maps_arguments_without_repeating_type_inference() {
         assert_eq!(stored, original, "{sql}");
     }
 }
+
+#[test]
+fn composite_record_operand_keeps_its_catalog_type_without_a_runtime_carrier_cast() {
+    let ty = ColumnType::Composite(crate::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 50_020,
+        array_oid: 50_021,
+        relation_oid: 50_022,
+    });
+    let schema = RowSchema::with_types(vec!["p".into()], vec![Some(ty)]);
+    let mut stored = expression("p");
+    let mut folding = OperatorCoercions {
+        schema: &schema,
+        params: &[],
+        resolver: &Catalog,
+    };
+    assert!(!folding.added_casts(&mut stored, &["record"]));
+    assert_eq!(stored, expression("p"));
+}
