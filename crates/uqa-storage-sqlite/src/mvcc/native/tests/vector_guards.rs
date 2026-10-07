@@ -106,7 +106,7 @@ fn native_ivf_guard_upgrade_preserves_closed_files_and_receipts() {
                     .get::<_, i64>(
                     0
                 ))?,
-                14
+                i64::from(crate::mvcc::native::format::CURRENT_VERSION)
             );
             assert_eq!(
                 sqlite.query_row(

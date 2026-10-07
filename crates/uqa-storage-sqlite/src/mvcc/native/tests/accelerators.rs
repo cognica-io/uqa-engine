@@ -73,7 +73,7 @@ fn populated_dynamic_accelerators_convert_with_canonical_rows_in_every_file_mode
                     .get::<_, i64>(
                     0
                 ))?,
-                14
+                i64::from(crate::mvcc::native::format::CURRENT_VERSION)
             );
             Ok(())
         });
@@ -94,9 +94,10 @@ fn ambiguous_populated_accelerators_leave_the_entire_source_format_unchanged() {
         index.flush_skip_pointers().unwrap();
     }
     let control = StorageReadControl::with_limit(1 << 20);
+    let before = catalog_version(&connection);
     assert!(SQLiteRecordStore::for_native(&connection, &control).is_err());
     connection.with(|sqlite| {
-        assert_eq!(sqlite.query_row("SELECT value FROM _metadata WHERE key='schema_version'", [], |row| row.get::<_, String>(0))?, "48");
+        assert_eq!(sqlite.query_row("SELECT value FROM _metadata WHERE key='schema_version'", [], |row| row.get::<_, String>(0))?, before);
         assert_eq!(sqlite.query_row("SELECT count(*) FROM _skip_a_b_c", [], |row| row.get::<_, i64>(0))?, 1);
         assert_eq!(sqlite.query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('_occurrence_skips','_occurrence_block_max','_uqa_mvcc_native_format','_uqa_mvcc_metadata')", [], |row| row.get::<_, i64>(0))?, 0);
         Ok(())
@@ -130,6 +131,7 @@ fn legacy_text_affinity_accelerators_preserve_blob_keys_and_reject_text_values()
             Ok(())
         }).unwrap();
         let control = StorageReadControl::with_limit(1 << 24);
+        let before = catalog_version(&connection);
         let result = SQLiteRecordStore::for_native(&connection, &control);
         if contents == "text" {
             assert!(result.is_err());
@@ -149,7 +151,7 @@ fn legacy_text_affinity_accelerators_preserve_blob_keys_and_reject_text_values()
                             [],
                             |row| row.get::<_, String>(0)
                         )?,
-                        "48"
+                        before
                     );
                     Ok(())
                 })
@@ -316,4 +318,16 @@ fn converted_mixed_scorer_fingerprints_never_return_a_partial_matching_prefix() 
             .unwrap(),
         None
     );
+}
+
+fn catalog_version(connection: &ManagedConnection) -> String {
+    connection
+        .with(|sqlite| {
+            Ok(sqlite.query_row(
+                "SELECT value FROM _metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )?)
+        })
+        .unwrap()
 }

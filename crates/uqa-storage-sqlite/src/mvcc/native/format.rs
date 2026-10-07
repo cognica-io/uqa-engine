@@ -48,7 +48,7 @@ const FORMAT_THIRTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton I
 
 const FORMAT_FOURTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 14), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
-const CURRENT_VERSION: u32 = 15;
+pub(super) const CURRENT_VERSION: u32 = 15;
 const FOREIGN_SERVER_METADATA_VERSION: u32 = 15;
 
 /// The first format that keeps sequence value state in value records of its own.

@@ -19,6 +19,9 @@ use super::{
 };
 use crate::mvcc::{read, write, Error, PhysicalResult};
 
+#[cfg(test)]
+mod tests;
+
 // Parents precede their children; native document guards and graph invalidation triggers also run before evaluated index materializations are installed.
 const ORDER: [Family; 63] = [
     Family::StandaloneGraphScopes,
@@ -299,17 +302,21 @@ fn seed_originals(
     // Nothing is published yet, so the rows of one table share one read of its owner binding.
     let mut table_owners = owners::TableOwners::default();
     let mut records = prepared.writes();
-    while let Some(record) = records.next(control)? {
-        let record = &record;
-        let identity = NativeRecordIdentity::decode_full(record.key(), control)?;
+    while let Some(record) = records.next_where(control, |metadata| {
+        let identity = NativeRecordIdentity::decode_full(metadata.key(), control)?;
         if matches!(identity.owner(), NativeRecordOwner::Database(id) if id != database) {
-            return Err(VersionError::WrongDatabase.into());
+            return Err(VersionError::WrongDatabase);
         }
         if identity.family() == Family::CacheRevisions {
-            return Err(
-                invalid("native cache generations are provider-owned commit effects").into(),
-            );
+            return Err(invalid(
+                "native cache generations are provider-owned commit effects",
+            ));
         }
+        // Revision validation already proved this under the same exclusive
+        // physical transaction. An absent head has no original value, including
+        // in compacted runs; tombstones retain a revision and still pass here.
+        Ok(metadata.expected().is_some())
+    })? {
         read::value(
             connection,
             record.key(),
@@ -402,11 +409,10 @@ fn validate_retired_owners(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let mut records = prepared.writes();
-    while let Some(record) = records.next(control)? {
-        let record = &record;
-        if NativeRecordIdentity::decode(record.key())?.family() != Family::TableOwners {
-            continue;
-        }
+    while let Some(record) = records.next_where(control, |metadata| {
+        Ok(metadata.expected().is_some()
+            && NativeRecordIdentity::decode(metadata.key())?.family() == Family::TableOwners)
+    })? {
         read::value(
             connection,
             record.key(),
