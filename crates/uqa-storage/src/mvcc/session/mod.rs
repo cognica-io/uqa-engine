@@ -64,6 +64,7 @@ pub struct VersionedKeyValueStore {
     observed: Mutex<observed::ObservedWatermarks>,
     /// The commit monitor value and the committed sequence of this session's last capture. While the monitor returns that value nothing was committed since, so the sequence is still the latest and a caller that asks only for it needs no capture.
     latest: Mutex<Option<(u64, super::CommitSequence)>>,
+    completed: Mutex<Option<super::CommitReceipt>>,
 }
 
 impl VersionedKeyValueStore {
@@ -201,6 +202,7 @@ impl VersionedKeyValueStore {
             active: Mutex::new(None),
             observed: Mutex::default(),
             latest: Mutex::new(None),
+            completed: Mutex::new(None),
         }
     }
 
@@ -258,6 +260,14 @@ impl VersionedKeyValueStore {
 
     fn write_control(&self) -> StorageReadControl {
         StorageReadControl::new(self.control.memory(), &self.write_cancellation)
+    }
+
+    /// Native providers certify definition preservation using effects already observed during the physical commit.
+    pub fn committed_data_revision(&self) -> Option<crate::CommittedDataRevision> {
+        let receipt = self.completed_commit()?;
+        self.persistence
+            .commit_preserves_catalog_definitions(receipt)
+            .then(|| crate::CommittedDataRevision::from_receipt(receipt))
     }
 
     pub fn options(&self) -> VersionedSessionOptions {
@@ -355,6 +365,7 @@ impl VersionedKeyValueStore {
                 "a KeyValue transaction is already active".into(),
             ));
         }
+        *self.completed.lock() = None;
         *active = Some(match self.retained.as_ref() {
             Some(view) => Transaction::at_snapshot(view.retain_committed(), true, &self.control),
             None => self
@@ -408,6 +419,7 @@ impl VersionedKeyValueStore {
                 .atomic(operation)
                 .map_err(VersionError::into_storage_error);
         }
+        *self.completed.lock() = None;
         let transaction = Transaction::new(&*self.persistence, false, &self.control)
             .map_err(VersionError::into_storage_error)?;
         let result = self.evaluate_autocommit(&mut active, transaction, operation)?;
@@ -419,6 +431,7 @@ impl VersionedKeyValueStore {
             .as_ref()
             .expect("retained attempt")
             .acknowledge_completion(&*self.persistence, &self.control)?;
+        *self.completed.lock() = active.as_ref().and_then(Transaction::committed_receipt);
         *active = None;
         Ok(result)
     }
@@ -806,6 +819,15 @@ impl KeyValueStore for VersionedKeyValueStore {
         )))
     }
 
+    fn completed_commit(&self) -> Option<super::CommitReceipt> {
+        let active = self.active.lock();
+        if active.is_some() {
+            None
+        } else {
+            *self.completed.lock()
+        }
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
         active
@@ -816,6 +838,7 @@ impl KeyValueStore for VersionedKeyValueStore {
             .as_ref()
             .expect("completed attempt")
             .acknowledge_completion(&*self.persistence, &self.control)?;
+        *self.completed.lock() = active.as_ref().and_then(Transaction::committed_receipt);
         *active = None;
         Ok(())
     }
@@ -830,6 +853,7 @@ impl KeyValueStore for VersionedKeyValueStore {
             .as_ref()
             .expect("completed attempt")
             .acknowledge_completion(&*self.persistence, &self.control)?;
+        *self.completed.lock() = None;
         *active = None;
         Ok(())
     }

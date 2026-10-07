@@ -381,6 +381,17 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.read_view_revision()
     }
 
+    fn committed_data_revision(
+        &self,
+    ) -> StorageBackendResult<Option<crate::CommittedDataRevision>> {
+        // This backend's Key/Value catalog exposes no physical cache-generation
+        // table. The invoking Engine still requires its data-only dirty state.
+        Ok(self
+            .store
+            .completed_commit()
+            .map(crate::CommittedDataRevision::from_receipt))
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         self.store.change_version_monitor_is_nonblocking()
     }

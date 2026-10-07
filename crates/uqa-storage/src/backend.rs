@@ -23,6 +23,26 @@ use crate::inverted_index::InvertedIndex;
 use crate::vector_index::{VectorIndex, VectorIndexOpenMode, VectorIndexSpec};
 use crate::CatalogFacade;
 
+/// A session's completed record commit usable after the caller classifies its changes as data-only. A provider with cache generations also certifies that catalog, registry, graph and storage-schema generations stayed unchanged. Providers without those generations rely on the caller's classification. This is commit evidence, not a read of the latest database state.
+#[derive(Clone)]
+pub struct CommittedDataRevision {
+    pub revision: crate::key_value::KeyValueReadRevision,
+    pub change_version: u64,
+}
+
+impl CommittedDataRevision {
+    pub fn from_receipt(receipt: crate::mvcc::CommitReceipt) -> Self {
+        Self {
+            revision: crate::key_value::KeyValueReadRevision::records(
+                receipt.transaction.database(),
+                receipt.sequence,
+                None,
+            ),
+            change_version: receipt.sequence.as_u64(),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StorageBackendError {
     #[error(transparent)]
@@ -631,6 +651,11 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn read_view_revision(
         &self,
     ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        Ok(None)
+    }
+
+    /// Evidence for adopting this session's last completed commit after the caller classifies it as data-only, without opening a new snapshot. A provider whose catalog exposes cache generations must also prove catalog/registry/graph/schema preservation; an untracked catalog relies on the caller's classification. Return `None` while a transaction is active, after rollback/read-only completion, or when the required proof is unavailable. Later peer commits must not be folded into this revision. The default retains ordinary refresh.
+    fn committed_data_revision(&self) -> StorageBackendResult<Option<CommittedDataRevision>> {
         Ok(None)
     }
 

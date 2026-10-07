@@ -52,6 +52,7 @@ fn acknowledgement_failure_keeps_terminal_completion_and_retries_without_republi
             Some(TransactionOutcome::Committed(_))
         ));
         let id = store.pending_commit().unwrap();
+        assert!(store.completed_commit().is_none());
         let attempts = persistence.state.lock().attempts.len();
         let acknowledgement = persistence.state.lock().acknowledgements[0];
         assert_eq!(acknowledgement.transaction(), id);
@@ -61,6 +62,7 @@ fn acknowledgement_failure_keeps_terminal_completion_and_retries_without_republi
         assert_eq!(state.acknowledgements, [acknowledgement, acknowledgement]);
         drop(state);
         assert!(!store.in_transaction());
+        assert_eq!(store.completed_commit().unwrap().transaction, id);
         assert_eq!(
             store.get(b"acknowledged").unwrap().as_deref(),
             Some(b"once".as_slice())
@@ -93,6 +95,37 @@ fn abort_acknowledgement_failure_preserves_the_confirmed_abort_for_retry() {
         ]
     );
     assert_eq!(store.get(b"aborted").unwrap(), None);
+    assert!(store.completed_commit().is_none());
+}
+
+#[test]
+fn completed_receipts_are_session_local_and_need_no_snapshot_capture() {
+    let persistence = Persistence::new();
+    let store = persistence.session(96 * 1024);
+    assert!(store.completed_commit().is_none());
+    store.put(b"first", b"committed").unwrap();
+    let captures = persistence.state.lock().captures;
+    let receipt = store.completed_commit().unwrap();
+    assert_eq!(persistence.state.lock().captures, captures);
+    let peer = persistence.session(96 * 1024);
+    assert!(peer.completed_commit().is_none());
+    peer.put(b"peer", b"later").unwrap();
+    assert_eq!(store.completed_commit(), Some(receipt));
+    assert!(peer.completed_commit().unwrap().sequence > receipt.sequence);
+
+    store.begin_read_transaction().unwrap();
+    assert!(store.completed_commit().is_none());
+    store.commit_transaction().unwrap();
+    assert!(store.completed_commit().is_none());
+    store.begin_transaction().unwrap();
+    store.put(b"undone", b"private").unwrap();
+    assert!(store.completed_commit().is_none());
+    store.rollback_transaction().unwrap();
+    assert!(store.completed_commit().is_none());
+    store.begin_transaction().unwrap();
+    store.put(b"explicit", b"committed").unwrap();
+    store.commit_transaction().unwrap();
+    assert!(store.completed_commit().unwrap().sequence > receipt.sequence);
 }
 
 #[test]
