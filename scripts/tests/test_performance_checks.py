@@ -130,6 +130,7 @@ class PerformanceChecksTest(unittest.TestCase):
     def test_arguments_select_only_existing_test_targets(self):
         args = runner.arguments([self.check, {**self.check, "test": "other"}])
         self.assertEqual(args.count("-p"), 1)
+        self.assertEqual(args[:2], ["--profile", "ci"])
         self.assertIn("--locked", args)
         self.assertIn("--lib", args)
         self.assertIn("--tests", args)
@@ -170,7 +171,7 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["checks"][0]["selected_cases"], 2)
         self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check]))
-        self.assertEqual(run.call_args.args[0][5:], runner.arguments([self.check]))
+        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check]))
         self.assertTrue(run.call_args.kwargs["check"])
 
     def test_test_process_failure_stays_failed_and_retains_summary(self):

@@ -67,7 +67,7 @@ def selector(check: dict) -> str:
 
 def arguments(checks: list[dict]) -> list[str]:
     packages = sorted({check["package"] for check in checks})
-    return ["--locked", "--lib", "--tests"] + [
+    return ["--profile", "ci", "--locked", "--lib", "--tests"] + [
         argument for package in packages for argument in ("-p", package)
     ] + ["-E", " | ".join(selector(check) for check in checks)]
 
@@ -165,7 +165,7 @@ def main() -> int:
         (ROOT / "target/nextest/ci/junit.xml").unlink(missing_ok=True)
         listing = json.loads(capture("cargo", "nextest", "list", "--message-format", "json", *selection))
         result["checks"] = verify_selection(checks, listing)
-        subprocess.run(["cargo", "nextest", "run", "--profile", "ci", *selection], cwd=ROOT, check=True)
+        subprocess.run(["cargo", "nextest", "run", *selection], cwd=ROOT, check=True)
         result["status"] = "passed"
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         result["error"] = str(error)
