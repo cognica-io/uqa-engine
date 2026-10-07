@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {"id":"version","sql":"SELECT version()"},
+    {"id":"relation_types","sql":"SELECT c.oid,c.relname,c.reltype,t.typarray,c.relnatts,c.relkind FROM pg_class c JOIN pg_type t ON t.oid=c.reltype WHERE c.oid IN (1417,2328,3118) ORDER BY c.oid"},
+    {"id":"column_types","sql":"SELECT a.attrelid,a.attnum,a.attname,a.atttypid,a.attnotnull,a.attisdropped FROM pg_attribute a WHERE a.attrelid IN (1417,2328,3118) AND a.attnum>0 ORDER BY a.attrelid,a.attnum"},
+    {"id":"create_wrapper","sql":"CREATE FOREIGN DATA WRAPPER catalog_fdw OPTIONS (z 'last',a 'first')"},
+    {"id":"create_server","sql":"CREATE SERVER catalog_source TYPE 'remote' VERSION 'v1' FOREIGN DATA WRAPPER catalog_fdw OPTIONS (z 'server-last',a 'server-first')"},
+    {"id":"create_table","sql":"CREATE FOREIGN TABLE catalog_rows(id integer) SERVER catalog_source OPTIONS (z 'table-last',a 'table-first')"},
+    {"id":"wrapper_owner_options","sql":"SELECT fdwname,pg_get_userbyid(fdwowner)=current_user AS current_owner,fdwhandler,fdwvalidator,fdwacl IS NULL AS default_acl,fdwoptions FROM pg_foreign_data_wrapper WHERE fdwname='catalog_fdw'"},
+    {"id":"server_owner_options","sql":"SELECT s.srvname,pg_get_userbyid(s.srvowner)=current_user AS current_owner,w.fdwname,s.srvtype,s.srvversion,s.srvacl IS NULL AS default_acl,s.srvoptions FROM pg_foreign_server s JOIN pg_foreign_data_wrapper w ON w.oid=s.srvfdw WHERE s.srvname='catalog_source'"},
+    {"id":"table_options","sql":"SELECT c.relname,s.srvname,f.ftoptions FROM pg_foreign_table f JOIN pg_class c ON c.oid=f.ftrelid JOIN pg_foreign_server s ON s.oid=f.ftserver WHERE c.relname='catalog_rows'"},
+    {"id":"no_handler","sql":"SELECT * FROM catalog_rows"},
+    {"id":"drop_validatorless_wrapper","sql":"DROP FOREIGN DATA WRAPPER catalog_fdw CASCADE"},
+    {"id":"removed_catalogs","sql":"SELECT (SELECT count(*) FROM pg_foreign_data_wrapper WHERE fdwname='catalog_fdw') AS wrappers,(SELECT count(*) FROM pg_foreign_server WHERE srvname='catalog_source') AS servers,(SELECT count(*) FROM pg_foreign_table f JOIN pg_class c ON c.oid=f.ftrelid WHERE c.relname='catalog_rows') AS tables"}
+  ]
+}
