@@ -192,7 +192,10 @@ impl MutationCoordinator<'_> {
         &self,
         change: uqa_execution::statement::prepared::invalidation::CatalogRegistryChange,
     ) {
-        change.invalidate(self.session.prepared.write().values_mut());
+        change.invalidate_with_routines(
+            self.session.prepared.write().values_mut(),
+            &self.session.routine_bodies,
+        );
         // Ordinary messages must plan again under the newly published ACL.
         if change == uqa_execution::statement::prepared::invalidation::CatalogRegistryChange::BuiltinRoutinePrivileges {
             self.session.state.write().sql_statement_cache.clear();

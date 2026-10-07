@@ -129,7 +129,7 @@ pub fn execute_sql_language(
             .then_some(&check_result as super::context::StatementResultCheck<'_>);
         let statement = statements.prepare(plan, position, check)?;
         let _direct_routine_command = matches!(
-            &statement,
+            statement.plan(),
             UnifiedPlan::Command(command)
                 if matches!(
                     command.as_ref(),
@@ -137,9 +137,7 @@ pub fn execute_sql_language(
                 )
         )
         .then(|| DirectRoutineCommandGuard::enter(context.session));
-        last = context
-            .statements
-            .execute_body_statement(statement, &params, check)?;
+        last = statement.execute(context, &params, check)?;
     }
     let layout = layout
         .into_inner()

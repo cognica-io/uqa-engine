@@ -12,7 +12,7 @@ use uqa_sql::{
     prepared::{
         definition::PreparedDefinitionContext,
         entry::PreparedStatementPlan,
-        planning::{PreparedPlanAnalysis, PreparedPlanUpdate},
+        planning::{PreparedPlanAnalysis, PreparedPlanSelection, PreparedPlanUpdate},
     },
     SQLError, SQLParam,
 };
@@ -65,8 +65,22 @@ pub fn select_plan(
     let Some(entry) = context.session.prepared_entry(name) else {
         return Ok(None);
     };
+    let selected = select_entry(context, &entry, parameters)?;
+    context
+        .session
+        .publish_usage(name, &entry.logical_plan, selected.update);
+    Ok(Some(selected.plan))
+}
+
+/// Select a variant for an already captured definition, including routine-owned
+/// entries that are not registered as named prepared statements.
+pub fn select_entry(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+    parameters: &[SQLParam],
+) -> Result<PreparedPlanSelection, SQLError> {
     let mode = context.session.plan_cache_mode()?;
-    let needs_analysis = needs_analysis(&context.analysis, &entry)?;
+    let needs_analysis = needs_analysis(&context.analysis, entry)?;
     let mut generic_plan = if needs_analysis {
         None
     } else {
@@ -144,10 +158,9 @@ pub fn select_plan(
             None,
         )
     };
-    context.session.publish_usage(
-        name,
-        &entry.logical_plan,
-        PreparedPlanUpdate {
+    Ok(PreparedPlanSelection {
+        plan,
+        update: PreparedPlanUpdate {
             reanalyzed: reanalyzed.map(|definition| PreparedPlanAnalysis {
                 logical_plan: Arc::new(definition.logical_plan),
                 effective_search_path: definition.effective_search_path,
@@ -158,6 +171,5 @@ pub fn select_plan(
             generic_cost,
             custom_cost,
         },
-    );
-    Ok(Some(plan))
+    })
 }

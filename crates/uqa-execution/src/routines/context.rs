@@ -59,6 +59,19 @@ pub trait RoutineStatements {
         params: &[SQLParam],
         check: Option<StatementResultCheck<'_>>,
     ) -> Result<SQLResult, SQLError>;
+    /// Reuse the ordinary custom/generic selection policy for a retained routine
+    /// statement, without registering it in the user's PREPARE namespace.
+    fn select_body_plan(
+        &self,
+        entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
+        params: &[SQLParam],
+    ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError>;
+    /// Execute an already selected plan under the current statement scope.
+    fn execute_selected_body_plan(
+        &self,
+        plan: &UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError>;
     fn execute_bound(
         &self,
         statement: Statement,

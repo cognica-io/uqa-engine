@@ -134,6 +134,39 @@ impl RoutineStatements for Engine {
         }
     }
 
+    fn select_body_plan(
+        &self,
+        entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
+        params: &[SQLParam],
+    ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError> {
+        let _temporal_input = uqa_sql::expr::TemporalInputContext {
+            transaction_clock_micros: Some(self.transaction_timestamp_micros()),
+            date_order: uqa_sql::semantics::parameters::datestyle::date_order(
+                &self.session.setting("DateStyle"),
+            ),
+        }
+        .enter();
+        uqa_planner::statement_planning::prepared::selection::select_entry(
+            &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
+                session: self,
+                analysis: self.prepared_definition_context(),
+                optimization: self,
+            },
+            entry,
+            params,
+        )
+    }
+    fn execute_selected_body_plan(
+        &self,
+        plan: &UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError> {
+        uqa_execution::statement::compiled::execute_selected_plan(
+            &self.compiled_statement_context(),
+            plan,
+            params,
+        )
+    }
     fn execute_bound(
         &self,
         statement: Statement,

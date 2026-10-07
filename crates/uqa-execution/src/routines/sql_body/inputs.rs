@@ -4,12 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! First-use SQL statement analysis, separate from source parsing and executable planning.
+//! First-use SQL analysis and executable variants, retained by their routine owner.
 
 use parking_lot::Mutex;
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{
-    prepared::definition::{analysis_is_current, PreparedDefinition, PreparedDefinitionContext},
+    prepared::{
+        definition::{analysis_is_current, PreparedDefinition, PreparedDefinitionContext},
+        entry::PreparedStatementPlan,
+    },
     routines::SQLUserFunction,
     ColumnType, SQLError,
 };
@@ -35,7 +38,7 @@ impl SQLBodyIdentity {
 struct StatementInputs {
     position: usize,
     parameter_types: Vec<ColumnType>,
-    definition: Arc<PreparedDefinition>,
+    statement: Arc<SQLRoutineStatement>,
 }
 
 struct RoutineInputs {
@@ -54,7 +57,73 @@ pub struct SQLRoutineInputContext<'a> {
     pub analysis: PreparedDefinitionContext<'a>,
 }
 
+/// One successful input analysis owns its custom/generic history. Replacement
+/// analysis starts a new owner, so an older activation cannot republish its plan.
+pub struct SQLRoutineStatement {
+    pub definition: PreparedDefinition,
+    variants: Mutex<PreparedStatementPlan>,
+}
+
+impl SQLRoutineStatement {
+    fn new(definition: PreparedDefinition) -> Self {
+        let logical_plan = Arc::new(definition.logical_plan.clone());
+        let variants = Mutex::new(PreparedStatementPlan {
+            source_plan: Arc::clone(&logical_plan),
+            logical_plan,
+            needs_analysis: false,
+            effective_search_path: definition.effective_search_path.clone(),
+            dependencies: definition.dependencies.clone(),
+            dependency_snapshot: definition.dependency_snapshot.clone(),
+            plan: None,
+            parameter_types: definition.parameter_types.clone(),
+            result_schema: definition.result_schema.clone(),
+            source_sql: None,
+            prepared_at_micros: 0,
+            from_sql: false,
+            generic_plans: 0,
+            custom_plans: 0,
+            generic_cost: None,
+            total_custom_cost: 0.0,
+        });
+        Self {
+            definition,
+            variants,
+        }
+    }
+
+    pub(super) fn select(
+        &self,
+        select: impl FnOnce(
+            &PreparedStatementPlan,
+        )
+            -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError>,
+    ) -> Result<uqa_sql::plan::UnifiedPlan, SQLError> {
+        let entry = self.variants.lock().clone();
+        let selected = select(&entry)?;
+        let mut current = self.variants.lock();
+        if Arc::ptr_eq(&current.logical_plan, &entry.logical_plan) {
+            current.record_execution(selected.update);
+        }
+        Ok(selected.plan)
+    }
+}
+
 impl SQLRoutineInputs {
+    pub(crate) fn invalidate_execution_plans(&self) {
+        for routine in self.routines.lock().values() {
+            for statement in &routine.statements {
+                let mut entry = statement.statement.variants.lock();
+                if !entry.has_tracked_executable_dependencies() {
+                    entry.plan = None;
+                    // An optimizer callback may publish a catalog change. Give
+                    // the surviving analysis a fresh publication identity so
+                    // that callback cannot restore a discarded executable.
+                    entry.logical_plan = Arc::new((*entry.logical_plan).clone());
+                }
+            }
+        }
+    }
+
     pub(crate) fn invalidate(
         &self,
         affects: impl Fn(&uqa_sql::prepared::dependencies::PreparedAnalysisDependencies) -> bool,
@@ -63,7 +132,7 @@ impl SQLRoutineInputs {
         for routine in routines.values_mut() {
             routine
                 .statements
-                .retain(|statement| !affects(&statement.definition.dependencies));
+                .retain(|statement| !affects(&statement.statement.definition.dependencies));
         }
         routines.retain(|_, routine| !routine.statements.is_empty());
     }
@@ -77,7 +146,7 @@ impl SQLRoutineInputs {
         parameter_types: &[ColumnType],
         context: &PreparedDefinitionContext<'_>,
         prepare: impl FnOnce() -> Result<PreparedDefinition, SQLError>,
-    ) -> Result<Arc<PreparedDefinition>, SQLError> {
+    ) -> Result<Arc<SQLRoutineStatement>, SQLError> {
         let retained = self
             .routines
             .lock()
@@ -88,18 +157,19 @@ impl SQLRoutineInputs {
                     statement.position == position && statement.parameter_types == parameter_types
                 })
             })
-            .map(|statement| Arc::clone(&statement.definition));
-        if let Some(definition) = retained {
+            .map(|statement| Arc::clone(&statement.statement));
+        if let Some(statement) = retained {
+            let definition = &statement.definition;
             if analysis_is_current(
                 context,
                 definition.effective_search_path.as_ref(),
                 &definition.dependencies,
                 definition.dependency_snapshot.as_ref(),
             )? {
-                return Ok(definition);
+                return Ok(statement);
             }
         }
-        let definition = Arc::new(prepare()?);
+        let statement = Arc::new(SQLRoutineStatement::new(prepare()?));
         let mut routines = self.routines.lock();
         let routine = routines
             .entry(identity.object)
@@ -117,9 +187,9 @@ impl SQLRoutineInputs {
         routine.statements.push(StatementInputs {
             position,
             parameter_types: parameter_types.to_vec(),
-            definition: Arc::clone(&definition),
+            statement: Arc::clone(&statement),
         });
-        Ok(definition)
+        Ok(statement)
     }
 }
 
