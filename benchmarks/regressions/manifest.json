@@ -297,6 +297,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "append_addressed_versions_reduce_wal_frames",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/version_metadata/tests/wal.rs",
+      "capability": "SQLite version write amplification",
+      "workload": "Six record families with 2048 existing 41-byte keys and 160-byte values each; 128 FULL commits add six version records apiece.",
+      "invariant": "The addressed layout writes at most 80% of the predecessor WAL frames through the same provider staging function; both retain every inserted version.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
