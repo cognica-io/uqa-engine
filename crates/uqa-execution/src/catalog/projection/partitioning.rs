@@ -64,7 +64,15 @@ pub fn build_pg_partitioned_table(
             .keys
             .iter()
             .filter(|key| !matches!(key, Expr::Column(_)))
-            .map(schema_expr_text)
+            .map(|expression| {
+                super::stored_expression_definition(
+                    Some(&super::CatalogOutput(*context)),
+                    catalog,
+                    resolution,
+                    expression,
+                    false,
+                )
+            })
             .collect::<Result<Vec<_>, SQLError>>()?;
         rows.push(row([
             (
@@ -361,6 +369,20 @@ fn partition_datum_value(
     }
 }
 
+/// Reconstruct a stored key for bound-coercion diagnostics with the caller's current catalog.
+pub fn partition_key_expression(
+    context: &CatalogContext<'_>,
+    expression: &Expr,
+) -> Result<String, SQLError> {
+    super::stored_expression_definition(
+        Some(&super::CatalogOutput(*context)),
+        &context.catalog_read_view(),
+        &context.session_execution_view().relation_name_resolution(),
+        expression,
+        false,
+    )
+}
+
 /// The partition key as `pg_get_partkeydef` prints it.
 pub fn partition_key_definition(
     output: Option<&dyn uqa_sql::expr::EngineHook>,
@@ -452,7 +474,7 @@ fn partition_key_types(
                 &[],
                 Some(context.routines),
             )?
-            .ok_or_else(|| match schema_expr_text(key) {
+            .ok_or_else(|| match partition_key_expression(context, key) {
                 Ok(key) => SQLError::TypeMismatch(format!(
                     "cannot determine partition key type for `{key}`"
                 )),

@@ -107,7 +107,7 @@ pub(super) fn parent_partition_key(
         .try_describe_table(parent)
         .map_err(|error| SQLError::Internal(format!("read partition row type: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(parent.to_string()))?;
-    let keys = key_columns(context.types, &spec, &columns)?;
+    let keys = key_columns(context.types, context.expressions, &spec, &columns)?;
     Ok((spec, keys))
 }
 

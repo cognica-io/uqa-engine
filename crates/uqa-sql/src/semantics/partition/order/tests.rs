@@ -20,6 +20,9 @@ use uqa_core::Value;
 struct Literals;
 
 impl PartitionExpressions for Literals {
+    fn expression_text(&self, expression: &Expr) -> Result<String, SQLError> {
+        crate::catalog::expression_text::schema_expr_text(expression)
+    }
     fn evaluate_bound(&self, expression: &Expr, _params: &[SQLParam]) -> Result<Value, SQLError> {
         match expression {
             Expr::Literal(value) => Ok(value.clone()),

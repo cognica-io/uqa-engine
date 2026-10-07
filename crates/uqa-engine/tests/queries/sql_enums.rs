@@ -59,6 +59,31 @@ fn enum_semantics_match_postgresql_redb() {
     verify_enums(&open_redb(&directory.path().join("enums.redb")));
 }
 
+#[rstest::rstest]
+#[case::memory(None)]
+#[case::sqlite(Some(open_sqlite as fn(&Path) -> Engine))]
+#[case::sqlite_key_value(Some(open_sqlite_key_value as fn(&Path) -> Engine))]
+#[case::redb(Some(open_redb as fn(&Path) -> Engine))]
+fn enum_partition_key_catalog_output_matches_postgresql(#[case] open: Option<fn(&Path) -> Engine>) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("enum-partition-output.db");
+    let engine = open.map_or_else(Engine::new, |open| open(&path));
+    let mut reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/enum_partition_key_oracle.expected.json"
+    ))
+    .unwrap();
+    crate::pg18_oracle::verify(&engine, &reference.to_string());
+    drop(engine);
+    if let Some(open) = open {
+        let ids = reference["reopen_ids"].as_array().unwrap().clone();
+        reference["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| ids.contains(&case["id"]));
+        crate::pg18_oracle::verify(&open(&path), &reference.to_string());
+    }
+}
+
 /// Every result row of one statement as `PostgreSQL` text, NULL as `None`.
 fn text_rows(engine: &Engine, sql: &str) -> Vec<Vec<Option<String>>> {
     let case = crate::pg18_oracle::run_case(engine, sql);

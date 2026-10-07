@@ -28,6 +28,8 @@ pub trait PartitionCatalog {
 
 /// Evaluate declared partition keys and bounds with the caller's expression scope.
 pub trait PartitionExpressions {
+    /// Reconstruct a stored key using its retained type and routine identities and current catalog names.
+    fn expression_text(&self, expression: &Expr) -> Result<String, SQLError>;
     fn evaluate_bound(&self, expression: &Expr, params: &[SQLParam]) -> Result<Value, SQLError>;
     fn evaluate_row(
         &self,

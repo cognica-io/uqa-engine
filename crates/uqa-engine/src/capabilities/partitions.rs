@@ -47,6 +47,12 @@ impl PartitionCatalog for Engine {
 }
 
 impl PartitionExpressions for Engine {
+    fn expression_text(&self, expression: &Expr) -> Result<String, SQLError> {
+        uqa_execution::catalog::projection::partition_key_expression(
+            &self.catalog_execution(),
+            expression,
+        )
+    }
     fn evaluate_bound(&self, expression: &Expr, params: &[SQLParam]) -> Result<Value, SQLError> {
         crate::capabilities::query_expressions::eval_lowered_expression(
             self, expression, None, params,

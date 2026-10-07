@@ -194,6 +194,9 @@ impl AssignmentColumnCatalog for Fixture {
 }
 
 impl PartitionExpressions for Fixture {
+    fn expression_text(&self, expression: &Expr) -> Result<String, SQLError> {
+        uqa_sql::catalog::expression_text::schema_expr_text(expression)
+    }
     fn evaluate_bound(&self, expression: &Expr, params: &[SQLParam]) -> Result<Value, SQLError> {
         self.evaluations.fetch_add(1, Ordering::Relaxed);
         eval_physical(
