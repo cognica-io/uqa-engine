@@ -225,11 +225,13 @@ pub(super) unsafe extern "C" fn vfs_get_last_error(
 
 fn temp_path() -> std::io::Result<PathBuf> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-    let id = NEXT_ID
-        .fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |id| {
-            id.checked_add(1)
-        })
-        .map_err(|_| invalid_data("compressed VFS temporary-file id overflow"))?
+    let id = uqa_core::atomic::try_update_u64(
+        &NEXT_ID,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::Relaxed,
+        |id| id.checked_add(1),
+    )
+    .map_err(|_| invalid_data("compressed VFS temporary-file id overflow"))?
         + 1;
     Ok(std::env::temp_dir().join(format!(
         "uqa-compressed-sqlite-{}-{id}.tmp",

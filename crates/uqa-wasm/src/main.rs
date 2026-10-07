@@ -138,11 +138,13 @@ fn dispatch(handle: i32, method: &str, args: &JSON) -> Result<JSON, String> {
 }
 
 fn register(engine: Engine) -> Result<JSON, String> {
-    let handle = NEXT_HANDLE
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current.checked_add(1).filter(|next| *next > 0)
-        })
-        .map_err(|_| "engine handle space is exhausted".to_string())?;
+    let handle = uqa_core::atomic::try_update_i32(
+        &NEXT_HANDLE,
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| current.checked_add(1).filter(|next| *next > 0),
+    )
+    .map_err(|_| "engine handle space is exhausted".to_string())?;
     let mut engines = ENGINES.lock();
     match engines.entry(handle) {
         std::collections::btree_map::Entry::Vacant(entry) => {

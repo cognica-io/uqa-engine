@@ -20,11 +20,13 @@ impl InternalRelationId {
     #[must_use]
     pub fn allocate() -> Self {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-        let id = NEXT_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            })
-            .expect("internal relation identity space exhausted");
+        let id = uqa_core::atomic::try_update_u64(
+            &NEXT_ID,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |current| current.checked_add(1),
+        )
+        .expect("internal relation identity space exhausted");
         Self(id)
     }
 

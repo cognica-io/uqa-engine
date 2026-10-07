@@ -56,9 +56,11 @@ pub struct PrivateRecordRevision(NonZeroU64);
 impl PrivateRecordRevision {
     pub(in crate::mvcc) fn allocate() -> VersionResult<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(1);
-        NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map(|id| Self(NonZeroU64::new(id).expect("private revisions start at one")))
-            .map_err(|_| VersionError::PrivateRevisionExhausted)
+        uqa_core::atomic::try_update_u64(&NEXT, Ordering::Relaxed, Ordering::Relaxed, |id| {
+            id.checked_add(1)
+        })
+        .map(|id| Self(NonZeroU64::new(id).expect("private revisions start at one")))
+        .map_err(|_| VersionError::PrivateRevisionExhausted)
     }
 
     #[cfg(test)]

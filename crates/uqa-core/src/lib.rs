@@ -11,6 +11,7 @@
 //! algebraic invariants this crate must preserve.
 
 pub mod agtype;
+pub mod atomic;
 pub mod cancel;
 pub mod doc_set;
 mod float_text;

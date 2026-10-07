@@ -41,11 +41,10 @@ struct Clock {
 
 impl Clock {
     fn allocate(&self) -> StorageBackendResult<u64> {
-        self.next
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
-                next.checked_add(1)
-            })
-            .map_err(|_| StorageBackendError::Other("DiskANN memory identity exhausted".into()))
+        uqa_core::atomic::try_update_u64(&self.next, Ordering::Relaxed, Ordering::Relaxed, |next| {
+            next.checked_add(1)
+        })
+        .map_err(|_| StorageBackendError::Other("DiskANN memory identity exhausted".into()))
     }
     fn generation(&self) -> StorageBackendResult<DiskANNGeneration> {
         DiskANNGeneration::new(self.database.as_bytes(), 1, 1, self.allocate()?)
