@@ -72,6 +72,10 @@ pub fn referencing_rows<S: Clone + 'static>(
     expected: &[Value],
     action: ForeignKeyAction,
 ) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
+    // Referential actions use SQL equality, so a NULL parent key cannot select a child row.
+    if expected.iter().any(|value| matches!(value, Value::Null)) {
+        return Ok(Vec::new());
+    }
     let mut out = Vec::new();
     let snapshot = super::snapshots::ReferenceSnapshot::new(context)?;
     for physical_table in uqa_sql::semantics::partition::foreign_key_scan_tables(
@@ -79,7 +83,16 @@ pub fn referencing_rows<S: Clone + 'static>(
         table,
     )? {
         let rows = snapshot.table(&physical_table)?;
-        for doc_id in rows.doc_ids()? {
+        let indexed = if comparison.exact_local_lookup {
+            rows.indexed_doc_ids(&fk.local_columns, expected)?
+        } else {
+            None
+        };
+        let ids = match indexed {
+            Some(ids) => ids,
+            None => rows.doc_ids()?,
+        };
+        for doc_id in ids {
             let identity = PhysicalDocumentIdentity {
                 table: physical_table.clone(),
                 doc_id,

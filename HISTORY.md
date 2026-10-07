@@ -36,6 +36,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Use child indexes for foreign-key parent checks and referential actions, avoiding reads of unrelated child payloads while preserving private writes, latest-committed references and partition behavior. Deleting a NULL parent key now leaves NULL child keys unchanged, matching PostgreSQL.
+
 - Render stored partition key expressions with their current type and enum-label metadata during bound validation and catalog projection, preserving partition creation, diagnostics, rename and durable reopen.
 
 - Reject set-valued operands in individual IN comparisons before rewriting, while preserving PostgreSQL scalar-array expansion and ordered analysis errors.

@@ -74,6 +74,14 @@ impl<T: std::ops::Deref<Target = Engine>> ReferentialReadSnapshot for ReferenceS
     fn doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         self.0.live_table_doc_ids(table)
     }
+    fn value_index_scan_key(
+        &self,
+        table: &str,
+        key: &uqa_storage::ValueIndexKey,
+        predicate: &uqa_core::Predicate,
+    ) -> Result<Option<uqa_core::PostingList>, SQLError> {
+        self.0.value_index_scan_key(table, key, predicate)
+    }
     fn document(
         &self,
         table: &str,

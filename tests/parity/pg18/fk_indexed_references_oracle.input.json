@@ -1,0 +1,120 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TABLE ref_parent (id text PRIMARY KEY); CREATE TABLE ref_child (parent_id text REFERENCES ref_parent(id) ON DELETE CASCADE ON UPDATE CASCADE, kind integer, body text NOT NULL, PRIMARY KEY (parent_id, kind)); INSERT INTO ref_parent VALUES ('target'), ('empty'), ('other'); INSERT INTO ref_child VALUES ('target', 1, repeat('x', 20000)), ('target', 2, repeat('x', 20000)), ('other', 1, repeat('y', 20000))"
+    },
+    {
+      "id": "delete_empty",
+      "sql": "DELETE FROM ref_parent WHERE id = 'empty'"
+    },
+    {
+      "id": "update_cascade",
+      "sql": "UPDATE ref_parent SET id = 'renamed' WHERE id = 'target'"
+    },
+    {
+      "id": "updated_children",
+      "sql": "SELECT parent_id, kind, length(body) AS bytes FROM ref_child ORDER BY parent_id, kind"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ"
+    },
+    {
+      "id": "own_child",
+      "sql": "INSERT INTO ref_child VALUES ('renamed', 3, 'private')"
+    },
+    {
+      "id": "delete_private",
+      "sql": "DELETE FROM ref_parent WHERE id = 'renamed'"
+    },
+    {
+      "id": "private_children",
+      "sql": "SELECT parent_id, kind FROM ref_child ORDER BY parent_id, kind"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "restored_children",
+      "sql": "SELECT parent_id, kind FROM ref_child ORDER BY parent_id, kind"
+    },
+    {
+      "id": "delete_cascade",
+      "sql": "DELETE FROM ref_parent WHERE id = 'renamed'"
+    },
+    {
+      "id": "setup_no_action",
+      "sql": "CREATE TABLE checked_parent (id text PRIMARY KEY); CREATE TABLE checked_child (parent_id text REFERENCES checked_parent(id), kind integer, PRIMARY KEY (parent_id, kind)); INSERT INTO checked_parent VALUES ('used'), ('empty'); INSERT INTO checked_child VALUES ('used', 1), ('used', 2)"
+    },
+    {
+      "id": "checked_empty",
+      "sql": "DELETE FROM checked_parent WHERE id = 'empty'"
+    },
+    {
+      "id": "checked_used",
+      "sql": "DELETE FROM checked_parent WHERE id = 'used'"
+    },
+    {
+      "id": "child_first",
+      "sql": "DELETE FROM checked_child WHERE parent_id = 'used'; DELETE FROM checked_parent WHERE id = 'used'"
+    },
+    {
+      "id": "standalone_index",
+      "sql": "CREATE TABLE indexed_parent (id integer PRIMARY KEY); CREATE TABLE indexed_child (id integer PRIMARY KEY, parent_id integer REFERENCES indexed_parent(id) ON DELETE CASCADE); CREATE INDEX child_parent_lookup ON indexed_child(parent_id); INSERT INTO indexed_parent VALUES (1), (2); INSERT INTO indexed_child VALUES (10, 1), (11, 2); DELETE FROM indexed_parent WHERE id = 1"
+    },
+    {
+      "id": "standalone_rows",
+      "sql": "SELECT id, parent_id FROM indexed_child ORDER BY id"
+    },
+    {
+      "id": "compound_index",
+      "sql": "CREATE TABLE compound_parent (a integer, b text, PRIMARY KEY (a,b)); CREATE TABLE compound_child (a integer, b text, kind integer, PRIMARY KEY (a,b,kind), FOREIGN KEY (a,b) REFERENCES compound_parent(a,b) ON DELETE CASCADE); INSERT INTO compound_parent VALUES (1,'one'), (1,'two'), (2,'one'); INSERT INTO compound_child VALUES (1,'one',1), (1,'two',1), (2,'one',1); DELETE FROM compound_parent WHERE a=1 AND b='one'"
+    },
+    {
+      "id": "compound_rows",
+      "sql": "SELECT a, b, kind FROM compound_child ORDER BY a,b,kind"
+    },
+    {
+      "id": "cross_type",
+      "sql": "CREATE TABLE wide_parent (id bigint PRIMARY KEY); CREATE TABLE narrow_child (id integer PRIMARY KEY, parent_id integer REFERENCES wide_parent(id) ON DELETE CASCADE); CREATE INDEX narrow_lookup ON narrow_child(parent_id); INSERT INTO wide_parent VALUES (1), (2); INSERT INTO narrow_child VALUES (10,1), (11,2); DELETE FROM wide_parent WHERE id = 1"
+    },
+    {
+      "id": "cross_type_rows",
+      "sql": "SELECT id, parent_id FROM narrow_child ORDER BY id"
+    },
+    {
+      "id": "nullable_cascade",
+      "sql": "CREATE TABLE nullable_parent (id integer UNIQUE); CREATE TABLE nullable_child (id integer PRIMARY KEY, parent_id integer REFERENCES nullable_parent(id) ON DELETE CASCADE); INSERT INTO nullable_parent VALUES (NULL), (1); INSERT INTO nullable_child VALUES (10,NULL), (11,1); DELETE FROM nullable_parent WHERE id IS NULL"
+    },
+    {
+      "id": "nullable_cascade_rows",
+      "sql": "SELECT id, parent_id FROM nullable_child ORDER BY id"
+    },
+    {
+      "id": "nullable_default",
+      "sql": "CREATE TABLE default_parent (id integer UNIQUE); CREATE TABLE default_child (id integer PRIMARY KEY, parent_id integer DEFAULT 1 REFERENCES default_parent(id) ON DELETE SET DEFAULT); CREATE INDEX default_lookup ON default_child(parent_id); INSERT INTO default_parent VALUES (NULL), (1); INSERT INTO default_child VALUES (10,NULL), (11,1); DELETE FROM default_parent WHERE id IS NULL"
+    },
+    {
+      "id": "nullable_default_rows",
+      "sql": "SELECT id, parent_id FROM default_child ORDER BY id"
+    },
+    {
+      "id": "remaining_children",
+      "sql": "SELECT parent_id, kind, length(body) AS bytes FROM ref_child ORDER BY parent_id, kind"
+    }
+  ],
+  "reopen_ids": [
+    "standalone_rows",
+    "compound_rows",
+    "cross_type_rows",
+    "nullable_cascade_rows",
+    "nullable_default_rows",
+    "remaining_children"
+  ]
+}
