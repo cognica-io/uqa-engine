@@ -204,7 +204,7 @@ class ReleaseRunTest(unittest.TestCase):
 
 class ReportPublicationTest(unittest.TestCase):
     def publication_check(self, sources: list[dict], *, orphan: bool = False):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        workflow = (ROOT / ".github/workflows/release-assets.yml").read_text()
         step = workflow.split("      - name: Verify report release identities\n", 1)[1].split("\n      - ", 1)[0]
         script = textwrap.dedent(step.split("        run: |\n", 1)[1])
         with tempfile.TemporaryDirectory() as temporary:
@@ -223,7 +223,7 @@ class ReportPublicationTest(unittest.TestCase):
             return subprocess.run(["bash", "-e"], input=script, text=True, cwd=root,
                                   capture_output=True, check=False, env={
                                       **os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
-                                      "RELEASE_TAG": "v1.2.3", "GITHUB_RUN_ID": "123",
+                                      "RELEASE_TAG": "v1.2.3", "GITHUB_RUN_ID": "456", "SOURCE_RUN_ID": "123",
                                       "GITHUB_REPOSITORY": "cognica-io/uqa-engine",
                                   })
 
