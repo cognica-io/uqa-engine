@@ -11,6 +11,69 @@ use uqa_storage::ValueIndexKey;
 
 use super::Engine;
 
+#[rstest::rstest]
+#[case::sqlite(0)]
+#[case::sqlite_kv(1)]
+#[case::redb(2)]
+fn own_commit_adoption_opens_no_read_transaction_and_keeps_later_writers_visible(
+    #[case] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("receipt-adoption.db");
+    let engine = match provider {
+        0 => Engine::open(&path).unwrap(),
+        1 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
+    pause_automatic_statistics(&engine);
+    let peer = engine.new_session().unwrap();
+    pause_automatic_statistics(&peer);
+    engine
+        .sql("CREATE TABLE receipts(id integer PRIMARY KEY)", &[])
+        .unwrap();
+    engine.sql("SELECT count(*) FROM receipts", &[]).unwrap();
+    let before = engine.epochs.seen_storage_read_view.lock().clone().unwrap();
+    engine.sql("INSERT INTO receipts VALUES (1)", &[]).unwrap();
+    let backend = engine.storage.backend.as_ref().unwrap();
+    // A new read transaction clears the completed receipt. Keeping it proves adoption did not open one just to reread the committed revision and generations.
+    let committed = backend
+        .committed_data_revision()
+        .unwrap()
+        .expect("adoption must retain the own commit receipt");
+    assert!(committed.revision.follows_by_one_commit(&before));
+    assert!(engine.epochs.seen_storage_read_view.lock().as_ref() == Some(&committed.revision));
+
+    peer.sql("INSERT INTO receipts VALUES (2)", &[]).unwrap();
+    // Put adoption immediately after this racing peer commit. The own receipt must never advance the observed view to the peer's newer sequence.
+    *engine.epochs.seen_storage_read_view.lock() = Some(before);
+    engine.adopt_own_commit_revisions();
+    assert!(engine.epochs.seen_storage_read_view.lock().as_ref() == Some(&committed.revision));
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM receipts"),
+        Value::Int(2)
+    );
+    peer.sql("ALTER TABLE receipts RENAME COLUMN id TO renamed", &[])
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM receipts", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("42703")
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM receipts WHERE renamed > 0"),
+        Value::Int(2)
+    );
+}
+
 fn pause_automatic_statistics(engine: &Engine) {
     engine.release_automatic_statistics_client();
     engine

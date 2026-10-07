@@ -337,6 +337,10 @@ impl KeyValueStore for SQLiteKeyValueStore {
         self.conn.read_view_revision().map_err(Into::into)
     }
 
+    fn completed_commit(&self) -> Option<uqa_storage::mvcc::CommitReceipt> {
+        self.conn.completed_commit()
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
     }

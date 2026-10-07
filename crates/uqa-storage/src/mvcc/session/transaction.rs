@@ -65,6 +65,13 @@ pub(super) struct Transaction {
 }
 
 impl Transaction {
+    pub(super) fn committed_receipt(&self) -> Option<super::super::CommitReceipt> {
+        match self.outcome {
+            Some(CommitErrorOutcome::Committed(receipt)) => Some(receipt),
+            _ => None,
+        }
+    }
+
     pub(super) fn new(
         persistence: &dyn VersionedPersistence,
         read_only: bool,

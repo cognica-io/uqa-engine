@@ -38,8 +38,8 @@ use std::sync::Arc;
 
 use rusqlite::Connection;
 use uqa_storage::mvcc::{
-    CommitResult, CommitStatus, CommittedRecordSnapshot, DatabaseId, PreparedRecordCommit,
-    StorageTransactionId, VersionError, VersionResult, VersionedPersistence,
+    CommitReceipt, CommitResult, CommitStatus, CommittedRecordSnapshot, DatabaseId,
+    PreparedRecordCommit, StorageTransactionId, VersionError, VersionResult, VersionedPersistence,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -89,6 +89,8 @@ pub struct SQLiteRecordStore {
     native: Option<native::NativeRecordNamespace>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
     managed_allocations: receipts::ManagedAllocations,
+    /// Evidence from a successful physical commit, bounded independently of receipt retention.
+    data_commit: Arc<parking_lot::Mutex<Option<CommitReceipt>>>,
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     receipt_leases: receipts::ReceiptLeaseFile,
 }
@@ -118,6 +120,7 @@ impl SQLiteRecordStore {
         } = native::initialize_in(transaction, control).map_err(Error::into_version)?;
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
+            data_commit: Arc::default(),
             snapshots: retention::registry(connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -140,6 +143,7 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
+            data_commit: Arc::default(),
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -169,6 +173,7 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
+            data_commit: Arc::default(),
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -189,6 +194,7 @@ impl SQLiteRecordStore {
             .map_err(Error::into_version)?;
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
+            data_commit: Arc::default(),
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -293,6 +299,10 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn commit_preserves_catalog_definitions(&self, receipt: CommitReceipt) -> bool {
+        *self.data_commit.lock() == Some(receipt)
+    }
+
     fn diskann_population_record_layout(
         &self,
     ) -> Option<&dyn uqa_storage::mvcc::DiskANNPopulationRecordLayout> {
@@ -505,6 +515,7 @@ impl VersionedPersistence for SQLiteRecordStore {
                 prepared,
                 self.native,
                 control,
+                |receipt| *self.data_commit.lock() = Some(receipt),
             ))
         })?
     }

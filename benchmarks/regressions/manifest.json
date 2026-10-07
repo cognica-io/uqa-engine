@@ -310,6 +310,34 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "own_commit_adoption_opens_no_read_transaction_and_keeps_later_writers_visible",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/own_commits.rs",
+      "capability": "Post-commit cache adoption",
+      "workload": "One own data commit followed by a precisely scheduled peer data commit and schema rename, on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "The own receipt survives adoption, proving no additional read transaction was opened; the adopted sequence excludes the racing peer and the next SQL statement observes its rows and schema.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "data_commit_evidence_matches_the_exact_receipt_and_rejects_definition_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native commit evidence",
+      "workload": "Native document update followed by a registry metadata write; compare the completed receipt with altered identity.",
+      "invariant": "Adoption evidence performs zero record reads, matches only the exact receipt, and rejects definition changes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

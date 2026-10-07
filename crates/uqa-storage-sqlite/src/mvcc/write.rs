@@ -150,6 +150,7 @@ pub(super) fn commit(
     prepared: &PreparedRecordCommit,
     native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
+    retain_data_commit: impl FnOnce(CommitReceipt),
 ) -> CommitResult {
     let rejected = |error: Error| CommitFailure::Rejected(error.into_version());
     let _permit = admission::permit(connection, control).map_err(rejected)?;
@@ -175,10 +176,12 @@ pub(super) fn commit(
         sequence,
         fingerprint: prepared.fingerprint(),
     };
-    if let Some(namespace) = native {
+    let preserves_definitions = if let Some(namespace) = native {
         native::materialize(&transaction, namespace.0, prepared, sequence, control)
-            .map_err(rejected)?;
-    }
+            .map_err(rejected)?
+    } else {
+        false
+    };
     stage(&transaction, prepared, receipt, control).map_err(rejected)?;
     admission::commit(transaction, control).map_err(|error| match error {
         Error::Version(error @ VersionError::Cancelled(_)) => CommitFailure::Rejected(error),
@@ -187,6 +190,9 @@ pub(super) fn commit(
             source: error.into_version().into_storage_error(),
         },
     })?;
+    if preserves_definitions {
+        retain_data_commit(receipt);
+    }
     Ok(receipt)
 }
 

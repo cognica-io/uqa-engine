@@ -159,6 +159,11 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 
 /// Versioned record persistence. Every mutation of the current sequence, records and receipt must share one physical commit. Implementations retain no physical writer between calls and must distinguish rejection from an uncertain native commit outcome.
 pub trait VersionedPersistence: Send + Sync {
+    /// Whether this exact receipt's native catalog generations changed only data, column statistics or maintenance. Implementations retain bounded completion evidence and must not read a newer snapshot to establish this property. Missing evidence requires ordinary cache refresh.
+    fn commit_preserves_catalog_definitions(&self, _receipt: CommitReceipt) -> bool {
+        false
+    }
+
     fn database_id(&self) -> DatabaseId;
 
     /// Exclusive resource ownership for this physical database, separate from SQL participants. Wrappers must forward the capability.

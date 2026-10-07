@@ -635,6 +635,11 @@ pub trait KeyValueStore: Send + Sync {
         Ok(None)
     }
 
+    /// Receipt of this session's last successfully completed write transaction. This is not the latest database commit. A new transaction, rollback or read-only completion clears it; unsupported stores return `None`.
+    fn completed_commit(&self) -> Option<crate::mvcc::CommitReceipt> {
+        None
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
     }

@@ -104,7 +104,7 @@ fn child(path: &Path, mode: usize) {
                     )?;
                     connection.execute_batch("CREATE TEMP TRIGGER retain_uncommitted_main AFTER UPDATE OF status ON _uqa_mvcc_transactions WHEN NEW.status = 2 BEGIN SELECT __uqa_test_main_commit_gate(); END")?;
                     // This is the same physical commit owner used by SQLiteRecordStore. The gate runs after all records, heads and the terminal receipt are staged, while their native transaction is still open.
-                    crate::mvcc::write::commit(connection, committed_id, &committed_write, store.native, &control).unwrap();
+                    crate::mvcc::write::commit(connection, committed_id, &committed_write, store.native, &control, |_| {}).unwrap();
                     unreachable!("the parent must terminate the process at the physical staging barrier");
                 }).unwrap();
             }

@@ -553,6 +553,12 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(self.conn.read_view_revision()?)
     }
 
+    fn committed_data_revision(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::CommittedDataRevision>> {
+        Ok(self.conn.committed_data_revision())
+    }
+
     fn commit_monitor_version(&self) -> StorageBackendResult<Option<u64>> {
         Ok(self.conn.commit_monitor_version()?)
     }
