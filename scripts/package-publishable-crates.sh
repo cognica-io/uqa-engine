@@ -6,13 +6,14 @@
 #
 # Create crates.io package archives for every publishable workspace crate in
 # one Cargo invocation so unpublished workspace dependencies resolve locally.
-# Then check the license contents of every archive that was produced.
+# Build every archive before checking its license contents. Cargo resolves the
+# unpublished workspace packages together while verifying the extracted crates.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-cargo_package_args=(--no-verify --locked)
+cargo_package_args=(--locked)
 if [[ "${1:-}" == "--allow-dirty" ]]; then
   cargo_package_args+=(--allow-dirty)
   shift

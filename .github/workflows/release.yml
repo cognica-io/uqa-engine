@@ -65,8 +65,8 @@ jobs:
       tag: ${{ needs.resolve.outputs.tag }}
 
   crates-io:
-    name: crates.io
-    needs: [resolve, python, javascript]
+    name: verify crates and publish to crates.io
+    needs: [resolve, python, javascript, benchmarks]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -76,10 +76,7 @@ jobs:
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
 
-      - name: Package publishable crates
-        run: bash scripts/package-publishable-crates.sh
-
-      - name: Publish crates to crates.io
+      - name: Build every crate archive before publishing
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |

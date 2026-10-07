@@ -12,6 +12,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,12 +29,29 @@ SPEC.loader.exec_module(CHECKER)
 
 
 class CratePublicationTest(unittest.TestCase):
-    def run_publisher(self, registry_statuses: list[int], publish_status: int = 0) -> tuple[subprocess.CompletedProcess, str]:
+    def run_publisher(self, registry_statuses: list[int], publish_status: int = 0,
+                      package_status: int = 0, license_status: int = 0) -> tuple[subprocess.CompletedProcess, str]:
         with tempfile.TemporaryDirectory() as temporary:
             directory = pathlib.Path(temporary)
+            (directory / "scripts").mkdir()
+            for name in ("publish-crates.sh", "package-publishable-crates.sh"):
+                shutil.copyfile(ROOT / "scripts" / name, directory / "scripts" / name)
+            (directory / "Cargo.toml").write_text('[workspace.package]\nversion = "0.5.1"\n')
             checker = directory / "python3"
             checker.write_text(f"#!{sys.executable}\n" + """import json, os, pathlib, sys
 root = pathlib.Path(os.environ['UQA_TEST_COMMANDS'])
+if sys.argv[1] == '-c':
+    data = json.load(sys.stdin)
+    for package in data['packages']:
+        print(package['name'] + '\\t' + package['version'])
+    sys.exit(0)
+if sys.argv[1] == 'scripts/check-release-licenses.py':
+    assert (root / 'archives-built').exists()
+    status = int(os.environ['UQA_TEST_LICENSE'])
+    if status == 0:
+        (root / 'archives-verified').touch()
+    sys.exit(status)
+assert (root / 'archives-verified').exists(), 'registry access before all archives build and pass validation'
 count = root / 'probes'
 attempt = int(count.read_text()) if count.exists() else 0
 count.write_text(str(attempt + 1))
@@ -42,8 +60,24 @@ assert sys.argv[2] == 'uqa'
 sys.exit(json.loads(os.environ['UQA_TEST_REGISTRY'])[attempt])
 """)
             cargo = directory / "cargo"
-            cargo.write_text(f"#!{sys.executable}\n" + """import os, pathlib, sys
+            cargo.write_text(f"#!{sys.executable}\n" + """import json, os, pathlib, sys
 root = pathlib.Path(os.environ['UQA_TEST_COMMANDS'])
+if sys.argv[1] == 'metadata':
+    packages = [{'id': name, 'name': name, 'version': '0.5.1'} for name in ('uqa-core', 'uqa')]
+    print(json.dumps({'packages': packages, 'workspace_members': ['uqa-core', 'uqa']}))
+    sys.exit(0)
+if sys.argv[1] == 'package':
+    assert '--no-verify' not in sys.argv, 'archive compilation must not be skipped'
+    assert sys.argv[2:] == ['--locked', '-p', 'uqa-core', '-p', 'uqa']
+    status = int(os.environ['UQA_TEST_PACKAGE'])
+    if status == 0:
+        (root / 'target/package').mkdir(parents=True)
+        for name in ('uqa-core', 'uqa'):
+            (root / f'target/package/{name}-0.5.1.crate').touch()
+        (root / 'archives-built').touch()
+    sys.exit(status)
+assert sys.argv[1] == 'publish'
+assert (root / 'archives-verified').exists(), 'upload before every archive is verified'
 (root / 'cargo-args').write_text(' '.join(sys.argv[1:]))
 sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
 """)
@@ -51,13 +85,24 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
             cargo.chmod(0o755)
             result = subprocess.run(
                 ["bash", "scripts/publish-crates.sh", "--live", "--start-at", "uqa"],
-                cwd=ROOT, text=True, capture_output=True,
+                cwd=directory, text=True, capture_output=True,
                 env={**os.environ, "PATH": str(directory) + os.pathsep + os.environ["PATH"],
                      "UQA_TEST_COMMANDS": temporary, "UQA_TEST_REGISTRY": json.dumps(registry_statuses),
-                     "UQA_TEST_PUBLISH": str(publish_status)},
+                     "UQA_TEST_PUBLISH": str(publish_status), "UQA_TEST_PACKAGE": str(package_status),
+                     "UQA_TEST_LICENSE": str(license_status)},
             )
             calls = directory / "cargo-args"
             return result, calls.read_text() if calls.exists() else ""
+
+    def test_any_archive_build_failure_prevents_the_first_upload(self) -> None:
+        result, calls = self.run_publisher([], package_status=31)
+        self.assertEqual(result.returncode, 31, result.stderr)
+        self.assertEqual(calls, "")
+
+    def test_archive_license_failure_prevents_the_first_upload(self) -> None:
+        result, calls = self.run_publisher([], license_status=32)
+        self.assertEqual(result.returncode, 32, result.stderr)
+        self.assertEqual(calls, "")
 
     def test_existing_version_skips_cargo_publication(self) -> None:
         result, calls = self.run_publisher([0])
@@ -123,7 +168,7 @@ class ReleaseAssetRetentionTest(unittest.TestCase):
     def test_registry_publication_waits_for_all_package_checks(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         for name, required in (
-            ("crates-io", {"resolve", "python", "javascript"}),
+            ("crates-io", {"resolve", "python", "javascript", "benchmarks"}),
             ("release", {"resolve", "python", "javascript", "crates-io"}),
         ):
             with self.subTest(job=name):
