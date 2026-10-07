@@ -7,6 +7,7 @@
 use super::*;
 use uqa_storage_sqlite::{Catalog, SQLiteStorageBackend};
 
+mod indexed_queries;
 mod legacy_vectors;
 mod referential;
 mod retained;
@@ -105,6 +106,7 @@ struct PortalSnapshotProbeStore {
     snapshot_error: Option<SnapshotErrorFactory>,
     snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
     row_reads: Arc<std::sync::atomic::AtomicUsize>,
+    field_reads: Arc<std::sync::atomic::AtomicUsize>,
     doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
     catalog_was_unlocked: Arc<std::sync::atomic::AtomicBool>,
     tables: std::sync::Weak<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
@@ -121,6 +123,7 @@ impl PortalSnapshotProbeStore {
             snapshot_error: None,
             snapshot_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             row_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            field_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             doc_id_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             catalog_was_unlocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tables: Arc::downgrade(&engine.storage.tables),
@@ -170,6 +173,8 @@ impl DocumentStore for PortalSnapshotProbeStore {
     }
 
     fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        self.field_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(self
             .docs
             .get(&doc_id)
@@ -182,6 +187,8 @@ impl DocumentStore for PortalSnapshotProbeStore {
         ids: &[DocId],
         fields: &[&str],
     ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        self.field_reads
+            .fetch_add(ids.len(), std::sync::atomic::Ordering::Relaxed);
         Ok(ids
             .iter()
             .filter_map(|id| {
