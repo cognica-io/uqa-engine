@@ -87,7 +87,7 @@ jobs:
 
   crates:
     needs: [resolve, verify]
-    if: ${{ needs.resolve.outputs.ready == 'true' }}
+    if: ${{ !cancelled() && needs.resolve.outputs.ready == 'true' && needs.verify.result == 'success' }}
     runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: "0"
@@ -116,7 +116,7 @@ jobs:
 
   release:
     needs: [resolve, crates]
-    if: ${{ needs.resolve.outputs.ready == 'true' }}
+    if: ${{ !cancelled() && needs.resolve.outputs.ready == 'true' && needs.crates.result == 'success' }}
     uses: ./.github/workflows/release-assets.yml
     permissions:
       actions: write
