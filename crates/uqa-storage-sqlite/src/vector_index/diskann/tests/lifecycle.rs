@@ -265,13 +265,18 @@ fn native_diskann_origin_scope_aborts_cancelled_evaluation_with_independent_clea
 
 #[test]
 fn native_diskann_origin_cleanup_failures_retain_an_abort_only_attempt() {
-    for status in [1, 3] {
+    for fail_validation in [false, true] {
         let connection = memory();
         let control = StorageReadControl::with_limit(1 << 22);
-        connection.with_physical(|sqlite| {
-            sqlite.execute_batch(&format!("CREATE TRIGGER reject_origin_cleanup BEFORE UPDATE ON _uqa_mvcc_transactions WHEN NEW.status={status} BEGIN SELECT RAISE(ABORT, 'injected origin cleanup failure'); END;"))?;
-            Ok(())
-        }).unwrap();
+        let rejected = if fail_validation {
+            Some(reject_terminal_receipt_validation(&connection))
+        } else {
+            connection.with_physical(|sqlite| {
+                sqlite.execute_batch("CREATE TRIGGER reject_origin_cleanup BEFORE UPDATE ON _uqa_mvcc_transactions WHEN NEW.status=1 BEGIN SELECT RAISE(ABORT, 'injected origin cleanup failure'); END;")?;
+                Ok(())
+            }).unwrap();
+            None
+        };
         let mut origin = None;
         let result: crate::Result<()> =
             connection.with_native_versioned_write(|current, snapshot, batch| {
@@ -281,10 +286,20 @@ fn native_diskann_origin_cleanup_failures_retain_an_abort_only_attempt() {
                     "injected evaluation failure".into(),
                 ))
             });
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("injected origin cleanup failure"));
+        let error = result.unwrap_err();
+        if let Some(rejected) = rejected {
+            assert!(
+                rejected.load(std::sync::atomic::Ordering::Acquire),
+                "{error}"
+            );
+        } else {
+            assert!(
+                error
+                    .to_string()
+                    .contains("injected origin cleanup failure"),
+                "{error}"
+            );
+        }
         assert!(connection.in_transaction());
         assert!(connection.commit_transaction().is_err());
         let mut replayed = false;
@@ -296,6 +311,9 @@ fn native_diskann_origin_cleanup_failures_retain_an_abort_only_attempt() {
             .is_err());
         assert!(!replayed);
         let peer = connection.new_session();
+        if fail_validation {
+            permit_receipt_validation(&peer);
+        }
         assert!(peer
             .native_snapshot()
             .unwrap()
@@ -303,11 +321,13 @@ fn native_diskann_origin_cleanup_failures_retain_an_abort_only_attempt() {
             .table_owner("failed-cleanup")
             .unwrap()
             .is_none());
-        peer.with_physical(|sqlite| {
-            sqlite.execute_batch("DROP TRIGGER reject_origin_cleanup")?;
-            Ok(())
-        })
-        .unwrap();
+        if !fail_validation {
+            peer.with_physical(|sqlite| {
+                sqlite.execute_batch("DROP TRIGGER reject_origin_cleanup")?;
+                Ok(())
+            })
+            .unwrap();
+        }
         connection.rollback_transaction().unwrap();
         assert!(!connection.in_transaction());
         let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();

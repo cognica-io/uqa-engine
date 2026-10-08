@@ -7,6 +7,7 @@
 use super::*;
 use crate::{Catalog, SQLiteCompressionOptions, SQLiteRecordStore};
 use std::path::Path;
+use std::sync::Arc;
 use uqa_storage::diskann_index::{DiskANNCanonicalRead, DiskANNCanonicalScorer};
 use uqa_storage::mvcc::{CommitStatus, VersionedPersistence, VersionedSessionOptions};
 
@@ -45,6 +46,62 @@ fn memory() -> ManagedConnection {
     let connection = ManagedConnection::open_in_memory().unwrap();
     bind(&connection);
     connection
+}
+
+/// Fail receipt validation only after the terminal write has reached COMMIT. Managed completion reads the receipt and releases its owner without another status write.
+fn reject_terminal_receipt_validation(
+    connection: &ManagedConnection,
+) -> Arc<std::sync::atomic::AtomicBool> {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let rejected = Arc::new(AtomicBool::new(false));
+    let observed = Arc::clone(&rejected);
+    let terminal = Arc::new(AtomicBool::new(false));
+    let committed = Arc::new(AtomicBool::new(false));
+    let commit_terminal = Arc::clone(&terminal);
+    let commit_observed = Arc::clone(&committed);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.commit_hook(Some(move || {
+                if commit_terminal.load(Ordering::Acquire) {
+                    commit_observed.store(true, Ordering::Release);
+                }
+                false
+            }))?;
+            sqlite.authorizer(Some(move |context: AuthContext<'_>| {
+                match context.action {
+                    AuthAction::Update {
+                        table_name: "_uqa_mvcc_transactions",
+                        column_name: "status",
+                    } => terminal.store(true, Ordering::Release),
+                    AuthAction::Read {
+                        table_name: "_uqa_mvcc_transactions",
+                        ..
+                    } if committed.load(Ordering::Acquire) => {
+                        observed.store(true, Ordering::Release);
+                        return Authorization::Deny;
+                    }
+                    _ => {}
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    rejected
+}
+
+fn permit_receipt_validation(connection: &ManagedConnection) {
+    use rusqlite::hooks::{AuthContext, Authorization};
+    connection
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+            sqlite.commit_hook(None::<fn() -> bool>)?;
+            Ok(())
+        })
+        .unwrap();
 }
 
 fn canonical(
