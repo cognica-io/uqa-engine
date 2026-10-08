@@ -23,17 +23,17 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.5.1
+## New in 0.5.2
 
-Version 0.5.1 corrects CREATE TABLE AS catalog publication, composite UNIQUE probes, operator-join predicates, routine recursion and legacy key migration. It includes enum and composite types, composite attribute addition, domain constraint changes, foreign-data wrapper lifecycle, builtin routine privileges, and PostgreSQL configuration and timeout behavior. It also corrects stored-expression typing, routine validation, foreign-key and trigger ordering, catalog identities and session date input. See the [release history](HISTORY.md#051---2026-10-07).
+Version 0.5.2 reduces repeated SQL analysis, SQLite commit work and vector-index rewrites while preserving transaction and query semantics. It also corrects sequence identity refresh, concurrent automatic ANALYZE, cross-process claim identity and owner admission, and retained PL/pgSQL record-field types. See the [release history](HISTORY.md#052---2026-10-08).
 
-Foreign-key parent checks and referential actions now use compatible child indexes without reading unrelated child payloads. Indexed mutation reads include staged rows, composite UNIQUE checks probe complete tuples, expression checks reuse staged keys, and native SQLite streams retained snapshots and GIN document keys while avoiding repeated commit reads, file-identity lookups and row/key reservation I/O. Large mutation, text-index and vector-index workloads retain bounded memory through encrypted temporary storage.
+Ordinary statements and routine bodies reuse valid analysis and plans without losing current parameters or snapshot checks. SQLite batches durable allocations, avoids redundant completion writes and synchronizes native WAL sequence logs at the consuming transaction boundary. HNSW restores spilled edges in bounded groups, retains certified generations after own writes and skips rewrites when canonical vectors are unchanged. Large mutation, text-index and vector-index workloads retain bounded memory through encrypted temporary storage.
 
 The engine provides native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-Persistent databases use SQLite record format 58, native mapping 15 or redb record format 56. Initial open upgrades catalog identities and stored expressions; shared row-change and relation-lock coordination also requires all database owners to use the new protocol. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.1 upgrade guide](docs/manual/reference/10-upgrading.md#051), including Rust API changes and rollback requirements.
+Persistent databases use SQLite record format 60, native mapping 15 or redb record format 56. Initial open atomically upgrades predecessor SQLite version records, and row-claim tables and relation registries use coordination format 2. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.2 upgrade guide](docs/manual/reference/10-upgrading.md#052) for temporary disk requirements, custom Rust provider interfaces and rollback to an older binary.
 
 ## Mathematical foundation
 
@@ -46,7 +46,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.5.1
+python -m pip install uqa==0.5.2
 usql
 ```
 
@@ -98,10 +98,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.5.1
+cargo add uqa@0.5.2
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.1 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.2 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
@@ -237,57 +237,21 @@ Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled Duck
 
 ## Build and test
 
-Install the versioned commit hook once per clone:
+Install the commit hook, then build and test the workspace:
 
 ```sh
 bash scripts/install-git-hooks.sh
-```
-
-SQL owns executable statement schemas and mutation parameter analysis, TRUNCATE target expansion and foreign-key ordering, view namespaces, persisted metadata validation, source binding and dependency analysis, replacement row types and ownership rules, transaction-block diagnostics, prepared declarations, argument validation and result descriptor identity, mutation and declaration analysis, relation lookup candidate ordering, foreign-table schema envelopes, sequence binding, literal and regclass dependency analysis, and declaration rewrites, trigger/rule definitions, lookup semantics, dependency rewrites, durable envelopes and partition-name checks, stored relation and routine binding, overload and CALL rules, stored-object dependencies, routine replacement and privileges, table/column GRANT and REVOKE candidates, view access rules, schema authorization binding, privilege inquiries, and graph and scalar-projection argument rules. Retrieval predicates, FTS and operator joins lower into a declarative IR without runtime scorers, fusers, closures or physical index choices. Shared agtype and retrieval configuration values live in core.
-
-The planner schedules statement analysis before optimizer input capture and constant evaluation, and owns source and rewrite-rule pruning, statement statistics, prepared-plan costs and custom/generic selection, parameter specialization, retrieval optimizer setup, index and graph statistics, independent relation and operator-join costs, indexed access selection and physical text top-k planning. Execution owns portal declaration and directional row streaming, batch and cursor scheduling, statement cache use, snapshot-bound re-lowering, transaction cleanup and result delivery, exhaustive unified statement dispatch, cancellation and CTE validation before transaction checks, nested EXPLAIN and prepared execution, view creation, refresh, restoration, deletion and reference publication, including migration rollback, statement read-only validation and error rollback, TRUNCATE authorization and trigger scheduling, prepared-argument evaluation and conversion order, scoped scalar-subquery type binding, scalar-subquery caches and correlated EXISTS execution, mutation loops, trigger/rule registry execution and restoration, foreign-table creation and removal, pinned/live foreign lookup, durable sequence restoration, sequence value allocation and session-cache scheduling, ordinary-table DROP dependency and cascade publication, sequence-owner enumeration, implicit-owner migration and attachment, sequence DROP scheduling and ordered dependency removal, definition persistence, identity migration and server lifecycle, table-shaped privilege persistence and publication, table-owner transfer with owned-sequence ACL publication, retained-table and foreign-table authority, maintenance target authorization, role, schema and routine lifecycle scheduling, catalog publication, routine invocation and caller restoration, table-function streams, scalar dispatch, score provenance and highlight rendering. It also owns retrieval row dispatch, bounded vector-pool interpretation, physical fusion construction, tree execution, cross-relation joins, score composition and model inference.
-
-Engine supplies retained catalog guards, table generations, storage operations, cache state and statement/transaction boundaries through typed adapters. Its query API owns statement gates and clocks; document reads live with table storage. Compiled-statement execution and catalog-bound planning order belong to execution. Engine has no SQL implementation directory; its public `sql` namespace re-exports native result types and formatting. Native batch and cursor scheduling invoke the same execution dispatcher, retaining each row-lock guard through its original cleanup boundary. SQL owns cursor declaration restrictions, relation and sequence binding, and table/graph dependency analysis; native portal execution captures its query scope after the first row request, while Engine retains the child session, pinned snapshots and delegated statement gate. Prepared descriptors and cache entries are SQL-owned; execution retains the registration write guard while constructing metadata, and the planner selects custom/generic variants before the session publishes usage against the captured plan identity. The planner implements a SQL-plan optimization contract; execution does not depend on the planner. Public retrieval APIs retain their existing entry points. Every commit checks the staged dependency graph, including build and platform-specific edges and transitive ownership boundaries. See [crate ownership](docs/manual/internals/01-architecture.md), [planning and execution](docs/manual/internals/02-planning-and-execution.md), and the [SQL boundary design](docs/design/sql-crate-boundaries.md).
-
-Build the complete workspace:
-
-```sh
 cargo build --workspace --locked
-```
-
-Run the test suite:
-
-```sh
 cargo test --workspace --locked
 ```
 
-Run the optimized persistent text top-k engine benchmark; `cargo bench` builds and executes the release benchmark profile, this target uses a real SQLite file rather than the in-memory engine, and it invokes `Engine::search_profiled` directly so cursor and ranking costs remain isolated from SQL planning and row projection:
-
-```sh
-cargo bench -p uqa-engine --bench text_top_k --locked -- --warm-up-time 2 --measurement-time 5 --sample-size 30 --noplot
-```
-
-Run the optimized persistent SQL vector-search performance and exact-ground-truth quality benchmark. The default profile loads 100,000 128-dimensional vectors into a real SQLite file, reopens it for each exact, IVF, and HNSW phase, and drives every query through `Engine::sql`:
-
-```sh
-bash scripts/run-vector-search-benchmark.sh
-```
-
-Run the real-data BEIR hybrid-search benchmark after installing its pinned Python embedding dependency. The runner downloads and verifies SciFact, generates MiniLM embeddings, loads a persistent SQLite file through SQL, creates GIN and HNSW indexes through SQL, reopens it, and executes all BM25, vector, and hybrid queries through `Engine::sql`:
-
-```sh
-python3 -m pip install -r benchmarks/beir/requirements.txt
-bash scripts/run-beir-benchmark.sh
-```
-
-The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](benchmarks/vector-search/README.md).
-
-Each crate has one integration-test executable with domain modules, so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
+Run a focused test during development:
 
 ```sh
 cargo test -p uqa-engine --test integration queries::sql_joins::
-cargo test -p uqa-sql --test integration parser_fuzz::
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor checks, [crate ownership](docs/manual/internals/01-architecture.md) for implementation boundaries, and [verification](docs/manual/internals/09-verification.md) for compatibility tests and benchmarks.
 
 ## PostgreSQL 18 compatibility
 

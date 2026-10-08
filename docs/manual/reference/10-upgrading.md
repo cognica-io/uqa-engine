@@ -1,14 +1,14 @@
 # Upgrading UQA Engine
 
-This page describes current-source upgrade requirements and UQA Engine 0.5.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.1/docs/manual/reference/10-upgrading.md) when installing the 0.5.1 packages.
+This page describes upgrade requirements for UQA Engine 0.5.2 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.2/docs/manual/reference/10-upgrading.md) when installing the 0.5.2 packages.
 
-## Unreleased source
+## 0.5.2
 
-Current source uses SQLite record format 60. Its version payloads use stable integer addresses, while keyed version metadata stores each address and payload length. A new `sequence_durable` certificate allows native SQLite sequence-value logs to synchronize at the consuming transaction's completion. Native mapping 15, redb record format 56 and user-visible sequence allocation are unchanged. Close every database owner and retain a pre-upgrade backup before opening a predecessor file with this source. Initial open converts formats through 58 to the addressed layout in one FULL-synchronized transaction, requiring temporary disk space for the old and new version tables and SQLite journals. Format 59 already has that layout and upgrades only its metadata; the new certificate initially covers the complete preceding record sequence. Failure preserves the complete old schema and data. Older binaries reject the new marker, so return to a pre-upgrade backup to use an older binary. Published 0.5.1 packages continue to use format 58.
+Version 0.5.2 uses SQLite record format 60. Its version payloads use stable integer addresses, while keyed version metadata stores each address and payload length. A new `sequence_durable` certificate allows native SQLite sequence-value logs to synchronize at the consuming transaction's completion. Native mapping 15, redb record format 56 and user-visible sequence allocation are unchanged. Close every database owner and retain a pre-upgrade backup before opening a predecessor file with 0.5.2. Initial open converts formats through 58 to the addressed layout in one FULL-synchronized transaction, requiring temporary disk space for the old and new version tables and SQLite journals. Format 59 already has that layout and upgrades only its metadata; the new certificate initially covers the complete preceding record sequence. Failure preserves the complete old schema and data. Older binaries reject the new marker, so return to a pre-upgrade backup to use an older binary. Version 0.5.1 packages use format 58.
 
 Custom `SequenceValueRuntime` implementations must retain persistent sequence consumption through `require_sequence_value_durability`. A storage wrapper that enables deferred publication must forward both `PersistentStorageBackend::require_sequence_value_durability` and `open_sequence_value_session`. A `VersionedPersistence` implementation opting into `sequence_value_persistence` must honor the supplied publication lease and implement `synchronize_sequence_values` for the same database; ordinary providers keep the default synchronous behavior. See [sequence durability](../internals/03-storage.md#sequence-publication-durability).
 
-Current source also uses row-claim table and relation-registry format 2 for exact row identities and complete wait records. Close all coordinators before switching between these formats; the first coordinator in an empty epoch rebuilds only ephemeral coordination metadata. Coordinator admission against a live incompatible shared claim table or relation registry fails before permitting lock operations. The table process slots, liveness bytes and relation attachment byte retain their preceding addresses so incompatible live owners remain visible. SQLite record initialization also checks the existing physical owner leases before any record initialization write and retains admission through commit or rollback. A predecessor owner with the original zero protocol tag prevents raw, native and Key/Value record initialization; release or process death permits reopening. Current owners use protocol tag 2 and may coexist. Pre-table binaries reject the newer durable record format after a successful upgrade; table-aware predecessors remain fenced by the shared coordination format. Binaries predating physical owner leases cannot be detected by this check and still require an all-owner shutdown. Redb already requires an exclusive physical file owner.
+Version 0.5.2 also uses row-claim table and relation-registry format 2 for exact row identities and complete wait records. Close all coordinators before switching between these formats; the first coordinator in an empty epoch rebuilds only ephemeral coordination metadata. Coordinator admission against a live incompatible shared claim table or relation registry fails before permitting lock operations. The table process slots, liveness bytes and relation attachment byte retain their preceding addresses so incompatible live owners remain visible. SQLite record initialization also checks the existing physical owner leases before any record initialization write and retains admission through commit or rollback. A predecessor owner with the original zero protocol tag prevents raw, native and Key/Value record initialization; release or process death permits reopening. Current owners use protocol tag 2 and may coexist. Pre-table binaries reject the newer durable record format after a successful upgrade; table-aware predecessors remain fenced by the shared coordination format. Binaries predating physical owner leases cannot be detected by this check and still require an all-owner shutdown. Redb already requires an exclusive physical file owner.
 
 ## 0.5.1
 
@@ -638,20 +638,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1`, `0.2`, `0.3` and `0.4` dependency requirements do not select `0.5.1`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1`, `0.2`, `0.3` and `0.4` dependency requirements do not select `0.5.2`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.5.1` |
-| Rust HTTP client | `cargo add uqa-client@0.5.1` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.5.1` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.5.1` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.5.1` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.5.1` |
+| Embedded Rust | `cargo add uqa@0.5.2` |
+| Rust HTTP client | `cargo add uqa-client@0.5.2` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.5.2` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.5.2` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.5.2` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.5.2` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.5.1) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.5.1"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.5.2) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.5.2"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -720,10 +720,10 @@ Default document-API FTS registrations preserve their field list and analyzer re
 Existing native catalogs may retain the Python-era `_graph_catalog(graph_name)` alias alongside `_named_graphs` and native graph membership. Migration validates this exact representation and merges its names into `_named_graphs` before restoring graph metadata, then retires the alias in the same transaction. Catalog vertices, edges and memberships remain in their original namespace; Rust standalone graph catalogs use a different schema and keep their independent conversion. Historical FTS accelerator tables may declare their term column as `TEXT`: empty tables retire normally and canonical BLOB keys preserve their bytes; populated text-valued keys are rejected rather than coerced into another token representation.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.5.1 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.5.2 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.5.1.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.5.2.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 

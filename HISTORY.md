@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-08
+
 ### Fixed
 
 - Restore separately persisted HNSW edges with one bounded source-node buffer, avoiding per-edge rewrites of spilled vectors while preserving topology validation and memory limits.
