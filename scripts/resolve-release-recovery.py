@@ -140,6 +140,60 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
     return [rebuild[name] for name in sorted(missing)] if repairable else None
 
 
+def reusable_repair(run: dict, source_run: dict, repository: str, matrix: list[dict], jobs: list[dict], artifacts: list[dict]) -> bool:
+    """Retained wheels remain usable when a later publication step failed."""
+    if (
+        run["status"] != "completed" or run["conclusion"] not in {"success", "failure"}
+        or run["event"] not in {"push", "workflow_run"}
+        or run["path"] != ".github/workflows/release-recovery.yml"
+        or run["head_branch"] != "main" or run["head_repository"]["full_name"] != repository
+        or run["created_at"] < source_run["created_at"]
+    ):
+        return False
+    by_name = {job["name"]: job for job in jobs}
+    if len(by_name) != len(jobs):
+        return False
+    for name in ("resolve", "repair Python artifacts / minimum supported python"):
+        if by_name.get(name, {}).get("conclusion") != "success":
+            return False
+    for item in matrix:
+        job = by_name.get("repair Python artifacts / " + item["label"], {})
+        passed = {step["name"] for step in job.get("steps", []) if step["conclusion"] == "success"}
+        if job.get("conclusion") != "success" or not (
+            WHEEL_CHECKS | {"Record recovered wheel provenance", "Retain verified wheel"}
+        ) <= passed:
+            return False
+    expected = {"python-wheel-" + item["target"] for item in matrix}
+    wheels = [artifact for artifact in artifacts if artifact["name"].startswith("python-wheel-")]
+    return (
+        len(wheels) == len(expected) and {artifact["name"] for artifact in wheels} == expected
+        and all(artifact["expired"] is False and artifact["workflow_run"]["id"] == run["id"]
+                and artifact["workflow_run"]["head_sha"] == run["head_sha"] for artifact in wheels)
+    )
+
+
+def previous_repair(repository: str, source_run: dict, matrix: list[dict] | None) -> int | None:
+    if not matrix:
+        return None
+    runs = pages(f"repos/{repository}/actions/workflows/release-recovery.yml/runs", "workflow_runs")
+    for run in runs:
+        if run["status"] != "completed" or run["created_at"] < source_run["created_at"]:
+            continue
+        jobs = pages(f"repos/{repository}/actions/runs/{run['id']}/jobs", "jobs")
+        artifacts = pages(f"repos/{repository}/actions/runs/{run['id']}/artifacts", "artifacts")
+        if reusable_repair(run, source_run, repository, matrix, jobs, artifacts):
+            # The verification job still checks the original release commit,
+            # version, target and digest inside each retained artifact.
+            return run["id"]
+    return None
+
+
+def repair_directory(matrix: list[dict]) -> str:
+    # download-artifact v8 extracts a single match directly into its path,
+    # even when selected by pattern and merge-multiple is false.
+    return "python-wheel-" + matrix[0]["target"] if len(matrix) == 1 else ""
+
+
 def verify_repaired_artifacts(directory: pathlib.Path, commit: str, tag: str, matrix: list[dict]) -> None:
     expected = {"python-wheel-" + item["target"]: item for item in matrix}
     if len(expected) != len(matrix) or any(item not in WHEEL_MATRIX.values() for item in matrix):
@@ -191,11 +245,14 @@ def main() -> None:
     jobs = pages(f"repos/{repository}/actions/runs/{run['id']}/jobs", "jobs")
     artifacts = pages(f"repos/{repository}/actions/runs/{run['id']}/artifacts", "artifacts")
     matrix = validate(run, tag, commit, repository, jobs, artifacts, allow_python_repair=True)
-    print(f"Recover {tag} from run {run['id']} at {commit}; missing wheel rebuilds: {matrix}.")
+    retained_run = previous_repair(repository, run, matrix)
+    print(f"Recover {tag} from run {run['id']} at {commit}; missing wheels: {matrix}; retained repair run: {retained_run}.")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         output.write(f"ready=true\ntag={tag}\ncommit={commit}\nrun_id={run['id']}\n")
-        output.write(f"python_repair={str(matrix is not None).lower()}\n")
+        output.write(f"python_repair={str(matrix is not None and retained_run is None).lower()}\n")
         output.write("repair_matrix=" + json.dumps(matrix or [], separators=(",", ":")) + "\n")
+        output.write(f"retained_repair_run_id={retained_run or ''}\n")
+        output.write(f"repair_directory={repair_directory(matrix or [])}\n")
 
 
 if __name__ == "__main__":

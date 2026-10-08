@@ -30,6 +30,7 @@ COMMIT = "a" * 40
 def fixture():
     run = {"id": 123, "run_attempt": 1, "status": "completed", "conclusion": "failure",
            "event": "push", "path": ".github/workflows/release.yml",
+           "created_at": "2026-10-08T13:00:00Z",
            "head_branch": TAG, "head_sha": COMMIT,
            "head_repository": {"full_name": REPOSITORY}}
     jobs = [{"name": name, "conclusion": "success"} for name in sorted(RECOVERY.BUILD_JOBS)]
@@ -100,7 +101,7 @@ class RecoverySourceTest(unittest.TestCase):
                      {"object": {"type": "commit", "sha": COMMIT}},
                  ]) as api:
                 RECOVERY.main()
-            self.assertEqual(output.read_text(), f"ready=true\ntag={TAG}\ncommit={COMMIT}\nrun_id=123\npython_repair=false\nrepair_matrix=[]\n")
+            self.assertEqual(output.read_text(), f"ready=true\ntag={TAG}\ncommit={COMMIT}\nrun_id=123\npython_repair=false\nrepair_matrix=[]\nretained_repair_run_id=\nrepair_directory=\n")
             self.assertIn(f"/git/tags/{'b' * 40}", api.call_args.args[0])
 
     def test_active_successful_absent_or_already_recovered_runs_do_not_start_publication(self):
@@ -207,6 +208,106 @@ class PythonArtifactRecoveryTest(unittest.TestCase):
                 RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, matrix)
             with self.assertRaises(ValueError):
                 RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, [])
+
+
+class RetainedRepairTest(unittest.TestCase):
+    def fixture(self):
+        source, _, _ = fixture()
+        run = {**source, "id": 456, "path": ".github/workflows/release-recovery.yml",
+               "head_branch": "main", "head_sha": "b" * 40, "created_at": "2026-10-08T14:00:00Z"}
+        matrix = [RECOVERY.WHEEL_MATRIX["python / macos x86_64"]]
+        jobs = [
+            {"name": "resolve", "conclusion": "success"},
+            {"name": "repair Python artifacts / minimum supported python", "conclusion": "success"},
+            {"name": "repair Python artifacts / macos x86_64", "conclusion": "success", "steps": [
+                {"name": name, "conclusion": "success"}
+                for name in RECOVERY.WHEEL_CHECKS | {"Record recovered wheel provenance", "Retain verified wheel"}
+            ]},
+            {"name": "verify recovered artifacts", "conclusion": "failure"},
+        ]
+        artifacts = [{"name": "python-wheel-x86_64-apple-darwin", "expired": False,
+                      "workflow_run": {"id": 456, "head_sha": run["head_sha"]}}]
+        return run, source, matrix, jobs, artifacts
+
+    def test_later_publication_failure_does_not_require_rebuilding_verified_wheels(self):
+        run, source, matrix, jobs, artifacts = self.fixture()
+        self.assertTrue(RECOVERY.reusable_repair(run, source, REPOSITORY, matrix, jobs, artifacts))
+        with mock.patch.object(RECOVERY, "pages", side_effect=[[run], jobs, artifacts]):
+            self.assertEqual(RECOVERY.previous_repair(REPOSITORY, source, matrix), 456)
+        with mock.patch.object(RECOVERY, "pages") as pages:
+            self.assertIsNone(RECOVERY.previous_repair(REPOSITORY, source, []))
+            self.assertIsNone(RECOVERY.previous_repair(REPOSITORY, source, None))
+            pages.assert_not_called()
+
+    def test_only_completed_main_recovery_runs_after_the_original_release_qualify(self):
+        run, source, matrix, jobs, artifacts = self.fixture()
+        for key, value in (("status", "in_progress"), ("conclusion", "cancelled"),
+                           ("event", "pull_request"), ("path", ".github/workflows/other.yml"),
+                           ("head_branch", "feature/release"), ("created_at", "2026-10-07T14:00:00Z"),
+                           ("head_repository", {"full_name": "other/repository"})):
+            with self.subTest(key=key):
+                self.assertFalse(RECOVERY.reusable_repair({**run, key: value}, source, REPOSITORY, matrix, jobs, artifacts))
+
+    def test_all_build_checks_minimum_python_and_provenance_recording_must_pass(self):
+        run, source, matrix, jobs, artifacts = self.fixture()
+        for index in range(3):
+            for conclusion in ("failure", "skipped", "cancelled", None):
+                changed = copy.deepcopy(jobs)
+                changed[index]["conclusion"] = conclusion
+                with self.subTest(job=index, conclusion=conclusion):
+                    self.assertFalse(RECOVERY.reusable_repair(run, source, REPOSITORY, matrix, changed, artifacts))
+        for index in range(len(jobs[2]["steps"])):
+            changed = copy.deepcopy(jobs)
+            changed[2]["steps"].pop(index)
+            self.assertFalse(RECOVERY.reusable_repair(run, source, REPOSITORY, matrix, changed, artifacts))
+        self.assertFalse(RECOVERY.reusable_repair(run, source, REPOSITORY, matrix, jobs + [jobs[0]], artifacts))
+
+    def test_missing_expired_wrong_source_and_extra_wheels_cannot_replace_original_artifacts(self):
+        run, source, matrix, jobs, artifacts = self.fixture()
+        for changed in ([], artifacts * 2, [{**artifacts[0], "expired": True}],
+                        [{**artifacts[0], "workflow_run": {"id": 789, "head_sha": run["head_sha"]}}],
+                        [{**artifacts[0], "workflow_run": {"id": 456, "head_sha": COMMIT}}],
+                        artifacts + [{**artifacts[0], "name": "python-wheel-aarch64-apple-darwin"}]):
+            with self.subTest(artifacts=changed):
+                self.assertFalse(RECOVERY.reusable_repair(run, source, REPOSITORY, matrix, jobs, changed))
+
+    def test_resolver_reuses_previous_run_without_requesting_a_new_python_build(self):
+        source, jobs, artifacts = PythonArtifactRecoveryTest().fixture()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = pathlib.Path(temporary) / "output"
+            with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_OUTPUT": str(output)}), \
+                 mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.5.1"\n'), \
+                 mock.patch.object(RECOVERY, "publication_complete", return_value=False), \
+                 mock.patch.object(RECOVERY, "previous_repair", return_value=456), \
+                 mock.patch.object(RECOVERY, "pages", side_effect=[jobs, artifacts]), \
+                 mock.patch.object(RECOVERY, "api", side_effect=[
+                     {"workflow_runs": [source]}, {"object": {"type": "commit", "sha": COMMIT}},
+                 ]):
+                RECOVERY.main()
+            values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+            self.assertEqual(values["python_repair"], "false")
+            self.assertEqual(values["retained_repair_run_id"], "456")
+            self.assertEqual(values["repair_directory"], "python-wheel-x86_64-apple-darwin")
+            self.assertEqual(json.loads(values["repair_matrix"]), [RECOVERY.WHEEL_MATRIX["python / macos x86_64"]])
+
+    def test_single_and_multiple_download_layouts_preserve_artifact_inventory(self):
+        matrices = list(RECOVERY.WHEEL_MATRIX.values())
+        for count in (0, 1, 2, 6):
+            matrix = matrices[:count]
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                download_path = root / RECOVERY.repair_directory(matrix)
+                for item in matrix:
+                    # v8 creates artifact-named subdirectories only for multiple matches.
+                    artifact = download_path if count == 1 else download_path / ("python-wheel-" + item["target"])
+                    artifact.mkdir(parents=True, exist_ok=True)
+                    wheel = artifact / f"uqa-0.5.1-cp38-abi3-{item['target']}.whl"
+                    wheel.write_bytes(item["target"].encode())
+                    (artifact / "recovery-provenance.json").write_text(json.dumps({
+                        "commit": COMMIT, "target": item["target"], "filename": wheel.name,
+                        "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+                    }))
+                RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, matrix)
 
 
 class CompletedPublicationTest(unittest.TestCase):
