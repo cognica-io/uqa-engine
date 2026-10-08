@@ -262,8 +262,9 @@ impl Engine {
         digest: [u8; 32],
         display_name: &str,
     ) -> Result<crate::row_locks::LockAcquire, SQLError> {
+        let retained = self.row_locks.retain_key_reservation(digest);
         let key = crate::row_locks::RowLockKey {
-            table: self.row_locks.key_reservation_key(digest),
+            table: retained.table_key(),
             doc_id: 0,
         };
         self.row_locks.acquire(&crate::row_locks::LockRequest {
@@ -283,12 +284,16 @@ impl Engine {
         display_name: &str,
     ) -> Result<Vec<crate::row_locks::LockAcquire>, SQLError> {
         let mark = self.current_lock_mark();
-        let requests = keys
+        let retained = keys
             .iter()
-            .map(|key| crate::row_locks::LockRequest {
+            .map(|key| self.row_locks.retain_key_reservation(*key))
+            .collect::<Vec<_>>();
+        let requests = retained
+            .iter()
+            .map(|identity| crate::row_locks::LockRequest {
                 session_id: self.session_id,
                 key: crate::row_locks::RowLockKey {
-                    table: self.row_locks.key_reservation_key(*key),
+                    table: identity.table_key(),
                     doc_id: 0,
                 },
                 strength: uqa_sql::ast::LockStrength::ForUpdate,

@@ -10,9 +10,11 @@ Every native release retains the identity until the shared claim and its pin hav
 
 - [x] Reproduce 256 retained entries after 256 completed key reservations and register #588.
 - [x] Inspect Execution/Engine manifests, ownership policy, grant, wait, batch, release and Engine adapter paths.
-- [ ] Implement scoped identity ownership in Execution and retain it in Engine's two key-reservation adapters.
-- [ ] Verify reclamation, pending requests, duplicate/upgrade/savepoint ownership, cancellation, batch rollback, full-digest equality and concurrent reuse.
-- [ ] Pass focused Execution/Engine tests, rustfmt, strict Clippy and ownership/dependency checks.
+- [x] Implement scoped identity ownership in Execution and retain it in Engine's two key-reservation adapters.
+- [x] Verify reclamation, a 4,096-key batch and capacity release, permanent-ID promotion, duplicate/upgrade/savepoint ownership, cancellation, batch rollback, waiting ownership and 256 waves of concurrent reuse.
+- [x] Pass focused Execution/Engine tests, rustfmt, strict Clippy and ownership/dependency checks.
 - [ ] Update HISTORY and automatic regression inventory, push logical commits, review and merge; close #588 and clean up.
 
 The broader performance ledger remains #266, #347, #348, #261 and #125. Controlled timing qualification is separate from the retained-entry and operation-count assertions in this change.
+
+All 145 row-lock owner cases and 16 Engine composite-UNIQUE cases pass. The full owner run first exposed a crash-fixture failure (limit 11 versus expected 13); #590 adds peer-observed limits before death, retains the input handle through termination and requires abnormal exit. The expected reservation and restart values are unchanged, and the strengthened focused case plus the full owner suite pass. This is a test-boundary correction, not a claimed product allocator change. The automatic inventory now contains 36 checks / 92 required cases, including this recovery case.

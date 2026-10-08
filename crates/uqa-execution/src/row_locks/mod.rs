@@ -17,6 +17,7 @@ mod cleanup;
 mod cross_process;
 mod grants;
 mod identity;
+mod identity_registry;
 mod physical_changes;
 mod registry;
 mod relation;
@@ -63,6 +64,7 @@ pub use grants::{lock_strengths_conflict, LockAcquire, LockRequest, RowLockAcqui
 use grants::{rollback_grant, try_grant, GrantAttempt, LockGrant, LockTable};
 pub use identity::RowLockKey;
 use identity::{LockRelationIdentity, ManagerIdentity};
+pub use identity_registry::KeyReservationIdentity;
 pub use registry::{shared_backend_manager, shared_provider_manager};
 use relation::RelationLockGrant;
 pub use relation::{RelationLockMode, ScopedRelationLock};
@@ -86,9 +88,7 @@ pub struct RowLockManager {
     next_transaction_xid: AtomicU64,
     /// The OID counter of a database whose storage does not reserve identifiers durably.
     catalog_oids: crate::catalog::identity::CatalogOidCounter,
-    relation_ids: Mutex<HashMap<LockRelationIdentity, u64>>,
-    relation_identities: Mutex<HashMap<u64, LockRelationIdentity>>,
-    next_table: AtomicU64,
+    identities: identity_registry::IdentityRegistry,
     next_acquisition: AtomicU64,
     change_gate: RwLock<()>,
     state: Mutex<LockTable>,

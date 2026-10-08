@@ -32,9 +32,7 @@ impl RowLockManager {
             next_session: AtomicU64::new(1),
             next_transaction_xid: AtomicU64::new(3),
             catalog_oids: crate::catalog::identity::CatalogOidCounter::default(),
-            relation_ids: Mutex::new(HashMap::new()),
-            relation_identities: Mutex::new(HashMap::new()),
-            next_table: AtomicU64::new(1),
+            identities: super::identity_registry::IdentityRegistry::default(),
             next_acquisition: AtomicU64::new(1),
             change_gate: RwLock::new(()),
             temporary_roles: Mutex::new(HashMap::new()),
@@ -196,8 +194,14 @@ impl RowLockManager {
             .is_some_and(|rows| rows.contains_key(&key))
     }
 
+    /// Retain a permanent numeric key for existing callers. SQL requests use `retain_key_reservation` so completed keys can be reclaimed.
     pub fn key_reservation_key(&self, digest: [u8; 32]) -> u64 {
         self.relation_key(LockRelationIdentity::KeyReservation(digest))
+    }
+
+    /// Retain a transient key identity while constructing requests; successful grants retain it until release.
+    pub fn retain_key_reservation(&self, digest: [u8; 32]) -> super::KeyReservationIdentity {
+        self.identities.key(digest)
     }
 
     /// Coordinate one named scoring-parameter value without locking unrelated signals or SQL tables.
@@ -206,14 +210,7 @@ impl RowLockManager {
     }
 
     fn relation_key(&self, identity: LockRelationIdentity) -> u64 {
-        let mut relations = self.relation_ids.lock();
-        if let Some(id) = relations.get(&identity) {
-            return *id;
-        }
-        let id = self.next_table.fetch_add(1, Ordering::Relaxed);
-        relations.insert(identity.clone(), id);
-        self.relation_identities.lock().insert(id, identity);
-        id
+        self.identities.permanent(identity)
     }
 
     pub fn stable_table_hash(table: &str) -> u64 {
@@ -221,7 +218,7 @@ impl RowLockManager {
     }
 
     pub fn table_name(&self, table: u64) -> Arc<str> {
-        match self.relation_identities.lock().get(&table).cloned() {
+        match self.identities.identity(table) {
             Some(LockRelationIdentity::Table(name)) => name,
             Some(_) => panic!("internal lock identity has no SQL table name"),
             None => panic!("unknown relation lock identity"),
@@ -229,9 +226,8 @@ impl RowLockManager {
     }
 
     pub(super) fn relation_bytes(&self, table: u64) -> Vec<u8> {
-        self.relation_identities
-            .lock()
-            .get(&table)
+        self.identities
+            .identity(table)
             .unwrap_or_else(|| panic!("unknown relation lock identity"))
             .stable_bytes()
     }

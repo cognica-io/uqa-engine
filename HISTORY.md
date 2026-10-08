@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reclaim SQL key-reservation identities after requests, waiters and held grants finish instead of retaining every historical digest for the database lifetime. Preserve native release, savepoint ownership and existing permanent table/key identifiers.
+
 - Reject incompatible live SQLite storage owners before record initialization and retain owner admission through native catalog restoration, preventing upgrades from bypassing pre-table row locks. Current owners remain compatible, and process death releases admission through the existing owner leases.
 
 - Compare complete cross-process row and key identities, including wait edges, instead of conflating hash collisions. Retain native pins by relation and keep temporary dependency admission separate from relation-registry lifetime locks.
