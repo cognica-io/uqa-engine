@@ -9,4 +9,8 @@ This validates bounded arbitration counts and independent ownership under concur
 - [x] Inspect Execution's existing batch, full-identity and subprocess fixtures and reuse its established owner APIs.
 - [x] Add the independent-process schedule and automatic regression inventory entry without product/dependency changes.
 - [x] Pass all six focused batch cases, strict Execution Clippy, formatting and ownership/dependency, harness, file-size and header checks.
-- [ ] Pass automatic Linux/macOS regression checks, merge and clean up.
+- [x] Complete the implementation, review and automatic Linux/macOS verification required for PR #592.
+
+The focused batch suite passed six cases, including the four multi-process schedules, with the subprocess entry point intentionally ignored outside its parent fixture. Strict Execution Clippy and repository ownership/dependency, harness, file-size/header and inventory checks passed. The exact-process schedule and failure cleanup were reviewed directly; CodeRabbit and Copilot were quota-limited.
+
+Product commit `dc9562da6` passed all 97 required cases on both Linux and macOS in [run 37711567801](https://github.com/cognica-io/uqa-engine/actions/runs/37711567801). The PR formatting check also passed; the final commit only records this verification.
