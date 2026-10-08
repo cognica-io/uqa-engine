@@ -395,15 +395,15 @@ fn cross_process_wait_slot_observer_child() {
     loop {
         use std::io::{Read as _, Seek as _, SeekFrom};
 
-        file.seek(SeekFrom::Start(64)).unwrap();
+        file.seek(SeekFrom::Start(1 << 19)).unwrap();
         for _ in 0..256 {
-            let mut slot = [0_u8; 32];
+            let mut slot = [0_u8; 80];
             match file.read_exact(&mut slot) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(error) => panic!("failed to read the lock sidecar: {error}"),
             }
-            if u32::from_be_bytes(slot[0..4].try_into().unwrap()) == 0x5551_4c4c
+            if u32::from_be_bytes(slot[0..4].try_into().unwrap()) == 0x5551_4c4d
                 && u32::from_be_bytes(slot[4..8].try_into().unwrap()) == waiting_pid
             {
                 std::fs::write(ready, b"1").unwrap();

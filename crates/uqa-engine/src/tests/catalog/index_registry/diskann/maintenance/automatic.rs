@@ -87,10 +87,14 @@ fn exercise(provider: usize) {
     stop(&engine);
     sql(&engine, "CREATE TABLE diskann_docs(id int, embedding tensor(2)); INSERT INTO diskann_docs VALUES (1,ARRAY[ARRAY[1.0,0.0]]),(2,ARRAY[ARRAY[0.0,1.0]]); CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)");
     sql(&engine, "BEGIN");
-    for _ in 0..70 {
+    for update in 0..70 {
         sql(
             &engine,
-            "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[0.0,1.0]] WHERE id=1",
+            if update % 2 == 0 {
+                "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[0.0,1.0]] WHERE id=1"
+            } else {
+                "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[1.0,0.0]] WHERE id=1"
+            },
         );
     }
     sql(&engine, "COMMIT");
@@ -142,7 +146,7 @@ fn exercise(provider: usize) {
     );
     assert_eq!(first.examined, 64);
     assert!(first.next.is_some());
-    sql(&engine, "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[1.0,0.0]] WHERE id=1; INSERT INTO diskann_docs VALUES(3,ARRAY[ARRAY[1.0,0.0]])");
+    sql(&engine, "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[0.0,1.0]] WHERE id=1; INSERT INTO diskann_docs VALUES(3,ARRAY[ARRAY[1.0,0.0]])");
     let last = page(
         &*session.backend,
         &*captured,
@@ -194,7 +198,7 @@ fn exercise_coalescing(engine: &Engine, control: &StorageReadControl) {
     );
     sql(
         engine,
-        "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[1.0,0.0]] WHERE id=3",
+        "UPDATE diskann_docs SET embedding=ARRAY[ARRAY[0.0,1.0]] WHERE id=3",
     );
     maintenance
         .step(
