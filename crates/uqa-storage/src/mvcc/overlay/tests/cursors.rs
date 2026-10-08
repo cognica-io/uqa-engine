@@ -22,7 +22,13 @@ fn empty_private_cursors_need_no_read_workspace_and_keep_their_snapshot() {
     let snapshot = changes.snapshot().unwrap();
     let exhausted = StorageReadControl::with_limit(0);
     let mut cursor = snapshot.cursor(b"k", Some(b"k000000"), &exhausted).unwrap();
-    stage(&changes, &mut Model::new(), 1, Some("later".into()), &control);
+    stage(
+        &changes,
+        &mut Model::new(),
+        1,
+        Some("later".into()),
+        &control,
+    );
     assert!(cursor.next(&exhausted).unwrap().is_none());
     assert!(cursor.next(&exhausted).unwrap().is_none());
     assert_eq!(exhausted.memory().used(), 0);
