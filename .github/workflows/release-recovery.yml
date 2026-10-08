@@ -35,6 +35,8 @@ jobs:
       run_id: ${{ steps.source.outputs.run_id }}
       python_repair: ${{ steps.source.outputs.python_repair }}
       repair_matrix: ${{ steps.source.outputs.repair_matrix }}
+      retained_repair_run_id: ${{ steps.source.outputs.retained_repair_run_id }}
+      repair_directory: ${{ steps.source.outputs.repair_directory }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +73,9 @@ jobs:
         if: ${{ needs.resolve.outputs.repair_matrix != '[]' }}
         with:
           pattern: python-wheel-*
-          path: recovered-artifacts
+          path: recovered-artifacts/${{ needs.resolve.outputs.repair_directory }}
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.resolve.outputs.retained_repair_run_id || github.run_id }}
       - name: Verify original source and recovered archive digests
         env:
           RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -120,4 +124,5 @@ jobs:
     with:
       tag: ${{ needs.resolve.outputs.tag }}
       artifacts_run_id: ${{ needs.resolve.outputs.run_id }}
-      supplemental_artifacts_run_id: ${{ needs.resolve.outputs.repair_matrix != '[]' && github.run_id || '' }}
+      supplemental_artifacts_run_id: ${{ needs.resolve.outputs.repair_matrix != '[]' && (needs.resolve.outputs.retained_repair_run_id || github.run_id) || '' }}
+      supplemental_artifact_directory: ${{ needs.resolve.outputs.repair_directory }}
