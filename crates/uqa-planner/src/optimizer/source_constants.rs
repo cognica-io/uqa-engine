@@ -43,7 +43,7 @@ pub(super) fn propagate_source_constants(block: &mut QueryBlockPlan) {
             _ => None,
         };
         if let Some(Some(value)) = column.and_then(|column| constants.get(column)) {
-            *expression = value.clone();
+            *expression = super::retain_computed_integer(value.clone(), None);
         }
     };
     let rewrite = crate::unified_plan::rewrite_scalar_expression;

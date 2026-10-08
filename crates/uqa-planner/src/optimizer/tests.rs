@@ -53,10 +53,22 @@ fn query_block(plan: &UnifiedPlan) -> &QueryBlockPlan {
 }
 
 #[test]
-fn folded_integer_order_keys_keep_values_instead_of_output_positions() {
+fn computed_integer_order_keys_keep_values_instead_of_output_positions() {
     let output = vec![("v".into(), ScalarExpr::Column("v".into()))];
-    for (expression, expected) in [("0 + 0", 0), ("1 + 1", 2), ("-1 + 0", -1)] {
-        let plan = optimized(&format!("SELECT v FROM t ORDER BY {expression}, v"));
+    for (sql, expected) in [
+        ("SELECT v FROM t ORDER BY 0 + 0, v", 0),
+        ("SELECT v FROM t ORDER BY 1 + 1, v", 2),
+        ("SELECT v FROM t ORDER BY -1 + 0, v", -1),
+        (
+            "SELECT v FROM t ORDER BY CASE WHEN true THEN 0 ELSE 1 END, v",
+            0,
+        ),
+        ("SELECT v FROM t ORDER BY coalesce(NULL::integer, 0), v", 0),
+        ("SELECT v FROM (VALUES (0)) AS input(v) ORDER BY v", 0),
+    ] {
+        let mut config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        config.coerced_conditionals = true;
+        let plan = optimize(UnifiedPlan::lower(compile(sql).unwrap().remove(0)), &config).unwrap();
         let key = uqa_execution::query::ordering::resolve_order_expression(
             &query_block(&plan).order_by[0].expr,
             &output,
