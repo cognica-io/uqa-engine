@@ -22,10 +22,11 @@ The operator installs `run-controlled-performance.py`, `controlled_runner_host.p
 
 - [x] Provision and record the reusable controlled host, with stop-after-use lifecycle and an automatic shutdown backstop.
 - [x] Implement and verify reference-only noise calibration and explicit regression-only reporting; 27 focused verifier tests and ownership/dependency/harness checks pass.
-- [ ] Build the immutable reference and candidate, establish host isolation and collect independent calibration.
-- [ ] Measure #261's four unchanged regression gates and retain qualified results.
-- [ ] Measure #266's independent-process scaling, implement any justified correction and verify it against the same invariants.
-- [ ] Connect the controlled path to automatic CI, retain compact results and detailed artifacts, and stop the instance after completion.
-- [ ] Update the issue and design ledgers, merge the reviewed changes, close satisfied issues and return to main.
+- [x] Build the immutable reference and candidate, establish host isolation and collect independent calibration.
+- [x] Execute #261's four unchanged regression gates and retain signed results: three accepted, Q1 inconclusive in [run 37734616093](ec2-results-2026-10-08.md).
+- [x] Measure #266's independent-process scaling and record the evidence-based decision to retain the current mutex/batching; all sixteen case/phase comparisons pass, and no sidecar-format correction is justified by this workload.
+- [x] Connect the controlled path to automatic CI, retain compact results and detailed artifacts, and stop the instance after completion.
+- [x] Publish the measured conclusions, synchronize issue/design records and preserve the unresolved tasks when closing #266.
+- [ ] Resolve #261's Q1 run-level variation before claiming its 10% qualification; do not discard its slow reference execution, widen the limit or retry measurements until a favorable result appears.
 
 The separately tracked SQLite dependency default (#348) is outside this measurement change. The maintainer closed #125 pending recurrence; successful startup diagnostics do not claim that its historical loader cause was fixed.
