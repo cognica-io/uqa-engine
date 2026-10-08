@@ -77,7 +77,7 @@ impl InsertConflictOverlay {
         )?;
         self.constraints = constraints;
         self.relevant_constraints = relevant_constraints;
-        self.constraint_table = table.to_owned();
+        table.clone_into(&mut self.constraint_table);
         Ok(())
     }
 
