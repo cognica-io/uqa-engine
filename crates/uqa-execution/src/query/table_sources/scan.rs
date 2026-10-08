@@ -288,12 +288,14 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             &qualifier,
             ctes.lock_identities.emit,
         )?;
-        let predicate_expression = qualifier_filter(filters, &qualifier);
+        // Candidate selection and row evaluation must share the selected SQL operand types. A lossy column cast cannot use an index over the uncast values.
+        let predicate_expression = qualifier_filter(filters, &qualifier)
+            .map(|predicate| uqa_sql::bind_type_introspection(predicate, &physical_schema, params));
         let predicate = predicate_expression
             .as_ref()
             .filter(|predicate| !expression_references_tableoid(predicate))
             .map(|predicate| {
-                crate::ProjectedPredicate::compile_with_schema(predicate, &physical_schema, params)
+                crate::ProjectedPredicate::compile_bound(predicate, &physical_schema, params)
             })
             .transpose()?
             .flatten();

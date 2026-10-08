@@ -6,8 +6,12 @@ on:
     paths:
       - Cargo.toml
       - Cargo.lock
-      - "crates/*/Cargo.toml"
-      - "examples/rust/*/Cargo.toml"
+      - "crates/**"
+      - "examples/rust/**"
+      - "tests/**"
+      - "scripts/**"
+      - "benchmarks/**"
+      - ".github/scripts/**"
       - rust-toolchain.toml
       - ".cargo/**"
       - .github/workflows/ci.yml
