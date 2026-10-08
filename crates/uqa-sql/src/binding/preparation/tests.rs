@@ -303,3 +303,32 @@ fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity()
         assert_eq!(constants, 1);
     }
 }
+
+#[test]
+fn peer_range_frames_do_not_require_offset_support() {
+    for ordering in ["'a'::text", "true", "ARRAY[1]"] {
+        for frame in [
+            "RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING",
+            "RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW",
+        ] {
+            for sql in [
+                format!("SELECT count(*) OVER (ORDER BY {ordering} {frame}) FROM assignment_target"),
+                format!("SELECT count(*) OVER w FROM assignment_target WINDOW w AS (ORDER BY {ordering} {frame})"),
+            ] {
+                let plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+                assert!(infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context()).unwrap().is_empty(), "{sql}");
+            }
+        }
+        let sql = format!(
+            "SELECT count(*) OVER (ORDER BY {ordering} RANGE 1 PRECEDING) FROM assignment_target"
+        );
+        let plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        assert_eq!(
+            infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context())
+                .unwrap_err()
+                .sqlstate(),
+            Some("0A000"),
+            "{sql}"
+        );
+    }
+}

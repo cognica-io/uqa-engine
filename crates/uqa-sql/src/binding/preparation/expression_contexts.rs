@@ -146,19 +146,19 @@ impl Preparation<'_> {
         };
         if let Some(frame) = &spec.frame {
             // An untyped offset takes the type an `unknown` literal would: `bigint` for `ROWS` and `GROUPS`, and for `RANGE` the offset type of the ordering column's `in_range` support. A `RANGE` frame without exactly one ordering column is rejected when the query is analyzed.
-            let target = match frame.mode {
-                crate::ast::FrameMode::Range if order_count == 1 => {
-                    Some(crate::range_frame_offset_type(order_type.as_ref(), None)?)
-                }
-                crate::ast::FrameMode::Range => None,
-                crate::ast::FrameMode::Rows | crate::ast::FrameMode::Groups => {
-                    Some(ColumnType::BigInteger)
-                }
-            };
             for bound in [&frame.start, &frame.end] {
                 if let crate::ScalarFrameBound::Preceding(value)
                 | crate::ScalarFrameBound::Following(value) = bound
                 {
+                    let target = match frame.mode {
+                        crate::ast::FrameMode::Range if order_count == 1 => {
+                            Some(crate::range_frame_offset_type(order_type.as_ref(), None)?)
+                        }
+                        crate::ast::FrameMode::Range => None,
+                        crate::ast::FrameMode::Rows | crate::ast::FrameMode::Groups => {
+                            Some(ColumnType::BigInteger)
+                        }
+                    };
                     let mut value = self.expression(value, input, subqueries)?;
                     if let Some(target) = &target {
                         self.parameters.coerce_unknown(&mut value, target)?;
