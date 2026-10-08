@@ -219,6 +219,7 @@ fn workload(processes: usize, keys: usize, measure: bool) -> serde_json::Value {
     let rounds = if measure { 128 } else { 2 };
     let mut samples = Vec::new();
     for round in 0..warmup + rounds {
+        let acquisition_started = measure.then(Instant::now);
         for peer in &mut peers {
             peer.send("acquire");
         }
@@ -226,7 +227,9 @@ fn workload(processes: usize, keys: usize, measure: bool) -> serde_json::Value {
             .iter_mut()
             .map(|peer| peer.response("held", keys).nanoseconds)
             .collect::<Vec<_>>();
+        let acquisition_wall_ns = acquisition_started.map(|start| start.elapsed().as_nanos());
         verify_ownership(&manager, processes, keys, true);
+        let release_started = measure.then(Instant::now);
         for peer in &mut peers {
             peer.send("release");
         }
@@ -234,13 +237,17 @@ fn workload(processes: usize, keys: usize, measure: bool) -> serde_json::Value {
             .iter_mut()
             .map(|peer| peer.response("released", keys).nanoseconds)
             .collect::<Vec<_>>();
+        let release_wall_ns = release_started.map(|start| start.elapsed().as_nanos());
         if !measure {
             assert!(acquired.iter().chain(&released).all(Option::is_none));
         }
         verify_ownership(&manager, processes, keys, false);
         if round >= warmup && measure {
             assert!(acquired.iter().chain(&released).all(Option::is_some));
-            samples.push(serde_json::json!({"acquire_ns": acquired, "release_ns": released}));
+            samples.push(
+                serde_json::json!({"acquire_ns": acquired, "release_ns": released,
+                "acquisition_wall_ns": acquisition_wall_ns, "release_wall_ns": release_wall_ns}),
+            );
         }
     }
     for peer in &mut peers {
