@@ -277,6 +277,30 @@
       "sql": "DEALLOCATE rc"
     },
     {
+      "id": "same_database",
+      "sql": "SELECT (current_database() || '.pg_catalog.\"C\"')::regcollation"
+    },
+    {
+      "id": "lookup_metadata",
+      "sql": "SELECT oid,proname,prorettype,proargtypes::text,proisstrict,provolatile,proparallel FROM pg_proc WHERE oid=4195"
+    },
+    {
+      "id": "schema_privileges",
+      "sql": "CREATE ROLE rc_reader; CREATE SCHEMA rc_hidden; SET ROLE rc_reader"
+    },
+    {
+      "id": "private_schema_input",
+      "sql": "SELECT 'rc_hidden.c'::regcollation"
+    },
+    {
+      "id": "private_schema_lookup",
+      "sql": "SELECT to_regcollation('rc_hidden.c')"
+    },
+    {
+      "id": "private_schema_reset",
+      "sql": "RESET ROLE; DROP SCHEMA rc_hidden; DROP ROLE rc_reader"
+    },
+    {
       "id": "stored",
       "sql": "CREATE TABLE rc_values(id integer PRIMARY KEY,c regcollation DEFAULT '\"C\"',a regcollation[]); INSERT INTO rc_values(id,a) VALUES(1,ARRAY[950,951]::regcollation[]); INSERT INTO rc_values VALUES(2,123456,ARRAY[123456,NULL]::regcollation[]); CREATE INDEX rc_index ON rc_values(c); CREATE VIEW rc_view AS SELECT '\"POSIX\"'::regcollation AS c"
     },

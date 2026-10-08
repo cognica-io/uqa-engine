@@ -113,6 +113,7 @@ impl ColumnType {
             | Self::Regproc
             | Self::Regprocedure
             | Self::Regclass
+            | Self::Regcollation
             | Self::Regnamespace
             | Self::Regrole
             | Self::Regtype

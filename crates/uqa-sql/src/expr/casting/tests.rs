@@ -172,6 +172,7 @@ fn regtype_zero_uses_postgresql_dash_text_output() {
         "regproc",
         "regprocedure",
         "regclass",
+        "regcollation",
         "regnamespace",
         "regtype",
     ] {
@@ -184,6 +185,29 @@ fn regtype_zero_uses_postgresql_dash_text_output() {
     assert_eq!(
         cast_value_from(&Value::Int(42), "text", Some("regproc")).unwrap(),
         Value::Str("42".into())
+    );
+}
+
+#[test]
+fn regcollation_preserves_oid_bits_and_rejects_out_of_range_bigints() {
+    // Independently captured in regcollation_oracle.expected.json.
+    for source in ["smallint", "integer"] {
+        let oid = cast_value_from(&Value::Int(-1), "regcollation", Some(source)).unwrap();
+        assert_eq!(oid, Value::Int(i64::from(u32::MAX)));
+        assert_eq!(
+            cast_value_from(&oid, "integer", Some("regcollation")).unwrap(),
+            Value::Int(-1)
+        );
+    }
+    for value in [-1, i64::from(u32::MAX) + 1] {
+        let error =
+            cast_value_from(&Value::Int(value), "regcollation", Some("bigint")).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"));
+        assert_eq!(error.to_string(), "OID out of range");
+    }
+    assert_eq!(
+        cast_value_from(&Value::Int(950), "pg_catalog.regcollation", Some("oid")).unwrap(),
+        Value::Int(950)
     );
 }
 

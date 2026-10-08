@@ -423,6 +423,7 @@ fn resolve_regobject_input(
         Routine,
         Role,
         Namespace,
+        Collation,
         Type,
     }
     let kind = if target_ty.eq_ignore_ascii_case("regclass") {
@@ -437,6 +438,8 @@ fn resolve_regobject_input(
         ObjectKind::Role
     } else if matches!(target_column_type, Some(ColumnType::Regnamespace)) {
         ObjectKind::Namespace
+    } else if matches!(target_column_type, Some(ColumnType::Regcollation)) {
+        ObjectKind::Collation
     } else if matches!(target_column_type, Some(ColumnType::Regtype)) {
         ObjectKind::Type
     } else {
@@ -449,6 +452,7 @@ fn resolve_regobject_input(
         ObjectKind::Routine => engine.resolve_regprocedure_input(name)?,
         ObjectKind::Role => engine.resolve_regrole(name)?,
         ObjectKind::Namespace => engine.resolve_regnamespace(name)?,
+        ObjectKind::Collation => engine.resolve_regcollation(name)?,
         ObjectKind::Type => engine.resolve_regtype_input(name)?,
     };
     control.check()?;
@@ -460,6 +464,10 @@ fn resolve_regobject_input(
         ObjectKind::Routine => ("42883", format!("function \"{name}\" does not exist")),
         ObjectKind::Role => ("42704", format!("role \"{name}\" does not exist")),
         ObjectKind::Namespace => ("3F000", format!("schema \"{name}\" does not exist")),
+        ObjectKind::Collation => (
+            "42704",
+            format!("collation \"{name}\" for encoding \"UTF8\" does not exist"),
+        ),
         ObjectKind::Type | ObjectKind::RoutineName => {
             unreachable!("regtype and regproc input return before reporting a missing object")
         }
@@ -478,6 +486,7 @@ fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
         | ColumnType::Regclass
         | ColumnType::Regproc
         | ColumnType::Regprocedure
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Enum(_)
         | ColumnType::Composite(_)

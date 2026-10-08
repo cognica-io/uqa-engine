@@ -229,3 +229,41 @@ fn array_inspection_metadata_matches_postgresql() {
         6,
     );
 }
+
+#[test]
+fn regcollation_lookup_metadata_matches_postgresql() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/regcollation_oracle.expected.json"
+    )))
+    .unwrap();
+    let case = reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "lookup_metadata")
+        .unwrap();
+    let entry = PG18_BUILTIN_ROUTINE_GROUPS
+        .iter()
+        .flat_map(|group| group.iter())
+        .find(|entry| entry.oid == 4195)
+        .unwrap();
+    let actual = vec![
+        entry.oid.to_string(),
+        entry.name.into(),
+        entry.return_type.to_string(),
+        entry
+            .argument_types
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(" "),
+        boolean_text(entry.strict).into(),
+        entry.volatility.into(),
+        entry.parallel.into(),
+    ];
+    assert_eq!(
+        serde_json::to_value(actual).unwrap(),
+        case["results"][0]["rows"][0]
+    );
+}

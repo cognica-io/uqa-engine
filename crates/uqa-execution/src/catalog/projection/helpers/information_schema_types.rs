@@ -128,6 +128,7 @@ pub fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Regproc => "regproc".into(),
         ColumnType::Regprocedure => "regprocedure".into(),
         ColumnType::Regclass => "regclass".into(),
+        ColumnType::Regcollation => "regcollation".into(),
         ColumnType::Regnamespace => "regnamespace".into(),
         ColumnType::Regrole => "regrole".into(),
         ColumnType::Regtype => "regtype".into(),

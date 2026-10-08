@@ -288,6 +288,7 @@ pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw
         uqa_sql::ast::ColumnType::Regproc => uqa_fdw::ColumnType::Regproc,
         uqa_sql::ast::ColumnType::Regprocedure => uqa_fdw::ColumnType::Regprocedure,
         uqa_sql::ast::ColumnType::Regclass => uqa_fdw::ColumnType::Regclass,
+        uqa_sql::ast::ColumnType::Regcollation => uqa_fdw::ColumnType::Regcollation,
         uqa_sql::ast::ColumnType::Regnamespace => uqa_fdw::ColumnType::Regnamespace,
         uqa_sql::ast::ColumnType::Regrole => uqa_fdw::ColumnType::Regrole,
         uqa_sql::ast::ColumnType::Regtype => uqa_fdw::ColumnType::Regtype,

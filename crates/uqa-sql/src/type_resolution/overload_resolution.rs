@@ -87,6 +87,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "numeric"
                 | "oid"
                 | "regclass"
+                | "regcollation"
                 | "regnamespace"
                 | "regproc"
                 | "regprocedure"
@@ -100,6 +101,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "numeric"
                 | "oid"
                 | "regclass"
+                | "regcollation"
                 | "regnamespace"
                 | "regproc"
                 | "regprocedure"
@@ -112,6 +114,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "numeric"
                 | "oid"
                 | "regclass"
+                | "regcollation"
                 | "regnamespace"
                 | "regproc"
                 | "regprocedure"
@@ -119,9 +122,21 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regtype",
         ) | (
             "oid",
-            "regclass" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype",
+            "regclass"
+                | "regcollation"
+                | "regnamespace"
+                | "regproc"
+                | "regprocedure"
+                | "regrole"
+                | "regtype",
         ) | (
-            "regclass" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype",
+            "regclass"
+                | "regcollation"
+                | "regnamespace"
+                | "regproc"
+                | "regprocedure"
+                | "regrole"
+                | "regtype",
             "oid",
         ) | ("regproc", "regprocedure")
             | ("regprocedure", "regproc")
@@ -155,7 +170,9 @@ fn canonical_type_category(canonical: &str) -> char {
         "bool" => 'B',
         "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" | "oid" | "regclass"
-        | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype" => 'N',
+        | "regcollation" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype" => {
+            'N'
+        }
         "int2vector" | "oidvector" => 'A',
         "anyarray" | "record" => 'P',
         "bpchar" | "name" | "text" | "varchar" => 'S',

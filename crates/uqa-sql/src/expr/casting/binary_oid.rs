@@ -88,60 +88,25 @@ pub(super) fn cast_oid(
     }
 }
 
-pub(super) fn cast_regclass(
+pub(super) fn cast_named_oid(
     value: &Value,
+    target: &str,
     source_ty: Option<&str>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
-        (
-            "unknown" | "text" | "varchar" | "bpchar" | "name" | "regclass",
-            Value::Str(text) | Value::FixedChar(text),
-        ) => text_value(control.copy_text(text)?, false, control),
+        (source, Value::Str(text) | Value::FixedChar(text))
+            if source == target
+                || matches!(source, "unknown" | "text" | "varchar" | "bpchar" | "name") =>
+        {
+            text_value(control.copy_text(text)?, false, control)
+        }
         (_, Value::Int(_)) => Ok(control.finish(
             cast_oid(value, source_ty, control)?,
             control.empty_reservation(),
         )?),
-        _ => Err(undefined_cast(&source, "regclass")),
-    }
-}
-
-pub(super) fn cast_regnamespace(
-    value: &Value,
-    source_ty: Option<&str>,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
-    let source = canonical_cast_source_with_control(source_ty, value, control)?;
-    match (source.as_str(), value) {
-        (
-            "unknown" | "text" | "varchar" | "bpchar" | "name" | "regnamespace",
-            Value::Str(text) | Value::FixedChar(text),
-        ) => text_value(control.copy_text(text)?, false, control),
-        (_, Value::Int(_)) => Ok(control.finish(
-            cast_oid(value, source_ty, control)?,
-            control.empty_reservation(),
-        )?),
-        _ => Err(undefined_cast(&source, "regnamespace")),
-    }
-}
-
-pub(super) fn cast_regrole(
-    value: &Value,
-    source_ty: Option<&str>,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
-    let source = canonical_cast_source_with_control(source_ty, value, control)?;
-    match (source.as_str(), value) {
-        (
-            "unknown" | "text" | "varchar" | "bpchar" | "name" | "regrole",
-            Value::Str(text) | Value::FixedChar(text),
-        ) => text_value(control.copy_text(text)?, false, control),
-        (_, Value::Int(_)) => Ok(control.finish(
-            cast_oid(value, source_ty, control)?,
-            control.empty_reservation(),
-        )?),
-        _ => Err(undefined_cast(&source, "regrole")),
+        _ => Err(undefined_cast(&source, target)),
     }
 }
 

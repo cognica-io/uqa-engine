@@ -254,6 +254,7 @@ pub(super) fn rust_scalar_column_type(
         "oid" => Ok(ColumnType::Oid),
         "xid" => Ok(ColumnType::Xid),
         "regclass" => Ok(ColumnType::Regclass),
+        "regcollation" => Ok(ColumnType::Regcollation),
         "regnamespace" => Ok(ColumnType::Regnamespace),
         "regrole" => Ok(ColumnType::Regrole),
         "bool" | "boolean" => Ok(ColumnType::Boolean),

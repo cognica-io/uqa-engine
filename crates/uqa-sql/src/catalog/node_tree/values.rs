@@ -53,6 +53,7 @@ fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
             | ColumnType::Xid
             | ColumnType::Regclass
             | ColumnType::Regtype
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
             | ColumnType::Regrole
             | ColumnType::Regproc

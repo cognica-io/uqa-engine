@@ -116,17 +116,6 @@ pub fn prepare_added_attribute(
 /// `MaxHeapAttributeNumber`.
 pub const MAX_ATTRIBUTES: usize = 1600;
 
-/// The collations every `PostgreSQL` 18 database has, independently of the operating system and ICU: their names and OIDs.
-const BUILTIN_COLLATIONS: [(&str, i64); 7] = [
-    ("default", 100),
-    ("pg_c_utf8", 811),
-    ("C", 950),
-    ("POSIX", 951),
-    ("ucs_basic", 962),
-    ("unicode", 963),
-    ("pg_unicode_fast", 6411),
-];
-
 /// Whether values of a type carry a collation.
 #[must_use]
 pub fn type_is_collatable(ty: &ColumnType) -> bool {
@@ -142,14 +131,7 @@ pub fn type_is_collatable(ty: &ColumnType) -> bool {
     }
 }
 
-/// The `pg_collation` OID of a built-in collation name.
-#[must_use]
-pub fn builtin_collation_oid(name: &str) -> Option<i64> {
-    BUILTIN_COLLATIONS
-        .iter()
-        .find(|(collation, _)| *collation == name)
-        .map(|(_, oid)| *oid)
-}
+pub use crate::catalog::collations::builtin_collation_oid;
 
 /// `GetColumnDefCollation`: an explicit collation must exist and the type must be collatable. The canonical collation name is kept.
 fn attribute_collation(

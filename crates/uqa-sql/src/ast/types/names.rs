@@ -149,6 +149,7 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Regproc => f.write_str("regproc"),
             ColumnType::Regprocedure => f.write_str("regprocedure"),
             ColumnType::Regclass => f.write_str("regclass"),
+            ColumnType::Regcollation => f.write_str("regcollation"),
             ColumnType::Regnamespace => f.write_str("regnamespace"),
             ColumnType::Regrole => f.write_str("regrole"),
             ColumnType::Regtype => f.write_str("regtype"),

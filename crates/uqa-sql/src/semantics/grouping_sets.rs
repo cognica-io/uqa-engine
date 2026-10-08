@@ -407,6 +407,7 @@ fn input_requires_catalog(ty: &ColumnType) -> bool {
         | ColumnType::Regproc
         | ColumnType::Regprocedure
         | ColumnType::Regclass
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regrole
         | ColumnType::Regtype

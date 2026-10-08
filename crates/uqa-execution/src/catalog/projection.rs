@@ -352,9 +352,10 @@ use pg_settings::build_pg_settings;
 pub use regtypes::{
     format_type_object, named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,
     resolve_catalog_user_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
-    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regproc_input_oid,
-    resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid, resolve_regtype_output,
-    resolve_type_object_oid, row_type_relation, type_privilege_oid, RegtypeOutputCatalog,
+    resolve_regcollation_oid, resolve_regnamespace_oid, resolve_regobject_oid,
+    resolve_regproc_input_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid,
+    resolve_regtype_output, resolve_type_object_oid, row_type_relation, type_privilege_oid,
+    RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(

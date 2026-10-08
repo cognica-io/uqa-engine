@@ -174,6 +174,7 @@ declarations! { fn lookup_local(local);
             ColumnType::Regprocedure,
         )],
         "to_regclass" => &[Signature::new(&[ColumnType::Text], ColumnType::Regclass)],
+        "to_regcollation" => &[Signature::new(&[ColumnType::Text], ColumnType::Regcollation)],
         "to_regnamespace" => &[Signature::new(&[ColumnType::Text],
             ColumnType::Regnamespace,
         )],

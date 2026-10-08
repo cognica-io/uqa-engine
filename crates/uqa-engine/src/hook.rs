@@ -96,6 +96,13 @@ impl uqa_sql::expr::EngineHook for Engine {
         )
     }
 
+    fn resolve_regcollation(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regcollation_oid(
+            &self.catalog_execution(),
+            name,
+        )
+    }
+
     fn resolve_regobject(
         &self,
         ty: &uqa_sql::ast::ColumnType,
