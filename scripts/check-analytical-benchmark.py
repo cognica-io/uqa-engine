@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Validate analytical samples and report unqualified timing observations."""
+"""Validate analytical samples and optionally verify independent timing evidence."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ import statistics
 import subprocess
 import sys
 
+from performance_qualification import qualify
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "benchmarks" / "analytical" / "manifest.json"
@@ -31,6 +33,7 @@ BENCHMARK_SOURCES = [
     ROOT / "crates/uqa-engine/benches/analytical_comparison/backends.rs",
     ROOT / "crates/uqa-engine/benches/analytical_comparison/fixture.rs",
     ROOT / "scripts/check-analytical-benchmark.py",
+    ROOT / "scripts/performance_qualification.py",
     ROOT / "scripts/run-analytical-comparison.sh",
     ROOT / "scripts/run-analytical-regression.py",
 ]
@@ -139,12 +142,22 @@ def main() -> int:
     parser.add_argument("--baseline-revision")
     parser.add_argument("--head-executable", type=pathlib.Path)
     parser.add_argument("--baseline-executable", type=pathlib.Path)
+    parser.add_argument("--calibration", type=pathlib.Path)
+    parser.add_argument("--calibration-signature", type=pathlib.Path)
+    parser.add_argument("--run-attestation", type=pathlib.Path)
+    parser.add_argument("--run-signature", type=pathlib.Path)
+    parser.add_argument("--issuer-key", type=pathlib.Path)
+    parser.add_argument("--require-qualified", action="store_true")
     parser.add_argument(
         "--output",
         type=pathlib.Path,
         default=ROOT / "target/benchmark-runs/analytical-comparison.json",
     )
     args = parser.parse_args()
+    evidence = [args.calibration, args.calibration_signature, args.run_attestation,
+                args.run_signature, args.issuer_key]
+    if (any(evidence) or args.require_qualified) and not all(evidence):
+        raise RuntimeError("qualified timing requires calibration, run attestation, both signatures and issuer key")
     criterion_roots = args.criterion_root or [ROOT / "target/criterion"]
     baseline_roots = args.baseline_criterion_root or []
     if baseline_roots and len(baseline_roots) != len(criterion_roots):
@@ -251,7 +264,7 @@ def main() -> int:
 
     status = command("git", "status", "--porcelain")
     report = {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "manifest": str(MANIFEST_PATH.relative_to(ROOT)),
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
@@ -286,12 +299,18 @@ def main() -> int:
         "external_ratio_checks": external_ratios,
         "external_limits_met": not external_failed,
         "regression_ratio_checks": regression_ratios,
+        "regression_protocol": regression_protocol,
         "regression_limits_met": not regression_failed if baseline_roots else None,
         "timing_acceptance": False,
         "acceptance_status": "unqualified",
         "qualification_missing": ["controlled_host_evidence", "independent_noise_bound"],
         "independent_reproduction": False,
     }
+    if all(evidence):
+        try:
+            report.update(qualify(report, *evidence))
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
+            report.update(acceptance_status="invalid", qualification_error=str(error))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8"
@@ -310,13 +329,21 @@ def main() -> int:
             f"{gate['ratio']:.3f} <= {gate['maximum']:.3f}"
         )
     print(f"Benchmark provenance report: {args.output}")
-    print("UNQUALIFIED: no controlled-host evidence or independent noise bound; timing is diagnostic only")
-    return 0
+    if report["acceptance_status"] == "unqualified":
+        print("UNQUALIFIED: no controlled-host evidence or independent noise bound; timing is diagnostic only")
+        return 0
+    if report["acceptance_status"] == "invalid":
+        print(f"INVALID: {report['qualification_error']}", file=sys.stderr)
+        return 2
+    for gate in report["qualified_ratio_checks"]:
+        print(f"{gate['decision'].upper()} qualified {gate['benchmark']}: "
+              f"interval={gate['ratio_interval']} limit={gate['maximum']}")
+    return {"accepted": 0, "regression": 1, "inconclusive": 3}[report["acceptance_status"]]
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+    except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
         print(error, file=sys.stderr)
         raise SystemExit(2) from error

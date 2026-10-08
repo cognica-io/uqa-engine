@@ -85,7 +85,7 @@ class AnalyticalBenchmarkReportTest(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
             report = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(report["schema_version"], 4)
+            self.assertEqual(report["schema_version"], 5)
             self.assertFalse(report["timing_acceptance"])
             self.assertEqual(report["acceptance_status"], "unqualified")
             self.assertNotIn("passed", report)
