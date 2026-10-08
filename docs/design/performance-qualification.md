@@ -1,0 +1,19 @@
+# Controlled performance qualification
+
+The full objective remains resolution of the open performance issues, including controlled CI regression acceptance (#261), multi-process claim-table contention qualification (#266), the upstream SQLite page-cache build flag (#348), and the macOS harness-startup investigation (#125). Completing this verifier does not close the missing host, calibration or diagnostic evidence. Work proceeds in separate reviewable PRs and the unresolved requirements remain in their original issues.
+
+Current analytical reports preserve paired measurements but cannot consume evidence of a controlled host or an independently established noise bound. Add a conservative qualification interface without treating a matching machine description, clean checkout, repeated candidate runs or a successful correctness test as that evidence. A trusted controller must attest the run's actual exclusive resource control; a separately reviewed calibration must establish noise before the candidate run. The issuer's private key stays outside benchmark code and candidate worktrees. The controller's public verification key is an operator-controlled input, never selected by a candidate report.
+
+Two detached signed documents bind the evidence. The calibration identifies its host/environment, validity window, independently completed calibration, workload identity, exact benchmark inventory, reviewed regression limits, estimator-specific multiplicative noise factors and their confidence levels. The run attestation identifies the actual exclusive-control lease, measurement interval, the calibration digest, exact base/head revisions and executable digests, workload identity and digest of the measured paired observations. Signatures establish the trusted issuer and integrity; the issuer remains responsible for establishing control and noise with independent evidence. Neither document may be synthesized from candidate timings by the verifier.
+
+For a reported head/base ratio $r$, the independently established noise factor $n \ge 1$ bounds the corresponding ratio by $[r/n, rn]$ at the calibration's stated confidence. Given the reviewed regression limit $L$, accept only if $rn \le L$, reject a regression only if $r/n > L$, and otherwise report inconclusive. These cases follow directly from interval containment and preserve the original limit rather than increasing it to absorb noise. Non-finite arithmetic, absent or altered signatures, incomplete inventories, changed limits, mismatched workloads/binaries, expired evidence and overlapping calibration/candidate intervals must not establish acceptance. Confidence is reported per workload; no unproved joint confidence or general engine-wide speedup is claimed.
+
+- [ ] Implement and test signed calibration/run validation and the conservative ratio decision.
+- [ ] Connect qualified evidence to analytical reports while preserving unqualified diagnostics.
+- [ ] Provide the controlled-run invocation contract and CI integration without manual dispatch, fabricated calibration or uncontrolled timing runs.
+- [ ] Add a bounded independent-process contention workload for #266 and consume its actual qualified evidence before deciding on partitioned locking.
+- [ ] Obtain and verify authoritative controlled-host/noise evidence; keep #261 and #266 open until their actual acceptance criteria pass.
+- [ ] Resolve #348 through a dependency path that fixes downstream builds without breaking the existing public connection contract.
+- [ ] Reproduce #125 under its original build conditions and establish the startup cause before claiming a fix.
+
+Generated measurements, signatures and detailed controller evidence belong in ignored output directories or CI artifacts. Source control retains only verifier code, deterministic fixtures/expected results, reviewed limits and compact provenance references.
