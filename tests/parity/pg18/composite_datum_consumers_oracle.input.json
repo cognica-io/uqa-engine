@@ -195,6 +195,54 @@
     {
       "id": "malformed_cleanup",
       "sql": "DROP TYPE datum_bad CASCADE"
+    },
+    {
+      "id": "json_datum_setup",
+      "sql": "CREATE TYPE datum_json AS(a text,b integer); PREPARE datum_json_p AS SELECT '(hello,7)'::datum_json; PREPARE datum_json_to_json AS SELECT to_json('(hello,7)'::datum_json)"
+    },
+    {
+      "id": "json_datum_alter",
+      "sql": "BEGIN; ALTER TYPE datum_json ALTER ATTRIBUTE a TYPE json"
+    },
+    {
+      "id": "json_datum_output",
+      "sql": "EXECUTE datum_json_p"
+    },
+    {
+      "id": "json_datum_to_json",
+      "sql": "EXECUTE datum_json_to_json"
+    },
+    {
+      "id": "json_datum_rollback",
+      "sql": "ROLLBACK; EXECUTE datum_json_p"
+    },
+    {
+      "id": "json_datum_cleanup",
+      "sql": "DEALLOCATE datum_json_p; DEALLOCATE datum_json_to_json; DROP TYPE datum_json"
+    },
+    {
+      "id": "json_to_text_setup",
+      "sql": "CREATE TYPE datum_json_text AS(a json,b integer); PREPARE datum_json_text_p AS SELECT '(\"{\"\"a\"\":1}\",9)'::datum_json_text; ALTER TYPE datum_json_text ALTER ATTRIBUTE a TYPE text"
+    },
+    {
+      "id": "json_to_text_output",
+      "sql": "EXECUTE datum_json_text_p"
+    },
+    {
+      "id": "json_to_text_cleanup",
+      "sql": "DEALLOCATE datum_json_text_p; DROP TYPE datum_json_text"
+    },
+    {
+      "id": "numeric_to_binary_setup",
+      "sql": "CREATE TYPE datum_numeric_bytes AS(a numeric,b integer); PREPARE datum_numeric_bytes_p AS SELECT '(12.34,8)'::datum_numeric_bytes; ALTER TYPE datum_numeric_bytes ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "numeric_to_binary_output",
+      "sql": "EXECUTE datum_numeric_bytes_p"
+    },
+    {
+      "id": "numeric_to_binary_cleanup",
+      "sql": "DEALLOCATE datum_numeric_bytes_p; DROP TYPE datum_numeric_bytes"
     }
   ]
 }

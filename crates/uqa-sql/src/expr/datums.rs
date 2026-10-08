@@ -51,7 +51,7 @@ pub fn read_with_control(
             let (bytes, memory) = output.finish()?.into_parts();
             Ok(control.finish(Value::Bytes(bytes), memory)?)
         }
-        25 | 1042 | 1043 | 1790 => {
+        25 | 114 | 1042 | 1043 | 1790 => {
             let text = std::str::from_utf8(bytes).map_err(|error| SQLError::Routine {
                 sqlstate: "22021".into(),
                 message: format!(
@@ -60,10 +60,10 @@ pub fn read_with_control(
                 ),
             })?;
             let (text, memory) = control.copy_text(text)?.into_parts();
-            let value = if datum.type_oid() == 1042 {
-                Value::FixedChar(text)
-            } else {
-                Value::Str(text)
+            let value = match datum.type_oid() {
+                114 => Value::Json(text),
+                1042 => Value::FixedChar(text),
+                _ => Value::Str(text),
             };
             Ok(control.finish(value, memory)?)
         }

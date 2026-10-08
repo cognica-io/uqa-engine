@@ -19,6 +19,7 @@ fn physical_scalar_headers_preserve_short_and_uncompressed_payloads() {
     for (oid, expected) in [
         (25, Value::Str("aé".into())),
         (17, Value::Bytes("aé".as_bytes().to_vec())),
+        (114, Value::Json("aé".into())),
     ] {
         let mut short = vec![9];
         short.extend_from_slice("aé".as_bytes());
@@ -28,6 +29,20 @@ fn physical_scalar_headers_preserve_short_and_uncompressed_payloads() {
             assert_eq!(read(&DatumValue::new(oid, 0, bytes)).unwrap(), expected);
         }
     }
+}
+
+#[test]
+fn retained_json_payload_is_not_revalidated_by_type_output() {
+    let retained = Value::Datum(DatumValue::new(
+        114,
+        0,
+        vec![13, b'h', b'e', b'l', b'l', b'o'],
+    ));
+    let record = Value::Record(vec![("a".into(), retained), ("b".into(), Value::Int(7))]);
+    assert_eq!(
+        crate::expr::eval_scalar_function("to_json", &[record]).unwrap(),
+        Value::Json("{\"a\":hello,\"b\":7}".into())
+    );
 }
 
 #[test]

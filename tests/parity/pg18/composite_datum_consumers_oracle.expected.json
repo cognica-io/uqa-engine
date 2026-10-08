@@ -1266,6 +1266,298 @@
         }
       ],
       "id": "malformed_cleanup"
+    },
+    {
+      "id": "json_datum_setup",
+      "sql": "CREATE TYPE datum_json AS(a text,b integer); PREPARE datum_json_p AS SELECT '(hello,7)'::datum_json; PREPARE datum_json_to_json AS SELECT to_json('(hello,7)'::datum_json)",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "json_datum_alter",
+      "sql": "BEGIN; ALTER TYPE datum_json ALTER ATTRIBUTE a TYPE json",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "json_datum_output",
+      "sql": "EXECUTE datum_json_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "datum_json"
+          ],
+          "type_oids": [
+            18819
+          ],
+          "rows": [
+            [
+              "(hello,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "json_datum_to_json",
+      "sql": "EXECUTE datum_json_to_json",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_json"
+          ],
+          "type_oids": [
+            114
+          ],
+          "rows": [
+            [
+              "{\"a\":hello,\"b\":7}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "json_datum_rollback",
+      "sql": "ROLLBACK; EXECUTE datum_json_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "datum_json"
+          ],
+          "type_oids": [
+            18819
+          ],
+          "rows": [
+            [
+              "(hello,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "json_datum_cleanup",
+      "sql": "DEALLOCATE datum_json_p; DEALLOCATE datum_json_to_json; DROP TYPE datum_json",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "json_to_text_setup",
+      "sql": "CREATE TYPE datum_json_text AS(a json,b integer); PREPARE datum_json_text_p AS SELECT '(\"{\"\"a\"\":1}\",9)'::datum_json_text; ALTER TYPE datum_json_text ALTER ATTRIBUTE a TYPE text",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "json_to_text_output",
+      "sql": "EXECUTE datum_json_text_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "datum_json_text"
+          ],
+          "type_oids": [
+            18822
+          ],
+          "rows": [
+            [
+              "(\"{\"\"a\"\":1}\",9)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "json_to_text_cleanup",
+      "sql": "DEALLOCATE datum_json_text_p; DROP TYPE datum_json_text",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "numeric_to_binary_setup",
+      "sql": "CREATE TYPE datum_numeric_bytes AS(a numeric,b integer); PREPARE datum_numeric_bytes_p AS SELECT '(12.34,8)'::datum_numeric_bytes; ALTER TYPE datum_numeric_bytes ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "numeric_to_binary_output",
+      "sql": "EXECUTE datum_numeric_bytes_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "datum_numeric_bytes"
+          ],
+          "type_oids": [
+            18825
+          ],
+          "rows": [
+            [
+              "(\"\\\\x00810c00480d\",8)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "numeric_to_binary_cleanup",
+      "sql": "DEALLOCATE datum_numeric_bytes_p; DROP TYPE datum_numeric_bytes",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
     }
   ]
 }
