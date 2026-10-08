@@ -26,15 +26,19 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_main_push_seeds_only_cache_identity_changes(self) -> None:
+    def test_main_push_validates_source_and_test_changes(self) -> None:
         expected_trigger = (
             "  push:\n"
             "    branches: [main]\n"
             "    paths:\n"
             "      - Cargo.toml\n"
             "      - Cargo.lock\n"
-            '      - "crates/*/Cargo.toml"\n'
-            '      - "examples/rust/*/Cargo.toml"\n'
+            '      - "crates/**"\n'
+            '      - "examples/rust/**"\n'
+            '      - "tests/**"\n'
+            '      - "scripts/**"\n'
+            '      - "benchmarks/**"\n'
+            '      - ".github/scripts/**"\n'
             "      - rust-toolchain.toml\n"
             '      - ".cargo/**"\n'
             "      - .github/workflows/ci.yml\n"
@@ -48,7 +52,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
 
         self.assertEqual(push_trigger, expected_trigger)
 
-    def test_rust_jobs_run_for_main_seed_or_selected_dispatch(self) -> None:
+    def test_rust_jobs_run_for_main_push_or_selected_dispatch(self) -> None:
         condition = (
             "if: ${{ github.event_name == 'push' || "
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
