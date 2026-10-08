@@ -22,6 +22,8 @@ pub struct CompositeCatalogValueContext<'a> {
     pub indexes: IndexRoutineContext<'a>,
     pub index_publication: &'a dyn IndexRegistryPublication,
     pub types: &'a dyn uqa_sql::type_resolution::FunctionTypeResolver,
+    pub bindings: &'a dyn uqa_sql::routines::compilation::RoutineCompilationCatalog,
+    pub resolution: &'a dyn uqa_sql::routines::RoutineResolution,
 }
 
 fn storage(error: impl std::fmt::Display) -> SQLError {
@@ -72,12 +74,18 @@ fn tables(
             changed |= change.spec(spec)?;
         }
         if changed {
-            table
-                .persist_candidate(&columns, &constraints)
-                .map_err(storage)?;
+            if change.rename.is_some() {
+                table.persist_expression_names(&columns, &constraints)
+            } else {
+                table.persist_candidate(&columns, &constraints)
+            }
+            .map_err(storage)?;
             updates.push((position, columns, constraints));
-            let relation = uqa_core::RelationIdentity::from_legacy_name(name).map_err(storage)?;
-            context.changes.prepared_relation_changed(&relation);
+            if change.rename.is_none() {
+                let relation =
+                    uqa_core::RelationIdentity::from_legacy_name(name).map_err(storage)?;
+                context.changes.prepared_relation_changed(&relation);
+            }
         }
     }
     if !updates.is_empty() {
@@ -121,6 +129,10 @@ fn domains(
     let mut next = before.clone();
     let mut changed = false;
     for domain in next.values_mut() {
+        let schema = uqa_sql::RowSchema::with_types(
+            vec!["value".into()],
+            vec![Some(domain.definition.base.clone())],
+        );
         for expression in domain.definition.default.iter_mut().chain(
             domain
                 .definition
@@ -128,7 +140,7 @@ fn domains(
                 .iter_mut()
                 .map(|check| &mut check.expression),
         ) {
-            changed |= change.expression(expression)?;
+            changed |= change.expression_in_schema(expression, &schema)?;
         }
     }
     if changed {
@@ -150,18 +162,31 @@ fn events(
         .flat_map(|entries| entries.values_mut())
     {
         if let Some(expression) = &mut trigger.definition.when {
-            triggers_changed |= change.expression(expression)?;
+            let schema = change
+                .rename
+                .map_or(Ok(uqa_sql::RowSchema::default()), |rename| {
+                    rename.transition_schema(&trigger.definition.table)
+                })?;
+            triggers_changed |= change.expression_in_schema(expression, &schema)?;
         }
     }
     for rule in rules.values_mut().flat_map(|entries| entries.values_mut()) {
+        let schema = change
+            .rename
+            .map_or(Ok(uqa_sql::RowSchema::default()), |rename| {
+                rename.transition_schema(&rule.definition.table)
+            })?;
         if let Some(expression) = &mut rule.definition.condition {
-            rules_changed |= change.expression(expression)?;
+            rules_changed |= change.expression_in_schema(expression, &schema)?;
         }
         if let Some(plan) = &mut rule.condition_plan {
+            if let Some(rename) = change.rename {
+                rules_changed |= rename.expression_plan(plan, &schema)?;
+            }
             rules_changed |= change.expression_plan(plan)?;
         }
         for statement in &mut rule.definition.actions {
-            rules_changed |= change.statement(statement)?;
+            rules_changed |= change.statement_in_scope(statement, None, Some(&schema))?;
         }
     }
     if triggers_changed {
@@ -186,17 +211,22 @@ fn indexes(
     let mut updates = Vec::new();
     let rows = context.indexes.registry.routine_index_rows();
     for row in rows.values() {
+        let schema = change
+            .rename
+            .map_or(Ok(uqa_sql::RowSchema::default()), |rename| {
+                rename.relation_schema(&row.table_name)
+            })?;
         let mut keys: Vec<uqa_sql::ast::IndexKey> =
             serde_json::from_str(&row.columns_json).map_err(storage)?;
         let mut definition = crate::catalog::index::index_definition(row).map_err(storage)?;
         let mut changed = false;
         for key in &mut keys {
             if let uqa_sql::ast::IndexKey::Expression(expression) = key {
-                changed |= change.expression(expression)?;
+                changed |= change.expression_in_schema(expression, &schema)?;
             }
         }
         if let Some(predicate) = &mut definition.predicate {
-            changed |= change.expression(predicate)?;
+            changed |= change.expression_in_schema(predicate, &schema)?;
         }
         if changed {
             let mut row = row.clone();
@@ -209,7 +239,14 @@ fn indexes(
     for row in updates {
         context
             .index_publication
-            .persist_index(&row)
+            .persist_index(
+                &row,
+                if change.rename.is_some() {
+                    crate::schema::indexes::registry::IndexPublicationKind::Names
+                } else {
+                    crate::schema::indexes::registry::IndexPublicationKind::Definition
+                },
+            )
             .map_err(storage)?;
         tables.insert(row.table_name.clone());
         context.index_publication.publish_index(row);

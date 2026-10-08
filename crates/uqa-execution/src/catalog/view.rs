@@ -39,6 +39,7 @@ pub trait ViewIdentityAllocation {
 pub trait ViewPublication: ViewRegistryState {
     fn has_catalog(&self) -> bool;
     fn save_view(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
+    fn save_view_expression_names(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
 }
 
 pub mod restoration;

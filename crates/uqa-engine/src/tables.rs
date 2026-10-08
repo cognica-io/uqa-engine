@@ -12,6 +12,7 @@ use super::{
     VectorIndexOpenMode, VectorIndexSpec,
 };
 use crate::state::BoundTableSecurity;
+use uqa_execution::catalog::definition_revision::TablePublicationKind;
 
 impl Engine {
     pub(crate) fn is_persistent(&self) -> bool {
@@ -73,12 +74,35 @@ impl Engine {
         constraints: &uqa_sql::ast::TableConstraintSet,
         security: &crate::state::BoundTableSecurity,
     ) -> StorageBackendResult<()> {
+        self.try_save_table_schema_candidate(
+            name,
+            table,
+            columns,
+            constraints,
+            security,
+            TablePublicationKind::Definition,
+        )
+    }
+
+    pub(crate) fn try_save_table_schema_candidate(
+        &self,
+        name: &str,
+        table: &TableState,
+        columns: &[uqa_sql::ast::ColumnDef],
+        constraints: &uqa_sql::ast::TableConstraintSet,
+        security: &crate::state::BoundTableSecurity,
+        kind: TablePublicationKind,
+    ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            self.note_prepared_table_change(table);
+            if kind == TablePublicationKind::Definition {
+                self.note_prepared_table_change(table);
+            }
             return Ok(());
         }
         let Some(catalog) = self.storage.catalog.as_ref() else {
-            self.note_prepared_table_change(table);
+            if kind == TablePublicationKind::Definition {
+                self.note_prepared_table_change(table);
+            }
             return Ok(());
         };
         let analyzer_json =
@@ -116,7 +140,13 @@ impl Engine {
             constraints_json,
         })?;
         self.note_table_catalog_changed();
-        self.note_prepared_table_change(table);
+        if kind == TablePublicationKind::Definition {
+            uqa_execution::catalog::definition_revision::publish_table(
+                catalog.as_ref(),
+                table.object_id(),
+            )?;
+            self.note_prepared_table_change(table);
+        }
         Ok(())
     }
 

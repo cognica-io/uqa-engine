@@ -17,6 +17,7 @@ mod command_scopes;
 mod commands;
 pub mod composite_dependencies;
 mod composite_inputs;
+pub mod composite_rename;
 mod cte_controls;
 mod ctes;
 mod dependencies;

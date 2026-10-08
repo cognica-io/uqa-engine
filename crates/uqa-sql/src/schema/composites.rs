@@ -11,6 +11,24 @@ use crate::catalog::composite_type::StoredCompositeAttribute;
 use crate::type_resolution::{resolve_declared_column_type, FunctionTypeResolver};
 use crate::SQLError;
 
+/// `renameatt_internal` checks the source before the destination; standalone composites have no system attributes.
+pub fn validate_renamed_attribute(
+    definition: &crate::catalog::composite_type::StoredComposite,
+    from: &str,
+    to: &str,
+) -> Result<(), SQLError> {
+    super::columns::renamed_column_position(
+        &definition.identity.name,
+        definition
+            .live_attributes()
+            .map(|attribute| attribute.name.as_str()),
+        from,
+        to,
+        false,
+    )
+    .map(|_| ())
+}
+
 /// Resolve a live composite attribute before dependency traversal. Composite relations have no system columns.
 pub fn validate_removed_attribute(
     definition: &crate::catalog::composite_type::StoredComposite,

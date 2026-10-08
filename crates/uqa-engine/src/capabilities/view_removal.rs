@@ -39,11 +39,24 @@ impl ViewRemovalEvents for Engine {
     }
 }
 impl ViewRemovalPublication for Engine {
-    fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<Option<bool>> {
+    fn drop_view(
+        &self,
+        relation: &RelationIdentity,
+        object: Option<[u8; 16]>,
+    ) -> StorageBackendResult<Option<bool>> {
         self.storage
             .catalog
             .as_ref()
-            .map(|catalog| catalog.drop_view(relation))
+            .map(|catalog| {
+                let removed = catalog.drop_view(relation)?;
+                if let Some(object) = object {
+                    uqa_execution::catalog::definition_revision::remove_view(
+                        catalog.as_ref(),
+                        object,
+                    )?;
+                }
+                Ok(removed)
+            })
             .transpose()
     }
 }

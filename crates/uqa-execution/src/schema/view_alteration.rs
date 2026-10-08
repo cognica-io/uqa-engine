@@ -27,6 +27,9 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 
+mod columns;
+pub use columns::{ViewColumnRenameContext, ViewColumnRenameInputs};
+
 pub use crate::catalog::view::ViewRegistryWrite;
 
 pub trait ViewAlterCatalog {
@@ -53,6 +56,7 @@ pub struct ViewAlterContext<'a> {
     pub locks: &'a dyn RelationDefinitionSession,
     pub roles: RoleTransferContext<'a>,
     pub dependencies: &'a dyn RelationRenameDependencies,
+    pub column_dependencies: &'a dyn ViewColumnRenameInputs,
     pub publication: &'a dyn ViewAlterPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
     pub rewrite: ViewRewriteContext<'a>,
@@ -138,6 +142,9 @@ fn execute_alter_view(
         AlterViewAction::OwnerTo(_) => unreachable!("owner changes prepare their role dependency"),
         AlterViewAction::RenameTo(new_name) => {
             return rename_view(context, relation, new_name, expected_kind);
+        }
+        AlterViewAction::RenameColumn { from, to } => {
+            return columns::rename(context, relation, expected_kind, view, from, to);
         }
         AlterViewAction::SetSchema(schema) => {
             if let Some(target) = context

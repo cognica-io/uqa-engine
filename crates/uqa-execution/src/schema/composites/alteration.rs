@@ -95,7 +95,10 @@ fn resolve(
         .ok_or_else(|| SQLError::Internal("composite definition disappeared during binding".into()))
 }
 
-fn bind(context: &CompositeAlterationContext<'_>, name: &str) -> Result<StoredComposite, SQLError> {
+pub(super) fn bind(
+    context: &CompositeAlterationContext<'_>,
+    name: &str,
+) -> Result<StoredComposite, SQLError> {
     loop {
         let initial = resolve(context, name)?;
         // Type lifecycle and dependency deletion use this immutable address as well.

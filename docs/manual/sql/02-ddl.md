@@ -217,6 +217,24 @@ ALTER TYPE shipping_address DROP ATTRIBUTE zip;
 SELECT id, destination, (destination).city FROM shipments ORDER BY id;
 ```
 
+### Renaming composite attributes
+
+```sql
+ALTER TYPE schema_name.type_name RENAME ATTRIBUTE old_name TO new_name;
+ALTER TYPE schema_name.type_name RENAME ATTRIBUTE old_name TO new_name RESTRICT;
+```
+
+The type and both attribute names are identifiers. The command returns `ALTER TYPE` and changes the live field's name while preserving its attribute number, type and value. Stored records, nested arrays and domains, views, defaults, checks, expression indexes, SQL-standard routine bodies, rules and triggers continue to refer to the same field. Same-named fields on other types are unchanged. Text routine bodies remain late-bound and must use the name visible when their statements are analyzed.
+
+Prepared field selectors retain their original attribute numbers across renames. Renaming a field or its existing expression index does not reanalyze a prepared table query; adding or removing an index still triggers PostgreSQL's ordinary relation reanalysis, which can reject a source query that writes the old field name. Descriptor publication, stored values and dependency changes share statement and transaction rollback and persistent restoration.
+
+Target lookup and ownership precede attribute checks. A missing target reports `42P01`, a non-owner `42501`, a missing source attribute `42703` and an existing destination name `42701`; renaming a field to its own name is also `42701`. Dropped slots do not reserve live field names. Standalone composites and views allow field names such as `ctid`. PostgreSQL also accepts this `ALTER TYPE` spelling for ordinary table and view columns; view columns additionally accept `ALTER VIEW ... RENAME COLUMN`. A sequence rejects column renaming with `42809` and its relation-kind DETAIL.
+
+```sql execute
+ALTER TYPE shipping_address RENAME ATTRIBUTE city TO locality;
+SELECT id, destination, (destination).locality FROM shipments ORDER BY id;
+```
+
 ## Type lifecycle and privileges
 
 ```sql

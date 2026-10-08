@@ -48,6 +48,42 @@ fn definition() -> StoredComposite {
         }],
     }
 }
+
+#[test]
+fn rename_checks_live_source_before_destination_and_keeps_system_names_available() {
+    let mut definition = definition();
+    let error = validate_renamed_attribute(&definition, "missing", "a").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42703"));
+    assert_eq!(error.to_string(), "column \"missing\" does not exist");
+    let error = validate_renamed_attribute(&definition, "a", "a").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42701"));
+    validate_renamed_attribute(&definition, "a", "ctid").unwrap();
+    definition.attributes[0].dropped = true;
+    assert_eq!(
+        validate_renamed_attribute(&definition, "a", "ctid")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42703")
+    );
+}
+
+#[test]
+fn rename_attribute_lowering_retains_quoted_names_and_type_command_tag() {
+    let Statement::AlterTypeObject(statement) = crate::compile(
+        "ALTER TYPE public.pair RENAME ATTRIBUTE \"Old Field\" TO \"New Field\" CASCADE",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("type rename")
+    };
+    assert_eq!(statement.kind, crate::ast::TypeObjectKind::Type);
+    assert_eq!(statement.name, "public.pair");
+    let AlterTypeObjectAction::RenameAttribute { from, to } = statement.action else {
+        panic!("attribute rename")
+    };
+    assert_eq!(from, "Old Field");
+    assert_eq!(to, "New Field");
+}
 fn addition(sql: &str) -> CompositeAttributeAddition {
     let Statement::AlterTypeObject(statement) = crate::compile(sql).unwrap().remove(0) else {
         panic!("ALTER TYPE")

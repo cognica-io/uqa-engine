@@ -84,7 +84,11 @@ impl ViewRemovalEvents for Fixture {
     }
 }
 impl ViewRemovalPublication for Fixture {
-    fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<Option<bool>> {
+    fn drop_view(
+        &self,
+        relation: &RelationIdentity,
+        _: Option<[u8; 16]>,
+    ) -> StorageBackendResult<Option<bool>> {
         assert_eq!(relation, &RelationIdentity::new("public", "v"));
         assert!(
             self.views.try_borrow().is_err(),

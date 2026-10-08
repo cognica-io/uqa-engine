@@ -8,9 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Rename composite attributes while preserving field identities, nested values, stored SQL references, prepared selectors and transaction rollback.
+
 - Remove composite attributes with PostgreSQL DROP ATTRIBUTE semantics, including mixed ADD/DROP order, stable surviving field identities, retained constructor effects, nested stored values and atomic rollback across all storage providers.
 
 ### Fixed
+
+- Support view column renames through the existing relation lifecycle while preserving stored row-type values and dependencies; retain PostgreSQL expression-index parentheses and avoid reparsing prepared queries when only stored field names or index names change. Dropping an absent column default preserves analyzed inputs.
 
 - Record composite field dependencies in views, checks, indexes, SQL-standard routines, rules and triggers so RESTRICT protects their definitions and CASCADE removes dependent objects, including definitions restored from existing databases.
 

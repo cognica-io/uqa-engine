@@ -20,6 +20,38 @@ pub fn validate_postgres_column_name(name: &str) -> Result<(), SQLError> {
     Ok(())
 }
 
+/// `renameatt_internal`: find the original live attribute before checking the destination. Views and standalone composite relations have no system attributes.
+pub fn renamed_column_position<'a>(
+    relation: &str,
+    columns: impl IntoIterator<Item = &'a str>,
+    from: &str,
+    to: &str,
+    has_system_columns: bool,
+) -> Result<usize, SQLError> {
+    let mut position = None;
+    let mut duplicate = false;
+    for (index, column) in columns.into_iter().enumerate() {
+        if column == from {
+            position = Some(index);
+        }
+        duplicate |= column == to;
+    }
+    let position = position.ok_or_else(|| SQLError::Routine {
+        sqlstate: "42703".into(),
+        message: format!("column \"{from}\" does not exist"),
+    })?;
+    if has_system_columns {
+        validate_postgres_column_name(to)?;
+    }
+    if duplicate {
+        return Err(SQLError::Routine {
+            sqlstate: "42701".into(),
+            message: format!("column \"{to}\" of relation \"{relation}\" already exists"),
+        });
+    }
+    Ok(position)
+}
+
 /// `column "x" of relation "t" does not exist`, which `ALTER TABLE` reports for a column the relation lacks.
 pub fn undefined_relation_column(table: &str, column: &str) -> SQLError {
     match uqa_core::RelationIdentity::from_legacy_name(table) {

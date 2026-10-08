@@ -58,6 +58,8 @@ impl Engine {
                     },
                     index_publication: self,
                     types: self,
+                    bindings: self,
+                    resolution: self,
                 },
         }
     }

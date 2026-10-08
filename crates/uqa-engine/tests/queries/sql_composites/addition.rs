@@ -7,7 +7,7 @@
 use uqa_engine::Engine;
 
 #[path = "addition_restoration.rs"]
-mod restoration;
+pub(super) mod restoration;
 
 pub(super) fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {

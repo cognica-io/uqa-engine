@@ -17,12 +17,20 @@ struct Publication {
 }
 
 impl IndexRegistryPublication for Publication {
-    fn persist_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()> {
+    fn persist_index(
+        &self,
+        row: &CatalogIndexRow,
+        _: crate::schema::indexes::registry::IndexPublicationKind,
+    ) -> StorageBackendResult<()> {
         self.persisted.borrow_mut().push(row.clone());
         Ok(())
     }
 
-    fn erase_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()> {
+    fn erase_index(
+        &self,
+        row: &CatalogIndexRow,
+        _: crate::schema::indexes::registry::IndexPublicationKind,
+    ) -> StorageBackendResult<()> {
         self.removed.borrow_mut().push(row.relation.clone());
         Ok(())
     }

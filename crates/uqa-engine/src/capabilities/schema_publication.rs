@@ -182,6 +182,20 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             constraints,
         )
     }
+    fn persist_expression_names(
+        &self,
+        columns: &[ColumnDef],
+        constraints: &TableConstraintSet,
+    ) -> StorageBackendResult<()> {
+        self.engine.try_save_table_schema_candidate(
+            &self.name,
+            &self.state,
+            columns,
+            constraints,
+            &self.state.security(),
+            uqa_execution::catalog::definition_revision::TablePublicationKind::ExpressionNames,
+        )
+    }
     fn publish_columns(
         &self,
         columns_declared: bool,
@@ -332,10 +346,7 @@ impl uqa_execution::schema::sequences::dependencies::ViewCatalogPublication for 
         self.storage.catalog.is_some()
     }
     fn save_view_row(&self, row: &uqa_storage::ViewRow) -> StorageBackendResult<()> {
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.save_view(row)?;
-        }
-        Ok(())
+        uqa_execution::catalog::view::ViewPublication::save_view(self, row)
     }
     fn publish_views(
         &self,

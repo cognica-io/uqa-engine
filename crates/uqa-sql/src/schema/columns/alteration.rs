@@ -90,13 +90,11 @@ pub fn validate_default_removal(
     context: &ColumnAlterAnalysisContext<'_>,
     table: &str,
     column: &str,
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     let columns = described_columns(context, table, "ALTER COLUMN DROP DEFAULT")?;
-    super::validate_default_change(
-        table,
-        super::altered_column(table, &columns, column)?,
-        false,
-    )
+    let column = super::altered_column(table, &columns, column)?;
+    super::validate_default_change(table, column, false)?;
+    Ok(column.default.is_some())
 }
 fn not_generated(table: &str, column: &str) -> Result<String, SQLError> {
     let relation = uqa_core::RelationIdentity::from_legacy_name(table).map_err(|error| {

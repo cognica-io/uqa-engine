@@ -105,6 +105,7 @@ pub fn index_key_definition(
                 if !binding.as_ref().is_some_and(|binding| matches!(binding.dispatch,
                     Some(uqa_sql::ast::FunctionDispatch::ArraySubscripts
                         | uqa_sql::ast::FunctionDispatch::ArraySlices
+                        | uqa_sql::ast::FunctionDispatch::FieldSelect
                         | uqa_sql::ast::FunctionDispatch::NumericOperator(_)))))
             {
                 Ok(sql)

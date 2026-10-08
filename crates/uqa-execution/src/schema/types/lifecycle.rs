@@ -53,7 +53,9 @@ pub fn alter_type_object(
         AlterTypeObjectAction::OwnerTo(owner) => {
             set_owner(context, statement.kind, &statement.name, &owner)
         }
-        AlterTypeObjectAction::AddAttributes(_) | AlterTypeObjectAction::AlterAttributes { .. } => {
+        AlterTypeObjectAction::AddAttributes(_)
+        | AlterTypeObjectAction::AlterAttributes { .. }
+        | AlterTypeObjectAction::RenameAttribute { .. } => {
             unreachable!("attribute changes bind before writer admission")
         }
     }

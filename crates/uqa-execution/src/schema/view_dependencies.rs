@@ -70,7 +70,7 @@ pub fn rewrite_view_routine_identity(
     let mut next = (**views).clone();
     drop(views);
     let changed = analysis::rewrite_view_routine_identity(&mut next, target, new_name);
-    publish_rewritten_views(context, next, &changed)
+    publish_rewritten_views(context, next, &changed, false)
 }
 
 /// Views embed the catalog names of the user-defined types they bind; a rename or schema move rewrites them.
@@ -84,7 +84,7 @@ pub fn rewrite_view_type_references(
     let mut next = (**views).clone();
     drop(views);
     let changed = analysis::rewrite_view_type_references(&mut next, oid, identity);
-    publish_rewritten_views(context, next, &changed)
+    publish_rewritten_views(context, next, &changed, false)
 }
 
 /// Materialized views store their rows, so a composite type's attribute change rewrites the stored values of the type in each column whose declared type holds it.
@@ -134,13 +134,14 @@ pub fn rewrite_materialized_composite_values(
         }
         changed.push(relation.clone());
     }
-    publish_rewritten_views(context, next, &changed).map_err(storage)
+    publish_rewritten_views(context, next, &changed, constants.rename.is_some()).map_err(storage)
 }
 
 fn publish_rewritten_views(
     context: &ViewDependencyContext<'_>,
     next: std::collections::BTreeMap<RelationIdentity, uqa_sql::catalog::stored_view::StoredView>,
     changed: &[RelationIdentity],
+    expression_names: bool,
 ) -> StorageBackendResult<()> {
     if changed.is_empty() {
         return Ok(());
@@ -154,14 +155,17 @@ fn publish_rewritten_views(
                 ))
             })?;
             if view.persistence != RelationPersistence::Temporary {
-                context
-                    .publication
-                    .save_view(&catalog_view_row(relation, view)?)?;
+                let row = catalog_view_row(relation, view)?;
+                if expression_names {
+                    context.publication.save_view_expression_names(&row)?;
+                } else {
+                    context.publication.save_view(&row)?;
+                }
             }
         }
     }
     for relation in changed {
-        if let Some(view) = next.get(relation) {
+        if let Some(view) = next.get(relation).filter(|_| !expression_names) {
             context.changes.prepared_catalog_changed(
                 crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                     view.relation_oids().relation,

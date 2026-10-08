@@ -32,7 +32,7 @@ pub fn rewrite_composite_constants(
         }
         if let FunctionBody::Statements(statements) = &mut definition.body {
             for statement in statements {
-                revised |= change.statement(statement)?;
+                revised |= change.statement_in_scope(statement, Some(&routine.def), None)?;
             }
         }
         if !revised {
@@ -42,11 +42,18 @@ pub fn rewrite_composite_constants(
         if let RoutineBody::Bound(compiled) = &mut body {
             if let CompiledFunctionBody::SQL(plans) = Arc::make_mut(compiled) {
                 for plan in plans {
+                    if let Some(rename) = change.rename {
+                        rename.bind_routine_plan(plan, &routine.def)?;
+                    }
                     change.plan(plan)?;
                 }
             }
         }
-        *routine = super::revision::replacement(definition, body)?;
+        *routine = if change.rename.is_some() {
+            Arc::new(uqa_sql::routines::SQLUserFunction::new(definition, body))
+        } else {
+            super::revision::replacement(definition, body)?
+        };
         changed = true;
     }
     if changed {

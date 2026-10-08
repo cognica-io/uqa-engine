@@ -23,6 +23,7 @@ struct RelationRevision {
     acl: Option<uqa_core::catalog_acl::RelationAclRevisions>,
     record_names: Vec<(RelationKind, RelationIdentity)>,
     records: Option<Vec<Option<CatalogRecordRevision>>>,
+    indexes: Vec<[u8; 16]>,
 }
 
 struct RelationDependency {
@@ -75,15 +76,15 @@ pub(super) fn capture(
     Ok(result)
 }
 
-struct SelectedRelations<'a> {
+struct SelectedRelations {
     objects: Vec<RelationDependency>,
-    indexes: BTreeMap<String, Vec<&'a RelationIdentity>>,
+    indexes: BTreeMap<String, Vec<[u8; 16]>>,
 }
 
-fn select_relations<'a>(
-    catalog: &'a CatalogReadView,
+fn select_relations(
+    catalog: &CatalogReadView,
     dependencies: &PreparedAnalysisDependencies,
-) -> Result<SelectedRelations<'a>, SQLError> {
+) -> Result<SelectedRelations, SQLError> {
     let snapshot = catalog.snapshot();
     let mut selected = Vec::new();
     let mut include = |oid: i64, relation: &RelationIdentity, kind, object, acl| {
@@ -159,7 +160,7 @@ fn select_relations<'a>(
         indexes
             .entry(row.table_name.clone())
             .or_insert_with(Vec::new)
-            .push(relation);
+            .push(identity.identity.object_id);
     }
     Ok(SelectedRelations {
         objects: selected,
@@ -169,27 +170,28 @@ fn select_relations<'a>(
 
 fn read_selected_relations(
     catalog: &CatalogReadView,
-    selected: SelectedRelations<'_>,
+    selected: SelectedRelations,
 ) -> Result<BTreeMap<u32, Option<PreparedDependencyRevision>>, SQLError> {
     let SelectedRelations {
         objects: selected,
         indexes,
     } = selected;
+    let definition_keys: Vec<_> = selected
+        .iter()
+        .map(|dependency| match dependency.kind {
+            RelationKind::Table => Some(super::definition_revision::table_key(dependency.object)),
+            RelationKind::View => Some(super::definition_revision::view_key(dependency.object)),
+            _ => None,
+        })
+        .collect();
     let mut records = Vec::new();
     let mut ranges = Vec::new();
-    for dependency in &selected {
+    for (dependency, key) in selected.iter().zip(&definition_keys) {
         let start = records.len();
-        records.push(CatalogRecordRef::Relation(
-            dependency.kind,
-            &dependency.relation,
+        records.push(key.as_ref().map_or(
+            CatalogRecordRef::Relation(dependency.kind, &dependency.relation),
+            |key| CatalogRecordRef::Metadata(key),
         ));
-        if dependency.kind == RelationKind::Table {
-            if let Some(indexes) = indexes.get(&dependency.relation.qualified_name()) {
-                for index in indexes {
-                    records.push(CatalogRecordRef::Relation(RelationKind::Index, index));
-                }
-            }
-        }
         ranges.push(start..records.len());
     }
     let revisions = catalog
@@ -214,16 +216,21 @@ fn read_selected_relations(
             Some(PreparedDependencyRevision::new(RelationRevision {
                 object: dependency.object,
                 acl: dependency.acl.clone(),
-                record_names: records[range.clone()]
-                    .iter()
-                    .map(|record| match record {
-                        CatalogRecordRef::Relation(kind, relation) => (*kind, (*relation).clone()),
-                        CatalogRecordRef::Metadata(_) => unreachable!("relation records"),
-                    })
-                    .collect(),
+                record_names: vec![(dependency.kind, dependency.relation.clone())],
                 records: revisions
                     .as_ref()
                     .map(|revisions| revisions[range].to_vec()),
+                // PostgreSQL reparses when the relation gains or loses an index. Renaming an existing index or a composite field used by it preserves analysis; executable publication still refreshes physical access paths.
+                indexes: if dependency.kind == RelationKind::Table {
+                    let mut identities = indexes
+                        .get(&dependency.relation.qualified_name())
+                        .cloned()
+                        .unwrap_or_default();
+                    identities.sort_unstable();
+                    identities
+                } else {
+                    Vec::new()
+                },
             })),
         );
     }

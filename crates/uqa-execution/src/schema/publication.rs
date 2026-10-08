@@ -38,6 +38,12 @@ pub trait TableSchemaState {
         columns: &[ColumnDef],
         constraints: &TableConstraintSet,
     ) -> StorageBackendResult<()>;
+    /// Persist renamed, already-bound expression fields without declaring a new table definition.
+    fn persist_expression_names(
+        &self,
+        columns: &[ColumnDef],
+        constraints: &TableConstraintSet,
+    ) -> StorageBackendResult<()>;
     /// Publish declared columns and CHECK, foreign-key, and key constraints; hierarchy and lifecycle state are published separately.
     fn publish_columns(
         &self,
