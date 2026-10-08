@@ -464,8 +464,22 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
             number: 2,
             result_type: ColumnType::Text,
             dropped: false,
+            changed_type: None,
         }));
     }
+    let mut incompatible = call.clone();
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut incompatible
+    {
+        binding.composite_field.as_mut().unwrap().changed_type = Some(ColumnType::Varchar(Some(8)));
+    }
+    let error =
+        fold_literal_expression(incompatible, |_| panic!("field must check its descriptor"))
+            .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(error.to_string(), "attribute 2 has wrong type");
     let folded =
         fold_literal_expression(call.clone(), |_| panic!("already-read constant")).unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Str("x".into())));

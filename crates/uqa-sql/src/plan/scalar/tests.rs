@@ -182,6 +182,9 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
                         "app.result".into(),
                     ))),
                     dropped: true,
+                    changed_type: Some(crate::ColumnType::Array(Box::new(
+                        crate::ColumnType::Named("app.changed".into()),
+                    ))),
                 })),
                 resolution_error: Some(Box::new(error)),
             }),

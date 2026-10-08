@@ -215,6 +215,12 @@ fn project_plan(
                         .iter()
                         .find(|attribute| attribute.number == field.number);
                     field.dropped = attribute.is_none();
+                    field.changed_type = attribute
+                        .filter(|attribute| {
+                            crate::catalog::type_metadata::pg_type_oid(&attribute.ty)
+                                != crate::catalog::type_metadata::pg_type_oid(&field.result_type)
+                        })
+                        .map(|attribute| attribute.ty.clone());
                     if let (Some(attribute), Some(ScalarExpr::Literal(Value::Str(name)))) =
                         (attribute, args.get_mut(1))
                     {

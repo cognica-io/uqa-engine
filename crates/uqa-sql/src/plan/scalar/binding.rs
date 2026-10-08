@@ -55,6 +55,7 @@ impl Lowering<'_> {
                                 .scalar_type_copy(Some(&field.result_type))?
                                 .expect("field result type"),
                             dropped: field.dropped,
+                            changed_type: this.scalar_type_copy(field.changed_type.as_ref())?,
                         })
                     })
                 })

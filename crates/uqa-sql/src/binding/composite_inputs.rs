@@ -106,6 +106,7 @@ fn retain_field(
             number: attribute.number,
             result_type: attribute.ty.clone(),
             dropped: false,
+            changed_type: None,
         }));
     }
     Ok(())

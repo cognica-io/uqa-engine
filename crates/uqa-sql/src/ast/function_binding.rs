@@ -23,7 +23,7 @@ pub struct FunctionBinding {
     /// Concrete invocation contract selected during routine overload resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invocation: Option<Box<RoutineInvocationBinding>>,
-    /// Prepared field identity and its original result type; executable copies refresh only its live/dropped state.
+    /// Prepared field identity and its original result type; executable copies refresh its live descriptor without changing the result contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_field: Option<Box<CompositeFieldBinding>>,
     /// A typed overload-resolution failure retained until the expression reaches a fallible planning or execution boundary. This never reuses the SQL function-name namespace as an error channel.
@@ -38,6 +38,9 @@ pub struct CompositeFieldBinding {
     pub number: i16,
     pub result_type: super::ColumnType,
     pub dropped: bool,
+    /// The live attribute type in an executable copy, when it differs from the original type OID. Type modifiers do not change FieldSelect's result contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_type: Option<super::ColumnType>,
 }
 
 /// Static function-call failure discovered while binding declared argument types.

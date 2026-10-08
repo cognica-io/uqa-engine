@@ -58,7 +58,7 @@
     },
     {
       "id": "catalog",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "fresh_values",
@@ -114,7 +114,7 @@
     },
     {
       "id": "collation_catalog",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "collation_reset",
@@ -122,7 +122,7 @@
     },
     {
       "id": "collation_reset_catalog",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "nested_type",
@@ -162,7 +162,7 @@
     },
     {
       "id": "stored_rollback",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "direct_drop",
@@ -310,7 +310,7 @@
     },
     {
       "id": "mixed_catalog",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "mixed_fresh",
@@ -322,7 +322,7 @@
     },
     {
       "id": "rollback_inside",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "rollback_end",
@@ -330,7 +330,7 @@
     },
     {
       "id": "rollback_after",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "savepoint_begin",
@@ -346,7 +346,7 @@
     },
     {
       "id": "savepoint_after",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
     },
     {
       "id": "quoted",
@@ -393,12 +393,124 @@
       "sql": "ALTER TYPE ct_pre ALTER ATTRIBUTE b TYPE text; DEALLOCATE ALL"
     },
     {
+      "id": "index_setup",
+      "sql": "CREATE TYPE ct_index_pair AS(a integer,b text); CREATE TABLE ct_keys(id integer); INSERT INTO ct_keys VALUES(1),(2); CREATE INDEX ct_record_index ON ct_keys((ROW(id,'x')::ct_index_pair))"
+    },
+    {
+      "id": "index_storage_reject",
+      "sql": "ALTER TYPE ct_index_pair ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "index_storage_drop",
+      "sql": "DROP INDEX ct_record_index"
+    },
+    {
+      "id": "index_field_setup",
+      "sql": "CREATE INDEX ct_field_index ON ct_keys(((ROW(id,'x')::ct_index_pair).a))"
+    },
+    {
+      "id": "index_field_change",
+      "sql": "ALTER TYPE ct_index_pair ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "index_field_catalog",
+      "sql": "SELECT attname,atttypid::regtype FROM pg_attribute WHERE attrelid='ct_field_index'::regclass ORDER BY attnum"
+    },
+    {
+      "id": "index_field_read",
+      "sql": "SELECT id FROM ct_keys WHERE (ROW(id,'x')::ct_index_pair).a=2 ORDER BY id"
+    },
+    {
+      "id": "index_field_drop",
+      "sql": "DROP INDEX ct_field_index"
+    },
+    {
+      "id": "prepared_parameter_setup",
+      "sql": "PREPARE ct_param(ct_pre) AS SELECT ($1).b AS b; EXECUTE ct_param('(1,before)'); PREPARE ct_unplanned AS SELECT ('(2,unplanned)'::ct_pre).b AS b"
+    },
+    {
+      "id": "prepared_parameter_change",
+      "sql": "ALTER TYPE ct_pre ALTER ATTRIBUTE b TYPE varchar(8)"
+    },
+    {
+      "id": "prepared_parameter_read",
+      "sql": "EXECUTE ct_param('(1,after)')"
+    },
+    {
+      "id": "prepared_unplanned_read",
+      "sql": "EXECUTE ct_unplanned"
+    },
+    {
+      "id": "prepared_parameter_restore",
+      "sql": "ALTER TYPE ct_pre ALTER ATTRIBUTE b TYPE text"
+    },
+    {
+      "id": "prepared_parameter_after",
+      "sql": "EXECUTE ct_param('(1,restore)'); EXECUTE ct_unplanned"
+    },
+    {
+      "id": "prepared_null_record",
+      "sql": "ALTER TYPE ct_pre ALTER ATTRIBUTE b TYPE varchar(8); EXECUTE ct_param(NULL)"
+    },
+    {
+      "id": "prepared_null_field",
+      "sql": "EXECUTE ct_param('(1,)')"
+    },
+    {
+      "id": "dependency_setup",
+      "sql": "CREATE TYPE ct_dependency AS(a integer,b text)"
+    },
+    {
+      "id": "default_setup",
+      "sql": "CREATE TABLE ct_default(v integer DEFAULT (('(1,x)'::ct_dependency).a))"
+    },
+    {
+      "id": "default_reject",
+      "sql": "ALTER TYPE ct_dependency ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "default_drop",
+      "sql": "DROP TABLE ct_default"
+    },
+    {
+      "id": "generated_setup",
+      "sql": "CREATE TABLE ct_generated(id integer,v bigint GENERATED ALWAYS AS ((ROW(id,'x')::ct_dependency).a) STORED)"
+    },
+    {
+      "id": "generated_reject",
+      "sql": "ALTER TYPE ct_dependency ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "generated_drop",
+      "sql": "DROP TABLE ct_generated"
+    },
+    {
+      "id": "check_setup",
+      "sql": "CREATE TABLE ct_check(id integer,CONSTRAINT ct_positive CHECK ((ROW(id,'x')::ct_dependency).a>0)); INSERT INTO ct_check VALUES(1)"
+    },
+    {
+      "id": "check_change",
+      "sql": "ALTER TYPE ct_dependency ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "check_accept",
+      "sql": "INSERT INTO ct_check VALUES(2)"
+    },
+    {
+      "id": "check_reject",
+      "sql": "INSERT INTO ct_check VALUES(-1)"
+    },
+    {
+      "id": "check_drop",
+      "sql": "DROP TABLE ct_check"
+    },
+    {
       "id": "durable_setup",
       "sql": "CREATE TYPE ct_durable AS(a integer,b text); ALTER TYPE ct_durable ALTER ATTRIBUTE a TYPE numeric(9,2), ALTER ATTRIBUTE b TYPE varchar(12) COLLATE \"C\"; CREATE TABLE ct_durable_rows(v ct_durable); INSERT INTO ct_durable_rows VALUES('(123.45,persist)')"
     },
     {
       "id": "durable_catalog",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_durable'::regclass AND attnum>0 ORDER BY attnum",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_durable'::regclass AND attnum>0 ORDER BY attnum",
       "reopen": true
     },
     {
@@ -418,7 +530,7 @@
     },
     {
       "id": "durable_after",
-      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_durable'::regclass AND attnum>0 ORDER BY attnum",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_durable'::regclass AND attnum>0 ORDER BY attnum",
       "reopen": true
     },
     {

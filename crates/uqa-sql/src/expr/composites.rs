@@ -70,6 +70,23 @@ pub fn descriptor(
         })
 }
 
+/// `ExecEvalFieldSelect` checks the current attribute OID against the prepared result type. Call only after evaluating a non-NULL record and checking the dropped marker.
+pub fn validate_field_result(field: &crate::ast::CompositeFieldBinding) -> Result<()> {
+    let Some(current) = &field.changed_type else {
+        return Ok(());
+    };
+    Err(SQLError::Diagnostic {
+        sqlstate: "42804".into(),
+        message: format!("attribute {} has wrong type", field.number),
+        detail: Some(format!(
+            "Table has type {}, but query expects {}.",
+            current.display_name(),
+            field.result_type.display_name(),
+        )),
+        hint: None,
+    })
+}
+
 fn cannot_cast(source: &str, target: &str, detail: Option<String>) -> SQLError {
     SQLError::Diagnostic {
         sqlstate: "42846".into(),

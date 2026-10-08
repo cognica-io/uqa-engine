@@ -184,7 +184,7 @@ pub(super) fn fold_authorized_literal(
         }
     }
     if let Some(literal) = composite_constant_field(&expression) {
-        return Ok(literal);
+        return literal;
     }
     let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
         if uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len()) == Some(true)
@@ -231,7 +231,7 @@ pub(super) fn fold_authorized_literal(
     })
 }
 
-fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
+fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr, SQLError>> {
     let ScalarExpr::Func {
         binding: Some(binding),
         args,
@@ -270,17 +270,20 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
             if field.dropped {
                 Value::Null
             } else {
+                if let Err(error) = uqa_sql::expr::composites::validate_field_result(field) {
+                    return Some(Err(error));
+                }
                 fields.iter().find(|(key, _)| key == name)?.1.clone()
             }
         }
         _ => return None,
     };
-    Some(ScalarExpr::TypedLiteral {
+    Some(Ok(ScalarExpr::TypedLiteral {
         value,
         ty: field.result_type.catalog_name(),
         bound_type: Some(field.result_type.clone()),
         parameter_index: None,
-    })
+    }))
 }
 
 #[cfg(test)]
