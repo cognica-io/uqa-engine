@@ -8,7 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- SQLite managed transaction completion validates its exact durable receipt without a second physical acknowledgement commit. Autonomous sequence logs and ordinary writes retain FULL publication, retry ownership, manual acknowledgement and SSI recovery semantics.
+- Preserve the recorded OIDs of private sequences when a callback refreshes committed catalog state, so bound `nextval` calls continue resolving the same sequence under REPEATABLE READ and SERIALIZABLE.
+
+- Synchronize native SQLite WAL sequence-value logs at the consuming transaction boundary, including values obtained from another session's cache, instead of forcing FULL synchronization for each logged block. Preserve autonomous visibility, rollback, exact retry, generation lifetimes and sequence allocation; retain FULL publication on other storage paths. SQLite record format 60 adds the durable-prefix certificate and atomically upgrades predecessor metadata.
+
+- SQLite managed transaction completion validates its exact durable receipt without a second physical acknowledgement commit. Ordinary writes retain FULL publication, retry ownership, manual acknowledgement and SSI recovery semantics.
 
 - Reclaim SQL key-reservation identities after requests, waiters and held grants finish instead of retaining every historical digest for the database lifetime. Preserve native release, savepoint ownership and existing permanent table/key identifiers.
 
@@ -24,7 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse completed data-commit receipts for session cache adoption on native SQLite, SQLite Key/Value and redb, avoiding an extra read transaction and catalog-generation scan after a data-only commit. Preserve refresh after intervening commits, definition changes, rollback and uncertain completion.
 
-- Store SQLite MVCC version payloads by stable physical address, with keyed metadata for historical reads and reclamation, reducing WAL write amplification when a commit changes several record families. Initial open atomically converts SQLite record format 58 and earlier to 59 while preserving histories, receipts, snapshots and FULL synchronization.
+- Store SQLite MVCC version payloads by stable physical address, with keyed metadata for historical reads and reclamation, reducing WAL write amplification when a commit changes several record families. Initial open atomically converts SQLite record format 58 and earlier to the addressed layout now retained by format 60 while preserving histories, receipts, snapshots and FULL synchronization.
 
 - Retain parsed SQL and structural plans across data-only changes while invalidating executable access paths. Persistent and explicit-transaction statements still lower and optimize under their selected snapshot, preserving live data, rollback and schema checks.
 

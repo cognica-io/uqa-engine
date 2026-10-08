@@ -61,6 +61,6 @@ This manual targets UQA Engine 0.5.1 and Rust 1.90 or newer; see the [release hi
 
 For an existing installation, follow the [0.5.1 upgrade guide](reference/10-upgrading.md#051), including SQLite record format 58/native mapping 15, redb record format 56, catalog and stored-expression conversion, shared coordination upgrades, Rust API changes, and the migration requirements for earlier releases.
 
-Current source additionally requires the [unreleased SQLite format-59 upgrade](reference/10-upgrading.md#unreleased-source); published 0.5.1 packages retain format 58.
+Current source additionally requires the [unreleased SQLite format-60 upgrade](reference/10-upgrading.md#unreleased-source); published 0.5.1 packages retain format 58.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

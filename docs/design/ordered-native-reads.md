@@ -24,7 +24,7 @@ For a requested key `k` and retained boundary `b`, let `V(k,b)` contain the phys
 
 ## Payload-free version metadata
 
-This section describes the format-55 introduction. Current source extends the same invariant with a stable physical address in [format 59](../manual/internals/03-storage.md#append-addressed-sqlite-versions); the logical key/revision ordering and payload admission rules remain unchanged.
+This section describes the format-55 introduction. Current source extends the same invariant with a stable physical address in current [format 60](../manual/internals/03-storage.md#append-addressed-sqlite-versions); the logical key/revision ordering and payload admission rules remain unchanged.
 
 SQLite record format 55 adds a guarded, payload-free table M with primary key `(key, sequence)` and a nullable integer `payload_length`. For a physical version value v, define f(v) as NULL for a tombstone, the exact byte length for a BLOB, and -1 for any other storage class. The representation invariant is M = {(k, s, f(v)) | (k, s, v) is in the version table V}. The original version table, heads, compacted runs, source identities and commit sequences are unchanged. M contains one narrow row per retained version; its disk and write costs are additional physical index costs, not user payload reservations or a result cache.
 

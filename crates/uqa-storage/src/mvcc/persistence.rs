@@ -159,7 +159,7 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 
 /// Versioned record persistence. Every mutation of the current sequence, records and receipt must share one physical commit. Implementations retain no physical writer between calls and must distinguish rejection from an uncertain native commit outcome.
 pub trait VersionedPersistence: Send + Sync {
-    /// Select autonomous sequence publication whose WAL synchronization is completed by the consuming transaction. Unsupported providers keep ordinary durable commits. Implementations may defer only recognized sequence value replacements and must implement `synchronize_sequence_values` on ordinary sessions over the same database.
+    /// Select autonomous sequence publication whose WAL synchronization is completed by the consuming transaction. Unsupported providers keep ordinary durable commits. Implementations may defer only recognized sequence value replacements, must retain `owner.with_publication` admission across physical publication, and must implement `synchronize_sequence_values` on ordinary sessions over the same database. An expired owner requires ordinary synchronous publication.
     fn sequence_value_persistence(
         &self,
         _owner: super::SequencePublicationLease,

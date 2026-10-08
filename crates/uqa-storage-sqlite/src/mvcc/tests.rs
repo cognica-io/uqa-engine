@@ -367,6 +367,8 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                         .get::<_, i64>(0))?,
                     schema::RECORD_FORMAT
                 );
+                let header = codec::header(connection, upgraded.identity)?;
+                assert_eq!(header.sequence_durable, header.sequence);
                 Ok(())
             })
             .unwrap();

@@ -6,7 +6,10 @@
 
 //! Sequence consumers retain durability independently of savepoint undo. Publication admission closes before the owner's completion barrier, so a retained child cannot publish an unsynchronized suffix after its consumer completes.
 
-use super::*;
+use super::{
+    Arc, StorageBackendError, StorageBackendResult, StorageReadControl, VersionError,
+    VersionedKeyValueStore,
+};
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::sync::atomic::{AtomicBool, Ordering};
 

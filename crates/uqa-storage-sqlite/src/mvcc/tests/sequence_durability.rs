@@ -282,11 +282,12 @@ fn ordinary_publication_covers_sequences_and_rollbacks_do_not_rewind_them() {
     );
     backend.rollback_transaction().unwrap();
     assert_eq!(boundary(&store).0, boundary(&store).1);
-    let rows = crate::Catalog::open(connection.new_session())
-        .unwrap()
-        .load_sequence_rows()
-        .unwrap();
+    let reopened = crate::Catalog::open(connection.new_session()).unwrap();
+    let rows = reopened.load_sequence_rows().unwrap();
     assert_eq!(rows[0].current, 66);
+    let schemas = reopened.load_schemas().unwrap();
+    assert!(schemas.iter().any(|name| name == "committed"));
+    assert!(schemas.iter().all(|name| name != "discarded"));
 }
 
 #[test]
@@ -297,13 +298,20 @@ fn synchronous_sessions_and_non_sequence_records_keep_full_publication() {
     let recorded = commits(&store);
     log(&backend.open_session().unwrap(), 1);
     assert!(recorded.lock().iter().all(|relaxed| !relaxed));
+    backend.begin_read_transaction().unwrap();
     let independent = backend
         .open_sequence_value_session(&uqa_core::CancellationToken::new())
         .unwrap();
     recorded.lock().clear();
     independent.catalog.save_schema("ordinary").unwrap();
     assert!(recorded.lock().iter().all(|relaxed| !relaxed));
+    independent.backend.begin_transaction().unwrap();
+    independent.catalog.save_schema("mixed").unwrap();
+    log(&independent, 2);
+    independent.backend.commit_transaction().unwrap();
+    assert!(recorded.lock().iter().all(|relaxed| !relaxed));
     assert_eq!(boundary(&store).0, boundary(&store).1);
+    backend.commit_transaction().unwrap();
 }
 
 #[test]

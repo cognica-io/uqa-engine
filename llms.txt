@@ -92,5 +92,5 @@ Implementation tests follow their owning crates. Engine catalog, session, guard,
 
 ## Release upgrades
 
-- [Upgrade guide](docs/manual/reference/10-upgrading.md): Unreleased SQLite record format 59, UQA Engine 0.5.1 package updates with SQLite record format 58/native mapping 15 and redb record format 56, catalog and stored-expression conversion, shared coordination upgrades, Rust API changes, and earlier storage and analyzer migration requirements.
+- [Upgrade guide](docs/manual/reference/10-upgrading.md): Unreleased SQLite record format 60, UQA Engine 0.5.1 package updates with SQLite record format 58/native mapping 15 and redb record format 56, catalog and stored-expression conversion, shared coordination upgrades, Rust API changes, and earlier storage and analyzer migration requirements.
 - [Rust provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership): Concrete SQLite APIs move to `uqa-storage-sqlite`; shared storage errors retain typed provider diagnostics.

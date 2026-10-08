@@ -8,12 +8,21 @@ Let $s$ be the current record commit sequence and $d$ a durable-prefix certifica
 
 SQLite WAL commits form an ordered prefix. A FULL commit synchronizes all earlier WAL frames, including sequence publications. Therefore every successfully completed transaction's sequence observations are included in the durable prefix. If power loss removes an unsynchronized suffix, no successfully completed dependent transaction can be in that suffix. Process failure does not discard committed WAL frames. Values published independently are never rolled back with the caller's ordinary writes. The shared position's existing record-identity check rejects positions whose covering record disappeared after recovery. Current values, cached values, generation replacement and sequence exhaustion retain their existing evaluation order.
 
+Every deferred publisher retains a lease for the consuming transaction's exact generation. Its read admission spans physical publication, while completion closes admission with exclusive ownership before synchronizing. Thus a publisher either finishes before the consumer's barrier or uses FULL publication after admission closes. Starting a new transaction cannot revive an old lease; nested retained readers preserve the original generation. Dropping an unfinished consumer also closes admission. Savepoint undo leaves it unchanged. A read-only consumer synchronizes before publishing its SSI completion; an ordinary record writer preserves its already committed outcome if later cleanup fails.
+
 The capability is explicit and defaults to synchronous publication. Provider wrappers that enable deferred sequence publication must also forward completion obligations; a provider without both halves cannot opt in. SQL-only value publications retain their original transaction receipts and exact retry identities. No general asynchronous-write setting is introduced.
 
 - [x] Inspect PostgreSQL 18 sequence logging, provider dependencies, native sequence records, completion and shared positions.
-- [ ] Implement the conservative completion capability and SQLite durable-prefix certificate, including predecessor migration.
-- [ ] Connect persistent SQL sequence consumers and independent sequence sessions through their owning interfaces.
-- [ ] Verify physical synchronization counts, cross-session consumption, savepoints, rollback, retry, cancellation, generation replacement and cold reopen.
-- [ ] Update the manual, HISTORY, regression inventory and PR evidence; merge, close #347 and clean up.
+- [x] Implement the conservative completion capability and SQLite durable-prefix certificate, including predecessor migration.
+- [x] Connect persistent SQL sequence consumers and independent sequence sessions through their owning interfaces.
+- [x] Verify physical synchronization counts, cross-session consumption, savepoints, rollback, retry, cancellation, generation replacement and cold reopen.
+- [x] Update the manual, HISTORY, regression inventory and PR evidence.
+- [x] Complete local owner validation and review; automatic verification, merge, issue closure and branch cleanup are tracked in [PR #595](https://github.com/cognica-io/uqa-engine/pull/595).
 
 Acceptance uses exact synchronization counts and state/recovery assertions, not elapsed-time measurements on the shared local host.
+
+Storage validation: 18 Common Storage completion/batch/notification cases and 36 SQLite sequence/receipt/admission/migration cases pass, including every supported predecessor format and all four file modes. Ownership, dependency, integration-harness, Rust file limits and headers pass. The regression inventory selects 52 checks / 108 cases and its nineteen verifier unit tests pass. All 44 Engine sequence value/position/restoration tests and three cross-process integration tests pass after the private-OID correction.
+
+SQL validation also reproduced #596 on unchanged main: a callback catalog refresh kept a private sequence definition but dropped its recorded OID. Execution already returns the correct merged OID map; the Engine snapshot adapter now transfers it with the other sequence state. The existing three-provider / two-isolation regression explicitly verifies OID preservation and is included in the automatic inventory.
+
+Final owner review verifies the lock order (consumer session, completion admission, physical writer), closed and abandoned generations, conservative FULL fallback, read-only SSI completion order, confirmed-outcome retry, cancellation-independent rollback, and format-59 metadata-only upgrade without rewriting its addressed payload layout. Strict Clippy with warnings denied passes for the four affected crates and their tests. The three enhanced SQLite regressions also pass, checking mixed sequence/schema publications, preservation of committed versus rolled-back schema records and the synchronized certificate after each predecessor upgrade.

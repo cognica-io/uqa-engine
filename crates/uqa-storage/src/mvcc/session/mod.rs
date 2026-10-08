@@ -299,7 +299,7 @@ impl VersionedKeyValueStore {
         cancellation.check()?;
         let active = self.active.lock();
         let retained = self
-            .view_locked(&active)
+            .view_locked(active.as_ref())
             .map_err(VersionError::into_storage_error)?;
         let mut session = self.new_session_with_cancellation(cancellation);
         session.control =
@@ -465,14 +465,14 @@ impl VersionedKeyValueStore {
     }
 
     fn view(&self) -> VersionResult<MergedRecordSnapshot> {
-        self.view_locked(&self.active.lock())
+        self.view_locked(self.active.lock().as_ref())
     }
 
-    fn view_locked(&self, active: &Option<Transaction>) -> VersionResult<MergedRecordSnapshot> {
+    fn view_locked(&self, active: Option<&Transaction>) -> VersionResult<MergedRecordSnapshot> {
         if let Some(view) = self.retained.as_ref() {
             return view.try_clone();
         }
-        if let Some(transaction) = active.as_ref() {
+        if let Some(transaction) = active {
             transaction.view()
         } else {
             self.capture(true)?.view()

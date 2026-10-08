@@ -589,6 +589,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_sequence_logs_share_the_consumers_durable_commit_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "Forty-eight autonomous logs, with a warmed sixteen-log counting window, on plain, encrypted, compressed and encrypted-compressed native SQLite; cold reopen.",
+      "invariant": "WAL counts sixteen NORMAL publications, at most one FULL allocation reserve and exactly one FULL completion barrier; rollback journals remain synchronous and reopened values are exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "independent_cached_consumers_synchronize_another_sessions_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "One unsynchronized native sequence log and a consuming session from an independent connection pool.",
+      "invariant": "Cached consumption covers the other session's visible sequence prefix at completion, without rewinding its value on rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "savepoint_undo_and_cancelled_completion_keep_the_sequence_durability_obligation",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "One autonomous value log, savepoint undo and cancellation before consumer completion.",
+      "invariant": "Savepoint undo keeps the obligation; cancellation rejects commit and cleanup rollback synchronizes once without undoing sequence values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_failed_sequence_barrier_retains_completion_for_exact_retry",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "One sequence log and an injected failure of the consumer's physical completion barrier.",
+      "invariant": "The failed boundary retains the active frame and incomplete prefix; retry completes durability without repeating the sequence operation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ordinary_publication_covers_sequences_and_rollbacks_do_not_rewind_them",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "Ordinary record publication with an autonomous sequence log, followed by a transaction rollback.",
+      "invariant": "The ordinary FULL publication covers earlier values without a second barrier; later rollback preserves independent sequence values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "synchronous_sessions_and_non_sequence_records_keep_full_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "A synchronous sequence session, an ordinary schema write through an admitted sequence publisher, and a mixed schema/sequence publication.",
+      "invariant": "Direct, non-sequence and mixed-record paths use only FULL commits and certify the complete published prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_sequence_publishers_are_synchronous_after_their_consumer_finishes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "A retained child publisher used after completion and after a new consumer transaction starts.",
+      "invariant": "Expired generation leases force FULL publication; only the new transaction's child may defer synchronization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "sequence_publishers_cannot_outlive_or_change_their_original_completion_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "An autonomous publisher, nested retained readers, successive transactions and owner abandonment.",
+      "invariant": "A lease cannot revive in a later generation or after owner drop; a retained reader cannot transfer the completion obligation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "sequence_barrier_failure_retains_read_only_or_committed_completion_without_replay",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "Read-only and ordinary-write transactions with savepoint undo and one completion barrier failure.",
+      "invariant": "Retry preserves the original completion outcome and publication count, clears the obligation on success and performs no barrier in the next unused transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "sequence_rollback_retries_cleanup_after_cancellation_without_replaying_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/sequence_durability.rs",
+      "capability": "Sequence completion durability",
+      "workload": "A cancelled consumer with private writes and one failed cleanup barrier.",
+      "invariant": "Rollback retry performs no record publication, retains the obligation until success and discards only transactional writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "callback_catalog_refresh_can_resolve_a_private_sequence",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/restoration/refresh.rs",
+      "capability": "Sequence catalog preservation",
+      "workload": "Callback-triggered catalog refresh after a peer role commit, while the caller owns a private sequence; three persistent providers and REPEATABLE READ/SERIALIZABLE.",
+      "invariant": "The private sequence retains its recorded OID, allocates its first value exactly once and disappears on rollback without retaining callback sessions.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
