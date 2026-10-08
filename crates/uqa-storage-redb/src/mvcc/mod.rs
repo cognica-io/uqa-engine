@@ -37,8 +37,8 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
-/// Writers maintain complete tuples for composite unique indexes.
-const RECORD_FORMAT: u64 = 56;
+/// Writers preserve original composite datums in durable expression metadata.
+const RECORD_FORMAT: u64 = 57;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");

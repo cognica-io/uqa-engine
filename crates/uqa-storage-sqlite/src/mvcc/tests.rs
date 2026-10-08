@@ -168,9 +168,9 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 60)"));
+        assert!(definition.contains("CHECK(format = 61)"));
         if format < 59 { super::version_metadata::install_predecessor(connection, format)?; }
-        let definition = definition.split(", sequence_durable BLOB").next().unwrap().to_owned() + ")";
+        let definition = if format < 60 { definition.split(", sequence_durable BLOB").next().unwrap().to_owned() + ")" } else { definition };
         let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else if format < 44 { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" } else { definition };
         if format < 29 {
             assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
@@ -184,8 +184,8 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 60)", &format!("CHECK(format = {format})")))?;
-        let restore = if format < 43 { "" } else if format < 44 { ", restore_target" } else { ", restore_target, receipt_limit" };
+        connection.execute_batch(&definition.replace("CHECK(format = 61)", &format!("CHECK(format = {format})")))?;
+        let restore = if format < 43 { "" } else if format < 44 { ", restore_target" } else if format < 60 { ", restore_target, receipt_limit" } else { ", restore_target, receipt_limit, sequence_durable" };
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping{restore} FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         if format < 44 {
         connection.execute_batch("ALTER TABLE _uqa_mvcc_transactions RENAME TO saved_transactions")?;
@@ -377,6 +377,45 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
 }
 
 #[test]
+fn predecessor_upgrade_preserves_a_partial_sequence_durability_certificate() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let control = control();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let transaction = store.allocate_transaction(&control).unwrap();
+    let receipt = store
+        .commit(
+            transaction,
+            &prepared(b"retained", b"original", &control),
+            &control,
+        )
+        .unwrap();
+    store
+        .with(|connection| {
+            let _permit = schema::WritePermit::acquire(connection)?;
+            connection.execute(
+                "UPDATE _uqa_mvcc_metadata SET sequence_durable = ?1",
+                [0_u64.to_be_bytes().as_slice()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    downgrade_record_format(&store, 60);
+    let upgraded = SQLiteRecordStore::new(&connection).unwrap();
+    upgraded
+        .with(|connection| {
+            let header = codec::header(connection, upgraded.identity)?;
+            assert_eq!(header.sequence_durable, CommitSequence::INITIAL);
+            assert_eq!(header.sequence, receipt.sequence);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        upgraded.commit_status(transaction, &control).unwrap(),
+        CommitStatus::Committed(receipt)
+    );
+}
+
+#[test]
 fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
     for format in 1..schema::RECORD_FORMAT {
         let connection = ManagedConnection::open_in_memory().unwrap();
@@ -469,7 +508,7 @@ fn closed_record_format_files_upgrade_in_every_sqlite_mode(
 #[rstest::rstest]
 fn latest_record_format_files_upgrade_in_every_sqlite_mode(
     #[values(0, 1, 2, 3)] mode: usize,
-    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58)] format: i64,
+    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60)] format: i64,
 ) {
     closed_record_formats_upgrade(mode, format);
 }
