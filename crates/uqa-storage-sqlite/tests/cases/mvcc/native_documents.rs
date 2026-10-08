@@ -309,7 +309,7 @@ fn native_binding_rejects_other_formats_active_transactions_and_changed_options(
                     [],
                     |row| row.get::<_, String>(0)
                 )?,
-                "48"
+                uqa_storage_sqlite::CURRENT_SCHEMA_VERSION.to_string()
             );
             Ok(())
         })

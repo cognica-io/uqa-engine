@@ -319,8 +319,8 @@ fn native_sequence_conversion_rejects_aliased_incarnations_atomically() {
         .bind_native_records(VersionedSessionOptions::default())
         .is_err());
     assert_eq!(
-        catalog.get_metadata("schema_version").unwrap().as_deref(),
-        Some("48")
+        catalog.get_metadata("schema_version").unwrap(),
+        Some(uqa_storage_sqlite::CURRENT_SCHEMA_VERSION.to_string())
     );
     assert_eq!(
         catalog.load_sequence_rows().unwrap(),
