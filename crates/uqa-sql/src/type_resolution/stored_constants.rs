@@ -148,10 +148,16 @@ impl Folding for OperatorCoercions<'_> {
         else {
             return Ok(false);
         };
-        // Enum constants are stored by label identity. Composite and domain-array input datums retain the definition-time result.
-        if is_enum_bearing(target)
-            || (super::catalog_input_type(target)
-                && !crate::expr::requires_catalog_constant_input(target))
+        // Membership rewriting and its enum constants must stay bound together: an untyped array would resolve to text on the next binding pass.
+        if is_enum_bearing(target) {
+            return self
+                .resolver
+                .enum_labels()
+                .map_or(Ok(false), |catalog| fold_literal(stored, target, catalog));
+        }
+        // Composite and domain-array input datums retain the definition-time result.
+        if super::catalog_input_type(target)
+            && !crate::expr::requires_catalog_constant_input(target)
         {
             return Ok(false);
         }
