@@ -185,7 +185,9 @@ fn the_last_attached_process_alone_returns_or_discards_the_reservation() {
     let reserved = limit(&coordinator);
     assert_eq!(reserved, 13);
     drop(coordinator);
+    assert_eq!(peer.request("limit"), reserved.to_string());
     assert_eq!(peer.request("allocate"), "10");
+    assert_eq!(peer.request("limit"), reserved.to_string());
     // Nothing vouches for the cursor once the only attached process has failed.
     peer.terminate();
     let coordinator = FileLockCoordinator::open(&path).unwrap();
@@ -255,8 +257,14 @@ impl Peer {
     }
 
     fn terminate(&mut self) {
+        let input = self.child.stdin.take();
         self.child.kill().unwrap();
-        self.child.wait().unwrap();
+        let status = self.child.wait().unwrap();
+        drop(input);
+        assert!(
+            !status.success(),
+            "the crash fixture must not close gracefully: {status}"
+        );
     }
 }
 
@@ -285,6 +293,7 @@ fn transaction_xid_peer() {
         let line = line.unwrap();
         match line.as_str() {
             "allocate" => respond(allocate(&coordinator)),
+            "limit" => respond(limit(&coordinator)),
             _ => panic!("unexpected transaction ID peer command {line}"),
         }
     }
