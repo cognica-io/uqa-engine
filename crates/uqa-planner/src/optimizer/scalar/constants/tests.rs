@@ -50,6 +50,7 @@ fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
                 object_id: None,
                 dispatch: None,
                 invocation: None,
+                composite_field: None,
                 resolution_error: None,
             })
         }),
@@ -424,4 +425,65 @@ fn composites_retained_in_constants_are_not_evaluated_without_the_catalog() {
             expression
         );
     }
+}
+
+#[test]
+fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
+    let ty = ColumnType::Composite(uqa_sql::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 20001,
+        relation_oid: 20002,
+        array_oid: 20003,
+    });
+    let literal = ScalarExpr::TypedLiteral {
+        value: Value::Record(vec![("b".into(), Value::Str("x".into()))]),
+        ty: ty.catalog_name(),
+        bound_type: Some(ty.clone()),
+        parameter_index: None,
+    };
+    let mut call = bound_call(
+        "field selection",
+        vec![
+            ScalarExpr::Cast {
+                expr: Box::new(literal.clone()),
+                ty: ty.catalog_name(),
+                implicit: false,
+            },
+            ScalarExpr::Literal(Value::Str("b".into())),
+        ],
+    );
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut call
+    {
+        binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
+        binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+            type_oid: 20001,
+            number: 2,
+            result_type: ColumnType::Text,
+            dropped: false,
+        }));
+    }
+    let folded =
+        fold_literal_expression(call.clone(), |_| panic!("already-read constant")).unwrap();
+    assert_eq!(literal_value(&folded), Some(&Value::Str("x".into())));
+    assert_eq!(
+        fold_literal_expression(literal.clone(), |_| panic!("whole record")).unwrap(),
+        literal
+    );
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = &mut call
+    {
+        binding.composite_field.as_mut().unwrap().dropped = true;
+        args[0] = ScalarExpr::Column("volatile_result".into());
+    }
+    assert_eq!(
+        fold_literal_expression(call.clone(), |_| panic!("base must still execute")).unwrap(),
+        call
+    );
 }

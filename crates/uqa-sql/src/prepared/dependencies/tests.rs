@@ -89,6 +89,7 @@ fn builtin_bindings_do_not_become_mutable_routine_dependencies() {
         builtin: false,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     };
     let mut dependencies = PreparedAnalysisDependencies::default();

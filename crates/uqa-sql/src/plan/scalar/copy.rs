@@ -29,7 +29,7 @@ impl ScalarExpr {
 }
 
 impl Lowering<'_> {
-    fn scalar_type_copy(
+    pub(super) fn scalar_type_copy(
         &mut self,
         ty: Option<&crate::ast::ColumnType>,
     ) -> Result<Option<crate::ast::ColumnType>> {

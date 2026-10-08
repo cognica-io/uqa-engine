@@ -23,6 +23,7 @@ impl RoutinePlanVariants {
     pub(super) fn new(definition: &PreparedDefinition) -> Self {
         let logical_plan = Arc::new(definition.logical_plan.clone());
         Self(Mutex::new(PreparedStatementPlan {
+            composite_inputs: definition.composite_inputs.clone(),
             source_plan: Arc::clone(&logical_plan),
             logical_plan,
             needs_analysis: false,

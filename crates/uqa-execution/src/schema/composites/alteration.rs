@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Composite attribute changes under retained type and relation locks, in PostgreSQL's DROP-before-ADD order.
+//! Composite attribute changes under retained type and relation locks, in `PostgreSQL`'s DROP-before-ADD order.
 
 use super::attributes::CompositeAttributeContext;
 use crate::catalog::notices::CatalogNotices;

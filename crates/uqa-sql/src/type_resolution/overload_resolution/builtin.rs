@@ -276,6 +276,7 @@ fn resolved(
                     builtin: true,
                     dispatch: None,
                     invocation: None,
+                    composite_field: None,
                     resolution_error: None,
                 },
                 return_type,

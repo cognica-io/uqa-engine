@@ -194,6 +194,7 @@ impl<'a> Walker<'a> {
             builtin: _,
             dispatch: _,
             invocation,
+            composite_field,
             resolution_error,
         } = binding;
         self.text(name)?;
@@ -217,8 +218,13 @@ impl<'a> Walker<'a> {
             self.texts(parameter_types)?;
             self.optional_text(return_type.as_ref())?;
         }
+        if let Some(field) = composite_field {
+            self.charge(size_of::<crate::ast::CompositeFieldBinding>())?;
+            self.ty(&field.result_type)?;
+        }
         if let Some(error) = resolution_error {
-            match error {
+            self.charge(size_of::<FunctionResolutionError>())?;
+            match error.as_ref() {
                 FunctionResolutionError::UndefinedFunction { signature } => self.text(signature)?,
                 FunctionResolutionError::Operator(error) => {
                     self.charge(size_of::<OperatorResolutionError>())?;

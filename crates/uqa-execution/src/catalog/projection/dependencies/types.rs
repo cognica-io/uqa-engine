@@ -74,50 +74,59 @@ impl DependencyBuilder<'_> {
                 self.recorder
                     .record_references(domain_type, references, DependencyKind::Normal);
             }
-            let not_null = domain.definition.not_null.iter().map(|constraint| {
-                (
-                    constraint.name.as_deref(),
-                    constraint.catalog_identity,
-                    None,
-                )
-            });
-            let checks = domain.definition.checks.iter().map(|constraint| {
-                (
-                    constraint.name.as_deref(),
-                    constraint.catalog_identity,
-                    Some(&constraint.expression),
-                )
-            });
-            for (name, identity, expression) in not_null.chain(checks).collect::<Vec<_>>() {
-                let (Some(name), Some(identity)) = (name, identity) else {
-                    return Err(SQLError::Internal(format!(
-                        "constraint of domain {} has no catalog identity",
-                        domain.identity.qualified_name()
-                    )));
-                };
-                let oid = super::catalog_oid(identity.oid)?;
-                self.objects.add_member(
-                    CONSTRAINT_CLASS,
-                    oid,
-                    MemberObject::Constraint {
-                        name: name.to_string(),
-                        owner: ConstraintOwner::Domain(domain.oid),
-                        not_null: expression.is_none(),
-                    },
-                );
-                let constraint = ObjectAddress::whole(CONSTRAINT_CLASS, oid);
+            self.record_domain_constraints(domain)?;
+        }
+        Ok(())
+    }
+
+    fn record_domain_constraints(
+        &mut self,
+        domain: &uqa_sql::catalog::domain::StoredDomain,
+    ) -> Result<(), SQLError> {
+        let domain_type = ObjectAddress::whole(TYPE_CLASS, domain.oid);
+        let not_null = domain.definition.not_null.iter().map(|constraint| {
+            (
+                constraint.name.as_deref(),
+                constraint.catalog_identity,
+                None,
+            )
+        });
+        let checks = domain.definition.checks.iter().map(|constraint| {
+            (
+                constraint.name.as_deref(),
+                constraint.catalog_identity,
+                Some(&constraint.expression),
+            )
+        });
+        for (name, identity, expression) in not_null.chain(checks).collect::<Vec<_>>() {
+            let (Some(name), Some(identity)) = (name, identity) else {
+                return Err(SQLError::Internal(format!(
+                    "constraint of domain {} has no catalog identity",
+                    domain.identity.qualified_name()
+                )));
+            };
+            let oid = super::catalog_oid(identity.oid)?;
+            self.objects.add_member(
+                CONSTRAINT_CLASS,
+                oid,
+                MemberObject::Constraint {
+                    name: name.to_string(),
+                    owner: ConstraintOwner::Domain(domain.oid),
+                    not_null: expression.is_none(),
+                },
+            );
+            let constraint = ObjectAddress::whole(CONSTRAINT_CLASS, oid);
+            self.recorder
+                .record(constraint, domain_type, DependencyKind::Auto);
+            if let Some(expression) = expression {
+                let mut references = References::default();
+                self.expressions().collect(
+                    expression,
+                    ColumnScope::Domain(&domain.definition.base),
+                    &mut references,
+                )?;
                 self.recorder
-                    .record(constraint, domain_type, DependencyKind::Auto);
-                if let Some(expression) = expression {
-                    let mut references = References::default();
-                    self.expressions().collect(
-                        expression,
-                        ColumnScope::Domain(&domain.definition.base),
-                        &mut references,
-                    )?;
-                    self.recorder
-                        .record_references(constraint, references, DependencyKind::Normal);
-                }
+                    .record_references(constraint, references, DependencyKind::Normal);
             }
         }
         Ok(())

@@ -220,8 +220,9 @@ fn generated_dependencies_retain_invocation_and_resolution_error_payloads() {
         return_type: Some(spare_text("text", 2051)),
         variadic_mode: RoutineVariadicMode::None,
     };
-    let mut expected = binding.name.capacity()
-        + match binding.resolution_error.as_ref().unwrap() {
+    let mut expected = size_of::<FunctionResolutionError>()
+        + binding.name.capacity()
+        + match binding.resolution_error.as_deref().unwrap() {
             FunctionResolutionError::UndefinedFunction { signature } => signature.capacity(),
             FunctionResolutionError::Operator(_) => unreachable!(),
         }
@@ -332,4 +333,35 @@ fn catalog_admission_errors_preserve_memory_cancellation_and_invariant_sqlstates
     ] {
         assert_eq!(crate::SQLError::from(error).sqlstate(), Some(expected));
     }
+}
+
+#[test]
+fn composite_field_metadata_retains_its_complete_result_type_and_releases_on_failure() {
+    let mut binding = FunctionBinding::undefined_function("field", "field");
+    let name = spare_text("domain", 8193);
+    let payload = size_of::<crate::ast::CompositeFieldBinding>() + name.capacity();
+    binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+        type_oid: 20001,
+        number: 2,
+        result_type: ColumnType::Named(name),
+        dropped: true,
+    }));
+    let mut source = columns("CREATE TABLE t(v integer)");
+    source[0].generated = Some(GeneratedColumn {
+        kind: GeneratedColumnKind::Stored,
+        expression: Box::new(Expr::Literal(Value::Int(1))),
+        function_dependencies: vec![binding],
+    });
+    let budget = MemoryBudget::new(128 * 1024);
+    let memory = source[0]
+        .reserve_retained_payload(&budget, &CancellationToken::new())
+        .unwrap();
+    assert!(memory.bytes() >= payload);
+    drop(memory);
+    assert_eq!(budget.used(), 0);
+    let small = MemoryBudget::new(payload - 1);
+    assert!(source[0]
+        .reserve_retained_payload(&small, &CancellationToken::new())
+        .is_err());
+    assert_eq!(small.used(), 0);
 }

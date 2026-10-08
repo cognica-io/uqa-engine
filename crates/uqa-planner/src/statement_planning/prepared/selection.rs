@@ -107,32 +107,36 @@ fn select(
         entry.plan.clone()
     };
     let mut generic_cost = entry.generic_cost;
-    let reanalyzed = if needs_analysis {
-        let declared = entry
-            .parameter_types
-            .iter()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
-        Some(uqa_sql::prepared::definition::analyze_definition(
-            &context.analysis,
-            (*entry.source_plan).clone(),
-            &declared,
-        )?)
-    } else {
-        None
-    };
+    let reanalyzed = needs_analysis
+        .then(|| reanalyze(context, entry))
+        .transpose()?;
     let logical_plan = reanalyzed
         .as_ref()
         .map_or(entry.logical_plan.as_ref(), |definition| {
             &definition.logical_plan
         });
+    let inputs = reanalyzed
+        .as_ref()
+        .map_or(&entry.composite_inputs, |definition| {
+            &definition.composite_inputs
+        });
+    if generic_plan.is_some() && inputs.generic_requires_rebuild(context.analysis.types)? {
+        generic_plan = None;
+        generic_cost = None;
+    }
     let usage = super::PreparedPlanUsage {
         has_parameters: !entry.parameter_types.is_empty(),
         custom_plans: entry.custom_plans,
         total_custom_cost: entry.total_custom_cost,
     };
     let mut custom = super::choose_custom_plan(usage, &mode, generic_cost);
+    let projected = if custom || generic_plan.is_none() {
+        inputs.project_logical(logical_plan, context.analysis.types)?
+    } else {
+        None
+    };
+    let logical_plan = projected.as_ref().unwrap_or(logical_plan);
+    let mut composite_inputs = inputs.clone();
     if check_analysis && (custom || generic_plan.is_none() || reanalyzed.is_some()) {
         let result_schema = match &reanalyzed {
             Some(definition) => definition.result_schema.clone(),
@@ -154,6 +158,7 @@ fn select(
     }
     if !custom && generic_plan.is_none() {
         let plan = context.optimization.optimize_plan(logical_plan.clone())?;
+        composite_inputs = inputs.with_generic(&plan, context.analysis.types)?;
         generic_cost = Some(context.optimization.estimate_plan(&plan)?.execution);
         generic_plan = Some(plan);
         // Building the first generic plan supplies its previously unknown cost.
@@ -170,17 +175,18 @@ fn select(
             .including_planning(&crate::CostEstimator::default());
         (plan, Some(cost))
     } else {
+        let cached = generic_plan.as_ref().expect("generic plan was built");
         (
-            generic_plan
-                .as_ref()
-                .expect("generic plan was built")
-                .clone(),
+            composite_inputs
+                .project_generic(cached, context.analysis.types)?
+                .unwrap_or_else(|| cached.clone()),
             None,
         )
     };
     Ok(PreparedPlanSelection {
         plan,
         update: PreparedPlanUpdate {
+            composite_inputs,
             reanalyzed: reanalyzed.map(|definition| PreparedPlanAnalysis {
                 logical_plan: Arc::new(definition.logical_plan),
                 effective_search_path: definition.effective_search_path,
@@ -192,4 +198,21 @@ fn select(
             custom_cost,
         },
     })
+}
+
+fn reanalyze(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+) -> Result<uqa_sql::prepared::definition::PreparedDefinition, SQLError> {
+    let declared = entry
+        .parameter_types
+        .iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    uqa_sql::prepared::definition::analyze_definition(
+        &context.analysis,
+        (*entry.source_plan).clone(),
+        &declared,
+    )
 }

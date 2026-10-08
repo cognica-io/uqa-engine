@@ -46,6 +46,7 @@ fn sequence_reference_rewriting_respects_selected_routines() {
                 builtin,
                 dispatch: None,
                 invocation: None,
+                composite_field: None,
                 resolution_error: None,
             }),
             args: vec![Expr::Literal(Value::Str("app.ids".into()))],

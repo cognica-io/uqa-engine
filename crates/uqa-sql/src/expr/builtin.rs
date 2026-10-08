@@ -332,6 +332,16 @@ pub(super) fn eval_dispatched_builtin_with_control(
     evaluated: &[Value],
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<uqa_core::memory::Produced<Value>> {
+    if dispatch == FunctionDispatch::FieldSelect
+        && binding
+            .composite_field
+            .as_ref()
+            .is_some_and(|field| field.dropped)
+    {
+        // Arguments have already run: removal must not suppress their observable effects.
+        control.check()?;
+        return Ok(control.finish(Value::Null, control.empty_reservation())?);
+    }
     if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
         dispatch, evaluated, control,
     ) {

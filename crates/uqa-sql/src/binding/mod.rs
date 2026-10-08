@@ -16,6 +16,7 @@ pub mod catalog_sources;
 mod command_scopes;
 mod commands;
 pub mod composite_dependencies;
+mod composite_inputs;
 mod cte_controls;
 mod ctes;
 mod dependencies;
@@ -94,6 +95,13 @@ use crate::semantics::{
 use crate::RowSchema;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(Clone, Copy)]
+enum ScalarBindingMode {
+    References,
+    Stored,
+    CompositeInputs,
+}
+
 struct SchemaScope {
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
@@ -105,8 +113,8 @@ struct SchemaScope {
     stored_expression_outer: Option<RowSchema>,
     /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
     routine_parameters: Option<RoutineParameterScope>,
-    /// Whether binding a stored expression also fixes the routines it calls; a pass that only resolves routine parameters leaves calls to analysis.
-    binds_routine_identities: bool,
+    /// Select reference resolution, complete stored binding, or prepared composite identity retention.
+    scalar_binding: ScalarBindingMode,
     /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
     variable_sites: Option<variable_sites::VariableSites>,
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.
@@ -133,7 +141,7 @@ impl SchemaScope {
             validate_references: false,
             stored_expression_outer: None,
             routine_parameters: None,
-            binds_routine_identities: true,
+            scalar_binding: ScalarBindingMode::Stored,
             variable_sites: None,
             preserve_syntax_shape: false,
             prepared_dependencies: None,
@@ -158,7 +166,7 @@ impl SchemaScope {
             validate_references: true,
             stored_expression_outer: None,
             routine_parameters: None,
-            binds_routine_identities: true,
+            scalar_binding: ScalarBindingMode::Stored,
             variable_sites: None,
             preserve_syntax_shape: false,
             prepared_dependencies: None,

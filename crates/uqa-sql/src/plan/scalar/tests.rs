@@ -175,7 +175,15 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
                     return_type: Some("text".into()),
                     variadic_mode: RoutineVariadicMode::Expanded { parameter_index: 1 },
                 })),
-                resolution_error: Some(error),
+                composite_field: Some(Box::new(crate::ast::CompositeFieldBinding {
+                    type_oid: 20_001,
+                    number: 2,
+                    result_type: crate::ColumnType::Array(Box::new(crate::ColumnType::Named(
+                        "app.result".into(),
+                    ))),
+                    dropped: true,
+                })),
+                resolution_error: Some(Box::new(error)),
             }),
             args: vec![Expr::TypedLiteral {
                 value: Value::Str("value".into()),

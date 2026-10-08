@@ -78,7 +78,7 @@ pub fn query_composite_dependencies(
         expression.visit(&mut |node| {
             contains_field |= matches!(node, ScalarExpr::Func { binding: Some(binding), .. }
             if binding.dispatch == Some(FunctionDispatch::FieldSelect));
-        })
+        });
     });
     if !contains_field {
         return Ok(Vec::new());

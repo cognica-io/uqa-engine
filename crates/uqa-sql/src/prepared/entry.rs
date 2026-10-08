@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct PreparedStatementPlan {
+    pub composite_inputs: super::composites::CompositeInputs,
     /// Original input syntax, retained for parse analysis after invalidation.
     pub source_plan: Arc<crate::plan::UnifiedPlan>,
     pub logical_plan: Arc<crate::plan::UnifiedPlan>,
@@ -57,6 +58,7 @@ impl PreparedStatementPlan {
     }
 
     pub fn record_execution(&mut self, update: super::planning::PreparedPlanUpdate) {
+        self.composite_inputs = update.composite_inputs;
         if let Some(analysis) = update.reanalyzed {
             self.logical_plan = analysis.logical_plan;
             self.effective_search_path = analysis.effective_search_path;

@@ -143,6 +143,7 @@ fn function_type_dispatch_preserves_unknown_common_types_fixed_overloads_and_bin
         builtin: false,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     };
     let args = [ScalarExpr::Literal(Value::Null)];

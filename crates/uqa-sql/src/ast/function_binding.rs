@@ -23,9 +23,21 @@ pub struct FunctionBinding {
     /// Concrete invocation contract selected during routine overload resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invocation: Option<Box<RoutineInvocationBinding>>,
+    /// Prepared field identity and its original result type; executable copies refresh only its live/dropped state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite_field: Option<Box<CompositeFieldBinding>>,
     /// A typed overload-resolution failure retained until the expression reaches a fallible planning or execution boundary. This never reuses the SQL function-name namespace as an error channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolution_error: Option<FunctionResolutionError>,
+    pub resolution_error: Option<Box<FunctionResolutionError>>,
+}
+
+/// A field selected during preparation. Attribute numbers are never reused, even when a later attribute has the same name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositeFieldBinding {
+    pub type_oid: u32,
+    pub number: i16,
+    pub result_type: super::ColumnType,
+    pub dropped: bool,
 }
 
 /// Static function-call failure discovered while binding declared argument types.
@@ -334,6 +346,7 @@ impl FunctionBinding {
             builtin: true,
             dispatch: None,
             invocation: None,
+            composite_field: None,
             resolution_error: None,
         }
     }
@@ -363,6 +376,7 @@ impl FunctionBinding {
                 builtin: true,
                 dispatch: Some(dispatch),
                 invocation: None,
+                composite_field: None,
                 resolution_error: None,
             },
             memory,
@@ -379,9 +393,10 @@ impl FunctionBinding {
             builtin: false,
             dispatch: None,
             invocation: None,
-            resolution_error: Some(FunctionResolutionError::UndefinedFunction {
+            composite_field: None,
+            resolution_error: Some(Box::new(FunctionResolutionError::UndefinedFunction {
                 signature: signature.into(),
-            }),
+            })),
         }
     }
 

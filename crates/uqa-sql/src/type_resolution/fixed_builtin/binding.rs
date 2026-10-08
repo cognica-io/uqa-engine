@@ -104,10 +104,12 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
                 control,
             )?;
             let name = control.copy_text(&call.name)?;
+            let error_memory = control.reserve(size_of::<crate::ast::FunctionResolutionError>())?;
             let (signature, extra) = signature.into_parts();
             *memory = control.combine(memory.take(), extra);
             let (name, extra) = name.into_parts();
             *memory = control.combine(memory.take(), extra);
+            *memory = control.combine(memory.take(), error_memory);
             call.binding = Some(FunctionBinding::undefined_function(name, signature));
             return Ok(());
         }

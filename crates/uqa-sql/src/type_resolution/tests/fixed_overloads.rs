@@ -171,6 +171,7 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
             builtin: false,
             dispatch: None,
             invocation: None,
+            composite_field: None,
             resolution_error: None,
         },
     };
@@ -233,6 +234,7 @@ fn non_fixed_udf_introspection_keeps_typed_text_distinct_from_unknown() {
                     builtin: false,
                     dispatch: None,
                     invocation: None,
+                    composite_field: None,
                     resolution_error: None,
                 },
                 return_type: ColumnType::Text,
@@ -326,6 +328,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
                 builtin: false,
                 dispatch: None,
                 invocation: None,
+                composite_field: None,
                 resolution_error: None,
             },
         };

@@ -94,7 +94,7 @@ fn inspect(
     }
 }
 
-pub(super) fn bind_stored_row(
+pub(crate) fn bind_stored_row(
     expression: &mut ScalarExpr,
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
@@ -116,24 +116,11 @@ pub(super) fn bind_stored_row(
     let domain = matches!(target, ColumnType::Domain { .. });
     let descriptor =
         crate::expr::composites::descriptor(resolver.composite_types(), reference.oid)?;
-    if items.len() != descriptor.attributes.len() {
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42846".into(),
-            message: format!(
-                "cannot cast type record to {}",
-                ColumnType::Composite(reference).display_name()
-            ),
-            detail: Some(
-                if items.len() < descriptor.attributes.len() {
-                    "Input has too few columns."
-                } else {
-                    "Input has too many columns."
-                }
-                .into(),
-            ),
-            hint: None,
-        });
-    }
+    validate_width(
+        &ColumnType::Composite(reference.clone()),
+        items.len(),
+        descriptor.attributes.len(),
+    )?;
     let mut converted = Vec::with_capacity(items.len());
     for (item, attribute) in items.iter().zip(&descriptor.attributes) {
         let source = super::scalar_type_with_resolver(item, schema, params, resolver)?;
@@ -193,4 +180,31 @@ pub(super) fn bind_stored_row(
         *expression = row;
     }
     Ok(true)
+}
+
+/// Validate an analyzed ROW cast before any surrounding field lookup.
+pub(crate) fn validate_width(
+    target: &ColumnType,
+    width: usize,
+    expected: usize,
+) -> Result<(), SQLError> {
+    if width != expected {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42846".into(),
+            message: format!(
+                "cannot cast type record to {}",
+                target.clone().display_name()
+            ),
+            detail: Some(
+                if width < expected {
+                    "Input has too few columns."
+                } else {
+                    "Input has too many columns."
+                }
+                .into(),
+            ),
+            hint: None,
+        });
+    }
+    Ok(())
 }

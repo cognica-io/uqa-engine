@@ -138,6 +138,7 @@ fn bound_generated_dispatch_keeps_structural_identity_and_fixed_integer_overflow
         builtin: true,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     };
     assert_eq!(

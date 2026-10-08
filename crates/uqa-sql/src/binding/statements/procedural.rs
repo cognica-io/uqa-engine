@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ProceduralPlanAnalysis {
+    pub composite_inputs: crate::prepared::composites::CompositeInputs,
     pub result: AnalyzedResult,
     pub dependencies: PreparedAnalysisDependencies,
     pub effective_search_path: Option<EffectiveSearchPath>,
@@ -48,6 +49,7 @@ impl ProceduralPlanAnalysis {
             )),
         };
         Ok(crate::prepared::definition::PreparedDefinition {
+            composite_inputs: self.composite_inputs.clone(),
             logical_plan: plan.clone(),
             parameter_types,
             result_schema,
@@ -73,11 +75,20 @@ pub fn analyze_procedural_plan(
         let (result, dependencies) =
             analyze_inputs(context, overloads, types, plan, params, &binding)?;
         crate::routines::compilation::bind_analyzed_sql_body_types(types, plan)?;
+        super::super::composite_inputs::retain_composite_inputs(
+            context.routines,
+            plan,
+            params,
+            &binding,
+        )?;
+        let composite_inputs =
+            crate::prepared::composites::CompositeInputs::capture(plan, context.routines)?;
         let effective_search_path = binding.catalog.effective_search_path(&binding.resolution)?;
         let dependency_snapshot = binding
             .catalog
             .prepared_dependency_snapshot(&dependencies)?;
         analyzed = Some(ProceduralPlanAnalysis {
+            composite_inputs,
             result,
             dependencies,
             effective_search_path,

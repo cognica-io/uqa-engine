@@ -7,6 +7,7 @@
 //! Recognize executables whose mutable dependencies are covered by their retained analysis snapshot.
 
 use super::PreparedStatementPlan;
+use crate::prepared::composites::CompositeInputs;
 use crate::{
     ast::FunctionBinding,
     plan::{QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan},
@@ -18,12 +19,14 @@ impl PreparedStatementPlan {
     /// Primitive expressions and selected fixed builtins can retain their executable across an unrelated registry refresh. Relations require exact analysis revisions, checked before every plan selection; surviving calls still check current execution privileges.
     #[must_use]
     pub fn has_tracked_executable_dependencies(&self) -> bool {
+        let composites = &self.composite_inputs;
+        let tracked_type = |ty: &ColumnType| independent_type(ty) || composites.tracks_type(ty);
         if self.needs_analysis
             || !self.dependencies.routines.is_empty()
             || !self
                 .parameter_types
                 .iter()
-                .all(|ty| ty.as_ref().is_some_and(independent_type))
+                .all(|ty| ty.as_ref().is_some_and(tracked_type))
         {
             return false;
         }
@@ -33,8 +36,13 @@ impl PreparedStatementPlan {
         if !schema
             .column_types()
             .iter()
-            .all(|ty| ty.as_ref().is_some_and(independent_type))
-            || (0..schema.len()).any(|index| schema.record_fields(index).is_some())
+            .all(|ty| ty.as_ref().is_some_and(tracked_type))
+            || (0..schema.len()).any(|index| {
+                schema.record_fields(index).is_some()
+                    && schema.column_types()[index]
+                        .as_ref()
+                        .is_none_or(|ty| !composites.tracks_type(ty))
+            })
         {
             return false;
         }
@@ -52,24 +60,39 @@ impl PreparedStatementPlan {
         }
         self.plan
             .as_ref()
-            .is_some_and(|plan| independent_plan(plan, true, tracked_relations))
-            && independent_plan(&self.source_plan, false, tracked_relations)
-            && independent_plan(&self.logical_plan, false, tracked_relations)
+            .is_some_and(|plan| independent_plan(plan, true, tracked_relations, composites))
+            // Composite analysis has replaced written type names and ROW casts with retained identities; its logical tree carries every remaining executable input.
+            && (composites.has_inputs()
+                || independent_plan(&self.source_plan, false, tracked_relations, composites))
+            && independent_plan(&self.logical_plan, false, tracked_relations, composites)
     }
 }
 
-fn independent_plan(plan: &UnifiedPlan, executable: bool, tracked_relations: bool) -> bool {
+fn independent_plan(
+    plan: &UnifiedPlan,
+    executable: bool,
+    tracked_relations: bool,
+    composites: &CompositeInputs,
+) -> bool {
     match plan {
-        UnifiedPlan::Query(query) => independent_query(query, executable, tracked_relations),
+        UnifiedPlan::Query(query) => {
+            independent_query(query, executable, tracked_relations, composites)
+        }
         UnifiedPlan::Command(_) => false,
     }
 }
 
-fn independent_query(query: &QueryPlan, executable: bool, tracked_relations: bool) -> bool {
+fn independent_query(
+    query: &QueryPlan,
+    executable: bool,
+    tracked_relations: bool,
+    composites: &CompositeInputs,
+) -> bool {
     if !query.ctes.is_empty() {
         return false;
     }
-    let admitted = |expression: &ScalarExpr| independent_expression(expression, executable);
+    let admitted =
+        |expression: &ScalarExpr| independent_expression(expression, executable, composites);
     match &query.root {
         RelationalPlan::QueryBlock(block) => {
             block.from.as_ref().is_none_or(|source| {
@@ -92,8 +115,8 @@ fn independent_query(query: &QueryPlan, executable: bool, tracked_relations: boo
             ..
         } => {
             subqueries.is_empty()
-                && independent_query(left, executable, tracked_relations)
-                && independent_query(right, executable, tracked_relations)
+                && independent_query(left, executable, tracked_relations, composites)
+                && independent_query(right, executable, tracked_relations, composites)
                 && order_by
                     .iter()
                     .map(|order| &order.expr)
@@ -107,12 +130,16 @@ fn independent_query(query: &QueryPlan, executable: bool, tracked_relations: boo
     }
 }
 
-fn independent_expression(expression: &ScalarExpr, executable: bool) -> bool {
+fn independent_expression(
+    expression: &ScalarExpr,
+    executable: bool,
+    composites: &CompositeInputs,
+) -> bool {
     let mut independent = true;
     expression.visit(&mut |part| {
         independent &= match part {
             ScalarExpr::Literal(value) => independent_value(value),
-            ScalarExpr::Cast { ty, .. } => independent_type_name(ty),
+            ScalarExpr::Cast { ty, .. } => independent_type_name(ty) || composites.tracks_name(ty),
             ScalarExpr::TypedLiteral {
                 value,
                 ty,
@@ -120,10 +147,24 @@ fn independent_expression(expression: &ScalarExpr, executable: bool) -> bool {
                 parameter_index,
             } => {
                 parameter_index.is_none()
-                    && independent_value(value)
-                    && bound_type
+                    && ((bound_type
                         .as_ref()
-                        .map_or_else(|| independent_type_name(ty), independent_type)
+                        .is_some_and(|ty| composites.tracks_type(ty))
+                        || composites.tracks_name(ty))
+                        || (independent_value(value)
+                            && bound_type
+                                .as_ref()
+                                .map_or_else(|| independent_type_name(ty), independent_type)))
+            }
+            ScalarExpr::CompositeRow {
+                bound_type,
+                binding,
+                ..
+            } => {
+                bound_type
+                    .as_ref()
+                    .is_some_and(|ty| composites.tracks_type(ty))
+                    || composites.tracks_name(&binding.ty)
             }
             ScalarExpr::Func {
                 binding,
@@ -137,11 +178,12 @@ fn independent_expression(expression: &ScalarExpr, executable: bool) -> bool {
                     && order_by.is_empty()
                     && filter.is_none()
                     && binding.as_ref().map_or(!executable, |binding| {
-                        independent_binding(binding)
-                            && (!executable
-                                || (args.len() == binding.argument_types.len()
-                                    && crate::fixed_builtin_return_type(binding)
-                                        .is_some_and(|ty| independent_type(&ty))))
+                        tracked_field(binding, composites)
+                            || (independent_binding(binding)
+                                && (!executable
+                                    || (args.len() == binding.argument_types.len()
+                                        && crate::fixed_builtin_return_type(binding)
+                                            .is_some_and(|ty| independent_type(&ty)))))
                     })
             }
             ScalarExpr::Column(_)
@@ -161,6 +203,19 @@ fn independent_expression(expression: &ScalarExpr, executable: bool) -> bool {
         };
     });
     independent
+}
+
+fn tracked_field(binding: &FunctionBinding, composites: &CompositeInputs) -> bool {
+    binding.builtin
+        && binding.object_id.is_none()
+        && binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect)
+        && binding.invocation.is_none()
+        && binding.resolution_error.is_none()
+        && binding.composite_field.as_ref().is_some_and(|field| {
+            composites.tracks_oid(field.type_oid)
+                && (independent_type(&field.result_type)
+                    || composites.tracks_type(&field.result_type))
+        })
 }
 
 fn independent_binding(binding: &FunctionBinding) -> bool {

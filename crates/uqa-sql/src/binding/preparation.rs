@@ -65,6 +65,8 @@ pub(crate) fn read_prepared_inputs(
     let constants = analysis.parameters.take_input_constants();
     let parameters = analysis.parameters.finish()?;
     constants.apply(plan)?;
+    let params = crate::prepared::analysis_parameters(&parameters);
+    super::composite_inputs::retain_composite_inputs(routines, plan, &params, ctes)?;
     plan.normalize_window_definitions()?;
     let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
     plan.visit_scalar_expressions(&mut |expression| dependencies.include_expression(expression));

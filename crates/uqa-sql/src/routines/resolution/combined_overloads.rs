@@ -432,6 +432,7 @@ fn resolved_builtin_overload(
             builtin: true,
             dispatch: None,
             invocation: None,
+            composite_field: None,
             resolution_error: None,
         },
         return_type: builtin.return_type,

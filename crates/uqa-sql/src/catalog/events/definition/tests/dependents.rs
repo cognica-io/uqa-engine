@@ -43,6 +43,7 @@ fn binding(id: Option<[u8; 16]>, name: &str) -> FunctionBinding {
         builtin: false,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     }
 }

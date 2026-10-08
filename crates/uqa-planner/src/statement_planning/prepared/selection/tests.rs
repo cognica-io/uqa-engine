@@ -33,6 +33,7 @@ impl Default for Inputs {
         ));
         Self {
             entry: RefCell::new(Some(PreparedStatementPlan {
+                composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
                 source_plan: logical_plan.clone(),
                 logical_plan,
                 needs_analysis: false,

@@ -182,6 +182,7 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
         builtin: true,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     };
     let error = resolve_gamma_overload(
@@ -349,7 +350,7 @@ fn uuid_extraction_binding_rejects_non_uuid_declared_types() {
     };
     assert_eq!(name, "uuid_extract_version");
     assert!(matches!(
-        binding.and_then(|binding| binding.resolution_error),
+        binding.as_ref().and_then(|binding| binding.resolution_error.as_deref()),
         Some(crate::ast::FunctionResolutionError::UndefinedFunction { signature })
             if signature == "uuid_extract_version(text)"
     ));
@@ -412,7 +413,7 @@ fn uuid_extraction_binding_uses_declared_scalar_subquery_types() {
     };
     assert_eq!(name, "uuid_extract_version");
     assert!(matches!(
-        binding.and_then(|binding| binding.resolution_error),
+        binding.as_ref().and_then(|binding| binding.resolution_error.as_deref()),
         Some(crate::ast::FunctionResolutionError::UndefinedFunction { signature })
             if signature == "uuid_extract_version(text)"
     ));

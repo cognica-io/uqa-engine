@@ -15,6 +15,7 @@ fn plan(sql: &str) -> UnifiedPlan {
 fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
     let source = Arc::new(plan(source));
     PreparedStatementPlan {
+        composite_inputs: crate::prepared::composites::CompositeInputs::default(),
         source_plan: Arc::clone(&source),
         logical_plan: source,
         needs_analysis: false,
@@ -165,6 +166,7 @@ fn mixed_entry() -> PreparedStatementPlan {
                     object_id: None,
                     dispatch: None,
                     invocation: None,
+                    composite_field: None,
                     resolution_error: None,
                 });
             }

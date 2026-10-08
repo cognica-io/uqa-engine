@@ -57,6 +57,7 @@ fn call(name: &str, argument: Expr) -> Expr {
             builtin: true,
             dispatch: None,
             invocation: None,
+            composite_field: None,
             resolution_error: None,
         }),
         args: vec![argument],
