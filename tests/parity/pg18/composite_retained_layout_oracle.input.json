@@ -165,6 +165,150 @@
       "sql": "ROLLBACK; EXECUTE cl_nan_p; DEALLOCATE cl_nan_p; DROP TYPE cl_nan"
     },
     {
+      "id": "cl_fixed_0_setup",
+      "sql": "CREATE TYPE cl_fixed_0 AS(a integer,b text); PREPARE cl_fixed_0_p AS SELECT '(0,tail)'::cl_fixed_0 AS v; EXECUTE cl_fixed_0_p"
+    },
+    {
+      "id": "cl_fixed_0_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_0 ALTER ATTRIBUTE a TYPE date"
+    },
+    {
+      "id": "cl_fixed_0_read",
+      "sql": "EXECUTE cl_fixed_0_p"
+    },
+    {
+      "id": "cl_fixed_0_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_0_p; DEALLOCATE cl_fixed_0_p; DROP TYPE cl_fixed_0"
+    },
+    {
+      "id": "cl_fixed_1_setup",
+      "sql": "CREATE TYPE cl_fixed_1 AS(a date,b text); PREPARE cl_fixed_1_p AS SELECT '(2000-01-01,tail)'::cl_fixed_1 AS v; EXECUTE cl_fixed_1_p"
+    },
+    {
+      "id": "cl_fixed_1_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_1 ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "cl_fixed_1_read",
+      "sql": "EXECUTE cl_fixed_1_p"
+    },
+    {
+      "id": "cl_fixed_1_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_1_p; DEALLOCATE cl_fixed_1_p; DROP TYPE cl_fixed_1"
+    },
+    {
+      "id": "cl_fixed_2_setup",
+      "sql": "CREATE TYPE cl_fixed_2 AS(a bigint,b text); PREPARE cl_fixed_2_p AS SELECT '(0,tail)'::cl_fixed_2 AS v; EXECUTE cl_fixed_2_p"
+    },
+    {
+      "id": "cl_fixed_2_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_2 ALTER ATTRIBUTE a TYPE timestamp"
+    },
+    {
+      "id": "cl_fixed_2_read",
+      "sql": "EXECUTE cl_fixed_2_p"
+    },
+    {
+      "id": "cl_fixed_2_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_2_p; DEALLOCATE cl_fixed_2_p; DROP TYPE cl_fixed_2"
+    },
+    {
+      "id": "cl_fixed_3_setup",
+      "sql": "CREATE TYPE cl_fixed_3 AS(a timestamp,b text); PREPARE cl_fixed_3_p AS SELECT '(2000-01-01 00:00:00,tail)'::cl_fixed_3 AS v; EXECUTE cl_fixed_3_p"
+    },
+    {
+      "id": "cl_fixed_3_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_3 ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "cl_fixed_3_read",
+      "sql": "EXECUTE cl_fixed_3_p"
+    },
+    {
+      "id": "cl_fixed_3_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_3_p; DEALLOCATE cl_fixed_3_p; DROP TYPE cl_fixed_3"
+    },
+    {
+      "id": "cl_fixed_4_setup",
+      "sql": "CREATE TYPE cl_fixed_4 AS(a timestamp,b text); PREPARE cl_fixed_4_p AS SELECT '(2000-01-01 00:00:00,tail)'::cl_fixed_4 AS v; EXECUTE cl_fixed_4_p"
+    },
+    {
+      "id": "cl_fixed_4_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_4 ALTER ATTRIBUTE a TYPE timestamptz"
+    },
+    {
+      "id": "cl_fixed_4_read",
+      "sql": "EXECUTE cl_fixed_4_p"
+    },
+    {
+      "id": "cl_fixed_4_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_4_p; DEALLOCATE cl_fixed_4_p; DROP TYPE cl_fixed_4"
+    },
+    {
+      "id": "cl_fixed_5_setup",
+      "sql": "CREATE TYPE cl_fixed_5 AS(a time,b text); PREPARE cl_fixed_5_p AS SELECT '(01:02:03.456789,tail)'::cl_fixed_5 AS v; EXECUTE cl_fixed_5_p"
+    },
+    {
+      "id": "cl_fixed_5_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_5 ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "cl_fixed_5_read",
+      "sql": "EXECUTE cl_fixed_5_p"
+    },
+    {
+      "id": "cl_fixed_5_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_5_p; DEALLOCATE cl_fixed_5_p; DROP TYPE cl_fixed_5"
+    },
+    {
+      "id": "cl_fixed_6_setup",
+      "sql": "CREATE TYPE cl_fixed_6 AS(a bigint,b text); PREPARE cl_fixed_6_p AS SELECT '(3723456789,tail)'::cl_fixed_6 AS v; EXECUTE cl_fixed_6_p"
+    },
+    {
+      "id": "cl_fixed_6_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_6 ALTER ATTRIBUTE a TYPE time(0)"
+    },
+    {
+      "id": "cl_fixed_6_read",
+      "sql": "EXECUTE cl_fixed_6_p"
+    },
+    {
+      "id": "cl_fixed_6_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_6_p; DEALLOCATE cl_fixed_6_p; DROP TYPE cl_fixed_6"
+    },
+    {
+      "id": "cl_fixed_7_setup",
+      "sql": "CREATE TYPE cl_fixed_7 AS(a boolean,b text); PREPARE cl_fixed_7_p AS SELECT '(t,tail)'::cl_fixed_7 AS v; EXECUTE cl_fixed_7_p"
+    },
+    {
+      "id": "cl_fixed_7_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_7 ALTER ATTRIBUTE a TYPE \"char\""
+    },
+    {
+      "id": "cl_fixed_7_read",
+      "sql": "EXECUTE cl_fixed_7_p"
+    },
+    {
+      "id": "cl_fixed_7_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_7_p; DEALLOCATE cl_fixed_7_p; DROP TYPE cl_fixed_7"
+    },
+    {
+      "id": "cl_fixed_8_setup",
+      "sql": "CREATE TYPE cl_fixed_8 AS(a \"char\",b text); PREPARE cl_fixed_8_p AS SELECT '(A,tail)'::cl_fixed_8 AS v; EXECUTE cl_fixed_8_p"
+    },
+    {
+      "id": "cl_fixed_8_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_8 ALTER ATTRIBUTE a TYPE boolean"
+    },
+    {
+      "id": "cl_fixed_8_read",
+      "sql": "EXECUTE cl_fixed_8_p"
+    },
+    {
+      "id": "cl_fixed_8_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_8_p; DEALLOCATE cl_fixed_8_p; DROP TYPE cl_fixed_8"
+    },
+    {
       "id": "durable_setup",
       "sql": "CREATE TYPE cl_saved AS(a integer); CREATE VIEW cl_saved_v AS SELECT '(2139095041)'::cl_saved AS v; ALTER TYPE cl_saved ALTER ATTRIBUTE a TYPE real; SELECT * FROM cl_saved_v"
     },

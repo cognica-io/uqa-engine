@@ -103,18 +103,42 @@ impl CompositeInputs {
         plan: &UnifiedPlan,
         types: &dyn FunctionTypeResolver,
     ) -> Result<Option<UnifiedPlan>, SQLError> {
-        project_plan(plan, types, &self.original)
+        project_plan(plan, types, &self.original, true, None)
     }
 
-    /// Record descriptors of the actual generic plan. Folded scalar results have no remaining composite dependency.
+    /// Update attribute names and field bindings for optimization while retaining the original scalar datums in the reusable executable. Interpreting a raw byte as boolean is not reversible, so an interpreted value cannot replace its source in a cache.
+    pub fn project_for_generic(
+        &self,
+        plan: &UnifiedPlan,
+        types: &dyn FunctionTypeResolver,
+    ) -> Result<Option<UnifiedPlan>, SQLError> {
+        project_plan(plan, types, &self.original, false, None)
+    }
+
+    /// Record the names and attribute numbers of the actual generic plan with the types of its retained scalar datums. Folded scalar results have no remaining composite dependency.
     pub fn with_generic(
         &self,
         plan: &UnifiedPlan,
         types: &dyn FunctionTypeResolver,
     ) -> Result<Self, SQLError> {
+        let mut planned = Self::capture(plan, types)?.original.as_ref().clone();
+        for (oid, descriptor) in &mut planned {
+            let Some(original) = self.original.get(oid) else {
+                continue;
+            };
+            for attribute in &mut Arc::make_mut(descriptor).attributes {
+                if let Some(source) = original
+                    .attributes
+                    .iter()
+                    .find(|source| source.number == attribute.number)
+                {
+                    attribute.ty.clone_from(&source.ty);
+                }
+            }
+        }
         Ok(Self {
             original: self.original.clone(),
-            planned: Some(Self::capture(plan, types)?.original),
+            planned: Some(Arc::new(planned)),
             planned_scope: Some(Arc::new(current_descriptors(&self.original, types)?)),
         })
     }
@@ -157,9 +181,9 @@ impl CompositeInputs {
         plan: &UnifiedPlan,
         types: &dyn FunctionTypeResolver,
     ) -> Result<Option<UnifiedPlan>, SQLError> {
-        self.planned
-            .as_ref()
-            .map_or(Ok(None), |original| project_plan(plan, types, original))
+        self.planned.as_ref().map_or(Ok(None), |original| {
+            project_plan(plan, types, original, true, self.planned_scope.as_deref())
+        })
     }
 }
 
@@ -167,12 +191,20 @@ fn project_plan(
     plan: &UnifiedPlan,
     types: &dyn FunctionTypeResolver,
     original: &Descriptors,
+    interpret_datums: bool,
+    binding_scope: Option<&Descriptors>,
 ) -> Result<Option<UnifiedPlan>, SQLError> {
     if original.is_empty() {
         return Ok(None);
     }
     let current = current_descriptors(original, types)?;
-    if *original == current {
+    let values_changed = *original != current;
+    let bindings_changed = binding_scope.is_some_and(|scope| {
+        current
+            .iter()
+            .any(|(oid, descriptor)| scope.get(oid) != Some(descriptor))
+    });
+    if !values_changed && !bindings_changed {
         return Ok(None);
     }
     let mut projected = plan.clone();
@@ -188,13 +220,16 @@ fn project_plan(
             bound_type,
         } = node
         {
+            if !values_changed {
+                return;
+            }
             let result = bound_type
                 .clone()
                 .map_or_else(|| types.resolve_type_name(ty), |ty| Ok(Some(ty)))
                 .and_then(|ty| {
                     ty.map_or_else(
                         || Ok(value.clone()),
-                        |ty| project(value, &ty, original, &current),
+                        |ty| project_value(value, &ty, original, &current, interpret_datums),
                     )
                 });
             match result {
@@ -283,15 +318,28 @@ fn capture_descriptor(
     Ok(())
 }
 
+#[cfg(test)]
 fn project(
     value: &Value,
     ty: &ColumnType,
     original: &Descriptors,
     current: &Descriptors,
 ) -> Result<Value, SQLError> {
+    project_value(value, ty, original, current, true)
+}
+
+fn project_value(
+    value: &Value,
+    ty: &ColumnType,
+    original: &Descriptors,
+    current: &Descriptors,
+    interpret_datums: bool,
+) -> Result<Value, SQLError> {
     match (ty, value) {
         (_, Value::Null) => Ok(Value::Null),
-        (ColumnType::Domain { base, .. }, _) => project(value, base, original, current),
+        (ColumnType::Domain { base, .. }, _) => {
+            project_value(value, base, original, current, interpret_datums)
+        }
         (ColumnType::Composite(reference), Value::Record(fields)) => {
             let (Some(before), Some(after)) =
                 (original.get(&reference.oid), current.get(&reference.oid))
@@ -313,12 +361,15 @@ fn project(
                                 .map(|(_, value)| (old, value))
                         });
                     let value = retained.map_or(Ok(Value::Null), |(old, value)| {
-                        let reinterpreted = datum::reinterpret(value, &old.ty, &attribute.ty);
-                        project(
+                        let reinterpreted = interpret_datums
+                            .then(|| datum::reinterpret(value, &old.ty, &attribute.ty))
+                            .flatten();
+                        project_value(
                             reinterpreted.as_ref().unwrap_or(value),
                             &attribute.ty,
                             original,
                             current,
+                            interpret_datums,
                         )
                     })?;
                     Ok((attribute.name.clone(), value))
@@ -330,7 +381,9 @@ fn project(
             let values = array
                 .elements()
                 .iter()
-                .map(|value| project_array_element(value, element, original, current))
+                .map(|value| {
+                    project_array_element(value, element, original, current, interpret_datums)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
                 .map(Value::Array)
@@ -347,14 +400,15 @@ fn project_array_element(
     element: &ColumnType,
     original: &Descriptors,
     current: &Descriptors,
+    interpret_datums: bool,
 ) -> Result<Value, SQLError> {
     match value {
         Value::List(values) => values
             .iter()
-            .map(|value| project_array_element(value, element, original, current))
+            .map(|value| project_array_element(value, element, original, current, interpret_datums))
             .collect::<Result<Vec<_>, _>>()
             .map(Value::List),
-        value => project(value, element, original, current),
+        value => project_value(value, element, original, current, interpret_datums),
     }
 }
 

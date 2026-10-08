@@ -8,6 +8,7 @@ use super::*;
 use crate::ast::{CompositeTypeReference, FunctionBinding};
 use crate::expr::composites::{CompositeAttribute, CompositeTypeCatalog};
 use std::sync::RwLock;
+use uqa_core::TemporalValue;
 
 fn ty() -> ColumnType {
     ColumnType::Composite(CompositeTypeReference {
@@ -72,7 +73,7 @@ fn value() -> Value {
 }
 
 #[test]
-fn retained_numeric_fields_use_postgresql_datum_bits_and_restore_after_rollback() {
+fn retained_fixed_width_fields_use_postgresql_datum_bits_and_restore_after_rollback() {
     for (before, after, input, expected) in [
         (
             ColumnType::Integer,
@@ -109,6 +110,32 @@ fn retained_numeric_fields_use_postgresql_datum_bits_and_restore_after_rollback(
             ColumnType::BigInteger,
             Value::Float(1.0),
             Value::Int(4_607_182_418_800_017_408),
+        ),
+        (
+            ColumnType::Integer,
+            ColumnType::Date,
+            Value::Int(0),
+            Value::Temporal(TemporalValue::Date { days: 10_957 }),
+        ),
+        (
+            ColumnType::Date,
+            ColumnType::Integer,
+            Value::Temporal(TemporalValue::Date { days: 10_957 }),
+            Value::Int(0),
+        ),
+        (
+            ColumnType::BigInteger,
+            ColumnType::TimePrecision(0),
+            Value::Int(3_723_456_789),
+            Value::Temporal(TemporalValue::Time {
+                micros: 3_723_456_789,
+            }),
+        ),
+        (
+            ColumnType::InternalChar,
+            ColumnType::Boolean,
+            Value::Str("A".into()),
+            Value::Bool(true),
         ),
     ] {
         let mut original = descriptor(2).as_ref().clone();
@@ -161,6 +188,58 @@ fn projection_uses_original_numbers_preserves_array_bounds_and_can_restore_after
         project(&input, &array_type, &original, &original).unwrap(),
         input
     );
+}
+
+#[test]
+fn generic_cache_keeps_source_datums_when_current_type_interpretation_loses_bits() {
+    let mut source = descriptor(2).as_ref().clone();
+    source.attributes[0].ty = ColumnType::InternalChar;
+    let source = Arc::new(source);
+    let types = Types(RwLock::new(source.clone()));
+    let mut plan = UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0));
+    let raw = Value::Record(vec![
+        ("a".into(), Value::Str("A".into())),
+        ("b".into(), Value::Str("tail".into())),
+    ]);
+    plan.rewrite_scalar_expressions(&mut |node| {
+        if matches!(node, ScalarExpr::Literal(Value::Int(1))) {
+            *node = ScalarExpr::TypedLiteral {
+                value: raw.clone(),
+                ty: "pair".into(),
+                bound_type: Some(ty()),
+                parameter_index: None,
+            };
+        }
+    });
+    let inputs = CompositeInputs::capture(&plan, &types).unwrap();
+    let mut changed = source.as_ref().clone();
+    changed.attributes[0].ty = ColumnType::Boolean;
+    *types.0.write().unwrap() = Arc::new(changed);
+    let generic = inputs.project_for_generic(&plan, &types).unwrap().unwrap();
+    let inputs = inputs.with_generic(&generic, &types).unwrap();
+    let values = |plan: &UnifiedPlan| {
+        let mut values = Vec::new();
+        plan.visit_scalar_expressions(&mut |expression| {
+            expression.visit(&mut |node| {
+                if let ScalarExpr::TypedLiteral { value, .. } = node {
+                    values.push(value.clone());
+                }
+            });
+        });
+        values
+    };
+    assert_eq!(values(&generic), std::slice::from_ref(&raw));
+    let executed = inputs.project_generic(&generic, &types).unwrap().unwrap();
+    assert_eq!(
+        values(&executed),
+        [Value::Record(vec![
+            ("a".into(), Value::Bool(true)),
+            ("b".into(), Value::Str("tail".into()))
+        ])]
+    );
+    *types.0.write().unwrap() = source;
+    let restored = inputs.project_generic(&generic, &types).unwrap().unwrap();
+    assert_eq!(values(&restored), [raw]);
 }
 
 #[test]

@@ -6,10 +6,16 @@
 
 //! Interpret retained fixed-width fields using the current tuple descriptor.
 
-use crate::{catalog::type_metadata::pg_type_len, ColumnType};
+use crate::{
+    catalog::{
+        node_tree::{decode_temporal_datum, encode_temporal_datum},
+        type_metadata::{pg_type_len, pg_type_oid},
+    },
+    ColumnType,
+};
 use uqa_core::Value;
 
-/// A descriptor change does not cast a constant already read by `PostgreSQL`. For equal-width numeric fields, recover the original datum bits and interpret those bits under the new type. The source constant remains immutable for subsequent changes and rollback.
+/// A descriptor change does not cast a constant already read by `PostgreSQL`. For represented equal-width by-value fields, recover the original datum bits and interpret those bits under the new type. The source constant remains immutable for subsequent changes and rollback.
 pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType) -> Option<Value> {
     let before = base(before);
     let after = base(after);
@@ -17,21 +23,45 @@ pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType
         return None;
     }
     let bits = match (before, value) {
+        (ColumnType::Boolean, Value::Bool(value)) => u64::from(*value),
+        (ColumnType::InternalChar, Value::Str(value)) => {
+            u64::from(value.as_bytes().first().copied().unwrap_or(0))
+        }
         (ColumnType::Integer, Value::Int(value)) => u64::from(*value as u32),
         (ColumnType::BigInteger, Value::Int(value)) => *value as u64,
         (ty, Value::Int(value)) if oid(ty) => u64::from(*value as u32),
         (ColumnType::Real, Value::Float(value)) => u64::from(real_bits(*value)),
         (ColumnType::DoublePrecision, Value::Float(value)) => value.to_bits(),
+        (ty, Value::Temporal(value)) if temporal(ty) => {
+            let bytes = encode_temporal_datum(value, pg_type_oid(ty)).ok()?;
+            u64::from_le_bytes(bytes.try_into().ok()?)
+        }
         _ => return None,
     };
     match after {
+        ColumnType::Boolean => Some(Value::Bool(bits as u8 != 0)),
+        ColumnType::InternalChar => Some(Value::Str(if bits == 0 {
+            String::new()
+        } else {
+            char::from(bits as u8).to_string()
+        })),
         ColumnType::Integer => Some(Value::Int(i64::from(bits as i32))),
         ColumnType::BigInteger => Some(Value::Int(bits as i64)),
         ty if oid(ty) => Some(Value::Int(i64::from(bits as u32))),
         ColumnType::Real => Some(Value::Float(real_value(bits as u32))),
         ColumnType::DoublePrecision => Some(Value::Float(f64::from_bits(bits))),
+        ty if temporal(ty) => decode_temporal_datum(&bits.to_le_bytes(), pg_type_oid(ty))
+            .ok()
+            .map(Value::Temporal),
         _ => None,
     }
+}
+
+fn temporal(ty: &ColumnType) -> bool {
+    matches!(
+        ty.without_temporal_modifiers(),
+        ColumnType::Date | ColumnType::Time | ColumnType::Timestamp | ColumnType::TimestampTz
+    )
 }
 
 // Hardware widening and narrowing can quiet a signaling NaN. Descriptor projection must keep those bits, including across serialization, so changing the descriptor back recovers the original integer datum.

@@ -15,6 +15,9 @@ pub use read::parse;
 pub mod deparse;
 pub mod expressions;
 mod values;
+pub(crate) use values::temporal::{
+    decode as decode_temporal_datum, encode as encode_temporal_datum,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
