@@ -25,6 +25,8 @@ To extend coverage, add a test to the owner's current harness that asserts both 
 
 This inventory is the deterministic part of [#261](https://github.com/cognica-io/uqa-engine/issues/261). Controlled-runner latency/throughput acceptance with an independently established noise bound remains open. Shared-runner elapsed times, the stall timeout and successful output assertions cannot establish that acceptance, and the runner explicitly records `timing_acceptance: false`.
 
+The separate [controlled EC2 protocol](controlled-runner.md) defines the actual isolated runner, independent reference calibration, fixed analytical/claim workloads and automatic main-CI lifecycle. It preserves this pre-merge inventory and the original timing limits. Detailed timing results remain artifacts; only reviewed conclusions and compact provenance belong in this repository.
+
 The analytical checker's separate [qualification contract](../../docs/design/performance-qualification.md) can verify independently authenticated calibration and controlled-run evidence. It preserves reviewed limits and reports uncertain results as inconclusive. Its synthetic tests do not establish an actual controlled runner or noise bound, and this deterministic inventory does not substitute its counts for that evidence.
 
 The same Linux/macOS workflow also checks the [independent-process claim workload](claim-contention.md) in its clock-free verification mode. Its eight process/key-count combinations verify actual foreign conflicts and completed releases; measurement mode is separate and cannot run in a debug-profile executable.

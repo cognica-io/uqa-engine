@@ -1,0 +1,57 @@
+name: Controlled performance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'benchmarks/analytical/**'
+      - 'benchmarks/regressions/claim-timing.json'
+      - 'scripts/*performance*.py'
+      - 'scripts/controlled_runner_host.py'
+      - 'scripts/check-analytical-benchmark.py'
+      - '.github/workflows/controlled-performance.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: controlled-performance-instance
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Dedicated EC2 latency and throughput
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    env:
+      AWS_REGION: ${{ vars.PERFORMANCE_AWS_REGION }}
+      PERFORMANCE_INSTANCE_ID: ${{ vars.PERFORMANCE_INSTANCE_ID }}
+      PERFORMANCE_ARTIFACT_BUCKET: ${{ vars.PERFORMANCE_ARTIFACT_BUCKET }}
+      PERFORMANCE_ISSUER_PUBLIC_KEY: ${{ vars.PERFORMANCE_ISSUER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PERFORMANCE_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.PERFORMANCE_AWS_REGION }}
+          role-duration-seconds: 7200
+      - name: Measure through the operator-installed controller
+        run: python3 scripts/run-ec2-performance.py --output target/controlled-performance
+      - name: Stop the reusable instance on every exit
+        if: always()
+        run: |
+          aws ec2 stop-instances --instance-ids "$PERFORMANCE_INSTANCE_ID"
+          aws ec2 wait instance-stopped --instance-ids "$PERFORMANCE_INSTANCE_ID"
+      - name: Retain controlled evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: controlled-performance-${{ github.sha }}
+          path: target/controlled-performance
+          if-no-files-found: error
+          retention-days: 14
