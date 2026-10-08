@@ -121,6 +121,15 @@ impl VectorIndex for HNSWIndex {
             .vector_read_snapshot(control)
     }
 
+    fn matches_document_vectors(
+        &self,
+        document: DocId,
+        vectors: &[Vec<f32>],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        crate::vector_index::canonical_vectors_equal(self, document, vectors, control)
+    }
+
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
         Ok(Box::new(self.clone()))
     }

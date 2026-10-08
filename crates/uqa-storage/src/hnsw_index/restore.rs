@@ -7,6 +7,7 @@
 //! Checked reconstruction accepts one persisted node or edge at a time.
 
 use super::metric::{normalize_with_norm, MAX_HNSW_LEVEL};
+use super::store::Record;
 use super::types::{active_key, HNSWGraphMeta, HNSWIndex, HNSWNode, HNSWNodeSnapshot};
 use crate::vector_index::{validate_vector_values, HNSWIndexParams};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
@@ -49,6 +50,7 @@ pub struct HNSWRestoreBuilder {
     expected: HNSWGraphMeta,
     control: StorageReadControl,
     memory: MemoryReservation,
+    pending: Option<(HNSWNode, MemoryReservation)>,
     failed: bool,
 }
 
@@ -77,6 +79,7 @@ impl HNSWRestoreBuilder {
             expected: meta,
             control: control.clone(),
             memory,
+            pending: None,
             failed: false,
         })
     }
@@ -90,6 +93,7 @@ impl HNSWRestoreBuilder {
 
     fn push_inner(&mut self, snapshot: HNSWNodeSnapshot) -> StorageBackendResult<()> {
         self.control.check()?;
+        self.flush_edges()?;
         let mut bytes = size_of::<HNSWNodeSnapshot>()
             .checked_add(
                 snapshot
@@ -186,7 +190,7 @@ impl HNSWRestoreBuilder {
             .insert(u128::from(node.id), node, Some(&self.control))
     }
 
-    /// Providers with a separate edge relation append each decoded edge to its original source node.
+    /// Providers with a separate edge relation append each decoded edge to its original source node. Retain one charged source until it changes, so ordered edge streams rewrite each spilled vector only once. Unordered streams remain valid and flush on each source change.
     pub fn edge(&mut self, source: u64, layer: usize, target: u64) -> StorageBackendResult<()> {
         self.check_usable()?;
         let result = self.edge_inner(source, layer, target);
@@ -196,10 +200,40 @@ impl HNSWRestoreBuilder {
 
     fn edge_inner(&mut self, source: u64, layer: usize, target: u64) -> StorageBackendResult<()> {
         self.control.check()?;
-        let node = self
-            .index
-            .node(source)?
-            .ok_or_else(|| corrupt(&format!("edge source {source} is missing")))?;
+        if self
+            .pending
+            .as_ref()
+            .is_none_or(|(node, _)| node.id != source)
+        {
+            self.flush_edges()?;
+            let node = self
+                .index
+                .node(source)?
+                .ok_or_else(|| corrupt(&format!("edge source {source} is missing")))?;
+            let mut bytes = node.memory_bytes()?;
+            for layer in 0..node.neighbors.len() {
+                bytes = bytes
+                    .checked_add(
+                        self.index
+                            .max_connections(layer)
+                            .checked_mul(size_of::<u64>())
+                            .ok_or(MemoryError::SizeOverflow)?,
+                    )
+                    .ok_or(MemoryError::SizeOverflow)?;
+            }
+            let mut memory = self.control.memory().reserve(bytes)?;
+            let mut owned = (*node).clone();
+            drop(node);
+            for (layer, neighbors) in owned.neighbors.iter_mut().enumerate() {
+                neighbors.reserve_exact(self.index.max_connections(layer) - neighbors.len());
+            }
+            let actual = owned.memory_bytes()?;
+            if actual > memory.bytes() {
+                memory.grow(actual - memory.bytes())?;
+            }
+            self.pending = Some((owned, memory));
+        }
+        let (node, _) = self.pending.as_mut().expect("selected edge source");
         let neighbors = node.neighbors.get(layer).ok_or_else(|| {
             corrupt(&format!(
                 "node {source} has an edge at layer {layer} above level {}",
@@ -211,14 +245,24 @@ impl HNSWRestoreBuilder {
                 "node {source} layer {layer} exceeds the degree bound"
             )));
         }
-        drop(node);
-        self.index.modify_node(source, Some(&self.control), |node| {
-            node.neighbors[layer].push(target);
-        })
+        node.neighbors[layer].push(target);
+        Ok(())
+    }
+
+    fn flush_edges(&mut self) -> StorageBackendResult<()> {
+        if let Some((node, _memory)) = self.pending.take() {
+            // Restoration does not produce a persistence delta. In particular,
+            // it need not build and spill a redundant dirty-node map.
+            self.index
+                .nodes
+                .insert(u128::from(node.id), node, Some(&self.control))?;
+        }
+        Ok(())
     }
 
     pub fn finish(mut self) -> StorageBackendResult<Budgeted<HNSWIndex>> {
         self.check_usable()?;
+        self.flush_edges()?;
         if self.expected.live_count != self.index.active.len()
             || self.expected.deleted_count != self.index.deleted_count
         {

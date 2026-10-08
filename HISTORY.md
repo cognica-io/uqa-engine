@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Restore separately persisted HNSW edges with one bounded source-node buffer, avoiding per-edge rewrites of spilled vectors while preserving topology validation and memory limits.
+
+- Retain HNSW indexes for SQL replacements whose canonical vector bits and ordinals are unchanged, while preserving ordinary row publication and actual vector changes.
+
+- Exclude native vector field conflict guards from catalog registry invalidation, including private transaction views and upgrades of existing cache triggers.
+
+- Preserve statically selected graph dependencies after SQL literal coercion, so cursor snapshots do not decode unrelated graph entities.
+
 - Preserve the recorded OIDs of private sequences when a callback refreshes committed catalog state, so bound `nextval` calls continue resolving the same sequence under REPEATABLE READ and SERIALIZABLE.
 
 - Synchronize native SQLite WAL sequence-value logs at the consuming transaction boundary, including values obtained from another session's cache, instead of forcing FULL synchronization for each logged block. Preserve autonomous visibility, rollback, exact retry, generation lifetimes and sequence allocation; retain FULL publication on other storage paths. SQLite record format 60 adds the durable-prefix certificate and atomically upgrades predecessor metadata.

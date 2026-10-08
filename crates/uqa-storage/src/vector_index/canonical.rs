@@ -20,6 +20,9 @@ pub(crate) use fingerprint::selected_fingerprint;
 pub(crate) use ordered::{copy_vector, ordinal_count};
 pub use selection::SelectedVectorRead;
 
+#[cfg(test)]
+mod tests;
+
 /// A fixed canonical field view. Owners retain their original visibility, allowance and cancellation. Metadata enumeration never decodes coordinates; a point read owns at most one vector and releases provider locks before returning. This interface makes no claim about physical index lineage or mutation origins.
 pub trait VectorRead: Send + Sync {
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()>;
@@ -53,6 +56,44 @@ pub trait VectorRead: Send + Sync {
 }
 
 pub type VectorReadSnapshot = Arc<dyn VectorRead>;
+
+/// Compare a complete replacement with the selected canonical document, keeping at most one existing vector in memory. Float bits, ordinal order and tensor length all matter; normalized equality is insufficient for a canonical replacement.
+pub(crate) fn canonical_vectors_equal(
+    source: &dyn VectorRead,
+    document: DocId,
+    vectors: &[Vec<f32>],
+    control: &StorageReadControl,
+) -> StorageBackendResult<bool> {
+    source.check_control(control)?;
+    for vector in vectors {
+        super::validate_vector_values_controlled(source.dimensions(), vector, Some(control))?;
+    }
+    if source.document_vector_count(document, control)? != vectors.len() as u64 {
+        return Ok(false);
+    }
+    for (ordinal, expected) in vectors.iter().enumerate() {
+        let ordinal =
+            u32::try_from(ordinal).map_err(|_| uqa_core::memory::MemoryError::SizeOverflow)?;
+        let Some(actual) = source.read_vector(document, ordinal, control)? else {
+            return Ok(false);
+        };
+        if actual.len() != expected.len() {
+            return Ok(false);
+        }
+        for (actual, expected) in actual.chunks(1024).zip(expected.chunks(1024)) {
+            source.check_control(control)?;
+            if actual
+                .iter()
+                .zip(expected)
+                .any(|(a, b)| a.to_bits() != b.to_bits())
+            {
+                return Ok(false);
+            }
+        }
+    }
+    source.check_control(control)?;
+    Ok(true)
+}
 
 /// Decode one little-endian canonical float vector under the invoking read allowance.
 pub fn decode_vector_bytes(

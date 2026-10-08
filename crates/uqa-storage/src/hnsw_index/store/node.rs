@@ -63,6 +63,8 @@ impl Record for HNSWNode {
     }
 
     fn encode(&self, bytes: &mut Vec<u8>) {
+        #[cfg(test)]
+        super::ENCODED_NODES.set(super::ENCODED_NODES.get() + 1);
         bytes.extend_from_slice(&self.id.to_le_bytes());
         bytes.extend_from_slice(&self.doc_id.to_le_bytes());
         bytes.extend_from_slice(&self.vector_ordinal.to_le_bytes());

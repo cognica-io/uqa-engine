@@ -14,6 +14,101 @@ fn document(id: i64, value: i64) -> Document {
 }
 
 #[test]
+fn sql_rewrites_retain_unchanged_hnsw_vectors_and_replace_actual_canonical_differences() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("unchanged-vectors.db");
+    let engine = Engine::open(&path).unwrap();
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, std::sync::atomic::Ordering::Release);
+    engine.sql("CREATE TABLE items (id INTEGER PRIMARY KEY, body TEXT, embedding VECTOR(3)); CREATE INDEX vectors ON items USING hnsw (embedding); INSERT INTO items VALUES (1, 'first', ARRAY[1.0, 0.0, 0.0])", &[]).unwrap();
+    let connection = uqa_storage_sqlite::ManagedConnection::open(&path).unwrap();
+    let revision = || {
+        connection.with_physical(|connection| {
+        Ok(connection.query_row("SELECT revision FROM _hnsw_indexes WHERE table_name = 'public.items' AND field = 'embedding'", [], |row| row.get::<_, i64>(0))?)
+    }).unwrap()
+    };
+    let original = revision();
+    engine
+        .sql("UPDATE items SET body = 'updated' WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(
+        revision(),
+        original,
+        "a scalar update must not rewrite the HNSW graph"
+    );
+    engine.sql("INSERT INTO items VALUES (1, 'metadata upsert', ARRAY[0.0, 0.0, 1.0]) ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body", &[]).unwrap();
+    assert_eq!(
+        revision(),
+        original,
+        "an upsert that excludes the vector must retain its graph"
+    );
+    engine.sql("INSERT INTO items VALUES (1, 'upserted', ARRAY[1.0, 0.0, 0.0]) ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body, embedding = EXCLUDED.embedding", &[]).unwrap();
+    assert_eq!(
+        revision(),
+        original,
+        "an identical vector assignment must retain its graph"
+    );
+    assert_eq!(
+        engine
+            .sql("SELECT body FROM items WHERE id = 1", &[])
+            .unwrap()
+            .rows[0]["body"],
+        Value::Str("upserted".into())
+    );
+    engine
+        .sql(
+            "UPDATE items SET embedding = ARRAY[0.0, 1.0, 0.0] WHERE id = 1",
+            &[],
+        )
+        .unwrap();
+    assert!(revision() > original);
+    let changed = revision();
+    engine
+        .sql(
+            "BEGIN; UPDATE items SET embedding = ARRAY[0.0, 0.0, 1.0] WHERE id = 1; ROLLBACK",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(revision(), changed);
+    engine
+        .sql("UPDATE items SET body = 'after rollback' WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(revision(), changed);
+    let table = engine.require_table("items").unwrap();
+    let document = table.document_store.read().doc_ids().unwrap()[0];
+    engine
+        .add_vector_values("items", document, "embedding", vec![vec![0.0, 0.0, 1.0]])
+        .unwrap();
+    let direct = revision();
+    engine.sql("UPDATE items SET body = 'restore canonical row', embedding = ARRAY[0.0, 1.0, 0.0] WHERE id = 1", &[]).unwrap();
+    assert!(
+        revision() > direct,
+        "compare the index, not just the unchanged row field"
+    );
+    engine
+        .sql("UPDATE items SET embedding = NULL WHERE id = 1", &[])
+        .unwrap();
+    let cleared = revision();
+    engine
+        .sql("UPDATE items SET body = 'empty vector' WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(revision(), cleared);
+    assert_eq!(
+        table
+            .vector_indexes
+            .read()
+            .get("embedding")
+            .unwrap()
+            .count()
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn command_payload_rejection_preserves_the_previous_row_and_cached_exact_key() {
     use uqa_execution::query::exact_lookup::FieldPresence;
     let engine = Engine::new();

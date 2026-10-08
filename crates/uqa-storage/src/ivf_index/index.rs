@@ -102,6 +102,15 @@ impl VectorIndex for IVFIndex {
             .vector_read_snapshot(control)
     }
 
+    fn matches_document_vectors(
+        &self,
+        document: DocId,
+        vectors: &[Vec<f32>],
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        crate::vector_index::canonical_vectors_equal(self, document, vectors, control)
+    }
+
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
         Ok(Box::new(self.detached_clone()))
     }

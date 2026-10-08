@@ -184,6 +184,43 @@ fn dynamic_graph_arguments_retain_all_graph_dependencies_without_evaluation() {
 }
 
 #[test]
+fn typed_graph_constants_preserve_dependencies_without_binding_parameters() {
+    use crate::ScalarExpr;
+
+    let catalog = Catalog::default();
+    for function in ["cypher", "graph_pagerank"] {
+        for parameter_index in [None, Some(0)] {
+            let mut plan = UnifiedPlan::Query(Box::new(query(&format!(
+                "SELECT * FROM {function}('items')"
+            ))));
+            plan.rewrite_scalar_expressions(&mut |expression| {
+                if matches!(expression, ScalarExpr::Literal(uqa_core::Value::Str(value)) if value == "items") {
+                    *expression = ScalarExpr::TypedLiteral {
+                        value: uqa_core::Value::Str("items".into()),
+                        ty: "name".into(),
+                        bound_type: Some(ColumnType::Name),
+                        parameter_index,
+                    };
+                }
+            });
+            let UnifiedPlan::Query(mut query) = plan else {
+                unreachable!();
+            };
+            let dependencies = prepare_query(&catalog.inputs(), &mut query).unwrap();
+            assert_eq!(
+                dependencies.graphs,
+                parameter_index
+                    .is_none()
+                    .then(|| BTreeSet::from(["items".into()])),
+                "{function}: {parameter_index:?}"
+            );
+            assert!(dependencies.graph_catalog);
+            assert_eq!(dependencies.tables, Some(BTreeSet::new()));
+        }
+    }
+}
+
+#[test]
 fn recursive_view_visitation_retains_table_descendants_and_terminates() {
     let catalog = Catalog {
         tables: BTreeSet::from(["app.base".into()]),

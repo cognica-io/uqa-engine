@@ -239,6 +239,13 @@ fn graph_cursor_spools_only_dependencies_and_includes_own_prior_writes() {
             rows
         );
         engine.sql("CLOSE item_cursor", &[]).unwrap();
+        engine.sql("BEGIN", &[]).unwrap();
+        engine
+            .add_graph_vertex(uqa_core::Vertex::new(4, "Item"), "items")
+            .unwrap();
+        let error = engine.sql("DECLARE corrupt_cursor CURSOR FOR SELECT * FROM cypher('unrelated', $$ MATCH (n) RETURN id(n) $$) AS result(id agtype)", &[]).unwrap_err();
+        assert!(error.to_string().contains("corrupt graph state"), "{error}");
+        engine.sql("ROLLBACK", &[]).unwrap();
     }
 }
 
@@ -279,6 +286,34 @@ fn data_commits_retain_schema_and_decoded_statistics_across_sessions() {
             &reader.require_table("untouched").unwrap()
         ));
         assert!(Arc::ptr_eq(&registries, &reader.durable.schemas.snapshot()));
+    }
+}
+
+#[test]
+fn indexed_data_commits_and_existing_definitions_retain_reader_registries() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = Engine::open(&directory.path().join("indexed-refresh.db")).unwrap();
+    pause_automatic_statistics(&writer);
+    writer.sql("CREATE TABLE records (id INTEGER PRIMARY KEY, body TEXT, embedding VECTOR(3)); CREATE INDEX body_idx ON records USING gin (body); CREATE INDEX embedding_idx ON records USING hnsw (embedding); INSERT INTO records VALUES (1, 'first', ARRAY[1.0, 0.0, 0.0])", &[]).unwrap();
+    let reader = writer.new_session().unwrap();
+    pause_automatic_statistics(&reader);
+    reader
+        .sql("SELECT body FROM records WHERE id = 1", &[])
+        .unwrap();
+    let table = reader.require_table("records").unwrap();
+    let registries = reader.durable.schemas.snapshot();
+    for statement in [
+        "INSERT INTO records VALUES (2, 'second', ARRAY[0.0, 1.0, 0.0])",
+        "UPDATE records SET body = 'updated' WHERE id = 1",
+        "CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, body TEXT, embedding VECTOR(3))",
+        "CREATE INDEX IF NOT EXISTS body_idx ON records USING gin (body)",
+        "CREATE INDEX IF NOT EXISTS embedding_idx ON records USING hnsw (embedding)",
+        "UPDATE records SET embedding = ARRAY[0.0, 0.0, 1.0] WHERE id = 2",
+    ] {
+        writer.sql(statement, &[]).unwrap();
+        assert_eq!(reader.sql("SELECT id FROM records ORDER BY id LIMIT 1", &[]).unwrap().rows[0]["id"], uqa_core::Value::Int(1));
+        assert!(Arc::ptr_eq(&table, &reader.require_table("records").unwrap()), "table rebuilt after {statement}");
+        assert!(Arc::ptr_eq(&registries, &reader.durable.schemas.snapshot()), "registries rebuilt after {statement}");
     }
 }
 
