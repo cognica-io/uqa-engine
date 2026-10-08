@@ -1,0 +1,430 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "missing",
+      "sql": "ALTER TYPE ct_missing ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "missing_schema",
+      "sql": "ALTER TYPE ct_missing.t ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "builtin",
+      "sql": "ALTER TYPE integer ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "relation_setup",
+      "sql": "CREATE TABLE ct_table(a integer); CREATE VIEW ct_view AS SELECT * FROM ct_table; CREATE SEQUENCE ct_seq"
+    },
+    {
+      "id": "wrong_ct_table",
+      "sql": "ALTER TYPE ct_table ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "wrong_ct_view",
+      "sql": "ALTER TYPE ct_view ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "wrong_ct_seq",
+      "sql": "ALTER TYPE ct_seq ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "create",
+      "sql": "CREATE TYPE ct_pair AS(a integer,b text)"
+    },
+    {
+      "id": "missing_attribute_and_type",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE absent TYPE missing_type"
+    },
+    {
+      "id": "missing_type",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE missing_type"
+    },
+    {
+      "id": "system_missing",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE ctid TYPE integer"
+    },
+    {
+      "id": "same_type",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "widen",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a SET DATA TYPE bigint"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "fresh_values",
+      "sql": "SELECT (ROW(123,'word')::ct_pair).a,pg_typeof((ROW(123,'word')::ct_pair).a),NULL::ct_pair"
+    },
+    {
+      "id": "unrelated_types",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE date"
+    },
+    {
+      "id": "unrelated_fresh",
+      "sql": "SELECT ('(2026-10-09,text)'::ct_pair).a,pg_typeof(('(2026-10-09,text)'::ct_pair).a)"
+    },
+    {
+      "id": "pseudo",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE void"
+    },
+    {
+      "id": "record",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE record"
+    },
+    {
+      "id": "serial",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE serial"
+    },
+    {
+      "id": "recursive",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE ct_pair"
+    },
+    {
+      "id": "recursive_array",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE ct_pair[]"
+    },
+    {
+      "id": "noncollatable",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE integer COLLATE \"C\""
+    },
+    {
+      "id": "missing_collation",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE text COLLATE ct_missing"
+    },
+    {
+      "id": "bad_typmod",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE varchar(0)"
+    },
+    {
+      "id": "setof",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE SETOF integer"
+    },
+    {
+      "id": "collation",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE integer, ALTER ATTRIBUTE b TYPE varchar(5) COLLATE \"C\""
+    },
+    {
+      "id": "collation_catalog",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "collation_reset",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE b TYPE text"
+    },
+    {
+      "id": "collation_reset_catalog",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "nested_type",
+      "sql": "CREATE TYPE ct_outer AS(v ct_pair)"
+    },
+    {
+      "id": "recursive_nested",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE ct_outer"
+    },
+    {
+      "id": "nested_type_drop",
+      "sql": "DROP TYPE ct_outer"
+    },
+    {
+      "id": "domain_setup",
+      "sql": "CREATE DOMAIN ct_domain AS ct_pair; CREATE TYPE ct_outer AS(v ct_pair,items ct_pair[])"
+    },
+    {
+      "id": "direct_store",
+      "sql": "CREATE TABLE ct_holder_direct(id integer,v ct_pair)"
+    },
+    {
+      "id": "direct_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint CASCADE"
+    },
+    {
+      "id": "stored_same",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "stored_missing_type",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE missing_type"
+    },
+    {
+      "id": "stored_drop_first",
+      "sql": "ALTER TYPE ct_pair DROP ATTRIBUTE b, ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "stored_rollback",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_pair'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "direct_drop",
+      "sql": "DROP TABLE ct_holder_direct"
+    },
+    {
+      "id": "array_store",
+      "sql": "CREATE TABLE ct_holder_array(id integer,v ct_pair[])"
+    },
+    {
+      "id": "array_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint CASCADE"
+    },
+    {
+      "id": "array_drop",
+      "sql": "DROP TABLE ct_holder_array"
+    },
+    {
+      "id": "nested_store",
+      "sql": "CREATE TABLE ct_holder_nested(id integer,v ct_outer)"
+    },
+    {
+      "id": "nested_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint CASCADE"
+    },
+    {
+      "id": "nested_drop",
+      "sql": "DROP TABLE ct_holder_nested"
+    },
+    {
+      "id": "domain_store",
+      "sql": "CREATE TABLE ct_holder_domain(id integer,v ct_domain)"
+    },
+    {
+      "id": "domain_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint CASCADE"
+    },
+    {
+      "id": "domain_drop",
+      "sql": "DROP TABLE ct_holder_domain"
+    },
+    {
+      "id": "materialized_setup",
+      "sql": "CREATE MATERIALIZED VIEW ct_mat AS SELECT NULL::ct_pair AS v WITH NO DATA"
+    },
+    {
+      "id": "materialized_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "materialized_drop",
+      "sql": "DROP MATERIALIZED VIEW ct_mat"
+    },
+    {
+      "id": "view_setup",
+      "sql": "CREATE VIEW ct_whole_view AS SELECT '(1,x)'::ct_pair AS v"
+    },
+    {
+      "id": "view_change",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE b TYPE varchar(8)"
+    },
+    {
+      "id": "view_read",
+      "sql": "SELECT * FROM ct_whole_view"
+    },
+    {
+      "id": "view_row_store",
+      "sql": "CREATE TABLE ct_view_store(v ct_whole_view)"
+    },
+    {
+      "id": "view_row_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE b TYPE text"
+    },
+    {
+      "id": "view_row_drop",
+      "sql": "DROP TABLE ct_view_store; DROP VIEW ct_whole_view"
+    },
+    {
+      "id": "field_view_setup",
+      "sql": "CREATE VIEW ct_field_view AS SELECT ('(1,x)'::ct_pair).a AS a"
+    },
+    {
+      "id": "field_view_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint CASCADE"
+    },
+    {
+      "id": "field_view_other",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE b TYPE text"
+    },
+    {
+      "id": "field_view_drop",
+      "sql": "DROP VIEW ct_field_view"
+    },
+    {
+      "id": "routine_setup",
+      "sql": "CREATE FUNCTION ct_get(v ct_pair) RETURNS integer LANGUAGE SQL RETURN (v).a"
+    },
+    {
+      "id": "routine_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "routine_same_reject",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "routine_other",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE b TYPE varchar(8)"
+    },
+    {
+      "id": "routine_read",
+      "sql": "SELECT ct_get('(2,x)')"
+    },
+    {
+      "id": "routine_drop",
+      "sql": "DROP FUNCTION ct_get(ct_pair)"
+    },
+    {
+      "id": "mixed_setup",
+      "sql": "CREATE TYPE ct_mixed AS(a integer,b text)"
+    },
+    {
+      "id": "add_before_type",
+      "sql": "ALTER TYPE ct_mixed ADD ATTRIBUTE c integer, ALTER ATTRIBUTE c TYPE bigint"
+    },
+    {
+      "id": "drop_before_type",
+      "sql": "ALTER TYPE ct_mixed DROP ATTRIBUTE a, ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "type_before_missing_drop",
+      "sql": "ALTER TYPE ct_mixed DROP ATTRIBUTE absent, ALTER ATTRIBUTE a TYPE missing_type"
+    },
+    {
+      "id": "duplicate_type",
+      "sql": "ALTER TYPE ct_mixed ALTER ATTRIBUTE b TYPE varchar(8), ALTER ATTRIBUTE b TYPE varchar(5)"
+    },
+    {
+      "id": "duplicate_same",
+      "sql": "ALTER TYPE ct_mixed ALTER ATTRIBUTE a TYPE integer, ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "mixed",
+      "sql": "ALTER TYPE ct_mixed DROP ATTRIBUTE b, ADD ATTRIBUTE c text, ALTER ATTRIBUTE a TYPE numeric(8,2)"
+    },
+    {
+      "id": "mixed_catalog",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "mixed_fresh",
+      "sql": "SELECT '(2.5,new)'::ct_mixed,pg_typeof(('(2.5,new)'::ct_mixed).a)"
+    },
+    {
+      "id": "rollback_begin",
+      "sql": "BEGIN; ALTER TYPE ct_mixed ALTER ATTRIBUTE a TYPE text"
+    },
+    {
+      "id": "rollback_inside",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "rollback_end",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "rollback_after",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "savepoint_begin",
+      "sql": "BEGIN; SAVEPOINT ct_save; ALTER TYPE ct_mixed ALTER ATTRIBUTE a TYPE date"
+    },
+    {
+      "id": "savepoint_bad",
+      "sql": "ALTER TYPE ct_mixed ALTER ATTRIBUTE c TYPE missing_type"
+    },
+    {
+      "id": "savepoint_restore",
+      "sql": "ROLLBACK TO ct_save; COMMIT"
+    },
+    {
+      "id": "savepoint_after",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_mixed'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "quoted",
+      "sql": "CREATE TYPE ct_quotes AS(\"Field\" text); ALTER TYPE ct_quotes ALTER ATTRIBUTE \"Field\" TYPE integer; SELECT (ROW(9)::ct_quotes).\"Field\""
+    },
+    {
+      "id": "privilege_setup",
+      "sql": "CREATE ROLE ct_other; CREATE TYPE ct_private AS(v integer); REVOKE ALL ON TYPE ct_private FROM PUBLIC; GRANT CREATE ON SCHEMA public TO ct_other; SET ROLE ct_other; CREATE TYPE ct_owned AS(a integer)"
+    },
+    {
+      "id": "privilege_owner",
+      "sql": "ALTER TYPE ct_pair ALTER ATTRIBUTE absent TYPE missing_type"
+    },
+    {
+      "id": "privilege_type",
+      "sql": "ALTER TYPE ct_owned ALTER ATTRIBUTE a TYPE ct_private"
+    },
+    {
+      "id": "privilege_order",
+      "sql": "ALTER TYPE ct_owned ALTER ATTRIBUTE missing TYPE ct_private"
+    },
+    {
+      "id": "privilege_cleanup",
+      "sql": "RESET ROLE; DROP TYPE ct_owned; DROP TYPE ct_private; REVOKE CREATE ON SCHEMA public FROM ct_other; DROP ROLE ct_other"
+    },
+    {
+      "id": "prepare_setup",
+      "sql": "CREATE TYPE ct_pre AS(a integer,b text); PREPARE ct_scalar AS SELECT ('(3,value)'::ct_pre).a AS a; PREPARE ct_whole AS SELECT '(4,longer)'::ct_pre AS v; EXECUTE ct_scalar; EXECUTE ct_whole"
+    },
+    {
+      "id": "prepare_change",
+      "sql": "ALTER TYPE ct_pre ALTER ATTRIBUTE b TYPE varchar(2)"
+    },
+    {
+      "id": "prepare_retained",
+      "sql": "EXECUTE ct_scalar; EXECUTE ct_whole"
+    },
+    {
+      "id": "prepare_fresh",
+      "sql": "SELECT '(4,longer)'::ct_pre"
+    },
+    {
+      "id": "prepare_restore",
+      "sql": "ALTER TYPE ct_pre ALTER ATTRIBUTE b TYPE text; DEALLOCATE ALL"
+    },
+    {
+      "id": "durable_setup",
+      "sql": "CREATE TYPE ct_durable AS(a integer,b text); ALTER TYPE ct_durable ALTER ATTRIBUTE a TYPE numeric(9,2), ALTER ATTRIBUTE b TYPE varchar(12) COLLATE \"C\"; CREATE TABLE ct_durable_rows(v ct_durable); INSERT INTO ct_durable_rows VALUES('(123.45,persist)')"
+    },
+    {
+      "id": "durable_catalog",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_durable'::regclass AND attnum>0 ORDER BY attnum",
+      "reopen": true
+    },
+    {
+      "id": "durable_read",
+      "sql": "SELECT v,(v).a,pg_typeof((v).a),(v).b FROM ct_durable_rows",
+      "reopen": true
+    },
+    {
+      "id": "durable_reject",
+      "sql": "ALTER TYPE ct_durable ALTER ATTRIBUTE a TYPE integer",
+      "reopen": true
+    },
+    {
+      "id": "durable_drop",
+      "sql": "DROP TABLE ct_durable_rows; ALTER TYPE ct_durable ALTER ATTRIBUTE a TYPE integer",
+      "reopen": true
+    },
+    {
+      "id": "durable_after",
+      "sql": "SELECT attname,attnum,atttypid::regtype,atttypmod,attcollation::regcollation,attisdropped FROM pg_attribute WHERE attrelid='ct_durable'::regclass AND attnum>0 ORDER BY attnum",
+      "reopen": true
+    },
+    {
+      "id": "durable_fresh",
+      "sql": "SELECT '(7,new)'::ct_durable",
+      "reopen": true
+    }
+  ]
+}
