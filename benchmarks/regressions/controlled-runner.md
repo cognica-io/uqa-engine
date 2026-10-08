@@ -27,7 +27,7 @@ The operator installs `run-controlled-performance.py`, `controlled_runner_host.p
 - [x] Measure #266's independent-process scaling and record the evidence-based decision to retain the current mutex/batching; all sixteen case/phase comparisons pass, and no sidecar-format correction is justified by this workload.
 - [x] Connect the controlled path to automatic CI, retain compact results and detailed artifacts, and stop the instance after completion.
 - [x] Publish the measured conclusions, synchronize issue/design records and preserve the unresolved tasks when closing #266.
-- [ ] Complete #261's remaining timing qualification with the reviewed eight-pair protocol. Preserve both four-pair runs and their decisions; do not widen limits or retry unchanged measurements until a favorable result appears.
+- [x] Execute and independently verify the reviewed eight-pair qualification, retaining accepted and inconclusive decisions. Preserve both four-pair runs; do not widen limits or retry unchanged measurements until a favorable result appears.
 
 The separately tracked SQLite dependency default (#348) is outside this measurement change. The maintainer closed #125 pending recurrence; successful startup diagnostics do not claim that its historical loader cause was fixed.
 
@@ -39,8 +39,10 @@ The retained calibration pair 25 from run 37734616093 has correlated slowdown ac
 - [x] Capture a bounded diagnostic session on the retained dedicated instance, with per-execution resource evidence and no acceptance claim.
 - [x] Verify the correction to CPU placement and kernel-workqueue isolation without changing the workload, estimator or regression limits; do not infer the old outlier's cause from a subsequent successful run.
 - [x] Deploy the reviewed correction, obtain fresh independent calibration through automatic CI and publish [run 37749960217](ec2-results-2026-10-08.md#eight-pair-follow-up): nineteen accepted comparisons, Q1 inconclusive, every observation/signature and 160 resource records independently verified.
-- [ ] Identify the remaining run-level variation before another justified control or implementation correction; do not round Q1's 1.10163 upper endpoint down to its 1.10 limit.
-- [ ] Close issue #261 only when its acceptance conditions are satisfied; stop the instance and clean the merged branch.
+- [x] Verify the process-layout-controlled session 37756360358: eighteen comparisons accepted, Q1 and materialized scans inconclusive, with every observation/signature and all 160 resource records checked.
+- [x] Map the implementation to [#261's original coverage requirements](ec2-results-2026-10-08.md#ci-coverage-and-timing-decisions), which explicitly include inconclusive measurements. Earlier progress records incorrectly added acceptance of every timing comparison as an implementation prerequisite.
+
+The cause of the remaining run-level variation is still unknown. Address control did not eliminate it. Do not round an upper endpoint down to a limit, reinterpret inconclusive results as acceptance, or claim the variation fixed. A further control or product change needs supporting evidence before another deliberate measurement. Ordinary main changes still receive independent automatic assessment, and the instance must stop after each completed session.
 
 The controller originally used a load-balanced exclusive CPU partition, which does not exclude unbound kernel work. The [Linux CPU isolation documentation](https://docs.kernel.org/admin-guide/kernel-parameters.html) requires configuring the global workqueue CPU mask when those CPUs remain in scheduler domains. Set `/sys/devices/virtual/workqueue/cpumask` to CPUs 0–7 and verify it throughout the session. Keep scheduler load balancing for the multi-process claim workload. A fixed CPU for sequential analytical latency also prevents observed migrations between warmup and measurement. Per-CPU kernel work and interrupts still exist; the independent noise bound remains required.
 
@@ -57,3 +59,5 @@ The fixed 16-pair diagnostic compared the same immutable reference with address 
 [Google Benchmark's variance guidance](https://github.com/google/benchmark/blob/main/docs/reducing_variance.md#disabling-aslr) identifies process address randomization as a source of benchmark variation and supports per-process control. The controller now removes this observed layout variation and verifies that the requested control actually applies. It does not alter product binaries, SQL fixtures, sample counts, noise ranks or regression limits. Any subsequent qualification requires a fresh automatic session with its own reference-only calibration; all earlier inconclusive decisions remain retained.
 
 Validation of process layout control: all 401 Python tests and dependency/ownership checks pass. On EC2, the actual analytical executable passes its four correctness cases with fixed-layout evidence; a Python process that re-enables ASLR is rejected, and the global host setting remains unchanged. These are control/correctness checks, not a timing acceptance claim.
+
+The subsequent [automatic session](ec2-results-2026-10-08.md#process-layout-controlled-session) verified that control in every invocation but retained large reference variation. Its analytical decision is inconclusive and its workflow conclusion is failure; the control correction does not retrospectively qualify any prior run.
