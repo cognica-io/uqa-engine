@@ -74,7 +74,9 @@ class ControlledHost:
         return command("runuser", "-u", "uqa-bench", "--", "git", *args, cwd=cwd)
 
     def source(self, revision: str, role: str) -> Path:
-        path = REPOSITORY if role == "reference" else WORK / (role + "-source")
+        # Claims read only their private temporary files. Reuse their checkout for the
+        # candidate; the analytical release keeps its own runtime manifest checkout.
+        path = REPOSITORY if role == "reference" else WORK / "claims-reference-source"
         if path.exists():
             if self.git("status", "--porcelain", cwd=path):
                 raise QualificationError(f"unexpected modified source tree: {role}")
@@ -229,7 +231,8 @@ class ControlledHost:
             environment["CRITERION_HOME"] = str(writable / "criterion")
         else:
             args += ["--measure"]
-        stdout = self.unit(label, args, source, measurement=True, writable=writable, environment=environment)
+        working_directory = source if kind == "analytical" else writable
+        stdout = self.unit(label, args, working_directory, measurement=True, writable=writable, environment=environment)
         self.verify_control()
         if kind == "claims":
             if stdout.stat().st_size > 4 * 1024 * 1024:
