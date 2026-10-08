@@ -13,8 +13,13 @@ Every native release retains the identity until the shared claim and its pin hav
 - [x] Implement scoped identity ownership in Execution and retain it in Engine's two key-reservation adapters.
 - [x] Verify reclamation, a 4,096-key batch and capacity release, permanent-ID promotion, duplicate/upgrade/savepoint ownership, cancellation, batch rollback, waiting ownership and 256 waves of concurrent reuse.
 - [x] Pass focused Execution/Engine tests, rustfmt, strict Clippy and ownership/dependency checks.
-- [ ] Update HISTORY and automatic regression inventory, push logical commits, review and merge; close #588 and clean up.
+- [x] Update HISTORY and automatic regression inventory; push logical commits and review the complete change.
+- [x] Complete the implementation, review and validation required for PR #589 and closure of #588 and #590.
 
 The broader performance ledger remains #266, #347, #348, #261 and #125. Controlled timing qualification is separate from the retained-entry and operation-count assertions in this change.
 
 All 145 row-lock owner cases and 16 Engine composite-UNIQUE cases pass. The full owner run first exposed a crash-fixture failure (limit 11 versus expected 13); #590 adds peer-observed limits before death, retains the input handle through termination and requires abnormal exit. The expected reservation and restart values are unchanged, and the strengthened focused case plus the full owner suite pass. This is a test-boundary correction, not a claimed product allocator change. The automatic inventory now contains 36 checks / 92 required cases, including this recovery case.
+
+Product commit `7f040f253` passed all 92 automatic regression cases on both Linux and macOS in [run 37709437095](https://github.com/cognica-io/uqa-engine/actions/runs/37709437095), with formatting also passing. The final local owner run passed 145 cases after the Clippy refactor.
+
+CodeRabbit reviewed product commit `7f040f253` and reported no actionable findings. Copilot did not perform a review because its quota was exhausted.
