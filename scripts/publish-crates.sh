@@ -130,10 +130,19 @@ publish_live() {
   local publish_status
   local retry_at
   local index_retries=0
+  local verification_args=()
+
+  # The complete archive set has already built and passed license validation.
+  # With the same default build options, publication need not compile it again.
+  # Explicit Cargo options can select different features or targets and retain
+  # their own verification instead of claiming coverage from the default build.
+  if (( ${#cargo_args[@]} == 0 )); then
+    verification_args+=(--no-verify)
+  fi
 
   publish_log="$(mktemp "${TMPDIR:-/tmp}/uqa-publish.XXXXXX")"
   while :; do
-    if cargo publish -p "$crate" --locked "${cargo_args[@]+"${cargo_args[@]}"}" 2>&1 | tee "$publish_log"; then
+    if cargo publish -p "$crate" --locked "${verification_args[@]+"${verification_args[@]}"}" "${cargo_args[@]+"${cargo_args[@]}"}" 2>&1 | tee "$publish_log"; then
       rm -f "$publish_log"
       return 0
     else
