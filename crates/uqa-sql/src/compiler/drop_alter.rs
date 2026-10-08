@@ -882,14 +882,7 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
     let table = range_var_name(relation);
     let action = match stmt.rename_type() {
         ObjectType::ObjectAttribute => {
-            return Ok(Statement::AlterTypeObject(crate::ast::AlterTypeObject {
-                kind: crate::ast::TypeObjectKind::Type,
-                name: table,
-                action: crate::ast::AlterTypeObjectAction::RenameAttribute {
-                    from: stmt.subname.clone(),
-                    to: stmt.newname.clone(),
-                },
-            }));
+            return Ok(super::composites::compile_attribute_rename(stmt, table));
         }
         ObjectType::ObjectColumn
             if matches!(
@@ -897,19 +890,15 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
                 ObjectType::ObjectView | ObjectType::ObjectMatview
             ) =>
         {
-            return Ok(Statement::AlterView(AlterViewStmt {
-                name: table,
-                kind: if stmt.relation_type() == ObjectType::ObjectView {
-                    AlterViewKind::View
-                } else {
-                    AlterViewKind::MaterializedView
-                },
-                if_exists: stmt.missing_ok,
-                action: AlterViewAction::RenameColumn {
+            return Ok(compile_view_rename(
+                stmt,
+                table,
+                stmt.relation_type(),
+                AlterViewAction::RenameColumn {
                     from: stmt.subname.clone(),
                     to: stmt.newname.clone(),
                 },
-            }));
+            ));
         }
         ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
             from: stmt.subname.clone(),
@@ -936,16 +925,12 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
             }));
         }
         ObjectType::ObjectView | ObjectType::ObjectMatview => {
-            return Ok(Statement::AlterView(AlterViewStmt {
-                name: table,
-                kind: if stmt.rename_type() == ObjectType::ObjectView {
-                    AlterViewKind::View
-                } else {
-                    AlterViewKind::MaterializedView
-                },
-                if_exists: stmt.missing_ok,
-                action: AlterViewAction::RenameTo(render_relation_component(&stmt.newname)),
-            }));
+            return Ok(compile_view_rename(
+                stmt,
+                table,
+                stmt.rename_type(),
+                AlterViewAction::RenameTo(render_relation_component(&stmt.newname)),
+            ));
         }
         ObjectType::ObjectForeignTable => {
             return Ok(Statement::AlterForeignTable(
@@ -983,4 +968,22 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
         recurse: relation.inh,
         actions: vec![action],
     }))
+}
+
+fn compile_view_rename(
+    stmt: &pg_query::protobuf::RenameStmt,
+    name: String,
+    kind: pg_query::protobuf::ObjectType,
+    action: AlterViewAction,
+) -> Statement {
+    Statement::AlterView(AlterViewStmt {
+        name,
+        kind: if kind == pg_query::protobuf::ObjectType::ObjectView {
+            AlterViewKind::View
+        } else {
+            AlterViewKind::MaterializedView
+        },
+        if_exists: stmt.missing_ok,
+        action,
+    })
 }

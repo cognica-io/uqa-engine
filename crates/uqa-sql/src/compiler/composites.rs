@@ -19,6 +19,20 @@ use crate::ast::{
     TypeObjectKind,
 };
 
+pub(super) fn compile_attribute_rename(
+    statement: &pg_query::protobuf::RenameStmt,
+    name: String,
+) -> Statement {
+    Statement::AlterTypeObject(AlterTypeObject {
+        kind: TypeObjectKind::Type,
+        name,
+        action: AlterTypeObjectAction::RenameAttribute {
+            from: statement.subname.clone(),
+            to: statement.newname.clone(),
+        },
+    })
+}
+
 pub(super) fn compile_composite_attributes(statement: &AlterTableStmt) -> Result<Statement> {
     let relation = statement
         .relation

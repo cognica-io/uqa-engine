@@ -253,6 +253,30 @@
       "sql": "EXECUTE cr_cached_q"
     },
     {
+      "id": "check_cache_setup",
+      "sql": "CREATE TYPE cr_check_pre AS(a int,b text); CREATE TABLE cr_check_t(v cr_check_pre CHECK ((v).b <> 'bad')); INSERT INTO cr_check_t VALUES('(1,x)'); CREATE FUNCTION cr_check_f(v cr_check_pre) RETURNS text LANGUAGE SQL RETURN (v).b; CREATE VIEW cr_check_v AS SELECT (v).b AS n FROM cr_check_t"
+    },
+    {
+      "id": "check_cache_prepare",
+      "sql": "PREPARE cr_check_q AS SELECT (v).b,cr_check_f(v) FROM cr_check_t; PREPARE cr_check_vq AS SELECT (v).b,n FROM cr_check_t CROSS JOIN cr_check_v; EXECUTE cr_check_q; EXECUTE cr_check_vq"
+    },
+    {
+      "id": "check_cache_rename",
+      "sql": "ALTER TYPE cr_check_pre RENAME ATTRIBUTE b TO label; EXECUTE cr_check_q; EXECUTE cr_check_vq"
+    },
+    {
+      "id": "check_cache_rollback",
+      "sql": "BEGIN; ALTER TYPE cr_check_pre RENAME ATTRIBUTE label TO transient; EXECUTE cr_check_q; ROLLBACK; EXECUTE cr_check_q"
+    },
+    {
+      "id": "check_cache_same_definition",
+      "sql": "ALTER TABLE cr_check_t ALTER COLUMN v DROP DEFAULT; EXECUTE cr_check_q"
+    },
+    {
+      "id": "check_cache_definition_change",
+      "sql": "ALTER TABLE cr_check_t ALTER COLUMN v SET DEFAULT '(3,z)'; EXECUTE cr_check_q"
+    },
+    {
       "id": "view_rename_setup",
       "sql": "CREATE TABLE cr_view_rows(a int); INSERT INTO cr_view_rows VALUES(12); CREATE VIEW cr_view_base AS SELECT a FROM cr_view_rows; CREATE VIEW cr_view_dep AS SELECT a FROM cr_view_base; CREATE FUNCTION cr_view_pick() RETURNS int LANGUAGE SQL RETURN (SELECT a FROM cr_view_base); CREATE MATERIALIZED VIEW cr_view_mat AS SELECT a FROM cr_view_rows"
     },

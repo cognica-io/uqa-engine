@@ -121,7 +121,9 @@ pub fn drop_default<S: Clone + 'static>(
     table: &str,
     name: &str,
 ) -> Result<(), SQLError> {
-    alteration::validate_default_removal(&context.analysis, table, name)?;
+    if !alteration::validate_default_removal(&context.analysis, table, name)? {
+        return Ok(());
+    }
     if !publish_property(
         context.transactions,
         table,

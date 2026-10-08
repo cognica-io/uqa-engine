@@ -16,7 +16,11 @@ pub trait ViewRemovalEvents {
     fn drop_relation_events_inner(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
 }
 pub trait ViewRemovalPublication {
-    fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<Option<bool>>;
+    fn drop_view(
+        &self,
+        relation: &RelationIdentity,
+        object: Option<[u8; 16]>,
+    ) -> StorageBackendResult<Option<bool>>;
 }
 pub struct ViewRemovalContext<'a> {
     pub registry: &'a dyn ViewRegistryState,

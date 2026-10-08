@@ -35,7 +35,7 @@ pub(super) fn drop_view_state_inner(
         views.contains_key(&relation)
     } else {
         publication
-            .drop_view(&relation)
+            .drop_view(&relation, views.get(&relation).map(|view| view.object_id))
             .map_err(|err| SQLError::Internal(format!("drop view `{name}`: {err}")))?
             .unwrap_or_else(|| views.contains_key(&relation))
     };

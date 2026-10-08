@@ -28,6 +28,7 @@ use uqa_core::RelationIdentity;
 pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use view::StoredView;
 mod analysis;
+pub mod definition_revision;
 pub mod graph;
 pub mod graph_oids;
 mod graph_reads;

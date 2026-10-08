@@ -49,7 +49,11 @@ pub fn rewrite_composite_constants(
                 }
             }
         }
-        *routine = super::revision::replacement(definition, body)?;
+        *routine = if change.rename.is_some() {
+            Arc::new(uqa_sql::routines::SQLUserFunction::new(definition, body))
+        } else {
+            super::revision::replacement(definition, body)?
+        };
         changed = true;
     }
     if changed {

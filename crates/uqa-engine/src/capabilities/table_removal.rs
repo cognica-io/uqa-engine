@@ -51,15 +51,19 @@ impl TableRemovalPublication for Engine {
         Engine::prune_constraint_modes(self)
     }
     fn remove_state(&self, name: &str, relation: &RelationIdentity) -> StorageBackendResult<()> {
-        let temporary = self
-            .storage
-            .tables
-            .read()
-            .get(relation)
+        let table = self.storage.tables.read().get(relation).cloned();
+        let temporary = table
+            .as_ref()
             .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary);
         if !temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.drop_table_and_data(name)?;
+                if let Some(table) = &table {
+                    uqa_execution::catalog::definition_revision::remove_table(
+                        catalog.as_ref(),
+                        table.object_id(),
+                    )?;
+                }
                 self.note_table_catalog_changed();
             }
         }

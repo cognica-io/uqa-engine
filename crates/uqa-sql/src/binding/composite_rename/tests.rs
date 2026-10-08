@@ -45,7 +45,7 @@ impl CompositeTypeCatalog for Types {
 
 fn context() -> BindingContext<'static> {
     let mut context = super::super::fixture::empty_binding_context();
-    context.catalog = super::super::fixture::catalog(BTreeMap::from_iter(
+    context.catalog = super::super::fixture::catalog(
         [("first", 20001), ("second", 21001)]
             .into_iter()
             .map(|(name, oid)| {
@@ -63,8 +63,9 @@ fn context() -> BindingContext<'static> {
                     uqa_core::RelationIdentity::new("public", name),
                     super::super::fixture::table_definition(vec![column]),
                 )
-            }),
-    ));
+            })
+            .collect::<BTreeMap<_, _>>(),
+    );
     context
 }
 

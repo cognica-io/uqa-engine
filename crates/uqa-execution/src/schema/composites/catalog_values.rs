@@ -74,12 +74,18 @@ fn tables(
             changed |= change.spec(spec)?;
         }
         if changed {
-            table
-                .persist_candidate(&columns, &constraints)
-                .map_err(storage)?;
+            if change.rename.is_some() {
+                table.persist_expression_names(&columns, &constraints)
+            } else {
+                table.persist_candidate(&columns, &constraints)
+            }
+            .map_err(storage)?;
             updates.push((position, columns, constraints));
-            let relation = uqa_core::RelationIdentity::from_legacy_name(name).map_err(storage)?;
-            context.changes.prepared_relation_changed(&relation);
+            if change.rename.is_none() {
+                let relation =
+                    uqa_core::RelationIdentity::from_legacy_name(name).map_err(storage)?;
+                context.changes.prepared_relation_changed(&relation);
+            }
         }
     }
     if !updates.is_empty() {

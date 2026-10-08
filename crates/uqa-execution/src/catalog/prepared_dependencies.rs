@@ -176,13 +176,21 @@ fn read_selected_relations(
         objects: selected,
         indexes,
     } = selected;
+    let definition_keys: Vec<_> = selected
+        .iter()
+        .map(|dependency| match dependency.kind {
+            RelationKind::Table => Some(super::definition_revision::table_key(dependency.object)),
+            RelationKind::View => Some(super::definition_revision::view_key(dependency.object)),
+            _ => None,
+        })
+        .collect();
     let mut records = Vec::new();
     let mut ranges = Vec::new();
-    for dependency in &selected {
+    for (dependency, key) in selected.iter().zip(&definition_keys) {
         let start = records.len();
-        records.push(CatalogRecordRef::Relation(
-            dependency.kind,
-            &dependency.relation,
+        records.push(key.as_ref().map_or(
+            CatalogRecordRef::Relation(dependency.kind, &dependency.relation),
+            |key| CatalogRecordRef::Metadata(key),
         ));
         ranges.push(start..records.len());
     }
@@ -208,13 +216,7 @@ fn read_selected_relations(
             Some(PreparedDependencyRevision::new(RelationRevision {
                 object: dependency.object,
                 acl: dependency.acl.clone(),
-                record_names: records[range.clone()]
-                    .iter()
-                    .map(|record| match record {
-                        CatalogRecordRef::Relation(kind, relation) => (*kind, (*relation).clone()),
-                        CatalogRecordRef::Metadata(_) => unreachable!("relation records"),
-                    })
-                    .collect(),
+                record_names: vec![(dependency.kind, dependency.relation.clone())],
                 records: revisions
                     .as_ref()
                     .map(|revisions| revisions[range].to_vec()),

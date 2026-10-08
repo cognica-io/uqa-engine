@@ -75,6 +75,11 @@ impl ViewPublication for Engine {
         self.storage.catalog.is_some()
     }
     fn save_view(&self, row: &ViewRow) -> StorageBackendResult<()> {
+        self.storage.catalog.as_ref().map_or(Ok(()), |catalog| {
+            uqa_execution::catalog::definition_revision::publish_view(catalog.as_ref(), row)
+        })
+    }
+    fn save_view_expression_names(&self, row: &ViewRow) -> StorageBackendResult<()> {
         self.storage
             .catalog
             .as_ref()

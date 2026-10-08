@@ -12,7 +12,7 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_storage::{CatalogFacade, PersistentStorageProvider};
 
-fn catalog<T>(
+pub(in crate::queries::sql_composites) fn catalog<T>(
     provider: usize,
     path: &Path,
     use_catalog: impl FnOnce(&dyn CatalogFacade) -> T,

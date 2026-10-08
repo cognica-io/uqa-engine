@@ -141,7 +141,7 @@ impl CompositeFieldRename<'_> {
         self.bind_expression_plan(&mut next, schema)?;
         let mut changed = false;
         crate::plan::rewrite_scalar_expression(&mut next.scalar, &mut |node| {
-            changed |= self.scalar_node(node)
+            changed |= self.scalar_node(node);
         });
         for query in &mut next.subqueries {
             query.rewrite_scalar_expressions(&mut |node| changed |= self.scalar_node(node));
