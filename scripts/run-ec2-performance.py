@@ -20,8 +20,8 @@ from performance_qualification import QualificationError, verified_document
 
 
 def aws(*args):
-    result = subprocess.check_output(["aws", *args, "--output", "json"], text=True)
-    return json.loads(result) if result.strip() else None
+    result = subprocess.run(["aws", *args, "--output", "json"], capture_output=True, text=True, check=True)
+    return json.loads(result.stdout) if result.stdout.strip() else None
 
 
 def await_online(instance):
@@ -68,9 +68,14 @@ def main():
                        "--document-name", "UQAEngineControlledPerformance", "--timeout-seconds", "120",
                        "--parameters", json.dumps({"headRevision": [revision], "runId": [run_id]}))
         command_id = response["Command"]["CommandId"]
-        for _ in range(540):
+        for attempt in range(540):
             time.sleep(10)
-            invocation = aws("ssm", "get-command-invocation", "--command-id", command_id, "--instance-id", instance)
+            try:
+                invocation = aws("ssm", "get-command-invocation", "--command-id", command_id, "--instance-id", instance)
+            except subprocess.CalledProcessError as error:
+                if attempt < 6 and "InvocationDoesNotExist" in (error.stderr or ""):
+                    continue
+                raise
             if invocation["Status"] not in {"Pending", "InProgress", "Delayed"}:
                 break
         else:

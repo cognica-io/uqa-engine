@@ -6,6 +6,7 @@
 
 import copy
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -28,6 +29,26 @@ ci = load("run-ec2-performance")
 
 
 class ControlledRunnerTest(unittest.TestCase):
+    def test_instance_is_stopped_when_execution_or_artifact_collection_fails(self):
+        for upload_failed in [False, True]:
+            calls = []
+
+            def aws(*args):
+                calls.append(args)
+                if args[:2] == ("ssm", "send-command"):
+                    raise RuntimeError("SSM unavailable")
+
+            environment = {"PERFORMANCE_INSTANCE_ID": "instance", "PERFORMANCE_ARTIFACT_BUCKET": "bucket",
+                           "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}
+            with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, environment), \
+                    patch.object(sys, "argv", ["run-ec2-performance.py", "--output", temporary]), \
+                    patch.object(ci, "aws", side_effect=aws), patch.object(ci, "await_online"), \
+                    patch.object(ci.subprocess, "run", side_effect=RuntimeError("S3 unavailable") if upload_failed else None), \
+                    self.assertRaises(RuntimeError):
+                ci.main()
+            self.assertIn(("ec2", "stop-instances", "--instance-ids", "instance"), calls)
+            self.assertIn(("ec2", "wait", "instance-stopped", "--instance-ids", "instance"), calls)
+
     def test_all_pairs_are_retained_in_counterbalanced_role_order(self):
         class Host:
             def __init__(self, output):
