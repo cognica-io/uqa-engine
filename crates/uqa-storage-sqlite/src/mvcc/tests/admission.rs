@@ -335,6 +335,57 @@ fn a_reader_blocking_commit_does_not_replay_staged_records() {
 }
 
 #[test]
+fn retained_completion_reads_retry_busy_and_preserve_cancelled_owners() {
+    for cancel in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retained.db");
+        let connection = ManagedConnection::open_auxiliary(&path, None).unwrap();
+        let store = SQLiteRecordStore::new(&connection).unwrap();
+        let control = control();
+        let owner = store.allocate_managed_transaction(&control).unwrap();
+        let receipt = store
+            .commit(
+                owner.transaction(),
+                &prepared(b"item", b"published", &control),
+                &control,
+            )
+            .unwrap();
+        let acknowledgement = uqa_storage::mvcc::ReceiptAcknowledgement::Committed(receipt);
+        let result = after_physical_contention(
+            &path,
+            &store,
+            &control,
+            Holder::Exclusive,
+            cancel,
+            |connection| {
+                super::super::receipts::validate_retained(
+                    connection,
+                    None,
+                    acknowledgement,
+                    &control,
+                )
+            },
+        );
+        if cancel {
+            assert!(result.is_err());
+        } else {
+            assert!(result.unwrap());
+        }
+        let recovery = super::control();
+        assert_eq!(store.reclaim_transaction_receipts(&recovery).unwrap(), 0);
+        assert_eq!(
+            store.commit_status(owner.transaction(), &recovery).unwrap(),
+            CommitStatus::Committed(receipt)
+        );
+        store
+            .acknowledge_retained_transaction(&owner, acknowledgement, &recovery)
+            .unwrap();
+        drop(owner);
+        assert_eq!(store.reclaim_transaction_receipts(&recovery).unwrap(), 1);
+    }
+}
+
+#[test]
 fn cancellation_of_a_busy_commit_preserves_pending_receipt_and_rolls_back_records() {
     commit_behind_reader(true);
 }

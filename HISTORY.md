@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- SQLite managed transaction completion validates its exact durable receipt without a second physical acknowledgement commit. Autonomous sequence logs and ordinary writes retain FULL publication, retry ownership, manual acknowledgement and SSI recovery semantics.
+
 - Reclaim SQL key-reservation identities after requests, waiters and held grants finish instead of retaining every historical digest for the database lifetime. Preserve native release, savepoint ownership and existing permanent table/key identifiers.
 
 - Reject incompatible live SQLite storage owners before record initialization and retain owner admission through native catalog restoration, preventing upgrades from bypassing pre-table row locks. Current owners remain compatible, and process death releases admission through the existing owner leases.

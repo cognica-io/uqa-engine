@@ -563,6 +563,28 @@ impl VersionedPersistence for SQLiteRecordStore {
     fn reclaim_transaction_receipts(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.reclaim_receipts(control)
     }
+
+    fn acknowledge_retained_transaction(
+        &self,
+        owner: &uqa_storage::mvcc::RetainedTransactionAllocation,
+        acknowledgement: uqa_storage::mvcc::ReceiptAcknowledgement,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.check_transaction(acknowledgement.transaction())?;
+        if owner.transaction() != acknowledgement.transaction() {
+            return Err(VersionError::InvalidEncoding(
+                "receipt acknowledgement owner mismatch",
+            ));
+        }
+        self.with_write(control, |connection| {
+            if owner.has_resolution_lease()
+                && receipts::validate_retained(connection, self.native, acknowledgement, control)?
+            {
+                return Ok(());
+            }
+            receipts::acknowledge(connection, self.native, acknowledgement, control)
+        })
+    }
     fn abort(
         &self,
         transaction: StorageTransactionId,
