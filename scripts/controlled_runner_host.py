@@ -115,10 +115,12 @@ class ControlledHost:
             args += ["--property=RuntimeMaxSec=5400"]
         args += [f"--setenv={name}={value}" for name, value in (environment or {}).items()]
         group = Path("/sys/fs/cgroup") / MEASUREMENT_SLICE / f"uqa-perf-{self.run_id}-{self.counter}.service"
-        resources = (MeasurementResources(group, self.output / (label + ".resources.json"), measurement_cpus)
+        resources = (MeasurementResources(group, self.output / (label + ".resources.json"), measurement_cpus,
+                                         executable=Path(argv[0]))
                      if measurement else nullcontext())
+        workload = ["/usr/bin/setarch", "--addr-no-randomize", *argv] if measurement else argv
         with resources, stdout.open("wb") as out, stderr.open("wb") as err:
-            result = subprocess.run([*args, *argv], stdout=out, stderr=err, check=False)
+            result = subprocess.run([*args, *workload], stdout=out, stderr=err, check=False)
         if result.returncode:
             raise QualificationError(f"{label} failed ({result.returncode}); see retained stderr")
         return stdout
@@ -205,6 +207,7 @@ class ControlledHost:
                     "measurement_cpus": BENCH_CPUS, "administration_cpus": "0-7",
                     "partition": "root", "unbound_workqueue_mask": f"{workqueue_mask():x}",
                     "workload_cpu_affinity": {"analytical": "8", "claims": BENCH_CPUS}, "processes": command("ps", "-eo", "pid,uid,comm,cgroup"),
+                    "workload_address_randomization": "disabled per process with setarch; verified through procfs",
                     "controller_sha256": {path.name: file_hash(path) for path in Path(__file__).parent.glob("*.py")},
                     "stopped_timers": timers, "swap": Path("/proc/swaps").read_text()}
         (self.output / "host-control.json").write_text(json.dumps(evidence, indent=2) + "\n")
