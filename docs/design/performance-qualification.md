@@ -16,7 +16,9 @@ For a reported head/base ratio $r$, the independently established noise factor $
 - [x] Consume [actual controlled contention evidence](../../benchmarks/regressions/ec2-results-2026-10-08.md) for #266: all sixteen comparisons pass, with the current mutex retained under the documented scaling limits and revisit criterion.
 - [x] Obtain and independently verify the real host/noise evidence and complete retained observations from automatic run 37734616093; #266's measurement decision is complete.
 - [x] Correct the CPU-placement and unbound-kernel-workqueue control gaps in PR #602, retaining bounded per-invocation resource evidence and the complete historical inconclusive run.
-- [ ] Verify the automatic qualification at main `1cae865134400171c25023be0bdbce399c19e573` in run 37746172283 before completing #261. The historical outlier's specific cause is not inferred from a later result.
+- [x] Independently verify all observations and resource records of run 37746172283: Q1 is accepted, but materialized scans and two claim comparisons remain inconclusive under the four-pair bound. Preserve its failure conclusion and stopped-instance lifecycle.
+- [x] Prove and verify the eight-pair median bound in PR #603 without changing limits or lowering marginal coverage.
+- [ ] Obtain and verify fresh automatic qualification under the eight-pair protocol before completing #261. The historical outlier's specific cause is not inferred from a later result.
 - [ ] Resolve #348 through a dependency path that fixes downstream builds without breaking the existing public connection contract.
 - [x] Close #125 at the maintainer's request pending recurrence; the historical startup cause is not claimed fixed.
 
