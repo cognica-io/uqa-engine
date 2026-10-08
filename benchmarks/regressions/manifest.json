@@ -576,6 +576,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "parallel_processes_bound_key_arbitration_and_preserve_independent_release",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/batch/tests/process.rs",
+      "capability": "Cross-process key reservation scaling",
+      "workload": "Two and four independent processes simultaneously acquire 64 and 512 distinct keys each, retain them, then release one process at a time.",
+      "invariant": "Each process arbitrates exactly ceil(N/64) times, uses zero relation registry entries or native pins for keys, retains exact foreign conflicts until release and reclaims every completed local identity.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
