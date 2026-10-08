@@ -243,7 +243,11 @@ fn notification_policy_cannot_strand_listeners_or_be_undone_by_rollback_or_disca
     engine.require_notification_subscriptions().unwrap();
     exec(&engine, "BEGIN; SAVEPOINT nested");
     rejected(&engine.sql("LISTEN events", &[]).unwrap_err());
-    exec(&engine, "ROLLBACK TO nested; ROLLBACK; DISCARD ALL");
+    let error = engine
+        .sql("ROLLBACK TO nested; ROLLBACK; DISCARD ALL", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("25001"));
+    exec(&engine, "DISCARD ALL");
     engine.require_notification_subscriptions().unwrap();
     rejected(&engine.sql("LISTEN events", &[]).unwrap_err());
 }

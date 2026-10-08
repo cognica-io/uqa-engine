@@ -16,6 +16,28 @@ fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
 }
 
 #[test]
+fn empty_private_cursors_need_no_read_workspace_and_keep_their_snapshot() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let changes = PrivateRecordChanges::new(control.memory());
+    let snapshot = changes.snapshot().unwrap();
+    let exhausted = StorageReadControl::with_limit(0);
+    let mut cursor = snapshot.cursor(b"k", Some(b"k000000"), &exhausted).unwrap();
+    stage(
+        &changes,
+        &mut Model::new(),
+        1,
+        Some("later".into()),
+        &control,
+    );
+    assert!(cursor.next(&exhausted).unwrap().is_none());
+    assert!(cursor.next(&exhausted).unwrap().is_none());
+    assert_eq!(exhausted.memory().used(), 0);
+    exhausted.cancellation().cancel();
+    assert!(cursor.next(&exhausted).is_err());
+    assert!(snapshot.cursor(b"k", None, &exhausted).is_err());
+}
+
+#[test]
 fn private_entry_cursor_preserves_retained_values_without_repeated_entry_scans() {
     let control = StorageReadControl::with_limit(512 << 10);
     let changes = PrivateRecordChanges::new(control.memory());

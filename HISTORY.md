@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Allow borrowed record scans without additional cursor workspace when a transaction has no private changes, preserving exhausted read allowances and cancellation.
+
 - Preserve computed integer ordering keys as values after constant folding, including custom plans in SQL routines, instead of reinterpreting them as output-column positions.
 
 - Restore separately persisted HNSW edges with one bounded source-node buffer, avoiding per-edge rewrites of spilled vectors while preserving topology validation and memory limits.

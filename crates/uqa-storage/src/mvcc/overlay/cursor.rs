@@ -34,6 +34,13 @@ impl PrivateRecordSnapshot {
         control: &StorageReadControl,
     ) -> VersionResult<PrivateRecordCursor<'_>> {
         control.check()?;
+        if self.records.is_empty() && self.runs.is_empty() {
+            return Ok(PrivateRecordCursor {
+                changes: None,
+                prefix: BudgetedVec::new(control.memory()),
+                failed: false,
+            });
+        }
         let start = after
             .filter(|after| *after >= prefix)
             .map_or(Bound::Included(prefix), Bound::Excluded);
