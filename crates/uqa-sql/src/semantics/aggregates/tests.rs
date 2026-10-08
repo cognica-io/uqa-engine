@@ -127,6 +127,7 @@ fn decimal_literal_identity_matches_its_clone_without_erasing_scale() {
 #[test]
 fn typed_literal_identity_retains_the_declared_type_and_datum() {
     let expression = |value, ty: &str| ScalarExpr::TypedLiteral {
+        composite_source: None,
         value,
         ty: ty.into(),
         bound_type: None,
@@ -147,12 +148,14 @@ fn typed_literal_identity_retains_the_declared_type_and_datum() {
         &ScalarExpr::Literal(Value::Int(1))
     ));
     let first = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: decimal("1.0"),
         ty: "numeric".into(),
         bound_type: None,
         parameter_index: Some(1),
     };
     let second = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: decimal("1.0"),
         ty: "numeric".into(),
         bound_type: None,
@@ -160,4 +163,32 @@ fn typed_literal_identity_retains_the_declared_type_and_datum() {
     };
     assert!(exprs_match(&first, &first.clone()));
     assert!(!exprs_match(&first, &second));
+}
+
+#[test]
+fn composite_literals_with_equal_current_values_keep_distinct_original_datums() {
+    use crate::expr::composites::{
+        CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
+    };
+    let expression = |original: &str| ScalarExpr::TypedLiteral {
+        value: Value::Record(vec![("a".into(), Value::Bool(true))]),
+        ty: "composite#20001".into(),
+        bound_type: None,
+        parameter_index: None,
+        composite_source: Some(Box::new(CompositeConstantSource {
+            value: Value::Record(vec![("a".into(), Value::Str(original.into()))]),
+            descriptors: vec![CompositeTypeDescriptor {
+                type_oid: 20_001,
+                relation_oid: 20_003,
+                attributes: vec![CompositeAttribute {
+                    name: "a".into(),
+                    ty: crate::ColumnType::InternalChar,
+                    number: 1,
+                }],
+            }],
+        })),
+    };
+    let first = expression("A");
+    assert!(exprs_match(&first, &first.clone()));
+    assert!(!exprs_match(&first, &expression("B")));
 }

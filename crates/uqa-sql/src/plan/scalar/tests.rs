@@ -189,6 +189,7 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
                 resolution_error: Some(Box::new(error)),
             }),
             args: vec![Expr::TypedLiteral {
+                composite_source: None,
                 value: Value::Str("value".into()),
                 ty: "text".into(),
             }],

@@ -176,6 +176,7 @@ fn simple_case_with_bound_condition_selects_the_matching_arm() {
         base: Some(Box::new(ScalarExpr::Literal(Value::Int(1)))),
         when: vec![(
             ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Int(1),
                 ty: "integer".into(),
                 bound_type: Some(ColumnType::Integer),

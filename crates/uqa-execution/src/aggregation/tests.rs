@@ -491,6 +491,7 @@ fn aggregate_finalizers_report_integer_width_overflow() {
 fn percentile_fraction_rejects_missing_and_out_of_range_values() {
     for (value, expected) in [(Value::Float(0.5), 0.5), (Value::Int(1), 1.0)] {
         let argument = ScalarExpr::TypedLiteral {
+            composite_source: None,
             value,
             ty: "double precision".into(),
             bound_type: Some(uqa_sql::ColumnType::DoublePrecision),

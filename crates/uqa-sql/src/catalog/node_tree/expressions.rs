@@ -66,7 +66,7 @@ impl ExpressionContext<'_> {
             Expr::Column(column) => self.column(column, None)?,
             Expr::QualifiedColumn { qualifier, column } => self.column(column, Some(qualifier))?,
             Expr::Literal(value) => self.literal(expression, value, expected)?,
-            Expr::TypedLiteral { value, ty } => {
+            Expr::TypedLiteral { value, ty, .. } => {
                 let ty = self.resolve_type(ty)?;
                 TypedNode {
                     node: values::constant(value, &ty)?,

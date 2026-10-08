@@ -309,6 +309,18 @@
       "sql": "ROLLBACK; EXECUTE cl_fixed_8_p; DEALLOCATE cl_fixed_8_p; DROP TYPE cl_fixed_8"
     },
     {
+      "id": "char_saved_setup",
+      "sql": "CREATE TYPE cl_char_saved AS(a \"char\",b text); CREATE VIEW cl_char_saved_v AS SELECT '(A,tail)'::cl_char_saved AS v; CREATE VIEW cl_char_saved_array AS SELECT '[0:1]={\"(A,tail)\",\"(B,tail)\"}'::cl_char_saved[] AS v; CREATE FUNCTION cl_char_saved_f() RETURNS cl_char_saved LANGUAGE SQL BEGIN ATOMIC SELECT '(C,tail)'::cl_char_saved; END; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()"
+    },
+    {
+      "id": "char_saved_boolean",
+      "sql": "ALTER TYPE cl_char_saved ALTER ATTRIBUTE a TYPE boolean; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()"
+    },
+    {
+      "id": "char_saved_names",
+      "sql": "ALTER TYPE cl_char_saved RENAME ATTRIBUTE b TO label; ALTER TYPE cl_char_saved DROP ATTRIBUTE label, ADD ATTRIBUTE extra text; SELECT * FROM cl_char_saved_v"
+    },
+    {
       "id": "durable_setup",
       "sql": "CREATE TYPE cl_saved AS(a integer); CREATE VIEW cl_saved_v AS SELECT '(2139095041)'::cl_saved AS v; ALTER TYPE cl_saved ALTER ATTRIBUTE a TYPE real; SELECT * FROM cl_saved_v"
     },
@@ -325,6 +337,26 @@
     {
       "id": "durable_drop",
       "sql": "DROP VIEW cl_saved_v; DROP TYPE cl_saved",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_reopen",
+      "sql": "SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_rollback",
+      "sql": "BEGIN; ALTER TYPE cl_char_saved ALTER ATTRIBUTE a TYPE \"char\"; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f(); ROLLBACK; SELECT * FROM cl_char_saved_v",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_restore",
+      "sql": "ALTER TYPE cl_char_saved ALTER ATTRIBUTE a TYPE \"char\"; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_drop",
+      "sql": "DROP VIEW cl_char_saved_v,cl_char_saved_array; DROP FUNCTION cl_char_saved_f(); DROP TYPE cl_char_saved",
       "reopen": true
     }
   ]

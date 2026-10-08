@@ -53,6 +53,7 @@ pub fn bind_schema_regclass_constants(
         }
         .ok_or_else(|| format!("relation \"{reference}\" does not exist"))?;
         **expr = Expr::TypedLiteral {
+            composite_source: None,
             value: Value::Int(oid),
             ty: "regclass".into(),
         };
@@ -130,6 +131,7 @@ pub fn bind_legacy_sequence_regclass_constants(
             .bound_relation_oid(&canonical)?
             .ok_or_else(|| format!("relation \"{canonical}\" does not exist"))?;
         *argument = Expr::TypedLiteral {
+            composite_source: None,
             value: Value::Int(oid),
             ty: "regclass".into(),
         };

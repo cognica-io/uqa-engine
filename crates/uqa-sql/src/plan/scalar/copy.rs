@@ -65,9 +65,12 @@ impl Lowering<'_> {
                 ty,
                 bound_type,
                 parameter_index,
+                composite_source,
             } => {
                 let bound_type = self.scalar_type_copy(bound_type.as_ref())?;
                 ScalarExpr::TypedLiteral {
+                    composite_source: self
+                        .composite_source(composite_source.as_ref().map(Source::Borrowed))?,
                     value: self.value(Source::Borrowed(value))?,
                     ty: self.copy_text(ty)?,
                     bound_type,

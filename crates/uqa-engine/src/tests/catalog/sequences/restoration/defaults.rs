@@ -53,6 +53,7 @@ fn assert_frozen(row: &TableSchema, oid: &Value) {
     assert_eq!(
         args[0],
         Expr::TypedLiteral {
+            composite_source: None,
             value: oid.clone(),
             ty: "regclass".into()
         }

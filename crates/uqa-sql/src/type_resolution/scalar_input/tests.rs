@@ -100,6 +100,7 @@ fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators(
         ScalarExpr::Position(0),
         ScalarExpr::Param(1),
         ScalarExpr::TypedLiteral {
+            composite_source: None,
             value: Value::Null,
             ty: "ignored_spelling".into(),
             bound_type: Some(ty.clone()),
@@ -132,6 +133,7 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
         (ScalarExpr::Column("value".into()), "character varying(12)"),
         (
             ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Int(1),
                 ty: "ignored_spelling".into(),
                 bound_type: Some(domain(ColumnType::SmallInteger)),

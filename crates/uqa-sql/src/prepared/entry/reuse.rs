@@ -145,6 +145,7 @@ fn independent_expression(
                 ty,
                 bound_type,
                 parameter_index,
+                ..
             } => {
                 parameter_index.is_none()
                     && ((bound_type

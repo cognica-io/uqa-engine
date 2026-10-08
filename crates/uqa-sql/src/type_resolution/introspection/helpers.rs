@@ -295,6 +295,7 @@ impl Binder<'_, '_> {
         let bound_type = self.retain(bound_type);
         let value = self.retain(value);
         Ok(Some(ScalarExpr::TypedLiteral {
+            composite_source: None,
             value,
             ty,
             bound_type: Some(bound_type),

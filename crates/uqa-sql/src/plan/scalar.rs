@@ -87,7 +87,12 @@ impl Lowering<'_> {
             },
             Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
             Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),
-            Node::TypedLiteral { value, ty } => ScalarExpr::TypedLiteral {
+            Node::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+            } => ScalarExpr::TypedLiteral {
+                composite_source: self.composite_source(composite_source)?,
                 value: self.value(value)?,
                 ty: self.text(ty)?,
                 bound_type: None,

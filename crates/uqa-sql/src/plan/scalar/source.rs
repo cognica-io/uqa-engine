@@ -78,6 +78,7 @@ pub(super) enum Node<'a> {
     TypedLiteral {
         value: Source<'a, Value>,
         ty: Source<'a, String>,
+        composite_source: Option<Source<'a, Box<crate::expr::composites::CompositeConstantSource>>>,
     },
     Param(usize),
     Func {
@@ -156,6 +157,10 @@ impl<'a> Source<'a, Expr> {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive AST projection keeps every variant field together"
+)]
 fn owned(expression: Expr) -> Node<'static> {
     match expression {
         Expr::Star => Node::Star,
@@ -168,9 +173,14 @@ fn owned(expression: Expr) -> Node<'static> {
         },
         Expr::InternalColumn(value) => Node::InternalColumn(value),
         Expr::Literal(value) => Node::Literal(Source::Owned(value)),
-        Expr::TypedLiteral { value, ty } => Node::TypedLiteral {
+        Expr::TypedLiteral {
+            value,
+            ty,
+            composite_source,
+        } => Node::TypedLiteral {
             value: Source::Owned(value),
             ty: Source::Owned(ty),
+            composite_source: composite_source.map(Source::Owned),
         },
         Expr::Param(value) => Node::Param(value),
         Expr::Func {
@@ -255,6 +265,10 @@ fn owned(expression: Expr) -> Node<'static> {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive AST projection keeps every variant field together"
+)]
 fn borrowed(expression: &Expr) -> Node<'_> {
     match expression {
         Expr::Star => Node::Star,
@@ -267,9 +281,14 @@ fn borrowed(expression: &Expr) -> Node<'_> {
         },
         Expr::InternalColumn(value) => Node::InternalColumn(*value),
         Expr::Literal(value) => Node::Literal(Source::Borrowed(value)),
-        Expr::TypedLiteral { value, ty } => Node::TypedLiteral {
+        Expr::TypedLiteral {
+            value,
+            ty,
+            composite_source,
+        } => Node::TypedLiteral {
             value: Source::Borrowed(value),
             ty: Source::Borrowed(ty),
+            composite_source: composite_source.as_ref().map(Source::Borrowed),
         },
         Expr::Param(value) => Node::Param(*value),
         Expr::Func {

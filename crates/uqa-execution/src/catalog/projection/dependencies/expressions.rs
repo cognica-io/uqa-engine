@@ -63,6 +63,7 @@ impl ExpressionReferences<'_> {
                 Expr::TypedLiteral {
                     value: Value::Int(oid),
                     ty,
+                    ..
                 } => found.constants.push((ty.clone(), *oid)),
                 Expr::Func {
                     binding: Some(binding),

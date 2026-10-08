@@ -109,6 +109,7 @@ impl DependencyBuilder<'_> {
                 Expr::TypedLiteral {
                     value: Value::Int(oid),
                     ty,
+                    ..
                 } => constants.push((ty.clone(), *oid)),
                 Expr::Param(position) => {
                     parameters.insert(*position);

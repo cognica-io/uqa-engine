@@ -35,6 +35,7 @@ fn regclass_reference(engine: &Engine, expression: &Expr) -> Option<String> {
         Expr::TypedLiteral {
             value: Value::Int(oid),
             ty,
+            ..
         } if ty == "regclass" => {
             let result = engine.sql(&format!("SELECT n.nspname || '.' || c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid={oid}"), &[]).unwrap();
             let Value::Str(name) = &result.rows.first()?["name"] else {

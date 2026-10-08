@@ -7,15 +7,13 @@
 //! Creation-time composite descriptors for retained input constants and immutable executable caches.
 
 use crate::{
-    expr::composites::{datum, descriptor, CompositeTypeDescriptor},
+    expr::composites::retained::{capture_descriptor, capture_type, project_value, Descriptors},
     plan::UnifiedPlan,
     type_resolution::FunctionTypeResolver,
     ColumnType, SQLError, ScalarExpr,
 };
-use std::{collections::BTreeMap, sync::Arc};
-use uqa_core::{ArrayValue, Value};
-
-type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
+use std::sync::Arc;
+use uqa_core::Value;
 
 /// Logical and optimized inputs retain their own descriptors and values across rollback. Reading either plan projects a copy without rerunning already-folded expressions.
 #[derive(Clone, Debug, Default)]
@@ -68,17 +66,19 @@ impl CompositeInputs {
                         bound_type,
                         ..
                     } => match bound_type {
-                        Some(ty) => capture_type(ty, types, &mut original),
+                        Some(ty) => capture_type(ty, types.composite_types(), &mut original),
                         None => types.resolve_type_name(ty).and_then(|ty| {
-                            ty.map_or(Ok(()), |ty| capture_type(&ty, types, &mut original))
+                            ty.map_or(Ok(()), |ty| {
+                                capture_type(&ty, types.composite_types(), &mut original)
+                            })
                         }),
                     },
                     ScalarExpr::Func {
                         binding: Some(binding),
                         ..
                     } => binding.composite_field.as_ref().map_or(Ok(()), |field| {
-                        capture_descriptor(field.type_oid, types, &mut original)?;
-                        capture_type(&field.result_type, types, &mut original)
+                        capture_descriptor(field.type_oid, types.composite_types(), &mut original)?;
+                        capture_type(&field.result_type, types.composite_types(), &mut original)
                     }),
                     _ => Ok(()),
                 };
@@ -218,6 +218,7 @@ fn project_plan(
             ty,
             parameter_index: None,
             bound_type,
+            ..
         } = node
         {
             if !values_changed {
@@ -288,36 +289,6 @@ fn current_descriptors(
     Ok(current)
 }
 
-fn capture_type(
-    ty: &ColumnType,
-    types: &dyn FunctionTypeResolver,
-    output: &mut Descriptors,
-) -> Result<(), SQLError> {
-    match ty {
-        ColumnType::Domain { base, .. } | ColumnType::Array(base) => {
-            capture_type(base, types, output)
-        }
-        ColumnType::Composite(reference) => capture_descriptor(reference.oid, types, output),
-        _ => Ok(()),
-    }
-}
-
-fn capture_descriptor(
-    oid: u32,
-    types: &dyn FunctionTypeResolver,
-    output: &mut Descriptors,
-) -> Result<(), SQLError> {
-    if output.contains_key(&oid) {
-        return Ok(());
-    }
-    let descriptor = descriptor(types.composite_types(), oid)?;
-    output.insert(oid, descriptor.clone());
-    for attribute in &descriptor.attributes {
-        capture_type(&attribute.ty, types, output)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 fn project(
     value: &Value,
@@ -326,90 +297,6 @@ fn project(
     current: &Descriptors,
 ) -> Result<Value, SQLError> {
     project_value(value, ty, original, current, true)
-}
-
-fn project_value(
-    value: &Value,
-    ty: &ColumnType,
-    original: &Descriptors,
-    current: &Descriptors,
-    interpret_datums: bool,
-) -> Result<Value, SQLError> {
-    match (ty, value) {
-        (_, Value::Null) => Ok(Value::Null),
-        (ColumnType::Domain { base, .. }, _) => {
-            project_value(value, base, original, current, interpret_datums)
-        }
-        (ColumnType::Composite(reference), Value::Record(fields)) => {
-            let (Some(before), Some(after)) =
-                (original.get(&reference.oid), current.get(&reference.oid))
-            else {
-                return Ok(value.clone());
-            };
-            after
-                .attributes
-                .iter()
-                .map(|attribute| {
-                    let retained = before
-                        .attributes
-                        .iter()
-                        .find(|old| old.number == attribute.number)
-                        .and_then(|old| {
-                            fields
-                                .iter()
-                                .find(|(name, _)| *name == old.name)
-                                .map(|(_, value)| (old, value))
-                        });
-                    let value = retained.map_or(Ok(Value::Null), |(old, value)| {
-                        let reinterpreted = interpret_datums
-                            .then(|| datum::reinterpret(value, &old.ty, &attribute.ty))
-                            .flatten();
-                        project_value(
-                            reinterpreted.as_ref().unwrap_or(value),
-                            &attribute.ty,
-                            original,
-                            current,
-                            interpret_datums,
-                        )
-                    })?;
-                    Ok((attribute.name.clone(), value))
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::Record)
-        }
-        (ColumnType::Array(element), Value::Array(array)) => {
-            let values = array
-                .elements()
-                .iter()
-                .map(|value| {
-                    project_array_element(value, element, original, current, interpret_datums)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
-                .map(Value::Array)
-                .ok_or_else(|| {
-                    SQLError::Internal("prepared composite projection changed array shape".into())
-                })
-        }
-        _ => Ok(value.clone()),
-    }
-}
-
-fn project_array_element(
-    value: &Value,
-    element: &ColumnType,
-    original: &Descriptors,
-    current: &Descriptors,
-    interpret_datums: bool,
-) -> Result<Value, SQLError> {
-    match value {
-        Value::List(values) => values
-            .iter()
-            .map(|value| project_array_element(value, element, original, current, interpret_datums))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::List),
-        value => project_value(value, element, original, current, interpret_datums),
-    }
 }
 
 #[cfg(test)]

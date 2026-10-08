@@ -21,11 +21,13 @@ pub mod constructor;
 pub(crate) mod datum;
 mod input;
 pub mod literal;
+pub(crate) mod retained;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
+pub use retained::CompositeConstantSource;
 
 /// One live attribute of a composite type in attribute-number order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompositeAttribute {
     pub name: String,
     pub ty: ColumnType,
@@ -34,7 +36,7 @@ pub struct CompositeAttribute {
 }
 
 /// The live attributes of one composite type in the statement's catalog generation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompositeTypeDescriptor {
     pub type_oid: u32,
     pub relation_oid: u32,

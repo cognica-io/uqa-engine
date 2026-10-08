@@ -139,7 +139,9 @@ fn loaded_sequence_binding_does_not_consult_the_session_search_path() {
     let Expr::Func { args, binding, .. } = expression else {
         panic!("expected function")
     };
-    assert!(matches!(&args[0],Expr::TypedLiteral {value: Value::Int(41), ty} if ty=="regclass"));
+    assert!(
+        matches!(&args[0],Expr::TypedLiteral {value: Value::Int(41), ty, .. } if ty=="regclass")
+    );
     assert_eq!(binding.unwrap().argument_types, ["regclass"]);
 }
 

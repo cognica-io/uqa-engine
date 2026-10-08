@@ -165,12 +165,14 @@ fn scalar_inference_preserves_cast_and_comparison_error_states() {
         ScalarExpr::Binary {
             op: BinaryOp::Equal,
             lhs: Box::new(ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Str("{}".into()),
                 ty: "json".into(),
                 bound_type: Some(ColumnType::Json),
                 parameter_index: None,
             }),
             rhs: Box::new(ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Str("{}".into()),
                 ty: "json".into(),
                 bound_type: Some(ColumnType::Json),

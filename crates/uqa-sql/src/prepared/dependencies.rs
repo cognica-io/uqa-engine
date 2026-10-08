@@ -90,6 +90,7 @@ impl PreparedAnalysisDependencies {
                 ty,
                 bound_type,
                 parameter_index: None,
+                ..
             } => {
                 let parsed;
                 let ty = if let Some(ty) = bound_type.as_ref() {

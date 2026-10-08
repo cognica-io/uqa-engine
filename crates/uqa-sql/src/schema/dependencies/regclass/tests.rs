@@ -82,6 +82,7 @@ fn selected_legacy_sequence_inputs_are_bound_once_without_session_resolution() {
         assert_eq!(
             args[0],
             Expr::TypedLiteral {
+                composite_source: None,
                 value: Value::Int(41),
                 ty: "regclass".into()
             }
@@ -112,6 +113,7 @@ fn legacy_sequence_conversion_preserves_explicit_text_and_user_or_unbound_calls(
         call(
             "nextval",
             Expr::TypedLiteral {
+                composite_source: None,
                 value: Value::Str("ids".into()),
                 ty: "text".into(),
             },

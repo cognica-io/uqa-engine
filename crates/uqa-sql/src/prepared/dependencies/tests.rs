@@ -8,6 +8,7 @@ use super::*;
 
 fn literal(ty: ColumnType, value: Value) -> ScalarExpr {
     ScalarExpr::TypedLiteral {
+        composite_source: None,
         value,
         ty: ty.catalog_name(),
         bound_type: Some(ty),

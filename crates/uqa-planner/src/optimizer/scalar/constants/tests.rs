@@ -195,6 +195,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
     let null = bound_call(
         "lower",
         vec![ScalarExpr::TypedLiteral {
+            composite_source: None,
             value: Value::Null,
             ty: "text".into(),
             bound_type: Some(ColumnType::Text),
@@ -235,6 +236,7 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         "replace",
         vec![
             ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Null,
                 ty: "text".into(),
                 bound_type: Some(ColumnType::Text),
@@ -330,6 +332,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         let expression = ScalarExpr::Cast {
             implicit: false,
             expr: Box::new(ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value,
                 ty: ty.catalog_name(),
                 bound_type: Some(ty),
@@ -346,6 +349,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
     let integer = ScalarExpr::Cast {
         implicit: false,
         expr: Box::new(ScalarExpr::TypedLiteral {
+            composite_source: None,
             value: Value::Int(7),
             ty: "integer".into(),
             bound_type: Some(ColumnType::Integer),
@@ -411,6 +415,7 @@ fn composites_retained_in_constants_are_not_evaluated_without_the_catalog() {
         relation_oid: 20_003,
     });
     let literal = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: Value::Record(vec![("a".into(), Value::Int(4))]),
         ty: ty.catalog_name(),
         bound_type: Some(ty),
@@ -437,6 +442,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         array_oid: 20003,
     });
     let literal = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: Value::Record(vec![("b".into(), Value::Str("x".into()))]),
         ty: ty.catalog_name(),
         bound_type: Some(ty.clone()),

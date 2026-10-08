@@ -41,6 +41,9 @@ pub enum ScalarExpr {
     TypedLiteral {
         value: Value,
         ty: String,
+        /// Original composite input retained across non-invertible descriptor changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composite_source: Option<Box<crate::expr::composites::CompositeConstantSource>>,
         /// Resolved identity of an already-bound datum, including domain OIDs and type modifiers.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bound_type: Option<ColumnType>,

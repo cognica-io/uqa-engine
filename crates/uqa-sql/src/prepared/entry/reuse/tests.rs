@@ -106,6 +106,7 @@ fn catalog_descriptors_and_input_identities_keep_conservative_invalidation() {
     Arc::make_mut(&mut converted.logical_plan).rewrite_scalar_expressions(&mut |expression| {
         if matches!(expression, ScalarExpr::Literal(_)) {
             *expression = ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: uqa_core::Value::Str("HELLO".into()),
                 ty: "text".into(),
                 bound_type: Some(domain()),
@@ -238,6 +239,7 @@ fn missing_and_specialized_descriptors_are_not_catalog_independent() {
         .rewrite_scalar_expressions(&mut |expression| {
             if matches!(expression, ScalarExpr::Param(_)) {
                 *expression = ScalarExpr::TypedLiteral {
+                    composite_source: None,
                     value: uqa_core::Value::Str("first".into()),
                     ty: "text".into(),
                     bound_type: Some(ColumnType::Text),

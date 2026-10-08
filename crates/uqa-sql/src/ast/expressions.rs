@@ -282,6 +282,9 @@ pub enum Expr {
     TypedLiteral {
         value: Value,
         ty: String,
+        /// Original composite input retained across non-invertible descriptor changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composite_source: Option<Box<crate::expr::composites::CompositeConstantSource>>,
     },
     /// A positional bind parameter (`$1`, `$2`, ...).
     Param(usize),

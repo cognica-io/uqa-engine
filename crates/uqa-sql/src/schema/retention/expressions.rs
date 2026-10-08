@@ -21,9 +21,29 @@ impl<'a> Walker<'a> {
                 self.text(column)?;
             }
             Expr::Literal(value) => self.value(value)?,
-            Expr::TypedLiteral { value, ty } => {
+            Expr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+            } => {
                 self.value(value)?;
                 self.text(ty)?;
+                if let Some(source) = composite_source {
+                    self.charge(size_of::<crate::expr::composites::CompositeConstantSource>())?;
+                    self.value(&source.value)?;
+                    self.buffer::<crate::expr::composites::CompositeTypeDescriptor>(
+                        source.descriptors.capacity(),
+                    )?;
+                    for descriptor in &source.descriptors {
+                        self.buffer::<crate::expr::composites::CompositeAttribute>(
+                            descriptor.attributes.capacity(),
+                        )?;
+                        for attribute in &descriptor.attributes {
+                            self.text(&attribute.name)?;
+                            self.node(Node::Type(&attribute.ty))?;
+                        }
+                    }
+                }
             }
             Expr::Func {
                 order_syntax: _,

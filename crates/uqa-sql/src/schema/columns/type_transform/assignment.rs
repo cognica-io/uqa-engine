@@ -52,6 +52,7 @@ pub fn fold_type_transform_assignment(
     let value =
         assign_type_transform_value(context, value.clone(), base, transform.source_type.as_ref())?;
     transform.plan.scalar = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value,
         ty: base.sql_name(),
         bound_type: Some(base.clone()),

@@ -25,6 +25,7 @@ pub(crate) fn retain_computed_integer(
         uqa_sql::expr::IntegerWidth::BigInt => ColumnType::BigInteger,
     };
     ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: Value::Int(value),
         ty: ty.sql_name(),
         bound_type: Some(ty),
@@ -174,6 +175,7 @@ pub(super) fn fold_authorized_literal(
             if let Ok(target) = ColumnType::from_sql_name(ty) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
+                        composite_source: None,
                         value: Value::Null,
                         ty: ty.clone(),
                         bound_type: Some(target),
@@ -222,6 +224,7 @@ pub(super) fn fold_authorized_literal(
     }
     Ok(match ty {
         Some(ty) => ScalarExpr::TypedLiteral {
+            composite_source: None,
             value,
             ty: ty.sql_name(),
             bound_type: Some(ty),
@@ -279,6 +282,7 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr
         _ => return None,
     };
     Some(Ok(ScalarExpr::TypedLiteral {
+        composite_source: None,
         value,
         ty: field.result_type.catalog_name(),
         bound_type: Some(field.result_type.clone()),

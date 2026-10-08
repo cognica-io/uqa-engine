@@ -44,7 +44,12 @@ impl CompositeConstantChange<'_> {
         Ok(true)
     }
 
-    fn typed_value(&self, value: &mut Value, name: &str) -> Result<bool, SQLError> {
+    fn typed_value(
+        &self,
+        value: &mut Value,
+        name: &str,
+        source: &mut Option<Box<super::CompositeConstantSource>>,
+    ) -> Result<bool, SQLError> {
         let Some(ty) = self.types.resolve_type_name(name)? else {
             return if crate::ast::UserTypeIdentity::parse(name).is_some() {
                 Err(SQLError::Internal(format!(
@@ -54,19 +59,46 @@ impl CompositeConstantChange<'_> {
                 Ok(false)
             };
         };
+        if let AttributeChange::Type { name, to, .. } = self.change {
+            if !matches!(value, Value::Null)
+                && type_contains_composite(&ty, self.target, self.catalog)?
+            {
+                if source.is_none() {
+                    *source = Some(Box::new(super::CompositeConstantSource::capture(
+                        value,
+                        &ty,
+                        Some(self.catalog),
+                    )?));
+                }
+                *value = source
+                    .as_ref()
+                    .expect("captured composite source")
+                    .project_type_change(&ty, self.target, name, to, self.catalog)?;
+                return Ok(true);
+            }
+        }
         self.value(value, &ty)
     }
 
     fn syntax_node(&self, node: &mut Expr) -> Result<bool, SQLError> {
         match node {
-            Expr::TypedLiteral { value, ty } => self.typed_value(value, ty),
+            Expr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+            } => self.typed_value(value, ty, composite_source),
             _ => Ok(false),
         }
     }
 
     fn scalar_node(&self, node: &mut ScalarExpr) -> Result<bool, SQLError> {
         match node {
-            ScalarExpr::TypedLiteral { value, ty, .. } => self.typed_value(value, ty),
+            ScalarExpr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+                ..
+            } => self.typed_value(value, ty, composite_source),
             _ => Ok(false),
         }
     }

@@ -102,6 +102,7 @@ fn arithmetic_does_not_require_parser_ast() {
 #[test]
 fn nested_real_arithmetic_retains_width_without_a_row_schema() {
     let real = |value| ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: Value::Float(value),
         ty: "real".into(),
         bound_type: None,
