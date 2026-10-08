@@ -115,7 +115,9 @@ def compare(host, kind, head, reference, manifest, identity, protocol, calibrati
                    "calibration_sha256": file_hash(calibration_path), "observations_sha256": digest(observed),
                    "exclusive_control": {"authority": "operator-installed root controller on a dedicated EC2 instance",
                        "lease_id": host.run_id, "mechanism": "flock controller lease; exclusive cgroup CPU partition; no swap, unrelated workloads or CPU steal",
-                       "evidence_sha256": file_hash(host.output / "host-control.json")}}
+                       "evidence_sha256": file_hash(host.output / "host-control.json")},
+                   "resource_evidence": {entry.name: file_hash(entry)
+                       for entry in sorted(host.output.glob(kind + "-*.resources.json"))}}
     path = save(host.output / (kind + "-run.json"), attestation)
     host.sign(path)
     if kind == "analytical":
