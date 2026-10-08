@@ -258,7 +258,12 @@ fn window_definitions_follow_subquery_remapping_and_source_constants() {
     };
     assert_eq!(
         block.windows[0].spec.order_by[0].expr,
-        ScalarExpr::Literal(Value::Int(3))
+        ScalarExpr::TypedLiteral {
+            value: Value::Int(3),
+            ty: "integer".into(),
+            bound_type: Some(uqa_sql::ColumnType::Integer),
+            parameter_index: None,
+        }
     );
     let ScalarExpr::WindowCall { spec, .. } = &block.projections[0].expr else {
         panic!("expected window call")
