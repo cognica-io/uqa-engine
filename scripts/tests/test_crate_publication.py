@@ -31,7 +31,8 @@ SPEC.loader.exec_module(CHECKER)
 class CratePublicationTest(unittest.TestCase):
     def run_publisher(self, registry_statuses: list[int], publish_status: int = 0,
                       package_status: int = 0, license_status: int = 0,
-                      index_failures: int = 0, separate_source: bool = False) -> tuple[subprocess.CompletedProcess, str]:
+                      index_failures: int = 0, separate_source: bool = False,
+                      cargo_arguments: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, str]:
         with tempfile.TemporaryDirectory() as temporary:
             directory = pathlib.Path(temporary)
             source = directory / "release-source" if separate_source else directory
@@ -101,7 +102,7 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
             checker.chmod(0o755)
             cargo.chmod(0o755)
             result = subprocess.run(
-                ["bash", "scripts/publish-crates.sh", "--live", "--start-at", "uqa"],
+                ["bash", "scripts/publish-crates.sh", "--live", "--start-at", "uqa", "--", *cargo_arguments],
                 cwd=directory, text=True, capture_output=True,
                 env={**os.environ, "PATH": str(directory) + os.pathsep + os.environ["PATH"],
                      "UQA_RELEASE_SOURCE_ROOT": str(source),
@@ -130,17 +131,22 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
     def test_missing_version_reaches_cargo_publication(self) -> None:
         result, calls = self.run_publisher([1])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, "publish -p uqa --locked")
+        self.assertEqual(calls, "publish -p uqa --locked --no-verify")
+
+    def test_custom_features_still_verify_the_requested_build(self) -> None:
+        result, calls = self.run_publisher([1], cargo_arguments=("--all-features",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, "publish -p uqa --locked --all-features")
 
     def test_recovery_builds_the_separate_original_source_tree(self) -> None:
         result, calls = self.run_publisher([1], separate_source=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, "publish -p uqa --locked")
+        self.assertEqual(calls, "publish -p uqa --locked --no-verify")
 
     def test_dependency_index_propagation_retries_only_after_all_archives_build(self) -> None:
         result, calls = self.run_publisher([1], index_failures=2)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, "publish -p uqa --locked")
+        self.assertEqual(calls, "publish -p uqa --locked --no-verify")
         self.assertEqual(result.stderr.count("after dependency index propagation"), 2)
 
     def test_dependency_index_retries_have_a_fixed_bound(self) -> None:
@@ -158,7 +164,7 @@ sys.exit(int(os.environ['UQA_TEST_PUBLISH']))
             with self.subTest(followup=followup):
                 result, calls = self.run_publisher([1, followup], publish_status=7)
                 self.assertEqual(result.returncode, 0 if followup == 0 else 7, result.stderr)
-                self.assertEqual(calls, "publish -p uqa --locked")
+                self.assertEqual(calls, "publish -p uqa --locked --no-verify")
 
     def test_exact_available_version_is_already_published(self) -> None:
         response = io.BytesIO(json.dumps({"version": {"crate": "uqa-core", "num": "0.4.5", "yanked": False}}).encode())
