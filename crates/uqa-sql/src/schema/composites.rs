@@ -11,6 +11,27 @@ use crate::catalog::composite_type::StoredCompositeAttribute;
 use crate::type_resolution::{resolve_declared_column_type, FunctionTypeResolver};
 use crate::SQLError;
 
+/// Resolve a live composite attribute before dependency traversal. Composite relations have no system columns.
+pub fn validate_removed_attribute(
+    definition: &crate::catalog::composite_type::StoredComposite,
+    removal: &crate::ast::CompositeAttributeRemoval,
+) -> Result<bool, SQLError> {
+    if definition
+        .live_attributes()
+        .any(|attribute| attribute.name == removal.name)
+    {
+        return Ok(true);
+    }
+    if removal.if_exists {
+        Ok(false)
+    } else {
+        Err(super::columns::undefined_relation_column(
+            &definition.identity.name,
+            &removal.name,
+        ))
+    }
+}
+
 /// `ATExecAddColumn` for a composite relation, after its owner and kind have been checked.
 pub fn prepare_added_attribute(
     types: &dyn FunctionTypeResolver,

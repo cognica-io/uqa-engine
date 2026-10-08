@@ -189,7 +189,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
         return Err(SQLError::Internal("ALTER TABLE without command".into()));
     }
     if stmt.objtype() == ObjectType::ObjectType {
-        return super::composites::compile_composite_additions(stmt);
+        return super::composites::compile_composite_attributes(stmt);
     }
     if stmt.objtype() == ObjectType::ObjectSequence {
         let [command] = stmt.cmds.as_slice() else {
