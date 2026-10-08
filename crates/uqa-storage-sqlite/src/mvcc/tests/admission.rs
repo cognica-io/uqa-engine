@@ -138,7 +138,7 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
         &control,
         Holder::Writer,
         false,
-        |connection| write::commit(connection, id, &prepared, None, &control, |_| {}),
+        |connection| write::commit(connection, id, &prepared, None, false, &control, |_| {}),
     )
     .unwrap();
     assert_eq!(
@@ -252,7 +252,7 @@ fn commit_behind_reader(cancel: bool) {
                     },
                 )
                 .unwrap();
-            write::commit(connection, id, &prepared, None, &control, |_| {})
+            write::commit(connection, id, &prepared, None, false, &control, |_| {})
         },
     );
     assert_eq!(staged.load(Ordering::SeqCst), 1, "publication was restaged");

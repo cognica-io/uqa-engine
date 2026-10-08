@@ -19,6 +19,7 @@ mod points;
 mod receipts;
 mod reclamation;
 mod runs;
+mod sequence_durability;
 mod unused;
 mod vector_spill;
 
@@ -167,8 +168,9 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 59)"));
-        super::version_metadata::install_predecessor(connection, format)?;
+        assert!(definition.contains("CHECK(format = 60)"));
+        if format < 59 { super::version_metadata::install_predecessor(connection, format)?; }
+        let definition = definition.split(", sequence_durable BLOB").next().unwrap().to_owned() + ")";
         let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else if format < 44 { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" } else { definition };
         if format < 29 {
             assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
@@ -182,7 +184,7 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 59)", &format!("CHECK(format = {format})")))?;
+        connection.execute_batch(&definition.replace("CHECK(format = 60)", &format!("CHECK(format = {format})")))?;
         let restore = if format < 43 { "" } else if format < 44 { ", restore_target" } else { ", restore_target, receipt_limit" };
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping{restore} FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         if format < 44 {
