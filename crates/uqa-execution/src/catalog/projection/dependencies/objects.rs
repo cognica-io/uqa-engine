@@ -55,6 +55,7 @@ impl RelationKind {
 pub(super) struct RelationObject {
     pub identity: RelationIdentity,
     pub kind: RelationKind,
+    pub row_type: Option<u32>,
     /// Attributes in column-number order.
     pub columns: Vec<ColumnDef>,
     pub dropped_columns: Vec<(i16, String)>,
@@ -223,6 +224,10 @@ impl CatalogObjects {
                 RelationKind::CompositeType,
                 columns,
             );
+            self.relations
+                .get_mut(&definition.relation_oid)
+                .expect("registered composite relation")
+                .row_type = Some(definition.oid);
         }
     }
 
@@ -290,7 +295,10 @@ impl CatalogObjects {
             self.add_relation(oid, identity.clone(), RelationKind::Sequence, columns);
         }
         for index in super::super::pg_catalog::catalog_index_relations(catalog, resolution)? {
-            let columns = index_attributes(&index);
+            let table = catalog
+                .table(resolution, &index.table_name)?
+                .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
+            let columns = index.attributes(&table.columns)?;
             let oid = catalog_oid(index.oid())?;
             self.add_relation(oid, index.relation.clone(), RelationKind::Index, columns);
             if let Some(relation) = self.relations.get_mut(&oid) {
@@ -393,6 +401,7 @@ impl CatalogObjects {
             RelationObject {
                 identity,
                 kind,
+                row_type: None,
                 columns,
                 dropped_columns: Vec::new(),
                 table: None,
@@ -406,6 +415,9 @@ impl CatalogObjects {
         let Some(row_type) = oids.row_type else {
             return;
         };
+        if let Some(relation) = self.relations.get_mut(&oids.relation) {
+            relation.row_type = Some(row_type);
+        }
         self.add_type(
             row_type,
             TypeObject::Row {
@@ -517,36 +529,6 @@ impl CatalogObjects {
     pub(super) fn is_unpinned(&self, object: ObjectAddress) -> bool {
         self.unpinned.contains(&(object.class_id, object.object_id))
     }
-}
-
-/// An index's attributes as `pg_attribute` names them: its key columns, then its included columns.
-fn index_attributes(index: &super::super::pg_catalog::CatalogIndexRelation) -> Vec<ColumnDef> {
-    let keys = index.columns.iter().enumerate().map(|(position, key)| {
-        index
-            .definition
-            .key_names
-            .get(position)
-            .map(String::as_str)
-            .or_else(|| key.column())
-            .unwrap_or("expr")
-            .to_string()
-    });
-    let included = index
-        .definition
-        .included_columns
-        .iter()
-        .enumerate()
-        .map(|(position, name)| {
-            index
-                .definition
-                .key_names
-                .get(index.columns.len() + position)
-                .unwrap_or(name)
-                .clone()
-        });
-    keys.chain(included)
-        .map(|name| ColumnDef::nullable(name, ColumnType::Text))
-        .collect()
 }
 
 pub(super) fn catalog_oid(oid: i64) -> Result<u32, SQLError> {

@@ -406,11 +406,19 @@
     },
     {
       "id": "index_field_setup",
-      "sql": "CREATE INDEX ct_field_index ON ct_keys(((ROW(id,'x')::ct_index_pair).a))"
+      "sql": "CREATE INDEX ct_field_index ON ct_keys(((ROW(id,'x')::ct_index_pair).a)); CREATE TEMP TABLE ct_old_index_oid AS SELECT 'ct_field_index'::regclass::oid AS old_oid"
+    },
+    {
+      "id": "index_field_before",
+      "sql": "SELECT attname,atttypid::regtype FROM pg_attribute WHERE attrelid='ct_field_index'::regclass ORDER BY attnum"
     },
     {
       "id": "index_field_change",
       "sql": "ALTER TYPE ct_index_pair ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "index_field_identity",
+      "sql": "SELECT old_oid='ct_field_index'::regclass::oid AS retained FROM ct_old_index_oid"
     },
     {
       "id": "index_field_catalog",

@@ -8,11 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics and atomic rollback.
+
 - Rename composite attributes while preserving field identities, nested values, stored SQL references, prepared selectors and transaction rollback.
 
 - Remove composite attributes with PostgreSQL DROP ATTRIBUTE semantics, including mixed ADD/DROP order, stable surviving field identities, retained constructor effects, nested stored values and atomic rollback across all storage providers.
 
 ### Fixed
+
+- Name expression-index field selections after the selected attribute instead of an internal dispatch label.
 
 - Support view column renames through the existing relation lifecycle while preserving stored row-type values and dependencies; retain PostgreSQL expression-index parentheses and avoid reparsing prepared queries when only stored field names or index names change. Dropping an absent column default preserves analyzed inputs.
 

@@ -14,7 +14,7 @@ use crate::row_locks::{
 use crate::schema::deletion::{perform_deletion, required_address, CatalogRemovalInputs};
 use crate::schema::table_alteration::binding::TableAlterBindingContext;
 use uqa_sql::{
-    ast::{CompositeAttributeAddition, CompositeAttributeRemoval},
+    ast::{CompositeAttributeAddition, CompositeAttributeDefinition, CompositeAttributeRemoval},
     catalog::{composite_type::StoredComposite, dependencies::TYPE_CLASS},
     schema::relation_alteration::RelationAlterTarget,
     type_resolution::FunctionTypeResolver,
@@ -25,6 +25,7 @@ pub struct CompositeAlterationContext<'a> {
     pub binding: TableAlterBindingContext<'a>,
     pub attributes: CompositeAttributeContext<'a>,
     pub types: &'a dyn FunctionTypeResolver,
+    pub indexes: crate::schema::indexes::creation::IndexCreationContext<'a>,
     pub sequences: crate::schema::sequences::implicit::ImplicitSequenceContext<'a>,
     pub removal: &'a dyn CatalogRemovalInputs,
     pub notices: &'a dyn CatalogNotices,
@@ -34,10 +35,13 @@ pub fn alter_attributes(
     context: &CompositeAlterationContext<'_>,
     name: &str,
     removals: &[CompositeAttributeRemoval],
+    type_changes: &[CompositeAttributeDefinition],
     additions: &[CompositeAttributeAddition],
 ) -> Result<(), SQLError> {
     let mut definition = bind(context, name)?;
     context.binding.locks.prepare_definition_write()?;
+    let original = definition.clone();
+    let prepared = super::type_changes::prepare(context, &definition, type_changes)?;
     for removal in removals {
         if !uqa_sql::schema::composites::validate_removed_attribute(&definition, removal)? {
             context
@@ -66,6 +70,7 @@ pub fn alter_attributes(
         )?;
         definition = resolve(context, name)?;
     }
+    super::type_changes::publish(context, &original, &mut definition, prepared)?;
     super::addition::add_attributes(context, definition, additions)
 }
 

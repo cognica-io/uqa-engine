@@ -9,6 +9,7 @@
 mod addresses;
 mod columns;
 mod composite_fields;
+mod composite_storage;
 mod constraints;
 mod defaults;
 mod descriptions;

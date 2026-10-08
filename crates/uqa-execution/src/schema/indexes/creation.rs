@@ -144,8 +144,36 @@ pub fn run_create_index(
         });
     }
 
+    publish_prepared(context, &c, &relation, &definition, &am)?;
+    Ok(SQLResult::empty())
+}
+
+/// Recreate an index selected by an authorized type alteration, after its old address is removed. The caller retains the table lock and its exact identity; an index has its table's owner.
+pub(crate) fn rebuild_index(
+    context: &IndexCreationContext<'_>,
+    mut statement: CreateIndex,
+    relation: &uqa_core::RelationIdentity,
+) -> Result<(), SQLError> {
+    let definition = uqa_sql::schema::indexes::keys::prepare_index_definition(
+        context.schema,
+        context.bindings,
+        &mut statement,
+    )?;
+    let method = uqa_sql::schema::indexes::options::index_access_method(&statement)?;
+    super::validate_index_declaration(context.unique.catalog, &statement)?;
+    publish_prepared(context, &statement, relation, &definition, &method)
+}
+
+fn publish_prepared(
+    context: &IndexCreationContext<'_>,
+    c: &CreateIndex,
+    relation: &uqa_core::RelationIdentity,
+    definition: &IndexDefinition,
+    am: &str,
+) -> Result<(), SQLError> {
+    let name = &relation.name;
     // Publish the original option values and bound key metadata so reopening restores the same physical index.
-    let catalog_index_type = if am.is_empty() { "btree" } else { &am };
+    let catalog_index_type = if am.is_empty() { "btree" } else { am };
     let partitioned = context
         .unique
         .catalog
@@ -159,19 +187,19 @@ pub fn run_create_index(
             &c.table,
             &c.columns,
             &c.options,
-            &definition,
+            definition,
         )?;
-        super::validate_partition_index_rows(&context.unique, &c, &definition.key_types, &planned)?;
+        super::validate_partition_index_rows(&context.unique, c, &definition.key_types, &planned)?;
     } else {
-        super::validate_index_rows(&context.unique, &c, &name, &definition.key_types)?;
+        super::validate_index_rows(&context.unique, c, name, &definition.key_types)?;
     }
     if am == "diskann" {
-        resolve_vector_index_target(context.vectors, &c, &am)?;
+        resolve_vector_index_target(context.vectors, c, am)?;
     }
 
     context.creation.reserve_name(&relation.qualified_name())?;
     if am != "diskann" {
-        build_physical_index(context.vectors, context.publication, &c, &am)?;
+        build_physical_index(context.vectors, context.publication, c, am)?;
     }
     context.publication.register_index(
         &relation.qualified_name(),
@@ -179,9 +207,9 @@ pub fn run_create_index(
         &c.table,
         &c.columns,
         &c.options,
-        &definition,
+        definition,
     )?;
-    Ok(SQLResult::empty())
+    Ok(())
 }
 
 pub(super) fn build_physical_index(

@@ -40,6 +40,7 @@ pub(super) fn compile_composite_attributes(statement: &AlterTableStmt) -> Result
         .ok_or_else(|| SQLError::Internal("composite attribute change has no relation".into()))?;
     let mut attributes = Vec::new();
     let mut removals = Vec::new();
+    let mut type_changes = Vec::new();
     for node in &statement.cmds {
         let Some(NodeEnum::AlterTableCmd(command)) = node.node.as_ref() else {
             return Err(SQLError::Internal(
@@ -54,7 +55,10 @@ pub(super) fn compile_composite_attributes(statement: &AlterTableStmt) -> Result
             });
             continue;
         }
-        if command.subtype() != AlterTableType::AtAddColumn {
+        if !matches!(
+            command.subtype(),
+            AlterTableType::AtAddColumn | AlterTableType::AtAlterColumnType
+        ) {
             return Err(SQLError::Unsupported(format!(
                 "ALTER TYPE attribute action {:?} is not supported",
                 command.subtype()
@@ -67,6 +71,12 @@ pub(super) fn compile_composite_attributes(statement: &AlterTableStmt) -> Result
                 "composite attribute change has no declaration".into(),
             ));
         };
+        if command.subtype() == AlterTableType::AtAlterColumnType {
+            let mut column = column.clone();
+            column.colname.clone_from(&command.name);
+            type_changes.push(compile_attribute(&column, true)?);
+            continue;
+        }
         let declaration = super::tree::compile_column_declaration(column)?;
         let mut attribute = compile_attribute(column, true)?;
         if declaration.serial {
@@ -83,11 +93,12 @@ pub(super) fn compile_composite_attributes(statement: &AlterTableStmt) -> Result
     Ok(Statement::AlterTypeObject(AlterTypeObject {
         kind: TypeObjectKind::Type,
         name: range_var_name(relation),
-        action: if removals.is_empty() {
+        action: if removals.is_empty() && type_changes.is_empty() {
             AlterTypeObjectAction::AddAttributes(attributes)
         } else {
             AlterTypeObjectAction::AlterAttributes {
                 removals,
+                type_changes,
                 additions: attributes,
             }
         },

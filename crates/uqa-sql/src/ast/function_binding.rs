@@ -38,7 +38,7 @@ pub struct CompositeFieldBinding {
     pub number: i16,
     pub result_type: super::ColumnType,
     pub dropped: bool,
-    /// The live attribute type in an executable copy, when it differs from the original type OID. Type modifiers do not change FieldSelect's result contract.
+    /// The live attribute type in an executable copy, when it differs from the original type OID. Type modifiers do not change `FieldSelect`'s result contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changed_type: Option<super::ColumnType>,
 }

@@ -41,6 +41,53 @@ impl CatalogIndexRelation {
             |catalog| catalog.identity.oid,
         )
     }
+
+    /// Stored key types and included-column types define both `pg_attribute` and storage dependencies.
+    pub(crate) fn attributes(
+        &self,
+        table_columns: &[uqa_sql::ast::ColumnDef],
+    ) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
+        let mut columns =
+            Vec::with_capacity(self.columns.len() + self.definition.included_columns.len());
+        for (position, key) in self.columns.iter().enumerate() {
+            let source = key
+                .column()
+                .and_then(|name| table_columns.iter().find(|column| column.name == name));
+            let name = self
+                .definition
+                .key_names
+                .get(position)
+                .map(String::as_str)
+                .or_else(|| key.column())
+                .unwrap_or("expr");
+            let ty = self
+                .definition
+                .key_types
+                .get(position)
+                .or_else(|| source.map(|column| &column.ty))
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Internal("missing expression index attribute type".into())
+                })?;
+            columns.push(uqa_sql::ast::ColumnDef::nullable(name, ty));
+        }
+        for (position, name) in self.definition.included_columns.iter().enumerate() {
+            let source = table_columns
+                .iter()
+                .find(|column| column.name == *name)
+                .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
+            let attribute_name = self
+                .definition
+                .key_names
+                .get(self.columns.len() + position)
+                .unwrap_or(name);
+            columns.push(uqa_sql::ast::ColumnDef::nullable(
+                attribute_name,
+                source.ty.clone(),
+            ));
+        }
+        Ok(columns)
+    }
 }
 
 pub(crate) mod legacy;

@@ -235,6 +235,27 @@ ALTER TYPE shipping_address RENAME ATTRIBUTE city TO locality;
 SELECT id, destination, (destination).locality FROM shipments ORDER BY id;
 ```
 
+### Changing composite attribute types
+
+```sql
+ALTER TYPE schema_name.type_name ALTER ATTRIBUTE attribute_name TYPE new_type;
+ALTER TYPE schema_name.type_name ALTER ATTRIBUTE attribute_name SET DATA TYPE new_type COLLATE "C";
+```
+
+The type and attribute names are identifiers. The command returns `ALTER TYPE` and replaces the attribute's type, modifier and collation while preserving the composite type, relation and array identities, attribute numbers, names and dropped slots. Fresh record input and ROW casts use the new descriptor. All changes share statement, transaction and savepoint rollback and survive persistent reopen.
+
+A stored column whose declared type contains this composite prevents the change with `0A000`, even in an empty table, for an identical new type or with `CASCADE`. The check follows arrays, domains, nested composite types and relation row types, including materialized views and whole-record index keys. Field-dependent views, SQL-standard routine bodies, triggers and column defaults or generation expressions also reject the change with PostgreSQL's diagnostic. Dependent expression indexes and CHECK constraints are reconstructed through their existing declaration and validation paths.
+
+Lookup and ownership precede attribute checks. The original attribute must exist (`42703`) before its new type is resolved (`42704`); type USAGE, collation, modifier, pseudo-type and recursive-type checks apply to the new declaration. In mixed statements, every type declaration is prepared against the original descriptor, followed by drops, type changes and additions. A second real type change of the same attribute reports `0A000`; an unchanged declaration followed by a change remains valid.
+
+Prepared field selectors retain their original result type OID. A non-NULL record with a changed field type reports `42804` and its type detail, even when that field contains NULL; a NULL record still yields NULL. A modifier-only change preserves the type OID. Scalar constants already folded into a cached plan retain their values until ordinary plan invalidation.
+
+```sql execute
+CREATE TYPE measure_reading AS (value integer, unit text);
+ALTER TYPE measure_reading ALTER ATTRIBUTE value TYPE numeric(8,2), ALTER ATTRIBUTE unit TYPE varchar(8) COLLATE "C";
+SELECT ROW(12.5, 'kg')::measure_reading;
+```
+
 ## Type lifecycle and privileges
 
 ```sql

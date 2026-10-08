@@ -196,6 +196,7 @@ fn mixed_attribute_lowering_keeps_drop_options_and_order_within_each_group() {
     let AlterTypeObjectAction::AlterAttributes {
         removals,
         additions,
+        ..
     } = statement.action
     else {
         panic!("attribute changes")

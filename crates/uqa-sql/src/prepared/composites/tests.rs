@@ -178,7 +178,7 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
                         assert_eq!(field.changed_type.as_ref(), Some(&ty));
                     }
                 }
-            })
+            });
         });
         assert_eq!(fields, 1);
     }

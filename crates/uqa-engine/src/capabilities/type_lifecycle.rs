@@ -37,6 +37,7 @@ impl Engine {
                     binding: self.table_alter_binding_context(),
                     attributes: self.composite_attribute_context(),
                     types: self,
+                    indexes: self.index_creation_context(),
                     sequences: self.implicit_sequence_context(),
                     removal: self,
                     notices: self,

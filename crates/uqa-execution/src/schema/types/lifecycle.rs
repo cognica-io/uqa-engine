@@ -27,18 +27,26 @@ pub fn alter_type_object(
     statement: AlterTypeObject,
 ) -> Result<(), SQLError> {
     let changes = match &statement.action {
-        AlterTypeObjectAction::AddAttributes(additions) => Some((&[][..], additions.as_slice())),
+        AlterTypeObjectAction::AddAttributes(additions) => {
+            Some((&[][..], &[][..], additions.as_slice()))
+        }
         AlterTypeObjectAction::AlterAttributes {
             removals,
+            type_changes,
             additions,
-        } => Some((removals.as_slice(), additions.as_slice())),
+        } => Some((
+            removals.as_slice(),
+            type_changes.as_slice(),
+            additions.as_slice(),
+        )),
         _ => None,
     };
-    if let Some((removals, additions)) = changes {
+    if let Some((removals, type_changes, additions)) = changes {
         return crate::schema::composites::alteration::alter_attributes(
             &context.composite_attributes,
             &statement.name,
             removals,
+            type_changes,
             additions,
         );
     }

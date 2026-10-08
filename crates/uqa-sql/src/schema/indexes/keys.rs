@@ -35,6 +35,16 @@ fn expression_name(expression: &Expr) -> Option<(String, bool)> {
         Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
             Some((name.clone(), true))
         }
+        Expr::Func {
+            binding: Some(binding),
+            args,
+            ..
+        } if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect) => {
+            match args.as_slice() {
+                [_, Expr::Literal(uqa_core::Value::Str(name))] => Some((name.clone(), true)),
+                _ => None,
+            }
+        }
         Expr::Func { name, .. } => Some((
             crate::parse_regobject_name(name)
                 .and_then(|mut names| names.pop())
@@ -273,4 +283,21 @@ pub fn prepare_index_definition(
         unique: c.unique,
         nulls_not_distinct: c.nulls_not_distinct,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_selection_names_use_the_selected_attribute_through_casts() {
+        let crate::ast::Statement::CreateIndex(statement) =
+            crate::compile("CREATE INDEX ix ON t (((ROW(id, 2)).f1), (((ROW(id, 2)).f1)::bigint))")
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("index")
+        };
+        assert_eq!(key_names(&statement.columns), ["f1", "f11"]);
+    }
 }
