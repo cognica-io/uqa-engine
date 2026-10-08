@@ -126,7 +126,9 @@ def measure(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Record paired analytical observations; this runner does not certify timing acceptance."
+    )
     parser.add_argument("base_revision")
     args = parser.parse_args()
     base_revision = output("git", "rev-parse", "--verify", f"{args.base_revision}^{{commit}}")

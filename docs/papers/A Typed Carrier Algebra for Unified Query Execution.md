@@ -985,7 +985,7 @@ The artifact uses different evidence for different kinds of claim.
 4. **Top-$k$ exactness.** WAND and Block-Max WAND are compared against exhaustive ranking over ‹N₄› query/corpus configurations, including duplicate terms, field-scoped statistics, scorer changes, writes, and reopen cycles.
 5. **Compatibility.** SQL and graph behavior uses golden fixtures and differential probes against the declared external semantics, including PostgreSQL 18 differential cases.
 6. **Persistence.** Reopen and rollback tests cover catalog objects, relational data, indexes, tensors, graphs, scoring parameters, models, views, routines, sequences, and encrypted or compressed stores.
-7. **Performance methodology.** Thirty-two Rust benchmark entrypoints are tracked by a machine-checked coverage manifest. A benchmark’s presence is not itself a speed claim; published comparisons require same-machine artifacts, executable hashes, fixtures, warmup, sample count, and ratio gates.
+7. **Performance methodology.** Thirty-two Rust benchmark entrypoints are tracked by a machine-checked coverage manifest. A benchmark’s presence is not itself a speed claim; qualified performance comparisons require a controlled host, an independently established noise bound, executable hashes, fixtures, warmup, sample counts, and reviewed versioned limits. Same-machine metadata and ratios alone do not establish timing acceptance.
 
 (The placeholders ‹N₁›–‹N₄› are to be filled from the coverage manifest before release. A layer named without a count states that a test exists; a layer with a count states what the test has ruled out, and only the second is evidence.)
 

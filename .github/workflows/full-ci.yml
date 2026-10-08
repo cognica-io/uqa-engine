@@ -253,7 +253,7 @@ jobs:
       - run: cargo bench --workspace --no-run --locked
 
   analytical-benchmark:
-    name: analytical comparison gate
+    name: analytical ratio diagnostics
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -266,7 +266,7 @@ jobs:
         with:
           cache-bin: false
           cache-targets: false
-      - name: Run paired base/head analytical regression
+      - name: Record paired base/head analytical observations
         env:
           UQA_ANALYTICAL_BASE_REVISION: ${{ inputs.base_revision }}
         run: python3 scripts/run-analytical-regression.py "${UQA_ANALYTICAL_BASE_REVISION}"
