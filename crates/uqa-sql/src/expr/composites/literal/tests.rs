@@ -44,6 +44,7 @@ impl CompositeTypeCatalog for Catalog {
             });
         }
         Ok(Some(Arc::new(CompositeTypeDescriptor {
+            dropped: Vec::new(),
             type_oid: oid,
             relation_oid: 20_003,
             attributes,

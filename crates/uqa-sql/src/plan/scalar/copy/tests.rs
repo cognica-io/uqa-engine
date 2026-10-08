@@ -68,6 +68,11 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
             ("dropped".into(), Value::Str("retained".repeat(1024))),
         ]),
         descriptors: vec![CompositeTypeDescriptor {
+            dropped: vec![crate::expr::composites::DroppedCompositeAttribute {
+                number: 3,
+                length: 8,
+                alignment: b'd',
+            }],
             type_oid: 20_001,
             relation_oid: 20_003,
             attributes: vec![

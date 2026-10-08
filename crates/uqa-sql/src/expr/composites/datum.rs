@@ -22,11 +22,16 @@ pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType
     if before == after || pg_type_len(before) != pg_type_len(after) {
         return None;
     }
-    let bits = match (before, value) {
+    decode_bits(encode_bits(value, before)?, after)
+}
+
+pub(super) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
+    Some(match (base(ty), value) {
         (ColumnType::Boolean, Value::Bool(value)) => u64::from(*value),
         (ColumnType::InternalChar, Value::Str(value)) => {
             u64::from(value.as_bytes().first().copied().unwrap_or(0))
         }
+        (ColumnType::SmallInteger, Value::Int(value)) => u64::from(*value as u16),
         (ColumnType::Integer, Value::Int(value)) => u64::from(*value as u32),
         (ColumnType::BigInteger, Value::Int(value)) => *value as u64,
         (ty, Value::Int(value)) if oid(ty) => u64::from(*value as u32),
@@ -37,14 +42,18 @@ pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType
             u64::from_le_bytes(bytes.try_into().ok()?)
         }
         _ => return None,
-    };
-    match after {
+    })
+}
+
+pub(super) fn decode_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
+    match base(ty) {
         ColumnType::Boolean => Some(Value::Bool(bits as u8 != 0)),
         ColumnType::InternalChar => Some(Value::Str(if bits == 0 {
             String::new()
         } else {
             char::from(bits as u8).to_string()
         })),
+        ColumnType::SmallInteger => Some(Value::Int(i64::from(bits as i16))),
         ColumnType::Integer => Some(Value::Int(i64::from(bits as i32))),
         ColumnType::BigInteger => Some(Value::Int(bits as i64)),
         ty if oid(ty) => Some(Value::Int(i64::from(bits as u32))),

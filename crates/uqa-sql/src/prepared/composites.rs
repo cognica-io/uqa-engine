@@ -218,7 +218,7 @@ fn project_plan(
             ty,
             parameter_index: None,
             bound_type,
-            ..
+            composite_source,
         } = node
         {
             if !values_changed {
@@ -230,7 +230,16 @@ fn project_plan(
                 .and_then(|ty| {
                     ty.map_or_else(
                         || Ok(value.clone()),
-                        |ty| project_value(value, &ty, original, &current, interpret_datums),
+                        |ty| {
+                            project_literal(
+                                value,
+                                &ty,
+                                composite_source,
+                                original,
+                                types,
+                                interpret_datums,
+                            )
+                        },
                     )
                 });
             match result {
@@ -267,6 +276,41 @@ fn project_plan(
         }
     });
     failure.map_or(Ok(Some(projected)), Err)
+}
+
+fn project_literal(
+    value: &Value,
+    ty: &ColumnType,
+    source: &mut Option<Box<crate::expr::composites::CompositeConstantSource>>,
+    original: &Descriptors,
+    types: &dyn FunctionTypeResolver,
+    interpret_datums: bool,
+) -> Result<Value, SQLError> {
+    if !crate::expr::composites::literal::contains_records(value) {
+        return Ok(value.clone());
+    }
+    let source = source.get_or_insert_with(|| {
+        Box::new(crate::expr::composites::CompositeConstantSource {
+            value: value.clone(),
+            descriptors: original
+                .values()
+                .map(|value| value.as_ref().clone())
+                .collect(),
+        })
+    });
+    let source_descriptors = source
+        .descriptors
+        .iter()
+        .map(|descriptor| (descriptor.type_oid, Arc::new(descriptor.clone())))
+        .collect::<Descriptors>();
+    let live = current_descriptors(&source_descriptors, types)?;
+    project_value(
+        &source.value,
+        ty,
+        &source_descriptors,
+        &live,
+        interpret_datums,
+    )
 }
 
 fn current_descriptors(

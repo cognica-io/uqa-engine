@@ -38,9 +38,30 @@ pub struct CompositeAttribute {
 /// The live attributes of one composite type in the statement's catalog generation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompositeTypeDescriptor {
+    /// Physical slots left by removed attributes, without retaining a type dependency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<DroppedCompositeAttribute>,
     pub type_oid: u32,
     pub relation_oid: u32,
     pub attributes: Vec<CompositeAttribute>,
+}
+
+/// Width and alignment remain necessary when a retained tuple contains a removed field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DroppedCompositeAttribute {
+    pub number: i16,
+    pub length: i64,
+    pub alignment: u8,
+}
+
+impl DroppedCompositeAttribute {
+    pub fn from_type(number: i16, ty: &ColumnType) -> Self {
+        Self {
+            number,
+            length: crate::catalog::type_metadata::pg_type_len(ty),
+            alignment: crate::catalog::type_metadata::pg_type_align(ty).as_bytes()[0],
+        }
+    }
 }
 
 impl CompositeTypeDescriptor {

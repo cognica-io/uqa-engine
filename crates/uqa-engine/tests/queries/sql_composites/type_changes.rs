@@ -103,3 +103,36 @@ fn composite_retained_layout_matches_postgresql(#[case] provider: usize) {
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_tuple_widths_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("tuple-widths.db");
+    let engine = super::addition::open(provider, &path);
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_tuple_width_oracle.expected.json"
+    ))
+    .unwrap();
+    let mut initial = reference.clone();
+    initial["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] != true);
+    crate::pg18_oracle::verify(&engine, &initial.to_string());
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        super::addition::open(provider, &path)
+    };
+    let mut durable = reference;
+    durable["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] == true);
+    crate::pg18_oracle::verify(&engine, &durable.to_string());
+}

@@ -189,6 +189,7 @@ mod tests {
             (
                 20_002,
                 Arc::new(CompositeTypeDescriptor {
+                    dropped: Vec::new(),
                     type_oid: 20_002,
                     relation_oid: 20_001,
                     attributes: vec![
@@ -200,6 +201,7 @@ mod tests {
             (
                 20_012,
                 Arc::new(CompositeTypeDescriptor {
+                    dropped: Vec::new(),
                     type_oid: 20_012,
                     relation_oid: 20_011,
                     attributes: vec![

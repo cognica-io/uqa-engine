@@ -32,6 +32,7 @@ impl CompositeTypeCatalog for Types {
     fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
         assert_eq!(oid, 20_001);
         Ok(Some(Arc::new(CompositeTypeDescriptor {
+            dropped: Vec::new(),
             type_oid: oid,
             relation_oid: 20_003,
             attributes: vec![CompositeAttribute {

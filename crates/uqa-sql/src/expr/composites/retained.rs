@@ -11,6 +11,8 @@ use crate::{ColumnType, SQLError};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, Value};
 
+mod tuple;
+
 pub(crate) type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
 
 /// The original admitted datum and its field types, retained independently of subsequent descriptor interpretations.
@@ -123,6 +125,11 @@ pub(crate) fn project_value(
             else {
                 return Ok(value.clone());
             };
+            if interpret_datums {
+                if let Some(projected) = tuple::project(fields, before, after) {
+                    return Ok(projected);
+                }
+            }
             after
                 .attributes
                 .iter()

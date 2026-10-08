@@ -23,6 +23,7 @@ fn ty() -> ColumnType {
 
 fn descriptor(second: i16) -> Arc<CompositeTypeDescriptor> {
     Arc::new(CompositeTypeDescriptor {
+        dropped: Vec::new(),
         type_oid: 20_001,
         relation_oid: 20_002,
         attributes: vec![

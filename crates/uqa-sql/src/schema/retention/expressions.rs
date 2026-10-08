@@ -35,6 +35,9 @@ impl<'a> Walker<'a> {
                         source.descriptors.capacity(),
                     )?;
                     for descriptor in &source.descriptors {
+                        self.buffer::<crate::expr::composites::DroppedCompositeAttribute>(
+                            descriptor.dropped.capacity(),
+                        )?;
                         self.buffer::<crate::expr::composites::CompositeAttribute>(
                             descriptor.attributes.capacity(),
                         )?;

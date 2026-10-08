@@ -62,6 +62,7 @@ fn composite(oid: u32) -> ColumnType {
 
 fn descriptor_with(oid: u32, types: Vec<ColumnType>) -> Arc<CompositeTypeDescriptor> {
     Arc::new(CompositeTypeDescriptor {
+        dropped: Vec::new(),
         type_oid: oid,
         relation_oid: oid - 1,
         attributes: types

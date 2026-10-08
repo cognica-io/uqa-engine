@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained fixed-width datum interpretation, original stored constants across commit and reopen, and atomic rollback.
+- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained fixed-width datum interpretation with tuple alignment and dropped slots, original stored constants across commit and reopen, and atomic rollback.
 
 - Rename composite attributes while preserving field identities, nested values, stored SQL references, prepared selectors and transaction rollback.
 

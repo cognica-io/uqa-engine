@@ -157,6 +157,7 @@ mod tests {
     impl CompositeTypeCatalog for Catalog {
         fn composite_type(&self, _: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
             Ok(Some(Arc::new(CompositeTypeDescriptor {
+                dropped: Vec::new(),
                 type_oid: 20_001,
                 relation_oid: 20_003,
                 attributes: [1, 3, 4]

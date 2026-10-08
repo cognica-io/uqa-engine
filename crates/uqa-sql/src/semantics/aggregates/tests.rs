@@ -178,6 +178,7 @@ fn composite_literals_with_equal_current_values_keep_distinct_original_datums() 
         composite_source: Some(Box::new(CompositeConstantSource {
             value: Value::Record(vec![("a".into(), Value::Str(original.into()))]),
             descriptors: vec![CompositeTypeDescriptor {
+                dropped: Vec::new(),
                 type_oid: 20_001,
                 relation_oid: 20_003,
                 attributes: vec![CompositeAttribute {

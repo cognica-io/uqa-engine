@@ -158,6 +158,9 @@ impl Lowering<'_> {
                         value: this.value(Source::Borrowed(&source.value))?,
                         descriptors: this.map(source.descriptors.iter(), |this, descriptor| {
                             Ok(CompositeTypeDescriptor {
+                                dropped: this.map(descriptor.dropped.iter(), |_, attribute| {
+                                    Ok(*attribute)
+                                })?,
                                 type_oid: descriptor.type_oid,
                                 relation_oid: descriptor.relation_oid,
                                 attributes: this.map(
