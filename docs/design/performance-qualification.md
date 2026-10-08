@@ -18,7 +18,8 @@ For a reported head/base ratio $r$, the independently established noise factor $
 - [x] Correct the CPU-placement and unbound-kernel-workqueue control gaps in PR #602, retaining bounded per-invocation resource evidence and the complete historical inconclusive run.
 - [x] Independently verify all observations and resource records of run 37746172283: Q1 is accepted, but materialized scans and two claim comparisons remain inconclusive under the four-pair bound. Preserve its failure conclusion and stopped-instance lifecycle.
 - [x] Prove and verify the eight-pair median bound in PR #603 without changing limits or lowering marginal coverage.
-- [ ] Obtain and verify fresh automatic qualification under the eight-pair protocol before completing #261. The historical outlier's specific cause is not inferred from a later result.
+- [x] Independently verify run 37749960217 under the eight-pair protocol: nineteen comparisons accepted, Q1 inconclusive at an upper bound of 1.10163 against its unchanged 1.10 limit; all observations, signatures and 160 resource records checked and EC2 stopped.
+- [ ] Investigate the remaining run-level variation and obtain complete qualification before completing #261. Neither earlier evidence nor the new inconclusive result identifies the historical outlier's specific cause.
 - [ ] Resolve #348 through a dependency path that fixes downstream builds without breaking the existing public connection contract.
 - [x] Close #125 at the maintainer's request pending recurrence; the historical startup cause is not claimed fixed.
 
