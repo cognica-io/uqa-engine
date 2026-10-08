@@ -22,7 +22,7 @@ import subprocess
 import sys
 
 from performance_qualification import qualify
-from performance_noise import ANALYTICAL_FILTER
+from performance_noise import ANALYTICAL_FILTER, controlled_analytical_protocol
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -152,12 +152,16 @@ def main() -> int:
     parser.add_argument("--require-qualified", action="store_true")
     parser.add_argument("--regression-only", action="store_true",
                         help="require all UQA regression gates without advisory external timings")
+    parser.add_argument("--controlled-protocol", action="store_true",
+                        help="use the reviewed eight-pair controlled protocol (requires --regression-only)")
     parser.add_argument(
         "--output",
         type=pathlib.Path,
         default=ROOT / "target/benchmark-runs/analytical-comparison.json",
     )
     args = parser.parse_args()
+    if args.controlled_protocol and not args.regression_only:
+        raise RuntimeError("--controlled-protocol requires --regression-only")
     evidence = [args.calibration, args.calibration_signature, args.run_attestation,
                 args.run_signature, args.issuer_key]
     if (any(evidence) or args.require_qualified) and not all(evidence):
@@ -217,6 +221,8 @@ def main() -> int:
     regression_protocol = dict(manifest.get("regression_protocol", {}))
     if args.regression_only:
         regression_protocol["benchmark_filter"] = ANALYTICAL_FILTER
+    if args.controlled_protocol:
+        regression_protocol = controlled_analytical_protocol(regression_protocol)
     expected_pairs = int(regression_protocol.get("pairs", 0))
     if baseline_roots:
         if expected_pairs < 2 or expected_pairs % 2:

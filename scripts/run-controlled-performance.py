@@ -22,7 +22,7 @@ import sys
 
 from controlled_performance import scaling_summary
 from controlled_runner_host import CONTROL, ControlledHost, command, file_hash
-from performance_noise import ANALYTICAL_FILTER, CALIBRATION_PAIRS, COMPARISON_PAIRS, reference_noise_bound
+from performance_noise import CALIBRATION_PAIRS, COMPARISON_PAIRS, controlled_analytical_protocol, reference_noise_bound
 from performance_qualification import QualificationError, digest, observations, qualify, ratio_decision
 
 
@@ -141,8 +141,8 @@ def execute(host, revision):
     host.git("merge-base", "--is-ancestor", revision, "origin/main")
     analytical = json.loads((HERE / "analytical-manifest.json").read_text())
     claims = json.loads((HERE / "claim-timing.json").read_text())
-    if (analytical["regression_protocol"] != {"pairs": COMPARISON_PAIRS, "ordering": "counterbalanced",
-                                            "point_estimator": "median_of_paired_slope_ratios"}
+    if (analytical["regression_protocol"].get("ordering") != "counterbalanced"
+            or analytical["regression_protocol"].get("point_estimator") != "median_of_paired_slope_ratios"
             or claims["calibration_pairs"] != CALIBRATION_PAIRS
             or claims["comparison_pairs"] != COMPARISON_PAIRS
             or claims["ordering"] != "counterbalanced"):
@@ -164,7 +164,7 @@ def execute(host, revision):
     head_source, head_artifacts = host.build(revision, "head", True)
     control = host.isolate()
     environment = digest(control)
-    analytical_protocol = {**analytical["regression_protocol"], "benchmark_filter": ANALYTICAL_FILTER}
+    analytical_protocol = controlled_analytical_protocol(analytical["regression_protocol"])
     analytical_limits = {row["benchmark"]: row["max"] for row in analytical["regression_gates"]}
     claim_protocol = {"pairs": COMPARISON_PAIRS, "ordering": "counterbalanced",
                       "point_estimator": claims["comparison_estimator"]}

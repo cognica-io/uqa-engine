@@ -109,6 +109,26 @@ class AnalyticalBenchmarkReportTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("analytical_external_q6", result.stderr)
 
+    def test_controlled_protocol_requires_eight_pairs_without_changing_advisory_sampling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            heads = [root / f"head-{index}" for index in range(8)]
+            bases = [root / f"base-{index}" for index in range(8)]
+            for path in heads + bases:
+                self.write_criterion(path)
+            flags = ("--regression-only", "--controlled-protocol")
+            result = self.run_checker(root / "report.json", heads, bases, extra_args=flags)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((root / "report.json").read_text())
+            self.assertEqual(report["regression_protocol"]["pairs"], 8)
+            short = self.run_checker(root / "short.json", heads[:4], bases[:4], extra_args=flags)
+            self.assertEqual(short.returncode, 2)
+            self.assertIn("requires 8 paired", short.stderr)
+            wrong_scope = self.run_checker(root / "scope.json", heads, bases,
+                                           extra_args=("--controlled-protocol",))
+            self.assertEqual(wrong_scope.returncode, 2)
+            self.assertIn("requires --regression-only", wrong_scope.stderr)
+
     def test_regression_only_requires_an_identified_paired_baseline(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
