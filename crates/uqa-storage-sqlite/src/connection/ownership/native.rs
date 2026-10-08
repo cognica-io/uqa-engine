@@ -18,6 +18,32 @@ pub(super) struct Admission {
     _held: NativeLeaseAdmission,
 }
 
+/// Existing owner slots carried zero before exact shared row coordination.
+const COORDINATION_PROTOCOL: u64 = 2;
+
+pub(super) struct Owner {
+    _lease: Box<dyn Send + Sync>,
+    file: NativeLeaseFile,
+}
+
+impl Owner {
+    pub(super) fn admit_records(&self, control: &StorageReadControl) -> Result<Admission> {
+        let held = self.file.admit(control)?;
+        let mut compatible = true;
+        self.file.visit(control, &mut |protocol| {
+            compatible &= protocol == COORDINATION_PROTOCOL;
+            Ok(())
+        })?;
+        if !compatible {
+            return Err(SQLiteError::DatabaseCoordinationUpgradeBusy);
+        }
+        Ok(Admission {
+            file: self.file.clone(),
+            _held: held,
+        })
+    }
+}
+
 impl Admission {
     pub(super) fn acquire(
         path: &Path,
@@ -49,7 +75,10 @@ impl Admission {
         Ok(Self { file, _held: held })
     }
 
-    pub(super) fn retain(&self, control: &StorageReadControl) -> Result<Box<dyn Send + Sync>> {
-        Ok(self.file.retain(0, control)?)
+    pub(super) fn retain(&self, control: &StorageReadControl) -> Result<Owner> {
+        Ok(Owner {
+            _lease: self.file.retain(COORDINATION_PROTOCOL, control)?,
+            file: self.file.clone(),
+        })
     }
 }

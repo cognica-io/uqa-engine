@@ -11,10 +11,12 @@ Owner lifetime remains the lifetime of its pool and retained resources, not a st
 Binaries predating physical owner leases do not participate in this fence. Upgrading those legacy versions still requires closing every owner. Direct raw SQLite manipulation is outside the versioned storage contract. This change does not claim controlled throughput qualification for the row table's mutex.
 
 - [x] Inspect SQLite/common Storage manifests, ownership policy, record initialization, initial native restoration and lease transport.
-- [ ] Implement protocol-tagged owners and retained initialization admission.
-- [ ] Verify live predecessor rejection, unchanged state on rejection, owner death/release, concurrent current owners, cancellation, memory accounting and restoration behavior.
-- [ ] Pass focused owner/provider checks, rustfmt, strict Clippy and dependency/ownership checks.
-- [ ] Update upgrade guidance and automatic regression inventory; commit and push logical units.
+- [x] Implement protocol-tagged owners and retained initialization admission.
+- [x] Verify live predecessor rejection across 12 storage/mapping combinations, unchanged state on rejection, separate-process death, concurrent current owners, cancellation, memory accounting and commit/rollback admission probes.
+- [x] Pass all 61 connection cases and 10 restoration failure/process cases; the ignored predecessor-peer entry point executes through its parent tests. Strict SQLite library/test Clippy, rustfmt, dependency/Engine ownership, harness, file-size/header checks and 19 regression-runner tests pass.
+- [x] Update HISTORY and upgrade guidance; automatic inventory includes the three new admission cases (32 checks / 88 required cases). Commit and push logical units.
 - [ ] Complete source/CI review, merge and remove the branch; preserve the remaining performance ledger.
 
 The remaining work continues under #266, #347, #348, #261 and #125. This unit advances #266's mixed-version safety condition; it does not close unrelated performance acceptance requirements.
+
+The last pre-table source inspected (`5a7e0c61f` parent) uses SQLite record format 55, while current source publishes format 59. The predecessor header validator rejects that newer marker. Physical owner leases and their admission byte already existed before the shared row table; the fence preserves their namespace, slot layout and liveness addresses and changes only the tag written by current owners. No timing acceptance is inferred from these correctness checks.

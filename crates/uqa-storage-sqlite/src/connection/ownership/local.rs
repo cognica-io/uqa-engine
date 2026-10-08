@@ -27,9 +27,21 @@ static OWNERS: OnceLock<Mutex<Owners>> = OnceLock::new();
 
 pub(super) struct Admission(Arc<Mutex<State>>);
 
-struct Lease {
+pub(super) struct Owner {
     state: Arc<Mutex<State>>,
     _memory: MemoryReservation,
+}
+
+impl Owner {
+    pub(super) fn admit_records(&self, control: &StorageReadControl) -> Result<Admission> {
+        control.check()?;
+        let mut state = self.state.lock();
+        if state.admitted {
+            return Err(SQLiteError::DatabaseRestoreBusy);
+        }
+        state.admitted = true;
+        Ok(Admission(Arc::clone(&self.state)))
+    }
 }
 
 impl Admission {
@@ -51,18 +63,18 @@ impl Admission {
         Ok(Self(shared))
     }
 
-    pub(super) fn retain(&self, control: &StorageReadControl) -> Result<Box<dyn Send + Sync>> {
+    pub(super) fn retain(&self, control: &StorageReadControl) -> Result<Owner> {
         control.check()?;
-        let memory = control.memory().reserve(std::mem::size_of::<Lease>())?;
+        let memory = control.memory().reserve(std::mem::size_of::<Owner>())?;
         let mut state = self.0.lock();
         state.owners = state
             .owners
             .checked_add(1)
             .ok_or_else(|| SQLiteError::StorageBackend("database owner count exhausted".into()))?;
-        Ok(Box::new(Lease {
+        Ok(Owner {
             state: Arc::clone(&self.0),
             _memory: memory,
-        }))
+        })
     }
 }
 
@@ -72,7 +84,7 @@ impl Drop for Admission {
     }
 }
 
-impl Drop for Lease {
+impl Drop for Owner {
     fn drop(&mut self) {
         self.state.lock().owners -= 1;
     }

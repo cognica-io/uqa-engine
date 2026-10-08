@@ -136,6 +136,12 @@ impl SQLiteRecordStore {
                 SQLiteError::TransactionAlreadyActive.into(),
             ));
         }
+        let control = StorageReadControl::with_limit(
+            uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+        );
+        let _admission = connection
+            .admit_record_initialization(&control)
+            .map_err(|error| VersionError::Storage(error.into()))?;
         let connection = connection.record_connection();
         let identity = connection
             .with(|connection| Ok(schema::initialize(connection)))
@@ -163,6 +169,9 @@ impl SQLiteRecordStore {
                 SQLiteError::TransactionAlreadyActive.into(),
             ));
         }
+        let _admission = connection
+            .admit_record_initialization(control)
+            .map_err(|error| VersionError::Storage(error.into()))?;
         let connection = connection.record_connection();
         let native::NativeMapping {
             identity,
@@ -187,6 +196,9 @@ impl SQLiteRecordStore {
         connection: &ManagedConnection,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
+        let _admission = connection
+            .admit_record_initialization(control)
+            .map_err(|error| VersionError::Storage(error.into()))?;
         let connection = connection.record_connection();
         let identity = connection
             .with(|connection| Ok(key_value::initialize(connection, control)))

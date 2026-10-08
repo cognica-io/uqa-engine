@@ -15,6 +15,7 @@ use super::{Arc, Connection, ManagedConnection, Result, SQLiteError, VersionedKe
 
 pub(super) struct NativeRestore {
     _permit: crate::mvcc::WritePermit,
+    _admission: Option<super::ownership::RecordAdmission>,
 }
 
 impl ManagedConnection {
@@ -28,6 +29,10 @@ impl ManagedConnection {
         if transaction.is_some() {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
+        let admission = self.admit_record_initialization(&StorageReadControl::new(
+            &uqa_core::memory::MemoryBudget::new(VersionedSessionOptions::default().retained_bytes),
+            &self.write_cancellation(),
+        ))?;
         let connection = self.pool.checkout()?;
         let sqlite = connection.connection()?;
         let permit = crate::mvcc::WritePermit::for_native_restore(sqlite)
@@ -45,7 +50,10 @@ impl ManagedConnection {
             return logical.begin_transaction().map_err(Into::into);
         }
         self.session.transaction_failure.lock().take();
-        *self.session.native_restore.lock() = Some(NativeRestore { _permit: permit });
+        *self.session.native_restore.lock() = Some(NativeRestore {
+            _permit: permit,
+            _admission: admission,
+        });
         *transaction = Some(connection);
         Ok(())
     }

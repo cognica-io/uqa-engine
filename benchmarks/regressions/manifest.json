@@ -433,6 +433,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "incompatible_owners_reject_all_record_mappings_before_initialization",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/ownership/tests/protocol.rs",
+      "capability": "Storage owner coordination admission",
+      "workload": "Plain, encrypted, compressed and combined databases, each initialized as raw, native or Key/Value records.",
+      "invariant": "A live predecessor prevents all record initialization without writes; release permits initialization and current peers share the same database identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_predecessor_process_excludes_record_admission_until_death",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/ownership/tests/protocol.rs",
+      "capability": "Storage owner coordination admission",
+      "workload": "A separate process retains the predecessor owner lease layout and zero tag.",
+      "invariant": "Initialization fails while the predecessor lives and succeeds after process death without deleting coordination files.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "initial_catalog_restoration_retains_admission_until_transaction_completion",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/ownership/tests/protocol.rs",
+      "capability": "Storage owner coordination admission",
+      "workload": "Initial native catalog commit and rollback with independent-process nonblocking admission probes.",
+      "invariant": "Owner admission stays held throughout the physical transaction and is released on either completion path.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
