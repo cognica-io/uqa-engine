@@ -25,6 +25,7 @@ pub struct CompositeConstantChange<'a> {
     pub change: &'a AttributeChange,
     pub catalog: &'a dyn CompositeTypeCatalog,
     pub types: &'a dyn FunctionTypeResolver,
+    pub rename: Option<&'a crate::binding::composite_rename::CompositeFieldRename<'a>>,
 }
 
 impl CompositeConstantChange<'_> {
@@ -71,7 +72,17 @@ impl CompositeConstantChange<'_> {
     }
 
     pub fn expression(&self, expression: &mut Expr) -> Result<bool, SQLError> {
-        let mut changed = false;
+        self.expression_in_schema(expression, &crate::RowSchema::default())
+    }
+
+    pub fn expression_in_schema(
+        &self,
+        expression: &mut Expr,
+        schema: &crate::RowSchema,
+    ) -> Result<bool, SQLError> {
+        let mut changed = self
+            .rename
+            .map_or(Ok(false), |rename| rename.expression(expression, schema))?;
         crate::catalog::stored_ast::visit_stored_expression(expression, &mut |node| {
             changed |= self.syntax_node(node)?;
             Ok(())
@@ -80,7 +91,18 @@ impl CompositeConstantChange<'_> {
     }
 
     pub fn statement(&self, statement: &mut Statement) -> Result<bool, SQLError> {
-        let mut changed = false;
+        self.statement_in_scope(statement, None, None)
+    }
+
+    pub fn statement_in_scope(
+        &self,
+        statement: &mut Statement,
+        definition: Option<&crate::ast::CreateFunction>,
+        outer: Option<&crate::RowSchema>,
+    ) -> Result<bool, SQLError> {
+        let mut changed = self.rename.map_or(Ok(false), |rename| {
+            rename.statement(statement, definition, outer)
+        })?;
         crate::catalog::stored_ast::visit_stored_statement_expressions(statement, &mut |node| {
             changed |= self.syntax_node(node)?;
             Ok(())
@@ -89,11 +111,17 @@ impl CompositeConstantChange<'_> {
     }
 
     pub fn query(&self, query: &mut QueryPlan) -> Result<bool, SQLError> {
+        let changed = self
+            .rename
+            .map_or(Ok(false), |rename| rename.query(query))?;
         self.plan_nodes(|visit| query.rewrite_scalar_expressions(visit))
+            .map(|values| values || changed)
     }
 
     pub fn plan(&self, plan: &mut UnifiedPlan) -> Result<bool, SQLError> {
+        let changed = self.rename.is_some_and(|rename| rename.bound_plan(plan));
         self.plan_nodes(|visit| plan.rewrite_scalar_expressions(visit))
+            .map(|values| values || changed)
     }
 
     pub fn expression_plan(
@@ -127,13 +155,20 @@ impl CompositeConstantChange<'_> {
     }
 
     pub fn columns(&self, columns: &mut [ColumnDef]) -> Result<bool, SQLError> {
+        let schema = crate::RowSchema::with_types(
+            columns.iter().map(|column| column.name.clone()).collect(),
+            columns
+                .iter()
+                .map(|column| Some(column.ty.clone()))
+                .collect(),
+        );
         let mut changed = false;
         for column in columns {
             for expression in column.default.iter_mut().chain(column.check.iter_mut()) {
-                changed |= self.expression(expression)?;
+                changed |= self.expression_in_schema(expression, &schema)?;
             }
             if let Some(generated) = &mut column.generated {
-                changed |= self.expression(&mut generated.expression)?;
+                changed |= self.expression_in_schema(&mut generated.expression, &schema)?;
             }
         }
         Ok(changed)
@@ -144,9 +179,16 @@ impl CompositeConstantChange<'_> {
         checks: &mut [TableCheck],
         columns: &[ColumnDef],
     ) -> Result<bool, SQLError> {
+        let schema = crate::RowSchema::with_types(
+            columns.iter().map(|column| column.name.clone()).collect(),
+            columns
+                .iter()
+                .map(|column| Some(column.ty.clone()))
+                .collect(),
+        );
         let mut changed = false;
         for check in checks {
-            changed |= self.expression(&mut check.expr)?;
+            changed |= self.expression_in_schema(&mut check.expr, &schema)?;
             if let Some(partition) = &mut check.partition_constraint {
                 changed |= self.bound(&mut partition.bound, &partition.spec, columns)?;
                 changed |= self.spec(&mut partition.spec)?;

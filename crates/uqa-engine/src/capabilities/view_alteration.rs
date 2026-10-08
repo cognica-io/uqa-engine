@@ -28,10 +28,23 @@ impl Engine {
             locks: self,
             roles: self.role_transfer_context(),
             dependencies: self,
+            column_dependencies: self,
             publication: self,
             changes: self,
             rewrite: self.view_rewrite_context(),
             notices: self.query_runtime_view().notices,
+        }
+    }
+}
+impl uqa_execution::schema::view_alteration::ViewColumnRenameInputs for Engine {
+    fn view_column_rename_context(
+        &self,
+    ) -> uqa_execution::schema::view_alteration::ViewColumnRenameContext<'_> {
+        uqa_execution::schema::view_alteration::ViewColumnRenameContext {
+            views: self.view_reference_context(),
+            routines: self.routine_rewrite_context(),
+            events: self.event_lifecycle_context(),
+            values: self.composite_value_context(),
         }
     }
 }

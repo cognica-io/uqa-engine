@@ -28,9 +28,24 @@ mod recheck;
 pub(super) mod schema;
 pub(crate) mod validation;
 
+/// Renaming an index or a bound composite field preserves analyzed SQL identities. Definition changes invalidate the indexed relation's analysis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexPublicationKind {
+    Definition,
+    Names,
+}
+
 pub trait IndexRegistryPublication {
-    fn persist_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()>;
-    fn erase_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()>;
+    fn persist_index(
+        &self,
+        row: &CatalogIndexRow,
+        kind: IndexPublicationKind,
+    ) -> StorageBackendResult<()>;
+    fn erase_index(
+        &self,
+        row: &CatalogIndexRow,
+        kind: IndexPublicationKind,
+    ) -> StorageBackendResult<()>;
     fn publish_index(&self, row: CatalogIndexRow);
     fn forget_index(&self, relation: &RelationIdentity);
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()>;
@@ -90,8 +105,8 @@ impl IndexRegistryChange {
         previous: &CatalogIndexRow,
         renamed: CatalogIndexRow,
     ) -> StorageBackendResult<()> {
-        publication.erase_index(previous)?;
-        publication.persist_index(&renamed)?;
+        publication.erase_index(previous, IndexPublicationKind::Names)?;
+        publication.persist_index(&renamed, IndexPublicationKind::Names)?;
         publication.forget_index(&previous.relation);
         publication.publish_index(renamed);
         Ok(())
@@ -114,11 +129,11 @@ impl IndexRegistryChange {
             tables.insert(change.relation.qualified_name());
         }
         for row in &self.removals {
-            publication.erase_index(row)?;
+            publication.erase_index(row, IndexPublicationKind::Definition)?;
             tables.insert(row.table_name.clone());
         }
         for row in &self.upserts {
-            publication.persist_index(row)?;
+            publication.persist_index(row, IndexPublicationKind::Definition)?;
             tables.insert(row.table_name.clone());
         }
         for row in self

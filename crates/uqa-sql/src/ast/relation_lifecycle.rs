@@ -50,6 +50,7 @@ pub enum AlterViewAction {
     Reset(Vec<String>),
     OwnerTo(RoleSpecification),
     RenameTo(String),
+    RenameColumn { from: String, to: String },
     SetSchema(String),
 }
 

@@ -221,6 +221,78 @@
       "sql": "INSERT INTO cr_trigger_rows VALUES('(1,2)'); SELECT * FROM cr_trigger_rows"
     },
     {
+      "id": "index_cache_setup",
+      "sql": "CREATE TYPE cr_cached_index AS(a int,b text); CREATE TABLE cr_cached_rows(v cr_cached_index); INSERT INTO cr_cached_rows VALUES('(1,x)'); CREATE INDEX cr_cached_idx ON cr_cached_rows(((v).b))"
+    },
+    {
+      "id": "index_cache_prepare",
+      "sql": "PREPARE cr_cached_q AS SELECT (v).b FROM cr_cached_rows WHERE (v).b='x'; EXECUTE cr_cached_q"
+    },
+    {
+      "id": "index_cache_rename",
+      "sql": "ALTER TYPE cr_cached_index RENAME ATTRIBUTE b TO label"
+    },
+    {
+      "id": "index_cache_read",
+      "sql": "EXECUTE cr_cached_q"
+    },
+    {
+      "id": "index_cache_name",
+      "sql": "ALTER INDEX cr_cached_idx RENAME TO cr_cached_idx2"
+    },
+    {
+      "id": "index_cache_named_read",
+      "sql": "EXECUTE cr_cached_q"
+    },
+    {
+      "id": "index_cache_create",
+      "sql": "CREATE INDEX cr_cached_idx3 ON cr_cached_rows(((v).label))"
+    },
+    {
+      "id": "index_cache_reanalysis",
+      "sql": "EXECUTE cr_cached_q"
+    },
+    {
+      "id": "view_rename_setup",
+      "sql": "CREATE TABLE cr_view_rows(a int); INSERT INTO cr_view_rows VALUES(12); CREATE VIEW cr_view_base AS SELECT a FROM cr_view_rows; CREATE VIEW cr_view_dep AS SELECT a FROM cr_view_base; CREATE FUNCTION cr_view_pick() RETURNS int LANGUAGE SQL RETURN (SELECT a FROM cr_view_base); CREATE MATERIALIZED VIEW cr_view_mat AS SELECT a FROM cr_view_rows"
+    },
+    {
+      "id": "view_rowtype_store",
+      "sql": "CREATE TABLE cr_view_values(v cr_view_base,m cr_view_mat); INSERT INTO cr_view_values VALUES('(12)','(13)'); CREATE VIEW cr_view_selected AS SELECT (v).a AS n,(m).a AS m FROM cr_view_values"
+    },
+    {
+      "id": "view_rename",
+      "sql": "ALTER VIEW cr_view_base RENAME COLUMN a TO b; ALTER TYPE cr_view_mat RENAME ATTRIBUTE a TO b"
+    },
+    {
+      "id": "view_rename_read",
+      "sql": "SELECT b FROM cr_view_base; SELECT a FROM cr_view_dep; SELECT cr_view_pick(); SELECT b FROM cr_view_mat"
+    },
+    {
+      "id": "view_rowtype_read",
+      "sql": "SELECT v,m,(v).b AS b,(m).b AS m FROM cr_view_values; SELECT * FROM cr_view_selected"
+    },
+    {
+      "id": "view_rename_missing",
+      "sql": "ALTER VIEW cr_view_base RENAME COLUMN absent TO b"
+    },
+    {
+      "id": "view_rename_duplicate",
+      "sql": "ALTER VIEW cr_view_base RENAME COLUMN b TO b"
+    },
+    {
+      "id": "view_rename_system",
+      "sql": "ALTER VIEW cr_view_base RENAME COLUMN b TO ctid"
+    },
+    {
+      "id": "view_rename_system_restore",
+      "sql": "ALTER VIEW cr_view_base RENAME COLUMN ctid TO b"
+    },
+    {
+      "id": "view_rename_rollback",
+      "sql": "BEGIN; ALTER VIEW cr_view_base RENAME COLUMN b TO c; SELECT c FROM cr_view_base; ROLLBACK; SELECT b FROM cr_view_base"
+    },
+    {
       "id": "owner_create",
       "sql": "CREATE ROLE cr_other_role; SET ROLE cr_other_role"
     },
@@ -275,6 +347,16 @@
     {
       "id": "persist_rename",
       "sql": "ALTER TYPE cr_pair RENAME ATTRIBUTE label TO final_name; SELECT * FROM cr_fields ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "persist_view_rename",
+      "sql": "SELECT b FROM cr_view_base; SELECT a FROM cr_view_dep; SELECT cr_view_pick(); SELECT b FROM cr_view_mat",
+      "reopen": true
+    },
+    {
+      "id": "persist_view_rowtype",
+      "sql": "SELECT v,m,(v).b AS b,(m).b AS m FROM cr_view_values; SELECT * FROM cr_view_selected",
       "reopen": true
     }
   ]

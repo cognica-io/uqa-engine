@@ -33,6 +33,11 @@ pub enum AlterTypeObjectAction {
     /// The destination schema.
     SetSchema(String),
     OwnerTo(RoleSpecification),
+    /// Rename an attribute without changing its type or attribute number.
+    RenameAttribute {
+        from: String,
+        to: String,
+    },
     /// Append attributes to a standalone composite relation in written order.
     AddAttributes(Vec<super::CompositeAttributeAddition>),
     /// `PostgreSQL` executes removals before additions, preserving written order within each group.

@@ -65,6 +65,7 @@ fn change(change: &AttributeChange) -> CompositeConstantChange<'_> {
         change,
         catalog: &Catalog,
         types: &Catalog,
+        rename: None,
     }
 }
 

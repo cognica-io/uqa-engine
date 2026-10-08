@@ -27,6 +27,7 @@ mod addition;
 pub mod alteration;
 pub mod attributes;
 pub mod catalog_values;
+pub mod renaming;
 pub mod values;
 
 pub struct CompositeTypeContext<'a> {

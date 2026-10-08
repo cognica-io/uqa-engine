@@ -66,6 +66,16 @@ pub fn alter_sequence_from_table_syntax(
         ..crate::ast::AlterSequence::default()
     };
     match stmt.actions.as_slice() {
+        [AlterTableAction::RenameColumn { .. }] => {
+            let relation = uqa_core::RelationIdentity::from_legacy_name(canonical)
+                .map_err(SQLError::Internal)?;
+            return Err(SQLError::Diagnostic {
+                sqlstate: "42809".into(),
+                message: format!("cannot rename columns of relation \"{}\"", relation.name),
+                detail: Some("This operation is not supported for sequences.".into()),
+                hint: None,
+            });
+        }
         [AlterTableAction::SetPersistence { persistence }] => {
             alter.persistence = Some(*persistence);
         }
@@ -99,6 +109,12 @@ pub fn alter_view_from_table_syntax(
 ) -> Result<Option<crate::ast::AlterViewStmt>, SQLError> {
     views::validate_actions(local_name, kind, &stmt.actions)?;
     let action = match stmt.actions.as_slice() {
+        [AlterTableAction::RenameColumn { from, to }] => {
+            Some(crate::ast::AlterViewAction::RenameColumn {
+                from: from.clone(),
+                to: to.clone(),
+            })
+        }
         [AlterTableAction::RenameTable { to }] => {
             Some(crate::ast::AlterViewAction::RenameTo(to.clone()))
         }

@@ -6,7 +6,9 @@
 
 //! Metadata and publication adapters for SQL-owned index declarations and execution-owned builds.
 use crate::{capabilities::RelationResolution, Engine};
-use uqa_execution::schema::indexes::registry::{IndexRegistryContext, IndexRegistryPublication};
+use uqa_execution::schema::indexes::registry::{
+    IndexPublicationKind, IndexRegistryContext, IndexRegistryPublication,
+};
 use uqa_execution::schema::indexes::renaming::{
     IndexRenameContext, IndexRenameTransactions, IndexRenameWrite,
 };
@@ -58,7 +60,11 @@ impl Engine {
 }
 
 impl IndexRegistryPublication for Engine {
-    fn persist_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()> {
+    fn persist_index(
+        &self,
+        row: &CatalogIndexRow,
+        kind: IndexPublicationKind,
+    ) -> StorageBackendResult<()> {
         let relation = uqa_core::RelationIdentity::from_legacy_name(&row.table_name)
             .map_err(StorageBackendError::Other)?;
         let table = self
@@ -76,11 +82,17 @@ impl IndexRegistryPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
-        self.note_prepared_table_change(&table);
+        if kind == IndexPublicationKind::Definition {
+            self.note_prepared_table_change(&table);
+        }
         Ok(())
     }
 
-    fn erase_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()> {
+    fn erase_index(
+        &self,
+        row: &CatalogIndexRow,
+        kind: IndexPublicationKind,
+    ) -> StorageBackendResult<()> {
         let relation = uqa_core::RelationIdentity::from_legacy_name(&row.table_name)
             .map_err(StorageBackendError::Other)?;
         let temporary = self
@@ -95,7 +107,9 @@ impl IndexRegistryPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
-        self.note_prepared_relation_change(&relation);
+        if kind == IndexPublicationKind::Definition {
+            self.note_prepared_relation_change(&relation);
+        }
         Ok(())
     }
 

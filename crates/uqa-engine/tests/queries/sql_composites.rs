@@ -13,6 +13,8 @@ mod addition;
 
 #[path = "sql_composites/removal.rs"]
 mod removal;
+#[path = "sql_composites/renaming.rs"]
+mod renaming;
 
 fn verify_composite_types(engine: &Engine) {
     crate::pg18_oracle::verify(

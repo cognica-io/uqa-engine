@@ -81,11 +81,31 @@ pub fn rewrite_composite_values(
             },
         )?;
     }
+    let snapshot = matches!(change, AttributeChange::Rename { .. })
+        .then(|| context.catalogs.bindings.binding_snapshot())
+        .transpose()?;
+    let rename = match (change, snapshot.as_ref()) {
+        (AttributeChange::Rename { from, to }, Some(snapshot)) => {
+            let descriptor = uqa_sql::expr::composites::descriptor(Some(context.types), target)?;
+            let (_, attribute) = descriptor
+                .attribute(from)
+                .ok_or_else(|| SQLError::Internal("renamed field descriptor disappeared".into()))?;
+            Some(uqa_sql::binding::composite_rename::CompositeFieldRename {
+                target,
+                number: attribute.number,
+                to,
+                routines: context.catalogs.resolution,
+                binding: snapshot.context(),
+            })
+        }
+        _ => None,
+    };
     let constants = uqa_sql::expr::composites::constants::CompositeConstantChange {
         target,
         change,
         catalog: context.types,
         types: context.catalogs.types,
+        rename: rename.as_ref(),
     };
     rebuild.extend(super::catalog_values::rewrite(
         &context.catalogs,
@@ -101,7 +121,7 @@ pub fn rewrite_composite_values(
     Ok(rebuild)
 }
 
-pub(super) fn rebuild_indexes(
+pub(crate) fn rebuild_indexes(
     context: &CompositeValueContext<'_>,
     tables: std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {

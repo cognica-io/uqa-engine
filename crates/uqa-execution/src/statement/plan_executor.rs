@@ -878,6 +878,22 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterTypeObject(statement) => {
+                if let uqa_sql::ast::AlterTypeObjectAction::RenameAttribute { from, to } =
+                    &statement.action
+                {
+                    return crate::schema::composites::renaming::rename_attribute(
+                        &self
+                            .context
+                            .schemas
+                            .inputs
+                            .type_lifecycle_context()
+                            .composite_attributes,
+                        &self.context.schemas.inputs.table_alter_entry_context(),
+                        &statement.name,
+                        from,
+                        to,
+                    );
+                }
                 crate::schema::types::alter_type_object(
                     &self.context.schemas.inputs.type_lifecycle_context(),
                     statement.clone(),

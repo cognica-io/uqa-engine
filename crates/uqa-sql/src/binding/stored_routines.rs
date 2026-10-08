@@ -52,6 +52,42 @@ pub fn bind_catalog_statement_routines(
     plan: &UnifiedPlan,
     params: &[crate::SQLParam],
 ) -> Result<BoundStatementRoutines, SQLError> {
+    bind_catalog_statement(context, plan, |query, outer| {
+        crate::binding::bind_syntax_query_plan_routines(
+            context.routines,
+            query,
+            params,
+            context.binding,
+            outer,
+        )
+    })
+}
+
+pub(super) fn bind_catalog_statement_composite_inputs(
+    context: &CatalogRoutineContext<'_, '_>,
+    plan: &UnifiedPlan,
+    params: &[crate::SQLParam],
+    outer: Option<&RowSchema>,
+) -> Result<BoundStatementRoutines, SQLError> {
+    bind_catalog_statement(context, plan, |query, command_outer| {
+        let mut scope = super::SchemaScope::for_analysis(context.binding)?;
+        scope.scalar_binding = super::ScalarBindingMode::CompositeInputs;
+        scope.preserve_syntax_shape = true;
+        scope.stored_expression_outer = outer.cloned();
+        let combined = match (command_outer, outer) {
+            (Some(left), Some(right)) => Some(RowSchema::join(left, right, [])),
+            (Some(schema), None) | (None, Some(schema)) => Some(schema.clone()),
+            (None, None) => None,
+        };
+        scope.bind_query_routines_for_storage(context.routines, query, params, combined.as_ref())
+    })
+}
+
+fn bind_catalog_statement(
+    context: &CatalogRoutineContext<'_, '_>,
+    plan: &UnifiedPlan,
+    bind: impl FnOnce(&mut QueryPlan, Option<&RowSchema>) -> Result<RowSchema, SQLError>,
+) -> Result<BoundStatementRoutines, SQLError> {
     let lowered = match plan {
         UnifiedPlan::Query(query) => {
             let mut query = (**query).clone();
@@ -68,13 +104,7 @@ pub fn bind_catalog_statement_routines(
         });
     };
     let mut query = lowered.clone();
-    let output = crate::binding::bind_syntax_query_plan_routines(
-        context.routines,
-        &mut query,
-        params,
-        context.binding,
-        outer.as_ref(),
-    )?;
+    let output = bind(&mut query, outer.as_ref())?;
     let sites = if matches!(plan, UnifiedPlan::Command(_)) {
         super::syntax_sites::command_query_syntax_sites(&lowered, &query)?
     } else {

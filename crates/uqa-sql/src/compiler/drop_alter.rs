@@ -881,6 +881,36 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
         .ok_or_else(|| SQLError::Internal("RENAME without relation".into()))?;
     let table = range_var_name(relation);
     let action = match stmt.rename_type() {
+        ObjectType::ObjectAttribute => {
+            return Ok(Statement::AlterTypeObject(crate::ast::AlterTypeObject {
+                kind: crate::ast::TypeObjectKind::Type,
+                name: table,
+                action: crate::ast::AlterTypeObjectAction::RenameAttribute {
+                    from: stmt.subname.clone(),
+                    to: stmt.newname.clone(),
+                },
+            }));
+        }
+        ObjectType::ObjectColumn
+            if matches!(
+                stmt.relation_type(),
+                ObjectType::ObjectView | ObjectType::ObjectMatview
+            ) =>
+        {
+            return Ok(Statement::AlterView(AlterViewStmt {
+                name: table,
+                kind: if stmt.relation_type() == ObjectType::ObjectView {
+                    AlterViewKind::View
+                } else {
+                    AlterViewKind::MaterializedView
+                },
+                if_exists: stmt.missing_ok,
+                action: AlterViewAction::RenameColumn {
+                    from: stmt.subname.clone(),
+                    to: stmt.newname.clone(),
+                },
+            }));
+        }
         ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
             from: stmt.subname.clone(),
             to: stmt.newname.clone(),
