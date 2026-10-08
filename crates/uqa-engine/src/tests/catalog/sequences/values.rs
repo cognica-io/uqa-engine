@@ -28,6 +28,9 @@ struct RuntimeObserver<'a> {
     before_lock: RefCell<Option<Box<dyn FnOnce() + 'a>>>,
 }
 impl SequenceValueRuntime for RuntimeObserver<'_> {
+    fn require_sequence_value_durability(&self) -> StorageBackendResult<()> {
+        SequenceValueRuntime::require_sequence_value_durability(self.engine)
+    }
     fn cancellation(&self) -> &uqa_core::CancellationToken {
         SequenceValueRuntime::cancellation(self.engine)
     }

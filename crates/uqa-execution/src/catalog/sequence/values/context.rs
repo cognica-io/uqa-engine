@@ -44,6 +44,7 @@ pub trait SequenceValueRuntime {
     fn session_read(&self) -> Box<dyn SequenceSessionRead + '_>;
     fn session_write(&self) -> Box<dyn SequenceSessionWrite + '_>;
     fn current_transaction_is_read_only(&self) -> bool;
+    fn require_sequence_value_durability(&self) -> StorageBackendResult<()>;
     fn open_nontransactional_sequence_session(
         &self,
     ) -> StorageBackendResult<Option<PersistentStorageSession>>;

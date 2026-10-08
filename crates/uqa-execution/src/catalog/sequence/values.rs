@@ -40,6 +40,13 @@ impl SequenceValueContext<'_> {
             if self.runtime.current_transaction_is_read_only() && !target.temporary {
                 return Err(SequenceValueError::ReadOnly("nextval"));
             }
+            if !target.temporary {
+                self.runtime
+                    .require_sequence_value_durability()
+                    .map_err(|error| {
+                        persistence::sequence_storage_error("retain sequence durability", error)
+                    })?;
+            }
             let mut caches = self.runtime.caches();
             if let Some((current, autonomous)) = Self::take_cached_nextval(&target, &mut caches)? {
                 drop(caches);
@@ -146,6 +153,13 @@ impl SequenceValueContext<'_> {
                     min,
                     max,
                 });
+            }
+            if !target.temporary {
+                self.runtime
+                    .require_sequence_value_durability()
+                    .map_err(|error| {
+                        persistence::sequence_storage_error("retain sequence durability", error)
+                    })?;
             }
             if let Some(value) = self.setval_target(target, value, is_called)? {
                 return Ok(value);
