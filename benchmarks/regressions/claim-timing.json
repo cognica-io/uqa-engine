@@ -7,7 +7,7 @@
   "warmup_rounds": 8,
   "measurement_rounds": 128,
   "calibration_pairs": 32,
-  "comparison_pairs": 4,
+  "comparison_pairs": 8,
   "ordering": "counterbalanced",
   "within_run_estimator": "median_phase_completion_nanoseconds",
   "comparison_estimator": "median_of_paired_phase_window_ratios",

@@ -289,6 +289,27 @@ class AnalyticalQualificationCLITest(SignedTimingFixture):
         self.run.pop("observations_sha256", None)
         self.issue()
 
+    def test_controlled_eight_pair_evidence_cannot_be_replaced_by_four_pair_evidence(self):
+        for role in ["head", "baseline"]:
+            for pair in range(4, 8):
+                root = self.root / f"{role}-{pair}"
+                flag = "--criterion-root" if role == "head" else "--baseline-criterion-root"
+                self.command.extend([flag, str(root)])
+                for gate in self.manifest["regression_gates"]:
+                    path = root / gate["benchmark"] / "new/estimates.json"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(json.dumps({"slope": {"point_estimate": 1.0}}))
+        self.command.extend(["--regression-only", "--controlled-protocol"])
+        self.issue_checker_evidence()
+        self.assertEqual(self.report["regression_protocol"]["pairs"], 8)
+        self.assertEqual(self.execute(evidence=True).returncode, 0)
+        self.calibration["regression_protocol"]["pairs"] = 4
+        self.run.pop("calibration_sha256")
+        self.issue()
+        result = self.execute(evidence=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("sampling protocol", result.stderr)
+
     def test_cli_exit_status_distinguishes_accepted_inconclusive_and_regression(self):
         for ratio, status, exit_code in [(1.0, "accepted", 0), (1.1, "inconclusive", 3),
                                         (1.2, "regression", 1)]:
