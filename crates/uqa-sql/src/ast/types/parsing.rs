@@ -134,6 +134,7 @@ impl ColumnType {
             "regproc" => Ok(Self::Regproc),
             "regprocedure" => Ok(Self::Regprocedure),
             "regclass" => Ok(Self::Regclass),
+            "regcollation" => Ok(Self::Regcollation),
             "regnamespace" => Ok(Self::Regnamespace),
             "regrole" => Ok(Self::Regrole),
             "regtype" => Ok(Self::Regtype),

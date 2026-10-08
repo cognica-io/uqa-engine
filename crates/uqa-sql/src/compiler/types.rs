@@ -515,6 +515,7 @@ pub(super) fn compile_pg_type_name(
             "regproc" => Ok(ColumnType::Regproc),
             "regprocedure" => Ok(ColumnType::Regprocedure),
             "regclass" => Ok(ColumnType::Regclass),
+            "regcollation" => Ok(ColumnType::Regcollation),
             "regnamespace" => Ok(ColumnType::Regnamespace),
             "regrole" => Ok(ColumnType::Regrole),
             "regtype" => Ok(ColumnType::Regtype),

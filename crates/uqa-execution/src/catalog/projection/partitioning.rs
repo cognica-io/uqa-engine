@@ -694,6 +694,7 @@ fn partition_operator_class(strategy: PartitionStrategy, ty: &ColumnType) -> i64
         }
         ColumnType::Oid
         | ColumnType::Regclass
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regrole
         | ColumnType::Regtype => {

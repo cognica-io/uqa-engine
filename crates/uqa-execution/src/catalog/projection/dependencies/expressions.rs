@@ -11,7 +11,7 @@ use crate::catalog::context::CatalogContext;
 use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr, FunctionBinding};
-use uqa_sql::catalog::dependencies::{ObjectAddress, NAMESPACE_CLASS};
+use uqa_sql::catalog::dependencies::{ObjectAddress, COLLATION_CLASS, NAMESPACE_CLASS};
 use uqa_sql::catalog::stored_ast::StoredAstVisitor;
 use uqa_sql::SQLError;
 
@@ -219,6 +219,7 @@ pub(super) fn add_constant_reference(ty: &str, oid: i64, references: &mut Refere
         "regtype" => references.add_type(oid),
         "regproc" | "regprocedure" => references.add_routine(oid),
         "regnamespace" => references.add(ObjectAddress::whole(NAMESPACE_CLASS, oid)),
+        "regcollation" => references.add(ObjectAddress::whole(COLLATION_CLASS, oid)),
         _ => {}
     }
 }

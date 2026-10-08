@@ -169,7 +169,13 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
                 | ("bit", "varbit")
                 | ("varbit", "bit")
                 | (
-                    "oid" | "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+                    "oid"
+                        | "regclass"
+                        | "regcollation"
+                        | "regnamespace"
+                        | "regproc"
+                        | "regrole"
+                        | "regtype",
                     "int4" | "int8"
                 )
         )

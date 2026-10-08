@@ -308,6 +308,7 @@ fn is_oid_alias(ty: &ColumnType) -> bool {
             | ColumnType::Regtype
             | ColumnType::Regproc
             | ColumnType::Regprocedure
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
     )
 }

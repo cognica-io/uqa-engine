@@ -75,6 +75,7 @@ fn output_is_stable(ty: &ColumnType) -> bool {
             | ColumnType::Regproc
             | ColumnType::Regprocedure
             | ColumnType::Regclass
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
             | ColumnType::Regrole
             | ColumnType::Regtype

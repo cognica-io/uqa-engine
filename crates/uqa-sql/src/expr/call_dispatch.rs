@@ -173,6 +173,7 @@ fn eval_function_call_inner(
         "to_regproc" => Some(crate::ast::ColumnType::Regproc),
         "to_regprocedure" => Some(crate::ast::ColumnType::Regprocedure),
         "to_regclass" => Some(crate::ast::ColumnType::Regclass),
+        "to_regcollation" => Some(crate::ast::ColumnType::Regcollation),
         "to_regnamespace" => Some(crate::ast::ColumnType::Regnamespace),
         "to_regrole" => Some(crate::ast::ColumnType::Regrole),
         "to_regtype" => Some(crate::ast::ColumnType::Regtype),

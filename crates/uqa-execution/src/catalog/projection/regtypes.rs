@@ -6,7 +6,9 @@
 
 //! Catalog-backed `reg*` input/output and type-name resolution.
 
+mod collations;
 mod format_type;
+pub use collations::resolve_regcollation_oid;
 pub mod relation_oid;
 mod row_types;
 pub use format_type::{format_type_name, format_type_value};
@@ -423,6 +425,7 @@ pub fn resolve_regobject_oid(
         ColumnType::Regprocedure => lookup_regprocedure_oid(context, name),
         ColumnType::Regclass => lookup_regclass_oid(context, name),
         ColumnType::Regnamespace => lookup_regnamespace_oid(context, name),
+        ColumnType::Regcollation => collations::lookup_regcollation_oid(context, name),
         ColumnType::Regrole => lookup_regrole_oid(context, name),
         ColumnType::Regtype => match resolve_regtype_oid(context, name) {
             Err(SQLError::Routine { sqlstate, .. })
@@ -685,6 +688,7 @@ impl AliasConstantOutput {
     pub(crate) fn text(&self, ty: &ColumnType, oid: i64) -> Option<String> {
         match ty {
             ColumnType::Regtype => format_regtype(&self.visibility, &self.catalog, oid),
+            ColumnType::Regcollation => collations::format_regcollation(&self.visibility, oid),
             ColumnType::Regproc => format_regproc(&self.visibility, &self.catalog, oid),
             ColumnType::Regprocedure => format_regprocedure(&self.visibility, &self.catalog, oid),
             ColumnType::Regnamespace => {
@@ -876,6 +880,7 @@ pub fn resolve_regtype_output(
         ColumnType::Regproc
             | ColumnType::Regprocedure
             | ColumnType::Regclass
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
             | ColumnType::Regrole
             | ColumnType::Regtype
@@ -888,6 +893,7 @@ pub fn resolve_regtype_output(
         ColumnType::Regproc => Ok(format_regproc(&visibility, &catalog, oid)),
         ColumnType::Regprocedure => Ok(format_regprocedure(&visibility, &catalog, oid)),
         ColumnType::Regclass => format_regclass(context, &catalog, oid),
+        ColumnType::Regcollation => Ok(collations::format_regcollation(&visibility, oid)),
         ColumnType::Regnamespace => {
             Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))
         }

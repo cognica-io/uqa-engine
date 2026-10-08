@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Resolve PostgreSQL `regcollation` names, numeric OIDs and arrays with the correct input diagnostics, lookup behavior, catalog type metadata and durable stored values.
+
 - Support view column renames through the existing relation lifecycle while preserving stored row-type values and dependencies; retain PostgreSQL expression-index parentheses and avoid reparsing prepared queries when only stored field names or index names change. Dropping an absent column default preserves analyzed inputs.
 
 - Record composite field dependencies in views, checks, indexes, SQL-standard routines, rules and triggers so RESTRICT protects their definitions and CASCADE removes dependent objects, including definitions restored from existing databases.

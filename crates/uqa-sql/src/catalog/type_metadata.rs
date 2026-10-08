@@ -34,6 +34,7 @@ pub fn catalog_type_name(oid: i64) -> &'static str {
         2202 => "regprocedure",
         2205 => "regclass",
         2206 => "regtype",
+        4191 => "regcollation",
         4089 => "regnamespace",
         4096 => "regrole",
         _ => "USER-DEFINED",
@@ -46,6 +47,7 @@ pub fn catalog_regtype_name(oid: i64) -> Option<&'static str> {
         2202 => Some("regprocedure"),
         2205 => Some("regclass"),
         2206 => Some("regtype"),
+        4191 => Some("regcollation"),
         4089 => Some("regnamespace"),
         4096 => Some("regrole"),
         _ => None,
@@ -84,6 +86,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Regproc => 24,
         ColumnType::Regprocedure => 2202,
         ColumnType::Regclass => 2205,
+        ColumnType::Regcollation => 4191,
         ColumnType::Regnamespace => 4089,
         ColumnType::Regrole => 4096,
         ColumnType::Regtype => 2206,
@@ -136,6 +139,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Regproc => 1008,
             ColumnType::Regprocedure => 2207,
             ColumnType::Regclass => 2210,
+            ColumnType::Regcollation => 4192,
             ColumnType::Regnamespace => 4090,
             ColumnType::Regrole => 4097,
             ColumnType::Regtype => 2211,
@@ -306,6 +310,7 @@ pub fn pg_type_len(ty: &ColumnType) -> i64 {
         | ColumnType::Regproc
         | ColumnType::Regprocedure
         | ColumnType::Regclass
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regrole
         | ColumnType::Regtype
@@ -344,6 +349,7 @@ pub fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::Regproc
             | ColumnType::Regprocedure
             | ColumnType::Regclass
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
             | ColumnType::Regrole
             | ColumnType::Regtype
@@ -577,6 +583,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Regproc => PgTypeRoutineOids::new(44, 45, 2444, 2445),
         ColumnType::Regprocedure => PgTypeRoutineOids::new(2212, 2213, 2446, 2447),
         ColumnType::Regclass => PgTypeRoutineOids::new(2218, 2219, 2452, 2453),
+        ColumnType::Regcollation => PgTypeRoutineOids::new(4193, 4194, 4196, 4197),
         ColumnType::Regnamespace => PgTypeRoutineOids::new(4084, 4085, 4087, 4088),
         ColumnType::Regrole => PgTypeRoutineOids::new(4098, 4092, 4094, 4095),
         ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
@@ -665,6 +672,7 @@ pub fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Regproc => "regproc",
         ColumnType::Regprocedure => "regprocedure",
         ColumnType::Regclass => "regclass",
+        ColumnType::Regcollation => "regcollation",
         ColumnType::Regnamespace => "regnamespace",
         ColumnType::Regrole => "regrole",
         ColumnType::Regtype => "regtype",
