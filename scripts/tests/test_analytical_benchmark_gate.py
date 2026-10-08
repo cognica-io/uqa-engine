@@ -57,8 +57,9 @@ class AnalyticalBenchmarkReportTest(unittest.TestCase):
         heads: list[pathlib.Path],
         bases: list[pathlib.Path] | None = None,
         baseline_manifest: pathlib.Path = MANIFEST,
+        extra_args: tuple[str, ...] = (),
     ) -> subprocess.CompletedProcess[str]:
-        command = ["python3", str(CHECKER), "--output", str(output)]
+        command = ["python3", str(CHECKER), "--output", str(output), *extra_args]
         for root in heads:
             command.extend(("--criterion-root", str(root)))
         for root in bases or []:
@@ -73,6 +74,49 @@ class AnalyticalBenchmarkReportTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    def test_regression_only_preserves_every_gate_and_declares_omitted_advisories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            heads = [root / f"head-{index}" for index in range(4)]
+            bases = [root / f"base-{index}" for index in range(4)]
+            self.benchmarks = {gate["benchmark"] for gate in self.manifest["regression_gates"]}
+            for path in heads + bases:
+                self.write_criterion(path)
+            result = self.run_checker(root / "report.json", heads, bases,
+                                      extra_args=("--regression-only",))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((root / "report.json").read_text())
+            self.assertEqual(report["comparison_scope"], "uqa_regression")
+            self.assertEqual(report["external_ratio_checks"], [])
+            self.assertIsNone(report["external_limits_met"])
+            self.assertEqual({gate["benchmark"] for gate in report["regression_ratio_checks"]}, self.benchmarks)
+            self.assertIn("benchmark_filter", report["regression_protocol"])
+            self.assertFalse(report["timing_acceptance"])
+            full = self.run_checker(root / "full.json", heads, bases)
+            self.assertEqual(full.returncode, 2)
+
+    def test_regression_only_rejects_a_missing_required_workload(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            heads = [root / f"head-{index}" for index in range(4)]
+            bases = [root / f"base-{index}" for index in range(4)]
+            for path in heads + bases:
+                self.write_criterion(path)
+            heads[2].joinpath("analytical_external_q6/uqa/new/estimates.json").unlink()
+            result = self.run_checker(root / "report.json", heads, bases,
+                                      extra_args=("--regression-only",))
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("analytical_external_q6", result.stderr)
+
+    def test_regression_only_requires_an_identified_paired_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.write_criterion(root / "head")
+            result = self.run_checker(root / "report.json", [root / "head"],
+                                      extra_args=("--regression-only",))
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("requires paired baseline", result.stderr)
 
     def test_report_uses_linear_slope_without_claiming_timing_acceptance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
