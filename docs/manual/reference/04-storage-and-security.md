@@ -118,7 +118,7 @@ Before upgrading an application:
 3. Run representative SQL, text, vector, and graph checks.
 4. Verify that the older binary is not expected to open a newly migrated file.
 
-Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.5.1 upgrade guide](10-upgrading.md) covers vector-index storage formats, shared MVCC writers, backup restoration and the provider, analyzer and index migration requirements for earlier releases.
+Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.5.2 upgrade guide](10-upgrading.md) covers vector-index storage formats, shared MVCC writers, backup restoration and the provider, analyzer and index migration requirements for earlier releases.
 
 ## Backups and copies
 

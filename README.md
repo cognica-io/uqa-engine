@@ -23,17 +23,17 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.5.1
+## New in 0.5.2
 
-Version 0.5.1 corrects CREATE TABLE AS catalog publication, composite UNIQUE probes, operator-join predicates, routine recursion and legacy key migration. It includes enum and composite types, composite attribute addition, domain constraint changes, foreign-data wrapper lifecycle, builtin routine privileges, and PostgreSQL configuration and timeout behavior. It also corrects stored-expression typing, routine validation, foreign-key and trigger ordering, catalog identities and session date input. See the [release history](HISTORY.md#051---2026-10-07).
+Version 0.5.2 reduces repeated SQL analysis, SQLite commit work and vector-index rewrites while preserving transaction and query semantics. It also corrects sequence identity refresh, concurrent automatic ANALYZE, cross-process claim identity and owner admission, and retained PL/pgSQL record-field types. See the [release history](HISTORY.md#052---2026-10-08).
 
-Foreign-key parent checks and referential actions now use compatible child indexes without reading unrelated child payloads. Indexed mutation reads include staged rows, composite UNIQUE checks probe complete tuples, expression checks reuse staged keys, and native SQLite streams retained snapshots and GIN document keys while avoiding repeated commit reads, file-identity lookups and row/key reservation I/O. Large mutation, text-index and vector-index workloads retain bounded memory through encrypted temporary storage.
+Ordinary statements and routine bodies reuse valid analysis and plans without losing current parameters or snapshot checks. SQLite batches durable allocations, avoids redundant completion writes and synchronizes native WAL sequence logs at the consuming transaction boundary. HNSW restores spilled edges in bounded groups, retains certified generations after own writes and skips rewrites when canonical vectors are unchanged. Large mutation, text-index and vector-index workloads retain bounded memory through encrypted temporary storage.
 
 The engine provides native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-Persistent databases use SQLite record format 58, native mapping 15 or redb record format 56. Initial open upgrades catalog identities and stored expressions; shared row-change and relation-lock coordination also requires all database owners to use the new protocol. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.1 upgrade guide](docs/manual/reference/10-upgrading.md#051), including Rust API changes and rollback requirements.
+Persistent databases use SQLite record format 60, native mapping 15 or redb record format 56. Initial open atomically upgrades predecessor SQLite version records, and row-claim tables and relation registries use coordination format 2. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.2 upgrade guide](docs/manual/reference/10-upgrading.md#052) for temporary disk requirements, custom Rust provider interfaces and rollback to an older binary.
 
 ## Mathematical foundation
 
@@ -46,7 +46,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.5.1
+python -m pip install uqa==0.5.2
 usql
 ```
 
@@ -98,10 +98,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.5.1
+cargo add uqa@0.5.2
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.1 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.2 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
