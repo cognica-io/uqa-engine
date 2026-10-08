@@ -46,6 +46,46 @@ fn retained_json_payload_is_not_revalidated_by_type_output() {
 }
 
 #[test]
+fn fixed_reference_outputs_retain_bounds_and_the_output_allowance() {
+    let bytes = vec![1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0];
+    let datum = DatumValue::new(2950, 0, bytes);
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let output = read_with_control(&datum, &control).unwrap();
+    assert_eq!(
+        *output,
+        Value::Str("01000000-0000-0000-0200-000003000000".into())
+    );
+    assert!(memory.used() >= 36);
+    drop(output);
+    assert_eq!(memory.used(), 0);
+    assert_eq!(
+        read(&datum.field(1186, 0)).unwrap(),
+        Value::Temporal(uqa_core::TemporalValue::Interval {
+            months: 3,
+            days: 2,
+            micros: 1,
+        })
+    );
+    assert_eq!(
+        read(&DatumValue::new(19, 1, b"xABCD\0tail".to_vec())).unwrap(),
+        Value::Str("ABCD".into())
+    );
+    for length in 0..16 {
+        assert!(read(&DatumValue::new(2950, 0, datum.bytes()[..length].to_vec())).is_err());
+    }
+    let small = MemoryBudget::new(8);
+    assert!(read_with_control(&datum, &ProductionControl::new(&small, &token, &token)).is_err());
+    assert_eq!(small.used(), 0);
+    token.cancel();
+    assert_eq!(
+        read_with_control(&datum, &control).unwrap_err().sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
 fn physical_scalar_compression_matches_pg_formats_and_rejects_trailing_or_truncated_bytes() {
     // PG's PGLZ control bits are least-significant first: three literals, then a six-byte backreference at distance three. LZ4 encodes the same nine literal bytes with token 0x90.
     let pglz = [8, b'a', b'b', b'c', 3, 3];

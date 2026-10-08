@@ -56,7 +56,7 @@ pub(super) fn project(
         if let Some((index, attribute)) = current {
             output[index].1 = if position == offset && original.ty == attribute.ty {
                 value.clone()
-            } else if length == -1 {
+            } else if length == -1 || !matches!(length, 1 | 2 | 4 | 8) {
                 Value::Datum(backing.field(base_oid(&attribute.ty)?, u32::try_from(offset).ok()?))
             } else {
                 let length = width(length)?;

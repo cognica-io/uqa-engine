@@ -13,6 +13,7 @@ use uqa_core::{
 };
 
 mod compression;
+mod fixed;
 mod malformed;
 
 #[cfg(test)]
@@ -39,6 +40,9 @@ pub fn read_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
+    if let Some(value) = fixed::read(datum, control) {
+        return value;
+    }
     let payload = payload(datum, control)?;
     let bytes = payload.bytes();
     match datum.type_oid() {

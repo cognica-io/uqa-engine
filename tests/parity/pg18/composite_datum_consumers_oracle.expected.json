@@ -1558,6 +1558,696 @@
           "rows": []
         }
       ]
+    },
+    {
+      "id": "fixed_uuid_interval_setup",
+      "sql": "CREATE TYPE fixed_uuid_interval AS(a uuid,b integer); PREPARE fixed_uuid_interval_p AS SELECT '(01000000-0000-0000-0200-000003000000,7)'::fixed_uuid_interval",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_interval_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_uuid_interval ALTER ATTRIBUTE a TYPE interval",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_interval_output",
+      "sql": "EXECUTE fixed_uuid_interval_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed_uuid_interval"
+          ],
+          "type_oids": [
+            18828
+          ],
+          "rows": [
+            [
+              "(\"3 mons 2 days 00:00:00.000001\",7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_interval_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_uuid_interval_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "fixed_uuid_interval"
+          ],
+          "type_oids": [
+            18828
+          ],
+          "rows": [
+            [
+              "(01000000-0000-0000-0200-000003000000,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_interval_cleanup",
+      "sql": "DEALLOCATE fixed_uuid_interval_p; DROP TYPE fixed_uuid_interval",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_name_integer_setup",
+      "sql": "CREATE TYPE fixed_name_integer AS(a name,b integer); PREPARE fixed_name_integer_p AS SELECT '(ABCD,7)'::fixed_name_integer",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_name_integer_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_name_integer ALTER ATTRIBUTE a TYPE integer",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_name_integer_output",
+      "sql": "EXECUTE fixed_name_integer_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed_name_integer"
+          ],
+          "type_oids": [
+            18831
+          ],
+          "rows": [
+            [
+              "(1145258561,0)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_name_integer_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_name_integer_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "fixed_name_integer"
+          ],
+          "type_oids": [
+            18831
+          ],
+          "rows": [
+            [
+              "(ABCD,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_name_integer_cleanup",
+      "sql": "DEALLOCATE fixed_name_integer_p; DROP TYPE fixed_name_integer",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_text_uuid_setup",
+      "sql": "CREATE TYPE fixed_text_uuid AS(a text,b integer); PREPARE fixed_text_uuid_p AS SELECT '(abcdefghijklmnop,7)'::fixed_text_uuid",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_text_uuid_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_text_uuid ALTER ATTRIBUTE a TYPE uuid",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_text_uuid_output",
+      "sql": "EXECUTE fixed_text_uuid_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed_text_uuid"
+          ],
+          "type_oids": [
+            18834
+          ],
+          "rows": [
+            [
+              "(23616263-6465-6667-6869-6a6b6c6d6e6f,112)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_text_uuid_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_text_uuid_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "fixed_text_uuid"
+          ],
+          "type_oids": [
+            18834
+          ],
+          "rows": [
+            [
+              "(abcdefghijklmnop,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_text_uuid_cleanup",
+      "sql": "DEALLOCATE fixed_text_uuid_p; DROP TYPE fixed_text_uuid",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_interval_uuid_setup",
+      "sql": "CREATE TYPE fixed_interval_uuid AS(a interval,b integer); PREPARE fixed_interval_uuid_p AS SELECT '(3 mons 2 days 00:00:00.000001,7)'::fixed_interval_uuid",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_interval_uuid_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_interval_uuid ALTER ATTRIBUTE a TYPE uuid",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_interval_uuid_output",
+      "sql": "EXECUTE fixed_interval_uuid_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed_interval_uuid"
+          ],
+          "type_oids": [
+            18837
+          ],
+          "rows": [
+            [
+              "(01000000-0000-0000-0200-000003000000,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_interval_uuid_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_interval_uuid_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "fixed_interval_uuid"
+          ],
+          "type_oids": [
+            18837
+          ],
+          "rows": [
+            [
+              "(\"3 mons 2 days 00:00:00.000001\",7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_interval_uuid_cleanup",
+      "sql": "DEALLOCATE fixed_interval_uuid_p; DROP TYPE fixed_interval_uuid",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_timetz_bigint_setup",
+      "sql": "CREATE TYPE fixed_timetz_bigint AS(a timetz,b integer); PREPARE fixed_timetz_bigint_p AS SELECT '(01:02:03-02,7)'::fixed_timetz_bigint",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_timetz_bigint_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_timetz_bigint ALTER ATTRIBUTE a TYPE bigint",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_timetz_bigint_output",
+      "sql": "EXECUTE fixed_timetz_bigint_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed_timetz_bigint"
+          ],
+          "type_oids": [
+            18840
+          ],
+          "rows": [
+            [
+              "(3723000000,7200)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_timetz_bigint_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_timetz_bigint_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "fixed_timetz_bigint"
+          ],
+          "type_oids": [
+            18840
+          ],
+          "rows": [
+            [
+              "(01:02:03-02,7)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_timetz_bigint_cleanup",
+      "sql": "DEALLOCATE fixed_timetz_bigint_p; DROP TYPE fixed_timetz_bigint",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_name_setup",
+      "sql": "CREATE TYPE fixed_uuid_name AS(a uuid,b name); PREPARE fixed_uuid_name_p AS SELECT '(41424344-0000-0000-0000-000000000000,tail)'::fixed_uuid_name",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_name_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_uuid_name ALTER ATTRIBUTE a TYPE name",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_name_output",
+      "sql": "EXECUTE fixed_uuid_name_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed_uuid_name"
+          ],
+          "type_oids": [
+            18843
+          ],
+          "rows": [
+            [
+              "(ABCD,\"\")"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_name_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_uuid_name_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "fixed_uuid_name"
+          ],
+          "type_oids": [
+            18843
+          ],
+          "rows": [
+            [
+              "(41424344-0000-0000-0000-000000000000,tail)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed_uuid_name_cleanup",
+      "sql": "DEALLOCATE fixed_uuid_name_p; DROP TYPE fixed_uuid_name",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
     }
   ]
 }

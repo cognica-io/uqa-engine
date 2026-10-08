@@ -64,21 +64,52 @@ pub(super) fn encode(
             }
             bytes.extend_from_slice(&payload);
         } else {
-            let length = width(length)?;
             bytes.resize(
                 align(bytes.len(), pg_type_align(&attribute.ty).as_bytes()[0])?,
                 0,
             );
             positions.push(Some(bytes.len()));
-            bytes.extend_from_slice(
-                &datum::encode_bits(value, &attribute.ty)?.to_le_bytes()[..length],
-            );
+            if let Some(length) = width(length) {
+                bytes.extend_from_slice(
+                    &datum::encode_bits(value, &attribute.ty)?.to_le_bytes()[..length],
+                );
+            } else {
+                let encoded = fixed(value, &attribute.ty)?;
+                if encoded.len() != usize::try_from(length).ok()? {
+                    return None;
+                }
+                bytes.extend_from_slice(&encoded);
+            }
         }
     }
     bytes[20..22].copy_from_slice(&mask.to_le_bytes());
     let total = u32::try_from(bytes.len()).ok()?.checked_mul(4)?;
     bytes[..4].copy_from_slice(&total.to_le_bytes());
     Some((bytes, positions, start))
+}
+
+fn fixed(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
+    if let ColumnType::Domain { base, .. } = ty {
+        return fixed(value, base);
+    }
+    match (value, ty) {
+        (Value::Str(text), ColumnType::Name) if text.len() < 64 => {
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.resize(64, 0);
+            Some(bytes)
+        }
+        (Value::Str(text), ColumnType::Uuid) => {
+            Some(crate::expr::uuid::parse_uuid_bytes(text).ok()?.to_vec())
+        }
+        (Value::Temporal(value), _) if matches!(pg_type_len(ty), 12 | 16) => {
+            crate::catalog::node_tree::encode_temporal_datum(
+                value,
+                crate::catalog::type_metadata::pg_type_oid(ty),
+            )
+            .ok()
+        }
+        _ => None,
+    }
 }
 
 fn payload(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {

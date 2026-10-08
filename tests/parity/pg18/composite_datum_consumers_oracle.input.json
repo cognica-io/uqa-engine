@@ -243,6 +243,126 @@
     {
       "id": "numeric_to_binary_cleanup",
       "sql": "DEALLOCATE datum_numeric_bytes_p; DROP TYPE datum_numeric_bytes"
+    },
+    {
+      "id": "fixed_uuid_interval_setup",
+      "sql": "CREATE TYPE fixed_uuid_interval AS(a uuid,b integer); PREPARE fixed_uuid_interval_p AS SELECT '(01000000-0000-0000-0200-000003000000,7)'::fixed_uuid_interval"
+    },
+    {
+      "id": "fixed_uuid_interval_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_uuid_interval ALTER ATTRIBUTE a TYPE interval"
+    },
+    {
+      "id": "fixed_uuid_interval_output",
+      "sql": "EXECUTE fixed_uuid_interval_p"
+    },
+    {
+      "id": "fixed_uuid_interval_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_uuid_interval_p"
+    },
+    {
+      "id": "fixed_uuid_interval_cleanup",
+      "sql": "DEALLOCATE fixed_uuid_interval_p; DROP TYPE fixed_uuid_interval"
+    },
+    {
+      "id": "fixed_name_integer_setup",
+      "sql": "CREATE TYPE fixed_name_integer AS(a name,b integer); PREPARE fixed_name_integer_p AS SELECT '(ABCD,7)'::fixed_name_integer"
+    },
+    {
+      "id": "fixed_name_integer_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_name_integer ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "fixed_name_integer_output",
+      "sql": "EXECUTE fixed_name_integer_p"
+    },
+    {
+      "id": "fixed_name_integer_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_name_integer_p"
+    },
+    {
+      "id": "fixed_name_integer_cleanup",
+      "sql": "DEALLOCATE fixed_name_integer_p; DROP TYPE fixed_name_integer"
+    },
+    {
+      "id": "fixed_text_uuid_setup",
+      "sql": "CREATE TYPE fixed_text_uuid AS(a text,b integer); PREPARE fixed_text_uuid_p AS SELECT '(abcdefghijklmnop,7)'::fixed_text_uuid"
+    },
+    {
+      "id": "fixed_text_uuid_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_text_uuid ALTER ATTRIBUTE a TYPE uuid"
+    },
+    {
+      "id": "fixed_text_uuid_output",
+      "sql": "EXECUTE fixed_text_uuid_p"
+    },
+    {
+      "id": "fixed_text_uuid_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_text_uuid_p"
+    },
+    {
+      "id": "fixed_text_uuid_cleanup",
+      "sql": "DEALLOCATE fixed_text_uuid_p; DROP TYPE fixed_text_uuid"
+    },
+    {
+      "id": "fixed_interval_uuid_setup",
+      "sql": "CREATE TYPE fixed_interval_uuid AS(a interval,b integer); PREPARE fixed_interval_uuid_p AS SELECT '(3 mons 2 days 00:00:00.000001,7)'::fixed_interval_uuid"
+    },
+    {
+      "id": "fixed_interval_uuid_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_interval_uuid ALTER ATTRIBUTE a TYPE uuid"
+    },
+    {
+      "id": "fixed_interval_uuid_output",
+      "sql": "EXECUTE fixed_interval_uuid_p"
+    },
+    {
+      "id": "fixed_interval_uuid_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_interval_uuid_p"
+    },
+    {
+      "id": "fixed_interval_uuid_cleanup",
+      "sql": "DEALLOCATE fixed_interval_uuid_p; DROP TYPE fixed_interval_uuid"
+    },
+    {
+      "id": "fixed_timetz_bigint_setup",
+      "sql": "CREATE TYPE fixed_timetz_bigint AS(a timetz,b integer); PREPARE fixed_timetz_bigint_p AS SELECT '(01:02:03-02,7)'::fixed_timetz_bigint"
+    },
+    {
+      "id": "fixed_timetz_bigint_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_timetz_bigint ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "fixed_timetz_bigint_output",
+      "sql": "EXECUTE fixed_timetz_bigint_p"
+    },
+    {
+      "id": "fixed_timetz_bigint_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_timetz_bigint_p"
+    },
+    {
+      "id": "fixed_timetz_bigint_cleanup",
+      "sql": "DEALLOCATE fixed_timetz_bigint_p; DROP TYPE fixed_timetz_bigint"
+    },
+    {
+      "id": "fixed_uuid_name_setup",
+      "sql": "CREATE TYPE fixed_uuid_name AS(a uuid,b name); PREPARE fixed_uuid_name_p AS SELECT '(41424344-0000-0000-0000-000000000000,tail)'::fixed_uuid_name"
+    },
+    {
+      "id": "fixed_uuid_name_alter",
+      "sql": "BEGIN; ALTER TYPE fixed_uuid_name ALTER ATTRIBUTE a TYPE name"
+    },
+    {
+      "id": "fixed_uuid_name_output",
+      "sql": "EXECUTE fixed_uuid_name_p"
+    },
+    {
+      "id": "fixed_uuid_name_rollback",
+      "sql": "ROLLBACK; EXECUTE fixed_uuid_name_p"
+    },
+    {
+      "id": "fixed_uuid_name_cleanup",
+      "sql": "DEALLOCATE fixed_uuid_name_p; DROP TYPE fixed_uuid_name"
     }
   ]
 }

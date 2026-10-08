@@ -241,7 +241,7 @@ fn format_uuid(bytes: [u8; 16]) -> String {
         .expect("ordinary UUID text")
 }
 
-fn format_uuid_with_control(
+pub(super) fn format_uuid_with_control(
     bytes: [u8; 16],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
