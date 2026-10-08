@@ -144,6 +144,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | "to_json"
         | "to_jsonb"
         | "to_regclass"
+        | "to_regcollation"
         | "to_regnamespace"
         | "to_regproc"
         | "to_regprocedure"

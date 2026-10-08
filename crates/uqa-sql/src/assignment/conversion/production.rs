@@ -127,6 +127,7 @@ pub fn convert_value_to_column_type_with_control(
         ColumnType::Regproc
         | ColumnType::Regprocedure
         | ColumnType::Regclass
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regtype
         | ColumnType::PgNodeTree

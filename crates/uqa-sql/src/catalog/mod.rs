@@ -9,6 +9,7 @@
 use crate::ast::ColumnType;
 
 pub mod access_methods;
+pub mod collations;
 pub mod expression_text;
 pub mod foreign_relations;
 pub mod languages;

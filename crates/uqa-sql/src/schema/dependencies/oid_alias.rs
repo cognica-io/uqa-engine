@@ -31,6 +31,7 @@ impl<T: EngineHook + ?Sized> OidAliasInput for T {
             ColumnType::Regproc => EngineHook::resolve_regproc(self, name),
             ColumnType::Regprocedure => EngineHook::resolve_regprocedure_input(self, name),
             ColumnType::Regnamespace => EngineHook::resolve_regnamespace(self, name),
+            ColumnType::Regcollation => EngineHook::resolve_regcollation(self, name),
             ColumnType::Regrole => EngineHook::resolve_regrole(self, name),
             other => Err(SQLError::Internal(format!(
                 "{} is not an OID alias type read at analysis",
@@ -48,6 +49,7 @@ fn is_alias(ty: &ColumnType) -> bool {
             | ColumnType::Regtype
             | ColumnType::Regproc
             | ColumnType::Regprocedure
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
     )
 }
@@ -70,6 +72,12 @@ fn alias_type(ty: &str) -> Option<(ColumnType, bool)> {
 
 /// The error the alias type's input function reports for a name no object has.
 fn missing_object(ty: &ColumnType, name: &str) -> SQLError {
+    if matches!(ty, ColumnType::Regcollation) {
+        return SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("collation \"{name}\" for encoding \"UTF8\" does not exist"),
+        };
+    }
     let (sqlstate, object) = match ty {
         ColumnType::Regclass => ("42P01", "relation"),
         ColumnType::Regtype => ("42704", "type"),

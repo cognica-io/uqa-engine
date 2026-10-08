@@ -12,6 +12,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
 | `INT2VECTOR`, `OIDVECTOR` | Distinct catalog-vector carriers with one zero-based dimension, including empty values; atomic elements inside an outer SQL array |
 | `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
+| `REGCOLLATION` | Collation-catalog OID over the integer carrier; supports numeric casts, quoted catalog names, arrays and durable values |
 | User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations-and-deletion) |
 | User-defined enum types | A distinct catalog type whose values keep an immutable label identity; [labels, their order and renames](#enum-types) come from the [enum declaration](02-ddl.md#enum-types) |
 | User-defined composite types and relation row types | Named records with a durable type identity, ordered attributes and a generated array type; see [composite types](#composite-types) |

@@ -87,6 +87,8 @@ pub enum ColumnType {
     Regprocedure,
     Regclass,
     Regnamespace,
+    /// `PostgreSQL` collation object identifier (`pg_catalog.regcollation`).
+    Regcollation,
     Regrole,
     Regtype,
     PgNodeTree,

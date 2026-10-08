@@ -141,13 +141,21 @@ pub trait EngineHook {
         self.resolve_regobject(&ColumnType::Regnamespace, name)
     }
 
+    /// Resolve `regcollation` input with the direct input function's diagnostics.
+    fn resolve_regcollation(&self, name: &str) -> Result<Option<i64>> {
+        self.resolve_regobject(&ColumnType::Regcollation, name)
+    }
+
     /// Resolve the text argument of one `PostgreSQL` `to_reg*` lookup function. The engine override owns catalog visibility and the lookup function's NULL-versus-error boundary; the default preserves the two historical hooks for embedders that only implement `regclass` or `regprocedure`.
     fn resolve_regobject(&self, ty: &ColumnType, name: &str) -> Result<Option<i64>> {
         match ty {
             ColumnType::Regclass => self.resolve_regclass_input(name),
             ColumnType::Regprocedure => self.resolve_regprocedure(name).map_err(SQLError::Internal),
             ColumnType::Regrole => self.resolve_regrole(name),
-            ColumnType::Regproc | ColumnType::Regnamespace | ColumnType::Regtype => Ok(None),
+            ColumnType::Regproc
+            | ColumnType::Regcollation
+            | ColumnType::Regnamespace
+            | ColumnType::Regtype => Ok(None),
             _ => Err(SQLError::Internal(format!(
                 "unsupported regobject lookup type `{}`",
                 ty.sql_name()

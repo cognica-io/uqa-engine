@@ -939,6 +939,7 @@ fn min_max_result_type(argument: Option<&ColumnType>) -> Option<ColumnType> {
             ColumnType::Regproc
             | ColumnType::Regprocedure
             | ColumnType::Regclass
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
             | ColumnType::Regrole
             | ColumnType::Regtype,

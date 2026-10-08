@@ -142,6 +142,7 @@ pub fn builtin_function_volatility(
                 | "version"
                 | "pg_listening_channels"
                 | "to_regclass"
+                | "to_regcollation"
                 | "to_regnamespace"
                 | "to_regproc"
                 | "to_regprocedure"

@@ -72,6 +72,8 @@ pub enum ColumnType {
     Regclass,
     /// `PostgreSQL` namespace object identifier (`pg_catalog.regnamespace`).
     Regnamespace,
+    /// `PostgreSQL` collation object identifier (`pg_catalog.regcollation`).
+    Regcollation,
     /// `PostgreSQL` role object identifier (`pg_catalog.regrole`).
     Regrole,
     Regtype,

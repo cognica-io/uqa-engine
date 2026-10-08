@@ -82,6 +82,7 @@ fn ordering_class_input_name(ty: &ColumnType) -> String {
         ColumnType::Regproc
         | ColumnType::Regprocedure
         | ColumnType::Regclass
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regrole
         | ColumnType::Regtype => "oid".into(),

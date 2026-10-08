@@ -130,6 +130,7 @@ pub fn convert_declared_value_to_column_type(
                     | ColumnType::Regproc
                     | ColumnType::Regprocedure
                     | ColumnType::Regclass
+                    | ColumnType::Regcollation
                     | ColumnType::Regnamespace
                     | ColumnType::Regrole
                     | ColumnType::Regtype
@@ -159,6 +160,7 @@ pub(crate) fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
         | ColumnType::Regtype
         | ColumnType::Regproc
         | ColumnType::Regprocedure
+        | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Domain { .. }
         | ColumnType::Enum(_)

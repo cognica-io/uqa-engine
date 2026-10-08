@@ -24,6 +24,8 @@ pub const REWRITE_CLASS: u32 = 2618;
 pub const TRIGGER_CLASS: u32 = 2620;
 /// `pg_namespace`.
 pub const NAMESPACE_CLASS: u32 = 2615;
+/// `pg_collation`.
+pub const COLLATION_CLASS: u32 = 3456;
 /// `pg_language`.
 pub const LANGUAGE_CLASS: u32 = 2612;
 /// `pg_authid`: roles, which every database shares.

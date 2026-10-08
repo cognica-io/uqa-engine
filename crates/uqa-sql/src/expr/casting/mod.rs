@@ -195,8 +195,8 @@ pub fn cast_value_from_with_control(
                 }
                 (
                     Some(
-                        "regproc" | "regprocedure" | "regclass" | "regnamespace" | "regrole"
-                        | "regtype",
+                        "regproc" | "regprocedure" | "regclass" | "regcollation" | "regnamespace"
+                        | "regrole" | "regtype",
                     ),
                     Value::Int(0),
                 ) => control.copy_text("-")?,
@@ -211,11 +211,14 @@ pub fn cast_value_from_with_control(
             return legacy_vector::cast_oidvector(v, source_ty, control)
         }
         "oid" | "pg_catalog.oid" => cast_oid(v, source_ty, control),
-        "regclass" | "pg_catalog.regclass" => return cast_regclass(v, source_ty, control),
-        "regnamespace" | "pg_catalog.regnamespace" => {
-            return cast_regnamespace(v, source_ty, control)
-        }
-        "regrole" | "pg_catalog.regrole" => return cast_regrole(v, source_ty, control),
+        "regclass"
+        | "pg_catalog.regclass"
+        | "regnamespace"
+        | "pg_catalog.regnamespace"
+        | "regcollation"
+        | "pg_catalog.regcollation"
+        | "regrole"
+        | "pg_catalog.regrole" => return cast_named_oid(v, target, source_ty, control),
         "xid" | "pg_catalog.xid" => cast_xid(v, source_ty, control),
         "\"char\"" => {
             let text = value_to_string_with_control(v, control)?;
@@ -754,10 +757,7 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
 }
 
 pub use array::{array_dimensions, parse_pg_array_literal, parse_pg_array_literal_with_control};
-use binary_oid::{
-    bytea_to_integer, cast_bytea, cast_oid, cast_regclass, cast_regnamespace, cast_regrole,
-    cast_xid,
-};
+use binary_oid::{bytea_to_integer, cast_bytea, cast_named_oid, cast_oid, cast_xid};
 use temporal::{cast_temporal, TemporalCastTarget};
 
 #[cfg(test)]

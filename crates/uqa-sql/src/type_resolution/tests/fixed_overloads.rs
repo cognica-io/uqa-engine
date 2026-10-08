@@ -502,6 +502,13 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
             ColumnType::Regnamespace,
         ),
         (
+            "to_regcollation",
+            vec![param(Value::Str("\"C\"".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regcollation,
+        ),
+        (
             "to_regrole",
             vec![param(Value::Str("uqa".into()))],
             None,

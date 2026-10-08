@@ -64,6 +64,7 @@ impl ScalarIndexDomain {
             | ColumnType::Regproc
             | ColumnType::Regprocedure
             | ColumnType::Regclass
+            | ColumnType::Regcollation
             | ColumnType::Regnamespace
             | ColumnType::Regrole
             | ColumnType::Regtype => Self::Integer,
