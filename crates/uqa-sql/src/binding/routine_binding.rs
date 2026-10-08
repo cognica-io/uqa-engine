@@ -685,7 +685,8 @@ impl SchemaScope {
             }
         });
         failure.map_or(Ok(()), Err)?;
-        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)
+        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)?;
+        self.record_composite_dependencies(engine, expression, schema, subqueries, params)
     }
 
     /// Name user-defined types by OID identity and keep the enum constants that binding coerces from `unknown` literals by label identity, as `PostgreSQL` stores type and label OIDs in analyzed expressions.

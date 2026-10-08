@@ -15,6 +15,7 @@ mod analysis;
 pub mod catalog_sources;
 mod command_scopes;
 mod commands;
+pub mod composite_dependencies;
 mod cte_controls;
 mod ctes;
 mod dependencies;
@@ -111,6 +112,7 @@ struct SchemaScope {
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.
     preserve_syntax_shape: bool,
     prepared_dependencies: Option<crate::prepared::dependencies::PreparedAnalysisDependencies>,
+    composite_dependencies: Option<Vec<crate::catalog::dependencies::ObjectAddress>>,
 }
 
 fn non_returning_cte_error(name: &str) -> SQLError {
@@ -135,6 +137,7 @@ impl SchemaScope {
             variable_sites: None,
             preserve_syntax_shape: false,
             prepared_dependencies: None,
+            composite_dependencies: None,
         })
     }
 
@@ -159,6 +162,7 @@ impl SchemaScope {
             variable_sites: None,
             preserve_syntax_shape: false,
             prepared_dependencies: None,
+            composite_dependencies: None,
         }
     }
 

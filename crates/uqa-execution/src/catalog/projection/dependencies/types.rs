@@ -110,8 +110,11 @@ impl DependencyBuilder<'_> {
                     .record(constraint, domain_type, DependencyKind::Auto);
                 if let Some(expression) = expression {
                     let mut references = References::default();
-                    self.expressions()
-                        .collect(expression, ColumnScope::None, &mut references)?;
+                    self.expressions().collect(
+                        expression,
+                        ColumnScope::Domain(&domain.definition.base),
+                        &mut references,
+                    )?;
                     self.recorder
                         .record_references(constraint, references, DependencyKind::Normal);
                 }
