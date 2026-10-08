@@ -38,7 +38,8 @@ The retained calibration pair 25 from run 37734616093 has correlated slowdown ac
 - [x] Compare all workloads in the anomalous pair with adjacent retained executions.
 - [x] Capture a bounded diagnostic session on the retained dedicated instance, with per-execution resource evidence and no acceptance claim.
 - [x] Verify the correction to CPU placement and kernel-workqueue isolation without changing the workload, estimator or regression limits; do not infer the old outlier's cause from a subsequent successful run.
-- [ ] Deploy the reviewed correction, obtain fresh independent calibration through automatic CI, and publish the complete qualification decision.
+- [x] Deploy the reviewed correction, obtain fresh independent calibration through automatic CI and publish [run 37749960217](ec2-results-2026-10-08.md#eight-pair-follow-up): nineteen accepted comparisons, Q1 inconclusive, every observation/signature and 160 resource records independently verified.
+- [ ] Identify the remaining run-level variation before another justified control or implementation correction; do not round Q1's 1.10163 upper endpoint down to its 1.10 limit.
 - [ ] Close issue #261 only when its acceptance conditions are satisfied; stop the instance and clean the merged branch.
 
 The controller originally used a load-balanced exclusive CPU partition, which does not exclude unbound kernel work. The [Linux CPU isolation documentation](https://docs.kernel.org/admin-guide/kernel-parameters.html) requires configuring the global workqueue CPU mask when those CPUs remain in scheduler domains. Set `/sys/devices/virtual/workqueue/cpumask` to CPUs 0–7 and verify it throughout the session. Keep scheduler load balancing for the multi-process claim workload. A fixed CPU for sequential analytical latency also prevents observed migrations between warmup and measurement. Per-CPU kernel work and interrupts still exist; the independent noise bound remains required.
