@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Build analytical provenance and enforce paired base/head regressions."""
+"""Validate analytical samples and report unqualified timing observations."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import pathlib
 import platform
@@ -59,10 +60,24 @@ def slope_estimate(criterion_root: pathlib.Path, benchmark: str) -> float:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         value = float(payload["slope"]["point_estimate"])
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, KeyError, TypeError, ValueError, OverflowError) as error:
         raise RuntimeError(f"read Criterion linear-sampling slope {path}: {error}") from error
-    if not value > 0:
-        raise RuntimeError(f"Criterion slope must be positive: {path}: {value}")
+    if not math.isfinite(value) or not value > 0:
+        raise RuntimeError(f"Criterion slope must be finite and positive: {path}: {value}")
+    return value
+
+
+def paired_ratios(numerators: list[float], denominators: list[float]) -> list[float]:
+    ratios = [left / right for left, right in zip(numerators, denominators)]
+    if any(not math.isfinite(ratio) or ratio <= 0 for ratio in ratios):
+        raise RuntimeError("Criterion ratio must be finite and positive")
+    return ratios
+
+
+def finite_median(values: list[float]) -> float:
+    value = statistics.median(values)
+    if not math.isfinite(value):
+        raise RuntimeError("Criterion median must be finite")
     return value
 
 
@@ -141,9 +156,9 @@ def main() -> int:
     manifest = json.loads(manifest_bytes)
     criterion_config = manifest.get("criterion", {})
     if criterion_config.get("sampling_mode") != "linear":
-        raise RuntimeError("analytical ratio gates require Criterion linear sampling")
+        raise RuntimeError("analytical ratios require Criterion linear sampling")
     if criterion_config.get("point_estimator") != "slope":
-        raise RuntimeError("analytical ratio gates require the Criterion slope estimator")
+        raise RuntimeError("analytical ratios require the Criterion slope estimator")
 
     head_samples: dict[str, list[float]] = {}
     base_samples: dict[str, list[float]] = {}
@@ -164,8 +179,8 @@ def main() -> int:
         denominator_name = gate["denominator"]
         numerators = load_samples(head_samples, criterion_roots, numerator_name)
         denominators = load_samples(head_samples, criterion_roots, denominator_name)
-        paired = [left / right for left, right in zip(numerators, denominators)]
-        ratio = statistics.median(paired)
+        paired = paired_ratios(numerators, denominators)
+        ratio = finite_median(paired)
         passed = ratio <= float(gate["max"])
         external_failed |= not passed
         external_ratios.append(
@@ -176,7 +191,7 @@ def main() -> int:
                 "paired_ratios": paired,
                 "ratio": ratio,
                 "maximum": gate["max"],
-                "passed": passed,
+                "within_reference_limit": passed,
             }
         )
 
@@ -203,8 +218,8 @@ def main() -> int:
         benchmark = gate["benchmark"]
         heads = load_samples(head_samples, criterion_roots, benchmark)
         bases = load_samples(base_samples, baseline_roots, benchmark)
-        paired = [head / base for head, base in zip(heads, bases)]
-        ratio = statistics.median(paired)
+        paired = paired_ratios(heads, bases)
+        ratio = finite_median(paired)
         passed = ratio <= float(gate["max"])
         regression_failed |= not passed
         regression_ratios.append(
@@ -214,7 +229,7 @@ def main() -> int:
                 "paired_ratios": paired,
                 "ratio": ratio,
                 "maximum": gate["max"],
-                "passed": passed,
+                "within_reference_limit": passed,
             }
         )
 
@@ -227,18 +242,16 @@ def main() -> int:
             raise RuntimeError("base and head analytical workload identities differ")
         baseline_identity_hash = object_hash(baseline_identity)
 
-    external_enforced = not baseline_roots
-    failed = regression_failed or (external_enforced and external_failed)
     head_estimates = {
-        name: statistics.median(samples) for name, samples in sorted(head_samples.items())
+        name: finite_median(samples) for name, samples in sorted(head_samples.items())
     }
     base_estimates = {
-        name: statistics.median(samples) for name, samples in sorted(base_samples.items())
+        name: finite_median(samples) for name, samples in sorted(base_samples.items())
     }
 
     status = command("git", "status", "--porcelain")
     report = {
-        "schema_version": 3,
+        "schema_version": 4,
         "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "manifest": str(MANIFEST_PATH.relative_to(ROOT)),
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
@@ -271,33 +284,39 @@ def main() -> int:
         if baseline_roots
         else None,
         "external_ratio_checks": external_ratios,
-        "external_ratios_enforced": external_enforced,
-        "regression_gates": regression_ratios,
-        "passed": not failed,
+        "external_limits_met": not external_failed,
+        "regression_ratio_checks": regression_ratios,
+        "regression_limits_met": not regression_failed if baseline_roots else None,
+        "timing_acceptance": False,
+        "acceptance_status": "unqualified",
+        "qualification_missing": ["controlled_host_evidence", "independent_noise_bound"],
         "independent_reproduction": False,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8"
+    )
 
     for gate in external_ratios:
-        marker = "PASS" if gate["passed"] else ("FAIL" if external_enforced else "WARN")
+        marker = "OBSERVED" if gate["within_reference_limit"] else "WARN"
         print(
             f"{marker} external {gate['name']}: "
             f"{gate['ratio']:.3f} <= {gate['maximum']:.3f}"
         )
     for gate in regression_ratios:
-        marker = "PASS" if gate["passed"] else "FAIL"
+        marker = "OBSERVED" if gate["within_reference_limit"] else "WARN"
         print(
             f"{marker} regression {gate['name']}: "
             f"{gate['ratio']:.3f} <= {gate['maximum']:.3f}"
         )
     print(f"Benchmark provenance report: {args.output}")
-    return int(failed)
+    print("UNQUALIFIED: no controlled-host evidence or independent noise bound; timing is diagnostic only")
+    return 0
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (RuntimeError, subprocess.CalledProcessError) as error:
+    except (RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         raise SystemExit(2) from error

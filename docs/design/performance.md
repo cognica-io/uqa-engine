@@ -67,11 +67,11 @@ The cursor originally calculated exact encoded sizes, blocked until the complete
 | Cursor: 1.018x materialized UQA | Moving uniquely owned batches removed the deep clone; exact-size accounting, blocking, and row-to-column conversion remain within run noise. |
 | Scan: external engines are 4.89-6.55x faster than the cursor | SQLite satisfies `ORDER BY id` through its primary-key auto-index, while UQA propagates document-ID order; dynamic positional values and transfer stages remain the gap. |
 
-The estimator correction was driven by ten retained Linux CI artifacts. Their Q6 UQA/SQLite ratios ranged from 1.596x to 3.390x when computed from sample medians and falsely failed the 3.0x ceiling five times; the slope ratios from the same measurements ranged from 1.608x to 2.751x and all passed. A later documentation-only commit then produced Q6 slope ratios of 3.169x and 3.140x on two hosted runners even though its executable inputs, runner image, and compiler matched a 1.827x passing run. That demonstrated a second flaw: an absolute cross-engine ceiling on heterogeneous hardware cannot identify a code regression. Tests now pin both corrections by supplying contradictory median/slope values and by proving that a repeatable paired head/base slowdown fails while an advisory external-ratio excursion does not.
+The estimator correction was driven by ten retained Linux CI artifacts. Their Q6 UQA/SQLite ratios ranged from 1.596x to 3.390x when computed from sample medians and falsely failed the 3.0x ceiling five times; the slope ratios from the same measurements ranged from 1.608x to 2.751x and all passed. A later documentation-only commit then produced Q6 slope ratios of 3.169x and 3.140x on two hosted runners even though its executable inputs, runner image, and compiler matched a 1.827x passing run. That demonstrated a second flaw: an absolute cross-engine ceiling on heterogeneous hardware cannot identify a code regression. The current checker retains the slope estimator and counterbalanced paired-ratio calculation, but neither matching metadata nor repeated ratios establish controlled execution or an independent noise bound. Synthetic tests verify that even ratios within every reference limit remain unqualified, that excursions retain their exact observed values and warnings, and that non-finite samples or derived values are rejected.
 
 `cargo bench --workspace --no-run` validates that every benchmark target builds, but it is not a measurement command. Workspace feature unification can produce a different LTO or code-layout binary from the package-scoped runner. Published comparisons must use `run-analytical-comparison.sh` end to end and must not mix measurements from different executable hashes.
 
-These are same-process developer-machine measurements, not independent OLAP validation. The ratio ceilings are regression alarms rather than proof of parity. `Engine::set_query_memory_limit(Some(1))` integration tests force backing spill and verify that the cursor yields at most 1,024 rows per batch.
+These are historical same-process developer-machine observations, not independent OLAP validation or qualified regression baselines. The manifest ceilings remain visible reference limits. Schema-4 analytical reports expose `within_reference_limit`, `external_limits_met` and `regression_limits_met` instead of an acceptance `passed` field, and always report `timing_acceptance: false` with `acceptance_status: "unqualified"`. A zero exit means that a valid diagnostic report was produced; malformed samples, workload mismatch and failed benchmark correctness checks still fail the command. The shared-runner full-CI job is explicitly diagnostic. Controlled timing acceptance still requires a reviewed controlled-host setup, independently established noise bounds and versioned baselines under #261; the deterministic work/memory CI remains enforced. `Engine::set_query_memory_limit(Some(1))` integration tests force backing spill and verify that the cursor yields at most 1,024 rows per batch.
 
 Reproduce and emit a fresh provenance artifact with:
 
@@ -79,7 +79,7 @@ Reproduce and emit a fresh provenance artifact with:
 bash scripts/run-analytical-comparison.sh
 ```
 
-Reproduce the CI regression protocol against a reachable base commit with:
+Reproduce the paired diagnostic protocol against a reachable base commit with:
 
 ```sh
 python3 scripts/run-analytical-regression.py <base-commit>
