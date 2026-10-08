@@ -145,6 +145,34 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
 }
 
 #[test]
+fn removing_a_field_preserves_its_original_datum_and_descriptor_through_serialization() {
+    let mut expression = Expr::TypedLiteral {
+        composite_source: None,
+        value: value(),
+        ty: pair_type().catalog_name(),
+    };
+    assert!(change(&AttributeChange::Drop("a".into()))
+        .expression(&mut expression)
+        .unwrap());
+    let encoded = serde_json::to_string(&expression).unwrap();
+    let restored: Expr = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(expression, restored);
+    let Expr::TypedLiteral {
+        value: projected,
+        composite_source: Some(source),
+        ..
+    } = restored
+    else {
+        panic!("retained composite datum")
+    };
+    assert_eq!(projected, Value::Record(Vec::new()));
+    assert_eq!(source.value, value());
+    assert_eq!(source.descriptors.len(), 1);
+    assert_eq!(source.descriptors[0].attributes[0].number, 1);
+    assert_eq!(source.descriptors[0].attributes[0].ty, ColumnType::Integer);
+}
+
+#[test]
 fn array_constants_keep_bounds_nulls_and_existing_fields() {
     let added = AttributeChange::Add("b".into());
     let change = change(&added);

@@ -59,17 +59,16 @@ impl CompositeConstantChange<'_> {
                 Ok(false)
             };
         };
-        if let AttributeChange::Type { name, to, .. } = self.change {
-            if !matches!(value, Value::Null)
-                && type_contains_composite(&ty, self.target, self.catalog)?
-            {
-                if source.is_none() {
-                    *source = Some(Box::new(super::CompositeConstantSource::capture(
-                        value,
-                        &ty,
-                        Some(self.catalog),
-                    )?));
-                }
+        if !matches!(value, Value::Null) && type_contains_composite(&ty, self.target, self.catalog)?
+        {
+            if source.is_none() {
+                *source = Some(Box::new(super::CompositeConstantSource::capture(
+                    value,
+                    &ty,
+                    Some(self.catalog),
+                )?));
+            }
+            if let AttributeChange::Type { name, to, .. } = self.change {
                 *value = source
                     .as_ref()
                     .expect("captured composite source")
