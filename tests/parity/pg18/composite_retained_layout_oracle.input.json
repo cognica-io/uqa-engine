@@ -135,6 +135,53 @@
     {
       "id": "domain_undo",
       "sql": "ROLLBACK; EXECUTE cl_domain_p; DEALLOCATE cl_domain_p; DROP TYPE cl_domain; DROP DOMAIN cl_negative"
+    },
+    {
+      "id": "view_setup",
+      "sql": "CREATE TYPE cl_view_t AS(a integer,b text); CREATE VIEW cl_view AS SELECT '(1065353216,tail)'::cl_view_t AS v; PREPARE cl_view_scalar AS SELECT (v).a FROM cl_view; PREPARE cl_view_whole AS SELECT v FROM cl_view; EXECUTE cl_view_scalar; EXECUTE cl_view_whole; SELECT * FROM cl_view"
+    },
+    {
+      "id": "view_alter",
+      "sql": "BEGIN; ALTER TYPE cl_view_t ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "view_read",
+      "sql": "SELECT * FROM cl_view; EXECUTE cl_view_whole; EXECUTE cl_view_scalar"
+    },
+    {
+      "id": "view_undo",
+      "sql": "ROLLBACK; SELECT * FROM cl_view; EXECUTE cl_view_scalar; EXECUTE cl_view_whole; DEALLOCATE cl_view_scalar; DEALLOCATE cl_view_whole; DROP VIEW cl_view; DROP TYPE cl_view_t"
+    },
+    {
+      "id": "late_setup",
+      "sql": "CREATE TYPE cl_nan AS(a integer); PREPARE cl_nan_p AS SELECT '(2139095041)'::cl_nan AS v"
+    },
+    {
+      "id": "late_alter",
+      "sql": "BEGIN; ALTER TYPE cl_nan ALTER ATTRIBUTE a TYPE real; EXECUTE cl_nan_p"
+    },
+    {
+      "id": "late_undo",
+      "sql": "ROLLBACK; EXECUTE cl_nan_p; DEALLOCATE cl_nan_p; DROP TYPE cl_nan"
+    },
+    {
+      "id": "durable_setup",
+      "sql": "CREATE TYPE cl_saved AS(a integer); CREATE VIEW cl_saved_v AS SELECT '(2139095041)'::cl_saved AS v; ALTER TYPE cl_saved ALTER ATTRIBUTE a TYPE real; SELECT * FROM cl_saved_v"
+    },
+    {
+      "id": "durable_read",
+      "sql": "SELECT * FROM cl_saved_v",
+      "reopen": true
+    },
+    {
+      "id": "durable_alter",
+      "sql": "ALTER TYPE cl_saved ALTER ATTRIBUTE a TYPE integer; SELECT * FROM cl_saved_v",
+      "reopen": true
+    },
+    {
+      "id": "durable_drop",
+      "sql": "DROP VIEW cl_saved_v; DROP TYPE cl_saved",
+      "reopen": true
     }
   ]
 }

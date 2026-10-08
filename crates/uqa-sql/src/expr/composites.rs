@@ -18,6 +18,7 @@ use crate::ast::ColumnType;
 mod changes;
 pub mod constants;
 pub mod constructor;
+pub(crate) mod datum;
 mod input;
 pub mod literal;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};

@@ -7,15 +7,13 @@
 //! Creation-time composite descriptors for retained input constants and immutable executable caches.
 
 use crate::{
-    expr::composites::{descriptor, CompositeTypeDescriptor},
+    expr::composites::{datum, descriptor, CompositeTypeDescriptor},
     plan::UnifiedPlan,
     type_resolution::FunctionTypeResolver,
     ColumnType, SQLError, ScalarExpr,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, Value};
-
-mod datum;
 
 type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
 

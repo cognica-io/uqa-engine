@@ -56,6 +56,7 @@ pub(super) fn publish(
         return Ok(());
     }
     let dependents = dependents::Dependents::capture(context, definition.relation_oid, &changes)?;
+    let mut rebuild = std::collections::BTreeSet::new();
     for change in changes {
         let current = definition
             .attributes
@@ -94,6 +95,16 @@ pub(super) fn publish(
                 _ => FieldDependent::Other,
             },
         )?;
+        let retained = uqa_sql::expr::composites::AttributeChange::Type {
+            name: current.name.clone(),
+            from: Box::new(current.ty.clone()),
+            to: Box::new(change.ty.clone()),
+        };
+        rebuild.extend(super::values::rewrite_composite_values(
+            &context.attributes.values,
+            definition.oid,
+            &retained,
+        )?);
         *current = change;
         let before = context.attributes.publication.composite_registry().clone();
         let mut after = before.clone();
@@ -101,5 +112,6 @@ pub(super) fn publish(
         crate::catalog::composite_type::publish(context.attributes.publication, &before, after)?;
         context.attributes.changes.catalog_registry_changed();
     }
-    dependents.rebuild(context)
+    dependents.rebuild(context)?;
+    super::values::rebuild_indexes(&context.attributes.values, rebuild)
 }

@@ -61,11 +61,28 @@ fn composite_attribute_dependents_match_postgresql(#[case] provider: usize) {
 #[case::redb(3)]
 fn composite_retained_layout_matches_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = super::addition::open(provider, &directory.path().join("retained-layout.db"));
-    crate::pg18_oracle::verify(
-        &engine,
-        include_str!(
-            "../../../../../tests/parity/pg18/composite_retained_layout_oracle.expected.json"
-        ),
-    );
+    let path = directory.path().join("retained-layout.db");
+    let engine = super::addition::open(provider, &path);
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_retained_layout_oracle.expected.json"
+    ))
+    .unwrap();
+    let mut initial = reference.clone();
+    initial["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] != true);
+    crate::pg18_oracle::verify(&engine, &initial.to_string());
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        super::addition::open(provider, &path)
+    };
+    let mut durable = reference;
+    durable["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] == true);
+    crate::pg18_oracle::verify(&engine, &durable.to_string());
 }

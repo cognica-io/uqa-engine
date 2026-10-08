@@ -74,6 +74,38 @@ fn value() -> Value {
 }
 
 #[test]
+fn stored_input_datums_reinterpret_bits_without_rebinding_or_reapplying_input() {
+    let array = ColumnType::Array(Box::new(pair_type()));
+    let mut value = Value::Array(
+        ArrayValue::with_lower_bounds(
+            vec![
+                Value::Record(vec![("a".into(), Value::Int(1_065_353_216))]),
+                Value::Null,
+            ],
+            vec![-2],
+        )
+        .unwrap(),
+    );
+    let type_change = AttributeChange::Type {
+        name: "a".into(),
+        from: Box::new(ColumnType::Integer),
+        to: Box::new(ColumnType::Real),
+    };
+    assert!(change(&type_change).value(&mut value, &array).unwrap());
+    let Value::Array(value) = value else {
+        panic!("array carrier")
+    };
+    assert_eq!(value.lower_bounds(), &[-2]);
+    assert_eq!(
+        value.elements(),
+        &[
+            Value::Record(vec![("a".into(), Value::Float(1.0))]),
+            Value::Null,
+        ]
+    );
+}
+
+#[test]
 fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts() {
     let mut statement = crate::compile("SELECT (SELECT 4), '(4)'::text")
         .unwrap()

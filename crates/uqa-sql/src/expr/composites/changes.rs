@@ -21,6 +21,11 @@ pub enum AttributeChange {
         from: String,
         to: String,
     },
+    Type {
+        name: String,
+        from: Box<ColumnType>,
+        to: Box<ColumnType>,
+    },
 }
 
 impl AttributeChange {
@@ -32,6 +37,13 @@ impl AttributeChange {
                 for (field, _) in fields.iter_mut() {
                     if field == from {
                         field.clone_from(to);
+                    }
+                }
+            }
+            Self::Type { name, from, to } => {
+                if let Some((_, value)) = fields.iter_mut().find(|(field, _)| field == name) {
+                    if let Some(projected) = super::datum::reinterpret(value, from, to) {
+                        *value = projected;
                     }
                 }
             }
