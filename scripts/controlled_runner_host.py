@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -18,6 +19,9 @@ import subprocess
 
 from controlled_performance import analytical_observations, claim_observations
 from performance_noise import ANALYTICAL_FILTER
+from controlled_performance_resources import (
+    MeasurementResources, restrict_workqueues, verify_workqueues, workqueue_mask,
+)
 from performance_qualification import QualificationError, digest
 
 
@@ -88,7 +92,8 @@ class ControlledHost:
         return path
 
     def unit(self, label: str, argv: list[str], cwd: Path, *, measurement: bool = False,
-             writable: Path | None = None, environment: dict | None = None) -> Path:
+             writable: Path | None = None, environment: dict | None = None,
+             measurement_cpus: str = BENCH_CPUS) -> Path:
         self.counter += 1
         stdout = self.output / (label + ".stdout")
         stderr = self.output / (label + ".stderr")
@@ -101,15 +106,18 @@ class ControlledHost:
         if measurement:
             if writable is None:
                 raise QualificationError("measurement output directory is required")
-            args += [f"--slice={MEASUREMENT_SLICE}", f"--property=AllowedCPUs={BENCH_CPUS}",
-                     f"--property=CPUAffinity={BENCH_CPUS}", "--property=PrivateNetwork=yes",
+            args += [f"--slice={MEASUREMENT_SLICE}", f"--property=AllowedCPUs={measurement_cpus}",
+                     f"--property=CPUAffinity={measurement_cpus}", "--property=PrivateNetwork=yes",
                      "--property=PrivateTmp=yes", "--property=ProtectSystem=strict",
                      "--property=ProtectHome=yes", f"--property=ReadWritePaths={writable}",
                      "--property=RuntimeMaxSec=300", "--property=TasksMax=256"]
         else:
             args += ["--property=RuntimeMaxSec=5400"]
         args += [f"--setenv={name}={value}" for name, value in (environment or {}).items()]
-        with stdout.open("wb") as out, stderr.open("wb") as err:
+        group = Path("/sys/fs/cgroup") / MEASUREMENT_SLICE / f"uqa-perf-{self.run_id}-{self.counter}.service"
+        resources = (MeasurementResources(group, self.output / (label + ".resources.json"), measurement_cpus)
+                     if measurement else nullcontext())
+        with resources, stdout.open("wb") as out, stderr.open("wb") as err:
             result = subprocess.run([*args, *argv], stdout=out, stderr=err, check=False)
         if result.returncode:
             raise QualificationError(f"{label} failed ({result.returncode}); see retained stderr")
@@ -174,6 +182,7 @@ class ControlledHost:
             command("systemctl", "set-property", "--runtime", group, "AllowedCPUs=0-7")
         command("systemctl", "start", MEASUREMENT_SLICE)
         command("systemctl", "set-property", "--runtime", MEASUREMENT_SLICE, f"AllowedCPUs={BENCH_CPUS}")
+        restrict_workqueues()
         group = Path("/sys/fs/cgroup") / MEASUREMENT_SLICE
         (group / "cpuset.cpus.exclusive").write_text(BENCH_CPUS)
         (group / "cpuset.cpus.partition").write_text("root")
@@ -194,7 +203,8 @@ class ControlledHost:
                     "instance_type": instance["InstanceType"], "boot_id": self.boot,
                     "kernel": command("uname", "-a"), "cpu": command("lscpu", "--json"), "toolchain": self.toolchain,
                     "measurement_cpus": BENCH_CPUS, "administration_cpus": "0-7",
-                    "partition": "root", "processes": command("ps", "-eo", "pid,uid,comm,cgroup"),
+                    "partition": "root", "unbound_workqueue_mask": f"{workqueue_mask():x}",
+                    "workload_cpu_affinity": {"analytical": "8", "claims": BENCH_CPUS}, "processes": command("ps", "-eo", "pid,uid,comm,cgroup"),
                     "controller_sha256": {path.name: file_hash(path) for path in Path(__file__).parent.glob("*.py")},
                     "stopped_timers": timers, "swap": Path("/proc/swaps").read_text()}
         (self.output / "host-control.json").write_text(json.dumps(evidence, indent=2) + "\n")
@@ -206,6 +216,7 @@ class ControlledHost:
                 if (fields := line.split())[0] in {f"cpu{cpu}" for cpu in range(8, 16)}}
 
     def verify_control(self):
+        verify_workqueues()
         if Path("/proc/sys/kernel/random/boot_id").read_text().strip() != self.boot:
             raise QualificationError("controlled boot changed during measurement")
         if self.steal() != self.initial_steal:
@@ -232,7 +243,8 @@ class ControlledHost:
         else:
             args += ["--measure"]
         working_directory = source if kind == "analytical" else writable
-        stdout = self.unit(label, args, working_directory, measurement=True, writable=writable, environment=environment)
+        stdout = self.unit(label, args, working_directory, measurement=True, writable=writable,
+                           environment=environment, measurement_cpus="8" if kind == "analytical" else BENCH_CPUS)
         self.verify_control()
         if kind == "claims":
             if stdout.stat().st_size > 4 * 1024 * 1024:
