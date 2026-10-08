@@ -12,7 +12,8 @@ For a reported head/base ratio $r$, the independently established noise factor $
 - [x] Connect qualified evidence to analytical reports while preserving unqualified diagnostics.
 - [x] Document the controller's invocation and evidence contract.
 - [ ] Connect an actual trusted controller and controlled runner to automatic CI without manual dispatch, fabricated calibration or uncontrolled timing runs.
-- [ ] Add a bounded independent-process contention workload for #266 and consume its actual qualified evidence before deciding on partitioned locking.
+- [x] Add a bounded [independent-process contention workload](../../benchmarks/regressions/claim-contention.md) for #266, with a correctness-only verification mode and separate acquisition/release observations.
+- [ ] Consume actual qualified contention evidence before deciding on partitioned locking for #266.
 - [ ] Obtain and verify authoritative controlled-host/noise evidence; keep #261 and #266 open until their actual acceptance criteria pass.
 - [ ] Resolve #348 through a dependency path that fixes downstream builds without breaking the existing public connection contract.
 - [ ] Reproduce #125 under its original build conditions and establish the startup cause before claiming a fix.
