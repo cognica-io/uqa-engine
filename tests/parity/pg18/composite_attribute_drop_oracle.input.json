@@ -1,0 +1,294 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "missing_relation",
+      "sql": "ALTER TYPE cd_missing DROP ATTRIBUTE IF EXISTS x"
+    },
+    {
+      "id": "scalar_type",
+      "sql": "ALTER TYPE integer DROP ATTRIBUTE x"
+    },
+    {
+      "id": "create",
+      "sql": "CREATE TYPE cd_pair AS (a integer,b text,c bigint)"
+    },
+    {
+      "id": "rows",
+      "sql": "CREATE TABLE cd_rows(id integer PRIMARY KEY,v cd_pair); INSERT INTO cd_rows VALUES(1,(1,'x',3)),(2,NULL),(3,(NULL,NULL,NULL))"
+    },
+    {
+      "id": "whole_view",
+      "sql": "CREATE VIEW cd_whole AS SELECT v FROM cd_rows"
+    },
+    {
+      "id": "missing_attribute",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE absent"
+    },
+    {
+      "id": "missing_notice",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE IF EXISTS absent"
+    },
+    {
+      "id": "system_attribute",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE ctid"
+    },
+    {
+      "id": "drop",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE b"
+    },
+    {
+      "id": "read",
+      "sql": "SELECT id,v,(v).a,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "whole_view_read",
+      "sql": "SELECT v FROM cd_whole ORDER BY v"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT a.attnum,a.attname,a.attisdropped,a.atttypid FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='cd_pair' AND a.attnum>0 ORDER BY a.attnum"
+    },
+    {
+      "id": "drop_again",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE b"
+    },
+    {
+      "id": "drop_again_notice",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE IF EXISTS b"
+    },
+    {
+      "id": "readd",
+      "sql": "ALTER TYPE cd_pair ADD ATTRIBUTE b text"
+    },
+    {
+      "id": "readd_read",
+      "sql": "SELECT id,v,(v).b FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "rollback",
+      "sql": "BEGIN; ALTER TYPE cd_pair DROP ATTRIBUTE c; ROLLBACK"
+    },
+    {
+      "id": "rollback_read",
+      "sql": "SELECT id,v,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "mixed_failed",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE c, ADD ATTRIBUTE bad numeric(0)"
+    },
+    {
+      "id": "mixed_failed_read",
+      "sql": "SELECT id,v,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "add_drop_order",
+      "sql": "ALTER TYPE cd_pair ADD ATTRIBUTE a text, DROP ATTRIBUTE a"
+    },
+    {
+      "id": "add_drop_read",
+      "sql": "SELECT id,v,(v).a FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "add_missing_drop",
+      "sql": "ALTER TYPE cd_pair ADD ATTRIBUTE absent text, DROP ATTRIBUTE absent"
+    },
+    {
+      "id": "double_drop_atomic",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE c, DROP ATTRIBUTE c"
+    },
+    {
+      "id": "double_drop_read",
+      "sql": "SELECT id,v,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "double_drop_notice",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE c, DROP ATTRIBUTE IF EXISTS c"
+    },
+    {
+      "id": "notice_before_error",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE IF EXISTS absent, ADD ATTRIBUTE bad numeric(0)"
+    },
+    {
+      "id": "ordinary_table",
+      "sql": "ALTER TYPE cd_rows DROP ATTRIBUTE v"
+    },
+    {
+      "id": "ordinary_view",
+      "sql": "ALTER TYPE cd_whole DROP ATTRIBUTE v"
+    },
+    {
+      "id": "dependency_create",
+      "sql": "CREATE TYPE cd_dep AS(a integer,b text); CREATE TABLE cd_dep_rows(v cd_dep); CREATE VIEW cd_field AS SELECT (v).b AS b FROM cd_dep_rows"
+    },
+    {
+      "id": "dependency_restrict",
+      "sql": "ALTER TYPE cd_dep DROP ATTRIBUTE b"
+    },
+    {
+      "id": "dependency_cascade",
+      "sql": "ALTER TYPE cd_dep DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "dependency_removed",
+      "sql": "SELECT to_regclass('cd_field'), '(2)'::cd_dep"
+    },
+    {
+      "id": "constant_dependency",
+      "sql": "CREATE TYPE cd_const AS(a integer,b text); CREATE VIEW cd_const_field AS SELECT ('(1,x)'::cd_const).b AS b"
+    },
+    {
+      "id": "constant_restrict",
+      "sql": "ALTER TYPE cd_const DROP ATTRIBUTE b"
+    },
+    {
+      "id": "constant_cascade",
+      "sql": "ALTER TYPE cd_const DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "constructor",
+      "sql": "CREATE SEQUENCE cd_calls; CREATE TYPE cd_effect AS(a integer,b bigint); CREATE VIEW cd_constructor AS SELECT ROW(1,nextval('cd_calls'))::cd_effect AS v"
+    },
+    {
+      "id": "constructor_drop",
+      "sql": "ALTER TYPE cd_effect DROP ATTRIBUTE b"
+    },
+    {
+      "id": "constructor_read",
+      "sql": "SELECT * FROM cd_constructor; SELECT is_called FROM cd_calls"
+    },
+    {
+      "id": "constructor_readd",
+      "sql": "ALTER TYPE cd_effect ADD ATTRIBUTE b bigint"
+    },
+    {
+      "id": "constructor_readd_read",
+      "sql": "SELECT * FROM cd_constructor; SELECT is_called FROM cd_calls"
+    },
+    {
+      "id": "nested",
+      "sql": "CREATE TYPE cd_inner AS(a integer,b text); CREATE DOMAIN cd_domain AS cd_inner; CREATE TYPE cd_outer AS(v cd_domain,items cd_inner[]); CREATE TABLE cd_nested(id integer,v cd_outer,items cd_inner[]); INSERT INTO cd_nested VALUES(1,ROW(ROW(7,'seven')::cd_inner,ARRAY[ROW(8,'eight')::cd_inner,NULL])::cd_outer,ARRAY[ROW(9,'nine')::cd_inner,NULL]),(2,NULL,NULL)"
+    },
+    {
+      "id": "materialized",
+      "sql": "CREATE MATERIALIZED VIEW cd_materialized AS SELECT id,v,items FROM cd_nested"
+    },
+    {
+      "id": "nested_drop",
+      "sql": "ALTER TYPE cd_inner DROP ATTRIBUTE b"
+    },
+    {
+      "id": "nested_read",
+      "sql": "SELECT id,v,items FROM cd_nested ORDER BY id"
+    },
+    {
+      "id": "materialized_read",
+      "sql": "SELECT id,v,items FROM cd_materialized ORDER BY id"
+    },
+    {
+      "id": "stored_default",
+      "sql": "CREATE TYPE cd_default AS(a integer,b text); CREATE TABLE cd_defaults(v cd_default DEFAULT '(5,five)'::cd_default)"
+    },
+    {
+      "id": "default_drop",
+      "sql": "ALTER TYPE cd_default DROP ATTRIBUTE b"
+    },
+    {
+      "id": "default_insert",
+      "sql": "INSERT INTO cd_defaults DEFAULT VALUES RETURNING v"
+    },
+    {
+      "id": "check_create",
+      "sql": "CREATE TYPE cd_check AS(a integer,b integer); CREATE TABLE cd_checks(v cd_check CHECK ((v).b>0))"
+    },
+    {
+      "id": "check_restrict",
+      "sql": "ALTER TYPE cd_check DROP ATTRIBUTE b"
+    },
+    {
+      "id": "check_cascade",
+      "sql": "ALTER TYPE cd_check DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "check_removed",
+      "sql": "INSERT INTO cd_checks VALUES ('(2)'); SELECT v FROM cd_checks"
+    },
+    {
+      "id": "unique_create",
+      "sql": "CREATE TYPE cd_key AS(a integer,b integer); CREATE TABLE cd_keys(v cd_key UNIQUE); INSERT INTO cd_keys VALUES('(1,1)'),('(1,2)')"
+    },
+    {
+      "id": "unique_drop",
+      "sql": "ALTER TYPE cd_key DROP ATTRIBUTE b"
+    },
+    {
+      "id": "unique_read",
+      "sql": "SELECT v FROM cd_keys ORDER BY v"
+    },
+    {
+      "id": "unique_conflict",
+      "sql": "INSERT INTO cd_keys VALUES ('(1)')"
+    },
+    {
+      "id": "empty_create",
+      "sql": "CREATE TYPE cd_empty AS(a integer); CREATE TABLE cd_empties(v cd_empty); INSERT INTO cd_empties VALUES('(1)'),(NULL)"
+    },
+    {
+      "id": "empty_drop",
+      "sql": "ALTER TYPE cd_empty DROP ATTRIBUTE a"
+    },
+    {
+      "id": "empty_read",
+      "sql": "SELECT v FROM cd_empties ORDER BY v"
+    },
+    {
+      "id": "all_drop",
+      "sql": "CREATE TYPE cd_all AS(a integer,b text); ALTER TYPE cd_all DROP ATTRIBUTE a,DROP ATTRIBUTE b; SELECT ROW()::cd_all"
+    },
+    {
+      "id": "owner_create",
+      "sql": "CREATE ROLE cd_other; CREATE TYPE cd_owned AS(a integer); SET ROLE cd_other"
+    },
+    {
+      "id": "owner_missing",
+      "sql": "ALTER TYPE cd_owned DROP ATTRIBUTE IF EXISTS absent"
+    },
+    {
+      "id": "owner_reset",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "persist_rows",
+      "sql": "SELECT id,v FROM cd_rows ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "persist_constructor",
+      "sql": "SELECT * FROM cd_constructor; SELECT is_called FROM cd_calls",
+      "reopen": true
+    },
+    {
+      "id": "persist_nested",
+      "sql": "SELECT id,v,items FROM cd_nested ORDER BY id; SELECT id,v,items FROM cd_materialized ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "persist_default",
+      "sql": "INSERT INTO cd_defaults DEFAULT VALUES RETURNING v",
+      "reopen": true
+    },
+    {
+      "id": "persist_unique",
+      "sql": "SELECT v FROM cd_keys ORDER BY v; INSERT INTO cd_keys VALUES ('(1)')",
+      "reopen": true
+    },
+    {
+      "id": "persist_empty",
+      "sql": "SELECT v FROM cd_empties ORDER BY v",
+      "reopen": true
+    }
+  ]
+}
