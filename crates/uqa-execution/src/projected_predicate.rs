@@ -103,7 +103,15 @@ impl ProjectedPredicate {
         params: &[SQLParam],
     ) -> Result<Option<Self>, SQLError> {
         let expression = uqa_sql::bind_type_introspection(expression.clone(), schema, params);
-        match compile::compile(&expression, schema, params) {
+        Self::compile_bound(&expression, schema, params)
+    }
+
+    pub(crate) fn compile_bound(
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        params: &[SQLParam],
+    ) -> Result<Option<Self>, SQLError> {
+        match compile::compile(expression, schema, params) {
             Ok(expression) => Ok(expression.map(|expression| Self { expression })),
             Err(SQLError::Unsupported(_)) => Ok(None),
             Err(error) => Err(error),

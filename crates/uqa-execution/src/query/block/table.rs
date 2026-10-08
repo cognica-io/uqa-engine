@@ -104,7 +104,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         (ScoredInput::entries(Vec::new(), score_bearing_filter), None)
     } else {
         match &block.access {
-            AccessPathPlan::Row => (ScoredInput::All, stmt.r#where.clone()),
+            AccessPathPlan::Row => (ScoredInput::All, predicate.clone()),
             AccessPathPlan::Hybrid => {
                 let rows = match stmt.r#where.as_ref() {
                     Some(filter) => {
@@ -150,7 +150,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                     Some(_) | None => ScoredInput::All,
                 };
                 let filter = matches!(rows, ScoredInput::All)
-                    .then(|| stmt.r#where.clone())
+                    .then(|| predicate.clone())
                     .flatten();
                 (rows, filter)
             }

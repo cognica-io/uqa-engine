@@ -116,3 +116,51 @@ fn mapped_columns_bind_parameters_and_skip_unanswerable_conjuncts() {
         .select(&equal("renamed", ScalarExpr::Param(1)))
         .is_err());
 }
+
+#[test]
+fn selected_operand_casts_preserve_index_candidates_and_residual_equality() {
+    let uqa_sql::Statement::CreateTable(table) = uqa_sql::compile("CREATE TABLE t(v bigint)")
+        .unwrap()
+        .remove(0)
+    else {
+        unreachable!()
+    };
+    let schema = crate::RowSchema::with_qualified_types(
+        "alias",
+        vec!["renamed".into()],
+        vec![Some(uqa_sql::ColumnType::BigInteger)],
+    );
+    let cancellation = CancellationToken::new();
+    for (value, expected) in [
+        (Value::Int(7), Some(vec![42])),
+        (Value::Float(9_007_199_254_740_992.0), None),
+    ] {
+        let params = [SQLParam::scalar(value)];
+        let filter = uqa_sql::bind_type_introspection(
+            equal("renamed", ScalarExpr::Param(1)),
+            &schema,
+            &params,
+        );
+        let selected = IndexCandidates {
+            reads: &Index,
+            table: "t",
+            columns: &table.columns,
+            visible: &|_| "renamed".into(),
+            params: &params,
+            command_visible: false,
+            cancellation: &cancellation,
+        }
+        .select(&filter)
+        .unwrap();
+        assert_eq!(selected, expected);
+        let predicate = crate::ProjectedPredicate::compile_bound(&filter, &schema, &params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            predicate
+                .keep(&[&Value::Int(9_007_199_254_740_993)])
+                .unwrap(),
+            expected.is_none()
+        );
+    }
+}

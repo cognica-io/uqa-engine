@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Apply the selected SQL operand casts consistently to index candidate selection and residual predicates, preserving mixed numeric comparisons across scans, indexes, column aliases, parameters and persistent reopening.
+
 - Resolve partitioned INSERT conflict arbiters from the target relation, preserving named parent constraints, child-only unique indexes for targetless DO NOTHING and physical row identity across partitions.
 
 - Initialize the user catalog OID counter independently of reserved bootstrap namespaces while retaining persisted user-object claims and creation order.

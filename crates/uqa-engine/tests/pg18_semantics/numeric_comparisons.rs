@@ -9,6 +9,7 @@
 use super::*;
 use serde_json::Value as JSONValue;
 use std::{path::Path, sync::Arc};
+use uqa_sql::SQLParam;
 
 fn fixture() -> JSONValue {
     serde_json::from_str(include_str!(concat!(
@@ -102,6 +103,16 @@ fn verify_relations(engine: &Engine, oracle: &JSONValue) {
         Value::Bool(true)
     );
     engine.sql("DEALLOCATE numeric_compare", &[]).unwrap();
+    for sql in [
+        "SELECT id FROM numeric_comparison WHERE i = $1 ORDER BY id",
+        "SELECT key FROM numeric_comparison AS probe(key, integral) WHERE integral = $1 ORDER BY key",
+        "SELECT key FROM numeric_comparison AS probe(key, integral) CROSS JOIN (VALUES(1)) AS one(v) WHERE integral = $1 ORDER BY key",
+    ] {
+        let result = engine.sql(sql, &[SQLParam::scalar(Value::Float(9_007_199_254_740_992.0))]).unwrap();
+        assert_eq!(result.rows.len(), 2, "{sql}");
+        assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)), "{sql}");
+        assert_eq!(result.value_at(1, 0), Some(&Value::Int(2)), "{sql}");
+    }
 }
 
 #[test]
