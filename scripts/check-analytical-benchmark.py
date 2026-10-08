@@ -22,6 +22,7 @@ import subprocess
 import sys
 
 from performance_qualification import qualify
+from performance_noise import ANALYTICAL_FILTER
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,6 +35,7 @@ BENCHMARK_SOURCES = [
     ROOT / "crates/uqa-engine/benches/analytical_comparison/fixture.rs",
     ROOT / "scripts/check-analytical-benchmark.py",
     ROOT / "scripts/performance_qualification.py",
+    ROOT / "scripts/performance_noise.py",
     ROOT / "scripts/run-analytical-comparison.sh",
     ROOT / "scripts/run-analytical-regression.py",
 ]
@@ -148,6 +150,8 @@ def main() -> int:
     parser.add_argument("--run-signature", type=pathlib.Path)
     parser.add_argument("--issuer-key", type=pathlib.Path)
     parser.add_argument("--require-qualified", action="store_true")
+    parser.add_argument("--regression-only", action="store_true",
+                        help="require all UQA regression gates without advisory external timings")
     parser.add_argument(
         "--output",
         type=pathlib.Path,
@@ -160,6 +164,8 @@ def main() -> int:
         raise RuntimeError("qualified timing requires calibration, run attestation, both signatures and issuer key")
     criterion_roots = args.criterion_root or [ROOT / "target/criterion"]
     baseline_roots = args.baseline_criterion_root or []
+    if args.regression_only and not (baseline_roots and args.baseline_manifest and args.baseline_revision):
+        raise RuntimeError("--regression-only requires paired baseline roots, manifest and revision")
     if baseline_roots and len(baseline_roots) != len(criterion_roots):
         raise RuntimeError("base and head Criterion roots must form equal-sized pairs")
     if args.baseline_manifest and not baseline_roots:
@@ -187,7 +193,7 @@ def main() -> int:
             cache[name] = [slope_estimate(root, name) for root in roots]
         return cache[name]
 
-    for gate in manifest["external_ratio_checks"]:
+    for gate in ([] if args.regression_only else manifest["external_ratio_checks"]):
         numerator_name = gate["numerator"]
         denominator_name = gate["denominator"]
         numerators = load_samples(head_samples, criterion_roots, numerator_name)
@@ -208,7 +214,9 @@ def main() -> int:
             }
         )
 
-    regression_protocol = manifest.get("regression_protocol", {})
+    regression_protocol = dict(manifest.get("regression_protocol", {}))
+    if args.regression_only:
+        regression_protocol["benchmark_filter"] = ANALYTICAL_FILTER
     expected_pairs = int(regression_protocol.get("pairs", 0))
     if baseline_roots:
         if expected_pairs < 2 or expected_pairs % 2:
@@ -297,7 +305,8 @@ def main() -> int:
         if baseline_roots
         else None,
         "external_ratio_checks": external_ratios,
-        "external_limits_met": not external_failed,
+        "external_limits_met": None if args.regression_only else not external_failed,
+        "comparison_scope": "uqa_regression" if args.regression_only else "uqa_and_external",
         "regression_ratio_checks": regression_ratios,
         "regression_protocol": regression_protocol,
         "regression_limits_met": not regression_failed if baseline_roots else None,

@@ -16,13 +16,13 @@ For a reported head/base ratio $r$, the independently established noise factor $
 - [ ] Consume actual qualified contention evidence before deciding on partitioned locking for #266.
 - [ ] Obtain and verify authoritative controlled-host/noise evidence; keep #261 and #266 open until their actual acceptance criteria pass.
 - [ ] Resolve #348 through a dependency path that fixes downstream builds without breaking the existing public connection contract.
-- [ ] Reproduce #125 under its original build conditions and establish the startup cause before claiming a fix.
+- [x] Close #125 at the maintainer's request pending recurrence; the historical startup cause is not claimed fixed.
 
 Generated measurements, signatures and detailed controller evidence belong in ignored output directories or CI artifacts. Source control retains only verifier code, deterministic fixtures/expected results, reviewed limits and compact provenance references.
 
 ## Controller contract
 
-The trusted controller owns resource isolation, its public-key configuration and the private signing key. It establishes and reviews the noise calibration independently before running a candidate, using the same workload, environment, sample count, ordering and estimator. A signature authenticates that controller's claim; it is not evidence that an uncontrolled laptop or shared hosted runner became isolated. The current repository has no configured controller or independently qualified runner, so the shared-runner analytical workflow stays diagnostic. Deterministic work/memory CI remains enforced. Synthetic signing fixtures exercise only verifier behavior.
+The trusted controller owns resource isolation, its public-key configuration and the private signing key. It establishes and reviews the noise calibration independently before running a candidate, using the same workload, environment, sample count, ordering and estimator. A signature authenticates that controller's claim; it is not evidence that an uncontrolled laptop or shared hosted runner became isolated. PR #599 adds the [dedicated EC2 controller and calibration protocol](../../benchmarks/regressions/controlled-runner.md), while the shared-runner analytical workflow stays diagnostic. Deterministic work/memory CI remains enforced. Synthetic signing fixtures exercise only verifier behavior; the preserved task ledger stays open until actual evidence satisfies its acceptance gates.
 
 Both evidence documents are UTF-8 JSON with integer `schema_version: 1` and detached RSA/SHA-256 signatures accepted by `openssl dgst -sha256 -verify`. Signatures cover the original document bytes; the verifier checks them, rejects duplicate JSON keys and non-finite values, and hashes bounded byte snapshots. The operator supplies the trusted public key separately; neither a report nor a candidate worktree may choose it.
 

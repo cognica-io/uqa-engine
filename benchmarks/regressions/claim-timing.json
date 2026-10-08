@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "workload": "independent-process-claim-completion-v1",
+  "reference_revision": "eb3523590116e295dff4410aac939878e5e0fce1",
+  "processes": [1, 2, 4, 8],
+  "keys_per_process": [64, 512],
+  "warmup_rounds": 8,
+  "measurement_rounds": 128,
+  "calibration_pairs": 32,
+  "comparison_pairs": 4,
+  "ordering": "counterbalanced",
+  "within_run_estimator": "median_phase_completion_nanoseconds",
+  "comparison_estimator": "median_of_paired_phase_window_ratios",
+  "phases": ["acquire", "release"],
+  "max_regression_ratio": 1.15
+}
