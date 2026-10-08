@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 
 use super::{quote_sql_identifier, Catalog, OptionalExtension, Result, SQLiteError};
 use crate::mvcc::native::NativeSnapshot;
+use crate::mvcc::native::VECTOR_FIELD_GUARD_PREFIX;
 use uqa_storage::catalog::graph_guards::METADATA_PREFIX as GRAPH_GUARD_PREFIX;
 use uqa_storage::CatalogCacheRevisions;
 
@@ -27,6 +28,7 @@ enum MetadataTriggerFormat {
     AllocationGuards,
     GraphLifetimes,
     RelationAclTuples,
+    VectorFieldGuards,
 }
 
 pub(super) fn metadata_scope(name: &str) -> Option<(&'static str, &str)> {
@@ -38,6 +40,7 @@ pub(super) fn metadata_scope(name: &str) -> Option<(&'static str, &str)> {
         "graph_identifier_generation" | "graph_identifier_data_revision"
     ) || name.starts_with("graph_definition_data_revision::")
         || name.starts_with(GRAPH_GUARD_PREFIX)
+        || name.starts_with(VECTOR_FIELD_GUARD_PREFIX)
     {
         return None;
     }
@@ -79,7 +82,7 @@ impl Catalog {
             table,
             has_table_name,
             event,
-            MetadataTriggerFormat::RelationAclTuples,
+            MetadataTriggerFormat::VectorFieldGuards,
         )
     }
 
@@ -120,10 +123,18 @@ impl Catalog {
                 MetadataTriggerFormat::GraphLifetimes,
             )
             .1;
+            let relation_acls = cache_trigger(
+                "_metadata",
+                false,
+                event,
+                MetadataTriggerFormat::RelationAclTuples,
+            )
+            .1;
             if current.as_deref() != Some(previous.as_str())
                 && current.as_deref() != Some(binary.as_str())
                 && current.as_deref() != Some(allocations.as_str())
                 && current.as_deref() != Some(graph_lifetimes.as_str())
+                && current.as_deref() != Some(relation_acls.as_str())
             {
                 return Err(SQLiteError::StorageBackend(
                     "missing or changed metadata cache trigger".into(),
@@ -229,7 +240,11 @@ fn cache_trigger(
                 has_table_name,
                 image,
                 !matches!(encoding, MetadataTriggerFormat::TextNames),
-                matches!(encoding, MetadataTriggerFormat::RelationAclTuples),
+                matches!(
+                    encoding,
+                    MetadataTriggerFormat::RelationAclTuples
+                        | MetadataTriggerFormat::VectorFieldGuards
+                ),
             );
             let mut values = if table == "_metadata"
                 && matches!(
@@ -237,6 +252,7 @@ fn cache_trigger(
                     MetadataTriggerFormat::AllocationGuards
                         | MetadataTriggerFormat::GraphLifetimes
                         | MetadataTriggerFormat::RelationAclTuples
+                        | MetadataTriggerFormat::VectorFieldGuards
                 ) {
                 let prefix = "graph_definition_data_revision::";
                 format!("SELECT {kind}, {name}, 1 WHERE {image}.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{prefix}' AS BLOB)", prefix.len())
@@ -248,9 +264,14 @@ fn cache_trigger(
                     encoding,
                     MetadataTriggerFormat::GraphLifetimes
                         | MetadataTriggerFormat::RelationAclTuples
+                        | MetadataTriggerFormat::VectorFieldGuards
                 )
             {
                 write!(values, " AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{GRAPH_GUARD_PREFIX}' AS BLOB)", GRAPH_GUARD_PREFIX.len()).expect("write graph guard exclusion");
+            }
+            if table == "_metadata" && matches!(encoding, MetadataTriggerFormat::VectorFieldGuards)
+            {
+                write!(values, " AND substr(CAST({image}.key AS BLOB), 1, {}) != CAST('{VECTOR_FIELD_GUARD_PREFIX}' AS BLOB)", VECTOR_FIELD_GUARD_PREFIX.len()).expect("write vector field guard exclusion");
             }
             write!(
                 body,

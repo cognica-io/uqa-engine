@@ -64,7 +64,17 @@ fn collect_graph_function_dependency(
         return;
     };
     dependencies.graph_catalog = true;
-    if let Some(crate::ScalarExpr::Literal(uqa_core::Value::Str(graph))) = args.get(argument) {
+    if let Some(
+        crate::ScalarExpr::Literal(uqa_core::Value::Str(graph))
+        | crate::ScalarExpr::TypedLiteral {
+            value: uqa_core::Value::Str(graph),
+            parameter_index: None,
+            ..
+        },
+    ) = args.get(argument)
+    {
+        // Preparation coerces string constants to their selected SQL type.
+        // Those datums still name one graph; parameters and expressions do not.
         dependencies.insert_graph(graph.clone());
     } else {
         // Do not evaluate expressions or volatile functions at DECLARE.

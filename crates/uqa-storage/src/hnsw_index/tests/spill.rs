@@ -124,6 +124,129 @@ fn restoration_streams_nodes_and_preserves_bits_with_more_vectors_than_memory() 
 }
 
 #[test]
+fn separate_edge_restoration_writes_spilled_vectors_once_per_source() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let params = HNSWIndexParams {
+        m: 6,
+        ef_construction: 12,
+        ..HNSWIndexParams::default()
+    };
+    let mut source = HNSWIndex::with_params(1024, params).unwrap();
+    for document in 1..=24 {
+        source.add(document, vector(document, 1024)).unwrap();
+    }
+    let snapshot = source.persistence_snapshot();
+    let mut builder = HNSWRestoreBuilder::new(1024, params, snapshot.meta, &control).unwrap();
+    for node in &snapshot.nodes {
+        let mut empty = node.clone();
+        empty.neighbors.iter_mut().for_each(Vec::clear);
+        builder.push(empty).unwrap();
+    }
+    crate::hnsw_index::store::ENCODED_NODES.set(0);
+    for node in &snapshot.nodes {
+        for (layer, neighbors) in node.neighbors.iter().enumerate() {
+            for target in neighbors {
+                builder.edge(node.node_id, layer, *target).unwrap();
+            }
+        }
+    }
+    let mut restored = builder.finish().unwrap().into_parts().0;
+    let encoded = crate::hnsw_index::store::ENCODED_NODES.get();
+    assert!(restored.nodes.is_spilled());
+    let mut delta = restored.delta(&control);
+    delta.full_rewrite = true;
+    assert_eq!(delta.meta, snapshot.meta);
+    let mut nodes = delta.nodes();
+    for expected in &snapshot.nodes {
+        assert_eq!(&*nodes.next().unwrap().unwrap(), expected);
+    }
+    assert!(nodes.next().is_none());
+    drop(delta);
+    assert_eq!(
+        restored.search_knn(&vector(19, 1024), 10).unwrap(),
+        source.search_knn(&vector(19, 1024), 10).unwrap()
+    );
+    assert!(restored.take_persistence_delta().nodes().next().is_none());
+    // One replacement per source, with room for one compaction of the live graph.
+    assert!(
+        encoded <= 2 * snapshot.nodes.len(),
+        "encoded {encoded} vector nodes"
+    );
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop(restored);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn streamed_edge_sources_can_repeat_and_errors_cannot_publish_pending_edges() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let params = HNSWIndexParams {
+        m: 2,
+        ef_construction: 4,
+        ..HNSWIndexParams::default()
+    };
+    let mut source = HNSWIndex::with_params(8, params).unwrap();
+    for document in 1..=12 {
+        source.add(document, vector(document, 8)).unwrap();
+    }
+    let snapshot = source.persistence_snapshot();
+    let empty_builder = || {
+        let mut builder = HNSWRestoreBuilder::new(8, params, snapshot.meta, &control).unwrap();
+        for node in &snapshot.nodes {
+            let mut node = node.clone();
+            node.neighbors.iter_mut().for_each(Vec::clear);
+            builder.push(node).unwrap();
+        }
+        builder
+    };
+    let edges = snapshot
+        .nodes
+        .iter()
+        .map(|node| {
+            node.neighbors
+                .iter()
+                .enumerate()
+                .flat_map(|(layer, targets)| {
+                    targets
+                        .iter()
+                        .map(move |target| (node.node_id, layer, *target))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut builder = empty_builder();
+    for position in 0..edges.iter().map(Vec::len).max().unwrap() {
+        for group in &edges {
+            if let Some(&(source, layer, target)) = group.get(position) {
+                builder.edge(source, layer, target).unwrap();
+            }
+        }
+    }
+    let restored = builder.finish().unwrap();
+    assert_eq!(restored.persistence_snapshot(), snapshot);
+    drop(restored);
+
+    let (source, layer, target) = edges.iter().flatten().next().copied().unwrap();
+    let mut builder = empty_builder();
+    builder.edge(source, layer, target).unwrap();
+    assert!(builder.edge(source, usize::MAX, target).is_err());
+    assert!(builder.finish().is_err());
+
+    let mut builder = empty_builder();
+    for _ in 0..=params.m * 2 {
+        if builder.edge(source, 0, target).is_err() {
+            assert!(builder.finish().is_err());
+            break;
+        }
+    }
+    let mut builder = empty_builder();
+    builder.edge(source, layer, target).unwrap();
+    control.cancellation().cancel();
+    assert!(builder.finish().is_err());
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn adaptive_tensor_search_spills_candidates_without_allocating_one_result_per_vector() {
     let control = StorageReadControl::with_limit(32 * 1024);
     let params = HNSWIndexParams {

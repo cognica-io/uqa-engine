@@ -732,6 +732,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "separate_edge_restoration_writes_spilled_vectors_once_per_source",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/spill.rs",
+      "capability": "HNSW spill restoration",
+      "workload": "24 vectors of 1024 dimensions; 64 KiB retention allowance and separately streamed edges.",
+      "invariant": "Canonical graph and KNN results match; node encodes are bounded by twice the node count, without exceeding retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "canonical_replacement_comparison_retains_only_one_vector_and_honors_control",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/canonical/tests.rs",
+      "capability": "Canonical replacement comparison",
+      "workload": "12 vectors of 1024 dimensions; allowance for exactly one vector.",
+      "invariant": "Peak retention is one vector, including live-index comparison; quota and cancellation failures release scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "indexed_data_commits_and_existing_definitions_retain_reader_registries",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/open/tests/cache_refresh.rs",
+      "capability": "Indexed data cache refresh",
+      "workload": "Two native sessions, GIN and HNSW indexes; inserts, updates and repeated IF NOT EXISTS definitions.",
+      "invariant": "Data becomes visible without replacing table or schema registry allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "sql_rewrites_retain_unchanged_hnsw_vectors_and_replace_actual_canonical_differences",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/table_storage/documents/tests.rs",
+      "capability": "Unchanged vector SQL rewrites",
+      "workload": "Synthetic vector table; scalar UPDATE, identical upsert, changed vector, rollback, direct canonical mutation and NULL.",
+      "invariant": "Unchanged canonical vectors retain HNSW revision; real replacements and transaction visibility remain correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "graph_cursor_spools_only_dependencies_and_includes_own_prior_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/open/tests/cache_refresh.rs",
+      "capability": "Bound graph cursor dependencies",
+      "workload": "Plain and compressed native storage, two graphs, private writes and an unrelated corrupt vertex.",
+      "invariant": "Only the statically selected graph is decoded; own prior writes and held cursor visibility survive later changes, and selected corruption still fails.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

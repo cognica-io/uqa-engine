@@ -75,13 +75,52 @@ fn metadata_cache_names_preserve_embedded_zero_and_unicode() {
     }
 }
 
+#[test]
+fn vector_field_guards_do_not_invalidate_registries_in_private_or_committed_views() {
+    for native in [false, true] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let catalog = Catalog::open(connection.clone()).unwrap();
+        if native {
+            connection
+                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                .unwrap();
+        }
+        let baseline = catalog.cache_revisions().unwrap();
+        for suffix in ["lifetime", "references"] {
+            let key = format!(
+                "{}012345::{suffix}",
+                crate::mvcc::native::VECTOR_FIELD_GUARD_PREFIX
+            );
+            connection.begin_transaction().unwrap();
+            catalog.set_metadata(&key, "1").unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), baseline);
+            connection.commit_transaction().unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), baseline);
+            catalog.set_metadata(&key, "2").unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), baseline);
+            connection.begin_transaction().unwrap();
+            catalog.delete_metadata(&key).unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), baseline);
+            connection.rollback_transaction().unwrap();
+            assert_eq!(catalog.get_metadata(&key).unwrap(), Some("2".into()));
+            catalog.delete_metadata(&key).unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), baseline);
+        }
+        // A similarly named application key remains registry metadata.
+        catalog
+            .set_metadata("vector_field_guard_definition", "changed")
+            .unwrap();
+        assert!(catalog.cache_revisions().unwrap().registries > baseline.registries);
+    }
+}
+
 // Exact released metadata INSERT trigger, independent of the current formatter.
 const LEGACY_METADATA_INSERT: &str = "CREATE TRIGGER \"uqa_cache__metadata_INSERT\" AFTER INSERT ON \"_metadata\" BEGIN INSERT INTO _cache_revisions(kind, name, generation) VALUES (CASE WHEN substr(NEW.key, 1, 30) = 'uqa.statistics.maintenance.v1:' THEN 'maintenance' WHEN substr(NEW.key, 1, 21) = 'uqa.table_next_id.v1:' THEN 'data' WHEN substr(NEW.key, 1, 22) = 'graph_label_registry::' THEN 'graph' ELSE 'registry' END, CASE WHEN substr(NEW.key, 1, 30) = 'uqa.statistics.maintenance.v1:' THEN substr(NEW.key, 31) WHEN substr(NEW.key, 1, 21) = 'uqa.table_next_id.v1:' THEN substr(NEW.key, 22) WHEN substr(NEW.key, 1, 22) = 'graph_label_registry::' THEN substr(NEW.key, 23) ELSE '' END, 1) ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1; END";
 
 #[test]
 fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent() {
     use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
-    for encoding in [0, 1, 2] {
+    for encoding in [0, 1, 2, 3] {
         for native in [false, true] {
             let connection = ManagedConnection::open_in_memory().unwrap();
             let catalog = Catalog::open(connection.clone()).unwrap();
@@ -116,6 +155,21 @@ fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent
                             ", 1) ON CONFLICT", ", 1 WHERE NEW.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST(NEW.key AS BLOB), 1, 32) != CAST('graph_definition_data_revision::' AS BLOB) ON CONFLICT"
                         );
                     }
+                    if encoding == 3 {
+                        previous = Catalog::cache_revision_trigger("_metadata", false, "INSERT").1.replace(
+                            " AND substr(CAST(NEW.key AS BLOB), 1, 20) != CAST('vector_field_guard::' AS BLOB)", ""
+                        );
+                        assert!(!previous.contains("vector_field_guard::"));
+                        for event in ["UPDATE", "DELETE"] {
+                            let (name, current) = Catalog::cache_revision_trigger("_metadata", false, event);
+                            let mut legacy = current;
+                            for image in ["OLD", "NEW"] {
+                                legacy = legacy.replace(&format!(" AND substr(CAST({image}.key AS BLOB), 1, 20) != CAST('vector_field_guard::' AS BLOB)"), "");
+                            }
+                            assert!(!legacy.contains("vector_field_guard::"));
+                            conn.execute_batch(&format!("DROP TRIGGER {name}; {legacy}"))?;
+                        }
+                    }
                     conn.execute_batch(&previous)?;
                     Ok(())
                 })
@@ -136,6 +190,19 @@ fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent
             let stable = catalog.cache_revisions().unwrap();
             Catalog::open(connection.clone()).unwrap();
             assert_eq!(catalog.cache_revisions().unwrap(), stable);
+            catalog
+                .set_metadata("vector_field_guard::012345::references", "1")
+                .unwrap();
+            catalog
+                .set_metadata("vector_field_guard::012345::references", "2")
+                .unwrap();
+            catalog
+                .delete_metadata("vector_field_guard::012345::references")
+                .unwrap();
+            assert_eq!(
+                catalog.cache_revisions().unwrap().registries,
+                stable.registries
+            );
             catalog
                 .set_metadata("graph_label_registry::g\0日本語", "{}")
                 .unwrap();

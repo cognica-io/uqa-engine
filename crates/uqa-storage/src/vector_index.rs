@@ -26,7 +26,9 @@ pub mod query;
 pub use query::statistics::{DiskANNExecutionRoute, DiskANNExecutionStats, VectorQueryResult};
 pub(crate) mod retained;
 
-pub(crate) use canonical::{copy_vector, ordinal_count, selected_fingerprint};
+pub(crate) use canonical::{
+    canonical_vectors_equal, copy_vector, ordinal_count, selected_fingerprint,
+};
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
     RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
@@ -265,6 +267,19 @@ pub trait VectorIndex: Send + Sync {
                     .map_err(Into::into)
             })
             .transpose()
+    }
+
+    /// Check whether a SQL replacement can retain this document's canonical vectors. Unsupported providers return false and keep the normal replacement path. Live memory indexes override this to borrow their canonical data without cloning the entire index.
+    fn matches_document_vectors(
+        &self,
+        document: DocId,
+        vectors: &[Vec<f32>],
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.vector_read_snapshot(control)?
+            .map_or(Ok(false), |source| {
+                canonical_vectors_equal(source.as_ref(), document, vectors, control)
+            })
     }
 
     /// Keep this selected physical `DiskANN` generation while reading a different fixed canonical field view. The query owner verifies raw coverage without inventing mutation origins.

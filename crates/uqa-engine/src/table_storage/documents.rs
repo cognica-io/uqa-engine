@@ -512,7 +512,33 @@ impl Engine {
             .try_table(&table_name)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
-        let vectors = Self::document_vector_values(&table_state, &document)?;
+        let mut vectors = Self::document_vector_values(&table_state, &document)?;
+        // The SQL row and its tuple metadata are still rewritten. Retain an
+        // index only when its actual canonical values match the replacement;
+        // comparing document fields alone would miss direct index API writes.
+        if !vectors.is_empty() {
+            let control = self.query_retention_control()?;
+            let indexes = table_state.vector_indexes.read();
+            let mut unchanged = Vec::new();
+            for (field, values) in &vectors {
+                if let Some(index) = indexes.get(field) {
+                    let same = index
+                        .matches_document_vectors(doc_id, values, &control)
+                        .map_err(|error| {
+                            uqa_execution::storage_errors::storage_error(
+                                "compare document vectors",
+                                &error,
+                            )
+                        })?;
+                    if same {
+                        unchanged.push(field.clone());
+                    }
+                }
+            }
+            for field in unchanged {
+                vectors.remove(&field);
+            }
+        }
         self.with_prepared_row_write_transaction(&table_name, |engine| {
             if index_fts {
                 engine.add_prepared_document_with_vector_values_inner(
