@@ -23,6 +23,7 @@ pub enum CurrentInsertConflict {
 pub struct InsertConflictOverlay {
     connection: rusqlite::Connection,
     _directory: tempfile::TempDir,
+    constraint_table: String,
     constraints: Vec<uqa_sql::catalog::index::EnforcedKey>,
     relevant_constraints: Vec<usize>,
     next_insert_identity: u64,
@@ -48,10 +49,36 @@ impl InsertConflictOverlay {
         Ok(Self {
             connection,
             _directory: directory,
+            constraint_table: table.to_owned(),
             constraints,
             relevant_constraints,
             next_insert_identity: 0,
         })
+    }
+
+    pub fn bind_table(
+        &mut self,
+        context: ConstraintContext<'_>,
+        table: &str,
+        on_conflict: &ConflictPlan,
+    ) -> Result<(), SQLError> {
+        if self.constraint_table == table {
+            return Ok(());
+        }
+        let constraints = context
+            .catalog
+            .enforced_keys(table)
+            .map_err(|error| dml_storage_error("INSERT conflict overlay", error))?;
+        let relevant_constraints = uqa_sql::semantics::conflict::conflict_key_indices(
+            context.catalog,
+            table,
+            &constraints,
+            on_conflict,
+        )?;
+        self.constraints = constraints;
+        self.relevant_constraints = relevant_constraints;
+        self.constraint_table = table.to_owned();
+        Ok(())
     }
 
     pub fn find(
@@ -212,17 +239,19 @@ fn open_conflict_database() -> Result<(rusqlite::Connection, tempfile::TempDir),
 
 pub fn find_insert_conflict(
     context: ConstraintContext<'_>,
+    target_table: &str,
     table: &str,
     on_conflict: &ConflictPlan,
     document: &Document,
 ) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
+    let constraint_table = conflict_constraint_table(target_table, table, on_conflict);
     let constraints = context
         .catalog
-        .enforced_keys(table)
+        .enforced_keys(constraint_table)
         .map_err(|err| dml_storage_error("INSERT conflict lookup", err))?;
     for index in uqa_sql::semantics::conflict::conflict_key_indices(
         context.catalog,
-        table,
+        constraint_table,
         &constraints,
         on_conflict,
     )? {
@@ -238,6 +267,22 @@ pub fn find_insert_conflict(
         }
     }
     Ok(None)
+}
+
+fn conflict_constraint_table<'a>(
+    target_table: &'a str,
+    physical_table: &'a str,
+    conflict: &ConflictPlan,
+) -> &'a str {
+    // Explicit arbiters belong to the INSERT target and map to descendant indexes by ancestry. Targetless DO NOTHING also considers unique indexes declared only on the physical partition.
+    if conflict.constraint.is_none()
+        && conflict.conflict_columns.is_empty()
+        && conflict.expressions.is_empty()
+    {
+        physical_table
+    } else {
+        target_table
+    }
 }
 
 pub mod update;

@@ -306,3 +306,58 @@ fn partitioned_on_conflict_uses_physical_identity_and_rejects_row_movement() {
     assert_eq!(rows.rows[0]["value"], Value::Int(101));
     assert_eq!(rows.rows[1]["value"], Value::Int(202));
 }
+
+#[test]
+fn partition_conflicts_preserve_parent_arbiters_and_child_only_unique_keys() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE TABLE conflict_root (bucket integer, item_key integer, value integer, CONSTRAINT root_key UNIQUE(bucket, item_key)) PARTITION BY RANGE(bucket)",
+        "CREATE TABLE conflict_low PARTITION OF conflict_root FOR VALUES FROM(MINVALUE) TO(10)",
+        "CREATE TABLE conflict_high PARTITION OF conflict_root FOR VALUES FROM(10) TO(MAXVALUE)",
+        "CREATE UNIQUE INDEX low_value ON conflict_low(value)",
+        "CREATE UNIQUE INDEX high_key ON conflict_high(item_key)",
+        "INSERT INTO conflict_root VALUES (1,5,10),(11,5,20)",
+    ] {
+        exec(&engine, sql);
+    }
+    // PostgreSQL 18 independently returns both partitions, skips child-only conflicts only for targetless DO NOTHING, and rejects revisiting an updated row.
+    let updated = engine.sql(
+        "INSERT INTO conflict_root SELECT * FROM (VALUES (11,5,202),(1,5,101)) AS source(bucket,item_key,value) ON CONFLICT ON CONSTRAINT root_key DO UPDATE SET value=EXCLUDED.value RETURNING bucket,value",
+        &[],
+    ).unwrap();
+    assert_eq!(updated.rows.len(), 2);
+    assert_eq!(updated.rows[0]["value"], Value::Int(202));
+    assert_eq!(updated.rows[1]["value"], Value::Int(101));
+    let inserted = engine.sql(
+        "INSERT INTO conflict_root VALUES (2,6,101),(12,5,203),(2,6,303),(12,6,404),(2,6,505) ON CONFLICT DO NOTHING RETURNING bucket,value",
+        &[],
+    ).unwrap();
+    assert_eq!(inserted.rows.len(), 2);
+    assert_eq!(inserted.rows[0]["bucket"], Value::Int(2));
+    assert_eq!(inserted.rows[0]["value"], Value::Int(303));
+    assert_eq!(inserted.rows[1]["bucket"], Value::Int(12));
+    assert_eq!(inserted.rows[1]["value"], Value::Int(404));
+    assert_eq!(engine.sql(
+        "INSERT INTO conflict_root VALUES (3,7,101) ON CONFLICT ON CONSTRAINT root_key DO NOTHING",
+        &[],
+    ).unwrap_err().sqlstate(), Some("23505"));
+    assert_eq!(engine.sql(
+        "INSERT INTO conflict_root VALUES (1,5,400),(11,5,401),(1,5,402) ON CONFLICT ON CONSTRAINT root_key DO UPDATE SET value=EXCLUDED.value",
+        &[],
+    ).unwrap_err().sqlstate(), Some("21000"));
+    let rows = engine
+        .sql("SELECT value FROM conflict_root ORDER BY bucket", &[])
+        .unwrap();
+    assert_eq!(
+        rows.rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Value::Int(101),
+            Value::Int(303),
+            Value::Int(202),
+            Value::Int(404)
+        ]
+    );
+}

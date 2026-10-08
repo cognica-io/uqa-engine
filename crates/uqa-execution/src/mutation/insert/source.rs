@@ -422,6 +422,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 })?
                 .prepare_document(InsertConflictPreparation {
                     context: services.rows.referential,
+                    target_table: &stmt.table,
                     table: &target_table,
                     target_qualifier: &stmt.target_qualifier,
                     on_conflict,

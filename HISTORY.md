@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Resolve partitioned INSERT conflict arbiters from the target relation, preserving named parent constraints, child-only unique indexes for targetless DO NOTHING and physical row identity across partitions.
+
+- Initialize the user catalog OID counter independently of reserved bootstrap namespaces while retaining persisted user-object claims and creation order.
+
 - Preserve enum label identities when storing IN-list conditions, including trigger definitions after label renames, and accept peer-only RANGE window frames for types without offset arithmetic.
 
 - Allow borrowed record scans without additional cursor workspace when a transaction has no private changes, preserving exhausted read allowances and cancellation.
