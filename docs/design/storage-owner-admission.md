@@ -15,7 +15,7 @@ Binaries predating physical owner leases do not participate in this fence. Upgra
 - [x] Verify live predecessor rejection across 12 storage/mapping combinations, unchanged state on rejection, separate-process death, concurrent current owners, cancellation, memory accounting and commit/rollback admission probes.
 - [x] Pass all 61 connection cases and 10 restoration failure/process cases; the ignored predecessor-peer entry point executes through its parent tests. Strict SQLite library/test Clippy, rustfmt, dependency/Engine ownership, harness, file-size/header checks and 19 regression-runner tests pass.
 - [x] Update HISTORY and upgrade guidance; automatic inventory includes the three new admission cases (32 checks / 88 required cases). Commit and push logical units.
-- [ ] Complete source/CI review, merge and remove the branch; preserve the remaining performance ledger.
+- [x] Complete source review and automatic Linux/macOS regression acceptance: all 88 required cases pass in [run 37706586641](https://github.com/cognica-io/uqa-engine/actions/runs/37706586641) at product commit `aa6e880e3`; PR checks pass as well. Both automated review services reported quota limits, so their status is not counted as an independent source review. PR #587 records merge and branch cleanup; the remaining performance ledger is preserved.
 
 The remaining work continues under #266, #347, #348, #261 and #125. This unit advances #266's mixed-version safety condition; it does not close unrelated performance acceptance requirements.
 
