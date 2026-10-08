@@ -16,9 +16,25 @@ on:
         description: Build every release wheel and the source distribution
         required: true
         type: boolean
+      source_ref:
+        description: Immutable original release commit for artifact recovery
+        required: false
+        default: ""
+        type: string
+      repair_matrix:
+        description: Validated missing wheel matrix; empty uses the normal full matrix
+        required: false
+        default: ""
+        type: string
+      artifacts_run_id:
+        description: Original release run supplying the minimum-Python Linux wheel
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,6 +48,7 @@ env:
 jobs:
   smoke:
     name: Python bindings
+    if: ${{ inputs.repair_matrix == '' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -112,39 +129,26 @@ jobs:
 
   build-wheels:
     name: ${{ matrix.label }}
-    if: ${{ inputs.full_matrix }}
+    if: ${{ inputs.full_matrix && inputs.repair_matrix != '[]' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - label: linux x86_64
-            os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            manylinux: "2_28"
-          - label: linux aarch64
-            os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            manylinux: "2_28"
-          - label: macos x86_64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
-            manylinux: auto
-          - label: macos aarch64
-            os: macos-14
-            target: aarch64-apple-darwin
-            manylinux: auto
-          - label: windows x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            manylinux: auto
-          - label: windows aarch64
-            os: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            manylinux: auto
+        include: >-
+          ${{ fromJSON(inputs.repair_matrix || '[
+            {"label":"linux x86_64","os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","manylinux":"2_28"},
+            {"label":"linux aarch64","os":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu","manylinux":"2_28"},
+            {"label":"macos x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","manylinux":"auto"},
+            {"label":"macos aarch64","os":"macos-14","target":"aarch64-apple-darwin","manylinux":"auto"},
+            {"label":"windows x86_64","os":"windows-latest","target":"x86_64-pc-windows-msvc","manylinux":"auto"},
+            {"label":"windows aarch64","os":"windows-11-arm","target":"aarch64-pc-windows-msvc","manylinux":"auto"}
+          ]') }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -221,23 +225,50 @@ jobs:
           done
           python tests/wasm/export_nori_diagnostics.py --check benchmarks/nori/browser-contract.json > nori-browser-native-diagnostics.json
 
+      - name: Record recovered wheel provenance
+        if: ${{ inputs.source_ref != '' }}
+        shell: bash
+        env:
+          EXPECTED_SOURCE: ${{ inputs.source_ref }}
+          WHEEL_TARGET: ${{ matrix.target }}
+        run: |
+          python - <<'PYTHON'
+          import hashlib, json, os, pathlib, subprocess
+          commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if commit != os.environ["EXPECTED_SOURCE"]:
+              raise SystemExit("recovered wheel checkout differs from the original release")
+          wheels = list(pathlib.Path("dist").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("expected exactly one recovered wheel")
+          wheel = wheels[0]
+          pathlib.Path("dist/recovery-provenance.json").write_text(json.dumps({
+              "commit": commit, "target": os.environ["WHEEL_TARGET"], "filename": wheel.name,
+              "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+          }) + "\n")
+          PYTHON
+
+      # Preserve the verified package before auxiliary diagnostic transport.
+      - name: Retain verified wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.target }}
+          path: |
+            dist/*.whl
+            dist/recovery-provenance.json
+          if-no-files-found: error
+
       - name: Retain native Nori diagnostic evidence
         if: ${{ always() && hashFiles('nori-browser-native-diagnostics.json') != '' }}
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: nori-python-${{ matrix.target }}-${{ github.sha }}
           path: nori-browser-native-diagnostics.json
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: python-wheel-${{ matrix.target }}
-          path: dist/*.whl
-          if-no-files-found: error
-
   build-sdist:
     name: source distribution
-    if: ${{ inputs.full_matrix }}
+    if: ${{ inputs.full_matrix && inputs.repair_matrix == '' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -281,7 +312,7 @@ jobs:
 
   minimum-python:
     name: minimum supported python
-    if: ${{ inputs.full_matrix }}
+    if: ${{ !cancelled() && inputs.full_matrix && (needs.build-wheels.result == 'success' || (inputs.repair_matrix == '[]' && needs.build-wheels.result == 'skipped')) }}
     needs: build-wheels
     runs-on: ubuntu-24.04
     # The declared floor is 3.8, which is past end of life and not available
@@ -293,6 +324,8 @@ jobs:
         with:
           name: python-wheel-x86_64-unknown-linux-gnu
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
 
       - name: Install and exercise the wheel on the declared minimum
         shell: bash
