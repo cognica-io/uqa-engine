@@ -65,6 +65,9 @@ impl<'a> Walker<'a> {
             Expr::CompositeRow { items, binding } => {
                 self.text(&binding.ty)?;
                 self.buffer::<i16>(binding.attributes.capacity())?;
+                if let Some(types) = &binding.argument_types {
+                    self.children(types, Node::Type)?;
+                }
                 self.children(items, Node::Expr)?;
             }
             Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {

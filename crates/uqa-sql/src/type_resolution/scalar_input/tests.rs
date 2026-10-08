@@ -30,6 +30,7 @@ fn constructor_result_inference_retains_catalog_identity_without_a_resolver() {
     let row = ScalarExpr::CompositeRow {
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: crate::ast::CompositeRowBinding {
+            argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
         },
@@ -73,6 +74,7 @@ fn constructor_cast_sources_keep_their_catalog_identity_under_the_output_budget(
         bound_type: None,
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: crate::ast::CompositeRowBinding {
+            argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
         },

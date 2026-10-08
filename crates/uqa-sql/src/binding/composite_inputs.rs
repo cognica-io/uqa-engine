@@ -21,6 +21,7 @@ pub(crate) fn retain_composite_inputs(
     plan.visit_scalar_expressions(&mut |expression| expression.visit(&mut |node| {
         has_composite_input |= matches!(node, ScalarExpr::Func { binding: Some(binding), .. } if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect));
         has_composite_input |= matches!(node, ScalarExpr::Cast { expr, .. } if matches!(expr.as_ref(), ScalarExpr::Row(_)));
+        has_composite_input |= matches!(node, ScalarExpr::CompositeRow { .. });
     }));
     if !has_composite_input {
         return Ok(());

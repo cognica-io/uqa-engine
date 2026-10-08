@@ -100,6 +100,13 @@ pub(crate) fn bind_stored_row(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, SQLError> {
+    if let ScalarExpr::CompositeRow { binding, .. } = expression {
+        return crate::expr::composites::constructor::retain_argument_types(
+            binding,
+            resolver,
+            resolver.composite_types(),
+        );
+    }
     let ScalarExpr::Cast { expr, ty, .. } = expression else {
         return Ok(false);
     };
@@ -172,6 +179,13 @@ pub(crate) fn bind_stored_row(
                 .iter()
                 .map(|attribute| attribute.number)
                 .collect(),
+            argument_types: Some(
+                descriptor
+                    .attributes
+                    .iter()
+                    .map(|attribute| attribute.ty.clone())
+                    .collect(),
+            ),
         },
     };
     if domain {

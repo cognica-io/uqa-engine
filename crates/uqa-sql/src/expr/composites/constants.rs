@@ -82,6 +82,9 @@ impl CompositeConstantChange<'_> {
 
     fn syntax_node(&self, node: &mut Expr) -> Result<bool, SQLError> {
         match node {
+            Expr::CompositeRow { binding, .. } => {
+                super::constructor::retain_argument_types(binding, self.types, Some(self.catalog))
+            }
             Expr::TypedLiteral {
                 value,
                 ty,
@@ -93,6 +96,9 @@ impl CompositeConstantChange<'_> {
 
     fn scalar_node(&self, node: &mut ScalarExpr) -> Result<bool, SQLError> {
         match node {
+            ScalarExpr::CompositeRow { binding, .. } => {
+                super::constructor::retain_argument_types(binding, self.types, Some(self.catalog))
+            }
             ScalarExpr::TypedLiteral {
                 value,
                 ty,

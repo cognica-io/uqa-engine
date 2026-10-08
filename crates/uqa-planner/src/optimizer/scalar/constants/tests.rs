@@ -12,6 +12,7 @@ fn typed_row_constructors_require_the_live_catalog_even_with_constant_arguments(
         bound_type: None,
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: uqa_sql::ast::CompositeRowBinding {
+            argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
         },

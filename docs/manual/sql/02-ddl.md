@@ -250,6 +250,8 @@ Lookup and ownership precede attribute checks. The original attribute must exist
 
 Prepared field selectors retain their original result type OID. A non-NULL record with a changed field type reports `42804` and its type detail, even when that field contains NULL; a NULL record still yields NULL. A modifier-only change preserves the type OID. Scalar constants already folded into a cached plan retain their values until ordinary plan invalidation. Admitted whole-record constants use the current descriptor without repeating input casts or domain constraints. Equal-width integer, floating-point and OID changes reinterpret the original datum bits; for example, an integer field containing `1065353216` reads as real `1`. Stored view constants follow the same interpretation, and a view-dependent prepared statement whose result type changes reports `0A000`. Rollback restores the original datum, including NaN payload bits. Stored constants retain their original input through committed descriptor changes and persistent reopen: an internal `"char"` field containing `A` reads as boolean true, and changing it back to `"char"` recovers `A`.
 
+A named `ROW(...)` constructor whose arguments are constants can be folded when its plan is built; later descriptor changes read that retained datum. Constructors that still need evaluation keep the originally admitted argument types and report `42804` when a surviving attribute now has a different type OID. The check precedes argument evaluation; removed arguments remain unevaluated.
+
 ```sql execute
 CREATE TYPE measure_reading AS (value integer, unit text);
 ALTER TYPE measure_reading ALTER ATTRIBUTE value TYPE numeric(8,2), ALTER ATTRIBUTE unit TYPE varchar(8) COLLATE "C";

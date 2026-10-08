@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Protect original composite constant metadata from older writers with SQLite record format 61 and redb record format 57; preserve record history, receipts and sequence durability during the upgrade.
 
+- Preserve PostgreSQL named ROW constructor folding and argument-type checks across prepared execution, composite attribute changes and rollback, before evaluating argument effects.
+
 - Name expression-index field selections after the selected attribute instead of an internal dispatch label.
 
 - Resolve PostgreSQL `regcollation` names, numeric OIDs and arrays with the correct input diagnostics, lookup behavior, catalog type metadata and durable stored values.

@@ -26,6 +26,7 @@ fn admitted_scalar_copy_preserves_window_frames_bindings_and_typed_payloads() {
         ScalarExpr::CompositeRow {
             items: vec![ScalarExpr::Literal(Value::Int(1))],
             binding: crate::ast::CompositeRowBinding {
+                argument_types: Some(vec![ColumnType::Integer]),
                 ty: "composite#20001".into(),
                 attributes: vec![1],
             },

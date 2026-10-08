@@ -21,17 +21,9 @@ pub fn evaluate_with_control(
     arguments: usize,
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
-    mut evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
+    evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
-    if binding.attributes.len() != arguments
-        || binding.attributes.iter().any(|number| *number <= 0)
-        || binding.attributes.windows(2).any(|pair| pair[0] >= pair[1])
-    {
-        return Err(SQLError::Internal(
-            "invalid stored composite constructor positions".into(),
-        ));
-    }
     let engine =
         engine.ok_or_else(|| SQLError::Internal("composite constructor has no catalog".into()))?;
     let resolved = engine
@@ -46,6 +38,51 @@ pub fn evaluate_with_control(
         ));
     };
     let descriptor = super::descriptor(engine.composite_types(), reference.oid)?;
+    construct_with_control(binding, arguments, &descriptor, control, evaluate)
+}
+
+/// Form a row using a resolved descriptor, after checking all surviving argument types and before evaluating any argument.
+pub fn construct_with_control(
+    binding: &CompositeRowBinding,
+    arguments: usize,
+    descriptor: &super::CompositeTypeDescriptor,
+    control: &ProductionControl<'_>,
+    mut evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    if binding.attributes.len() != arguments
+        || binding.attributes.iter().any(|number| *number <= 0)
+        || binding.attributes.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(SQLError::Internal(
+            "invalid stored composite constructor positions".into(),
+        ));
+    }
+    if let Some(types) = &binding.argument_types {
+        if types.len() != arguments {
+            return Err(SQLError::Internal(
+                "invalid stored composite constructor types".into(),
+            ));
+        }
+        for attribute in &descriptor.attributes {
+            control.check()?;
+            if let Ok(index) = binding.attributes.binary_search(&attribute.number) {
+                let source = &types[index];
+                if crate::catalog::type_metadata::pg_type_oid(source)
+                    != crate::catalog::type_metadata::pg_type_oid(&attribute.ty)
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42804".into(),
+                        message: format!(
+                            "ROW() column has type {} instead of type {}",
+                            source.display_name(),
+                            attribute.ty.display_name()
+                        ),
+                    });
+                }
+            }
+        }
+    }
     let mut fields = ProductionVec::new(*control);
     fields.reserve(descriptor.attributes.len())?;
     for attribute in &descriptor.attributes {
@@ -64,6 +101,37 @@ pub fn evaluate_with_control(
     control
         .finish(Value::Record(fields), memory)
         .map_err(Into::into)
+}
+
+/// Bind predecessor constructor metadata while its original descriptor is still current. Attribute removal cannot make a discarded argument run again.
+pub fn retain_argument_types(
+    binding: &mut CompositeRowBinding,
+    types: &dyn crate::type_resolution::FunctionTypeResolver,
+    catalog: Option<&dyn super::CompositeTypeCatalog>,
+) -> Result<bool, SQLError> {
+    if binding.argument_types.is_some() {
+        return Ok(false);
+    }
+    let Some(ColumnType::Composite(reference)) = types.resolve_type_name(&binding.ty)? else {
+        return Err(SQLError::Internal(
+            "composite constructor type disappeared".into(),
+        ));
+    };
+    let descriptor = super::descriptor(catalog, reference.oid)?;
+    binding.argument_types = Some(
+        binding
+            .attributes
+            .iter()
+            .map(|number| {
+                descriptor
+                    .attributes
+                    .iter()
+                    .find(|attribute| attribute.number == *number)
+                    .map_or(ColumnType::Integer, |attribute| attribute.ty.clone())
+            })
+            .collect(),
+    );
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -126,6 +194,11 @@ mod tests {
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
         let binding = CompositeRowBinding {
+            argument_types: Some(vec![
+                ColumnType::Integer,
+                ColumnType::Text,
+                ColumnType::Integer,
+            ]),
             ty: "composite#20001".into(),
             attributes: vec![1, 2, 3],
         };
@@ -152,11 +225,35 @@ mod tests {
     }
 
     #[test]
+    fn retained_argument_types_are_checked_before_any_argument_effect() {
+        let control = ProductionControl::uncontrolled();
+        let binding = CompositeRowBinding {
+            ty: "composite#20001".into(),
+            attributes: vec![1, 2, 3],
+            argument_types: Some(vec![
+                ColumnType::Integer,
+                ColumnType::Text,
+                ColumnType::Real,
+            ]),
+        };
+        let error = evaluate_with_control(&binding, 3, Some(&Catalog), &control, |_| {
+            panic!("a type mismatch must precede every argument effect")
+        })
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"));
+        assert_eq!(
+            error.to_string(),
+            "ROW() column has type real instead of type integer"
+        );
+    }
+
+    #[test]
     fn constructor_checks_cancellation_and_admission_before_evaluating_arguments() {
         let budget = MemoryBudget::new(0);
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
         let binding = CompositeRowBinding {
+            argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
         };

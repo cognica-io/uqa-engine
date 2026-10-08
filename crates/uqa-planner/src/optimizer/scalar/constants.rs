@@ -12,6 +12,9 @@ use uqa_sql::{scalar_type, RowSchema, ScalarExpr};
 
 use super::Value;
 
+mod composites;
+pub(super) use composites::fold_composite_constructor;
+
 pub(crate) fn retain_computed_integer(
     expression: ScalarExpr,
     parameter_index: Option<usize>,

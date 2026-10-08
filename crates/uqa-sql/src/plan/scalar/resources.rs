@@ -128,6 +128,17 @@ impl Lowering<'_> {
             Source::Borrowed(binding) => Ok(crate::ast::CompositeRowBinding {
                 ty: self.copy_text(&binding.ty)?,
                 attributes: self.map(binding.attributes.iter(), |_, number| Ok(*number))?,
+                argument_types: binding
+                    .argument_types
+                    .as_ref()
+                    .map(|types| {
+                        self.map(types.iter(), |this, ty| {
+                            Ok(this
+                                .scalar_type_copy(Some(ty))?
+                                .expect("constructor argument type"))
+                        })
+                    })
+                    .transpose()?,
             }),
         }
     }
