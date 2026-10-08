@@ -235,7 +235,7 @@ pub fn bind_routine_parameter_references(
 ) -> Result<(), SQLError> {
     let mut scope = SchemaScope::for_analysis(ctes)?;
     scope.routine_parameters = Some(parameters.clone());
-    scope.binds_routine_identities = false;
+    scope.scalar_binding = super::ScalarBindingMode::References;
     // Parameter lookup must retain the written expression sites for stored-body binding.
     scope.preserve_syntax_shape = true;
     scope.bind_statement_parameters(routines, plan, params, Some(parameters.schema()))

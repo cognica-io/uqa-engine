@@ -20,6 +20,7 @@ fn replaced_or_deallocated_definition_never_receives_a_previous_plans_usage() {
     let original = engine.session.prepared.read()["saved"].logical_plan.clone();
     register(&engine, "SELECT 2").unwrap();
     let update = || PreparedPlanUpdate {
+        composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         reanalyzed: None,
         generic_plan: Some((*original).clone()),
         generic_cost: Some(42.0),

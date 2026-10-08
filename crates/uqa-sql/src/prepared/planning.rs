@@ -25,6 +25,7 @@ pub struct PreparedPlanAnalysis {
 }
 
 pub struct PreparedPlanUpdate {
+    pub composite_inputs: super::composites::CompositeInputs,
     pub reanalyzed: Option<PreparedPlanAnalysis>,
     pub generic_plan: Option<UnifiedPlan>,
     pub generic_cost: Option<f64>,

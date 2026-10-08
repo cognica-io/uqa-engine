@@ -127,3 +127,57 @@ fn serial_lowering_is_exclusive_to_attribute_addition() {
     };
     assert!(matches!(created.attributes[0].ty, ColumnType::Named(_)));
 }
+
+#[test]
+fn removal_resolves_live_attributes_and_has_no_system_columns() {
+    let mut definition = definition();
+    let mut removal = crate::ast::CompositeAttributeRemoval {
+        name: "a".into(),
+        if_exists: false,
+        cascade: false,
+    };
+    assert!(validate_removed_attribute(&definition, &removal).unwrap());
+    definition.attributes[0].dropped = true;
+    for name in ["a", "ctid", "absent"] {
+        removal.name = name.into();
+        let error = validate_removed_attribute(&definition, &removal).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42703"));
+        assert_eq!(
+            error.to_string(),
+            format!("column \"{name}\" of relation \"ca_pair\" does not exist")
+        );
+        removal.if_exists = true;
+        assert!(!validate_removed_attribute(&definition, &removal).unwrap());
+        removal.if_exists = false;
+    }
+}
+
+#[test]
+fn mixed_attribute_lowering_keeps_drop_options_and_order_within_each_group() {
+    let Statement::AlterTypeObject(statement) = crate::compile(
+        "ALTER TYPE ca_pair ADD ATTRIBUTE a text, DROP ATTRIBUTE b CASCADE, ADD ATTRIBUTE c integer, DROP ATTRIBUTE IF EXISTS d RESTRICT"
+    ).unwrap().remove(0) else { panic!("ALTER TYPE") };
+    let AlterTypeObjectAction::AlterAttributes {
+        removals,
+        additions,
+    } = statement.action
+    else {
+        panic!("attribute changes")
+    };
+    assert_eq!(
+        removals
+            .iter()
+            .map(|removal| removal.name.as_str())
+            .collect::<Vec<_>>(),
+        ["b", "d"]
+    );
+    assert_eq!((removals[0].if_exists, removals[0].cascade), (false, true));
+    assert_eq!((removals[1].if_exists, removals[1].cascade), (true, false));
+    assert_eq!(
+        additions
+            .iter()
+            .map(|addition| addition.attribute.name.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "c"]
+    );
+}

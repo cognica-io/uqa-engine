@@ -199,6 +199,24 @@ ALTER TYPE shipping_address ADD ATTRIBUTE country text;
 SELECT id, (destination).city, (destination).country FROM shipments ORDER BY id;
 ```
 
+### Removing composite attributes
+
+```sql
+ALTER TYPE schema_name.type_name DROP ATTRIBUTE attribute_name;
+ALTER TYPE schema_name.type_name DROP ATTRIBUTE IF EXISTS attribute_name CASCADE;
+```
+
+The target and attribute are identifiers. The target must be a standalone composite type owned by the caller. The command returns `ALTER TYPE`; it removes the field from existing non-NULL values, including nested records, domains, arrays, materialized rows and stored constants. Outer NULLs, array bounds and surviving attribute numbers are preserved. A dropped slot remains in `pg_attribute`; re-adding the same name allocates a new number and supplies NULL to old records and retained constructors.
+
+Stored ROW constructors and whole-composite prepared constants follow the current descriptor. Removed constructor arguments are not evaluated. Prepared field selections retain attribute numbers, so re-adding a name cannot reconnect a retained selector to the new attribute. Scalar results already folded into a cached plan stay fixed until ordinary plan invalidation; relation-dependent reanalysis uses the current definition. Existing rows remain present even if removing a field makes formerly distinct unique keys equal, as in PostgreSQL; subsequent inserts and updates enforce uniqueness with the current fields. All value changes, dependency removals and descriptor changes participate in statement, transaction and savepoint rollback and survive persistent reopen.
+
+A missing relation reports `42P01`, a non-owner `42501`, and a different relation kind `42809`. A missing attribute reports `42703`; `IF EXISTS` instead emits a notice and skips that attribute. `RESTRICT` is the default: views, checks, indexes, SQL-standard routine bodies, rules and triggers that select a removed field block deletion with `2BP01`, DETAIL and a CASCADE hint. `CASCADE` removes dependent objects and reports them in notices. References to the whole composite value remain valid. In a mixed statement PostgreSQL processes all drops before additions, preserving written order within each group; any failure rolls back the complete statement.
+
+```sql execute
+ALTER TYPE shipping_address DROP ATTRIBUTE zip;
+SELECT id, destination, (destination).city FROM shipments ORDER BY id;
+```
+
 ## Type lifecycle and privileges
 
 ```sql

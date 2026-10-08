@@ -600,6 +600,7 @@ fn builtin_set_projection_binding_survives_same_named_user_routine_family() {
         builtin: true,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     });
     engine

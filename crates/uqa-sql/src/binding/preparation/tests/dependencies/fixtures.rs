@@ -136,6 +136,7 @@ fn routine_binding(name: &str, argument: ColumnType, identity: u8) -> FunctionBi
         builtin: false,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     }
 }

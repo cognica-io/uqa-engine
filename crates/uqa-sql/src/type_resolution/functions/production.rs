@@ -569,6 +569,9 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             }
             // Scalar inference types field selections with the row schema before builtin dispatch; without it, a field has the base value's composite attribute type.
             FunctionDispatch::FieldSelect => {
+                if let Some(field) = binding.and_then(|binding| binding.composite_field.as_ref()) {
+                    return copy(Some(&field.result_type), control);
+                }
                 let field = match args.get(1) {
                     Some(ScalarExpr::Literal(Value::Str(field))) => field,
                     _ => {

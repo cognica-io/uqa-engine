@@ -8,6 +8,7 @@
 
 mod addresses;
 mod columns;
+mod composite_fields;
 mod constraints;
 mod defaults;
 mod descriptions;
@@ -248,6 +249,8 @@ impl DependencyBuilder<'_> {
         ExpressionReferences {
             context: self.context,
             objects: &self.objects,
+            catalog: self.catalog,
+            resolution: self.resolution,
         }
     }
 

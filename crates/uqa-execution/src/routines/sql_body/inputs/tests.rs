@@ -48,6 +48,7 @@ fn context() -> PreparedDefinitionContext<'static> {
 
 fn definition() -> Result<PreparedDefinition, SQLError> {
     Ok(PreparedDefinition {
+        composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         logical_plan: uqa_sql::plan::UnifiedPlan::lower(uqa_sql::compile("SELECT 1")?.remove(0)),
         parameter_types: vec![],
         result_schema: None,
@@ -176,6 +177,7 @@ fn selected(entry: &PreparedStatementPlan) -> uqa_sql::prepared::planning::Prepa
     uqa_sql::prepared::planning::PreparedPlanSelection {
         plan: plan.clone(),
         update: uqa_sql::prepared::planning::PreparedPlanUpdate {
+            composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
             reanalyzed: None,
             generic_plan: Some(plan),
             generic_cost: Some(1.0),

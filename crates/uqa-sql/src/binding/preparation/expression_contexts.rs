@@ -21,6 +21,23 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ColumnType, SQLError> {
         let target = self.type_name(ty)?;
+        if let ScalarExpr::Row(items) = expr {
+            let mut base = &target;
+            while let ColumnType::Domain { base: nested, .. } = base {
+                base = nested;
+            }
+            if let ColumnType::Composite(reference) = base {
+                let descriptor = crate::expr::composites::descriptor(
+                    self.routines.composite_types(),
+                    reference.oid,
+                )?;
+                crate::type_resolution::composite_rows::validate_width(
+                    base,
+                    items.len(),
+                    descriptor.attributes.len(),
+                )?;
+            }
+        }
         // Parse analysis converts an untyped literal with the enum's input function before any assignment checks.
         if let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expr {
             crate::expr::enums::fold_unknown_literal(self.routines.enum_labels(), value, &target)?;

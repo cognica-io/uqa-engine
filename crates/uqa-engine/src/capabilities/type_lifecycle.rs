@@ -33,11 +33,13 @@ impl Engine {
     pub(crate) fn type_lifecycle_context(&self) -> TypeLifecycleContext<'_> {
         TypeLifecycleContext {
             composite_attributes:
-                uqa_execution::schema::composites::addition::CompositeAdditionContext {
+                uqa_execution::schema::composites::alteration::CompositeAlterationContext {
                     binding: self.table_alter_binding_context(),
                     attributes: self.composite_attribute_context(),
                     types: self,
                     sequences: self.implicit_sequence_context(),
+                    removal: self,
+                    notices: self,
                 },
             creation: self.relation_creation_context(),
             identities: self.catalog_identity_reservation_context(),

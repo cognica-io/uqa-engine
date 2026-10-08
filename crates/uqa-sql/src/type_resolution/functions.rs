@@ -162,6 +162,9 @@ pub(super) fn builtin_function_type_inner(
     if binding.and_then(|binding| binding.dispatch)
         == Some(crate::ast::FunctionDispatch::FieldSelect)
     {
+        if let Some(field) = binding.and_then(|binding| binding.composite_field.as_ref()) {
+            return Ok(Some(field.result_type.clone()));
+        }
         return super::inference::field_selection_type(args, schema, params, resolver, &control)
             .map(|ty| {
                 ty.map(|ty| {

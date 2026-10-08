@@ -390,6 +390,12 @@ pub(super) fn scalar_type_inner_with_control(
             if binding.as_ref().and_then(|binding| binding.dispatch)
                 == Some(crate::ast::FunctionDispatch::FieldSelect)
             {
+                if let Some(field) = binding
+                    .as_ref()
+                    .and_then(|binding| binding.composite_field.as_ref())
+                {
+                    return copy_type(Some(&field.result_type), control);
+                }
                 return field_selection_type(args, schema, params, resolver, control);
             }
             if let Some(filter) = filter {

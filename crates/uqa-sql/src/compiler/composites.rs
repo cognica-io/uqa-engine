@@ -15,21 +15,31 @@ use super::{
 };
 use crate::ast::{
     AlterTypeObject, AlterTypeObjectAction, CompositeAttributeAddition,
-    CompositeAttributeDefinition, CreateCompositeType, Statement, TypeObjectKind,
+    CompositeAttributeDefinition, CompositeAttributeRemoval, CreateCompositeType, Statement,
+    TypeObjectKind,
 };
 
-pub(super) fn compile_composite_additions(statement: &AlterTableStmt) -> Result<Statement> {
+pub(super) fn compile_composite_attributes(statement: &AlterTableStmt) -> Result<Statement> {
     let relation = statement
         .relation
         .as_ref()
         .ok_or_else(|| SQLError::Internal("composite attribute change has no relation".into()))?;
     let mut attributes = Vec::new();
+    let mut removals = Vec::new();
     for node in &statement.cmds {
         let Some(NodeEnum::AlterTableCmd(command)) = node.node.as_ref() else {
             return Err(SQLError::Internal(
                 "composite attribute change has no command".into(),
             ));
         };
+        if command.subtype() == AlterTableType::AtDropColumn {
+            removals.push(CompositeAttributeRemoval {
+                name: command.name.clone(),
+                if_exists: command.missing_ok,
+                cascade: command.behavior() == pg_query::protobuf::DropBehavior::DropCascade,
+            });
+            continue;
+        }
         if command.subtype() != AlterTableType::AtAddColumn {
             return Err(SQLError::Unsupported(format!(
                 "ALTER TYPE attribute action {:?} is not supported",
@@ -59,7 +69,14 @@ pub(super) fn compile_composite_additions(statement: &AlterTableStmt) -> Result<
     Ok(Statement::AlterTypeObject(AlterTypeObject {
         kind: TypeObjectKind::Type,
         name: range_var_name(relation),
-        action: AlterTypeObjectAction::AddAttributes(attributes),
+        action: if removals.is_empty() {
+            AlterTypeObjectAction::AddAttributes(attributes)
+        } else {
+            AlterTypeObjectAction::AlterAttributes {
+                removals,
+                additions: attributes,
+            }
+        },
     }))
 }
 

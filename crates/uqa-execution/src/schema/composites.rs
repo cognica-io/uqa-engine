@@ -23,7 +23,8 @@ use uqa_sql::{
     SQLError,
 };
 
-pub mod addition;
+mod addition;
+pub mod alteration;
 pub mod attributes;
 pub mod catalog_values;
 pub mod values;

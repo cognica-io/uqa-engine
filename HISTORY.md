@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Remove composite attributes with PostgreSQL DROP ATTRIBUTE semantics, including mixed ADD/DROP order, stable surviving field identities, retained constructor effects, nested stored values and atomic rollback across all storage providers.
+
+### Fixed
+
+- Record composite field dependencies in views, checks, indexes, SQL-standard routines, rules and triggers so RESTRICT protects their definitions and CASCADE removes dependent objects, including definitions restored from existing databases.
+
+- Preserve prepared composite values, ROW constructors and field identities across attribute removal, re-addition and rollback, including PostgreSQL cached scalar results and current-catalog reanalysis.
+
 ## [0.5.2] - 2026-10-08
 
 ### Fixed

@@ -41,6 +41,14 @@ pub struct CompositeAttributeAddition {
     pub declaration: super::ColumnDeclaration,
 }
 
+/// One DROP ATTRIBUTE action; missing-name handling and dependency behavior remain execution-time decisions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompositeAttributeRemoval {
+    pub name: String,
+    pub if_exists: bool,
+    pub cascade: bool,
+}
+
 /// Creation-time positional binding of a stored ROW constructor. Type references use the same canonical-name lifecycle as stored casts; attribute numbers survive additions and dropped slots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

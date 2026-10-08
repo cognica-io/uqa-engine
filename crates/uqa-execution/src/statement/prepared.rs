@@ -66,6 +66,7 @@ pub fn register_plan(
     context.registry.write_definitions().insert(
         name,
         PreparedStatementPlan {
+            composite_inputs: definition.composite_inputs,
             source_plan,
             logical_plan: Arc::new(definition.logical_plan),
             needs_analysis: false,

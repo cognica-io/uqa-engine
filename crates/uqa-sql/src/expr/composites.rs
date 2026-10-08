@@ -60,14 +60,13 @@ pub fn descriptor(
     catalog: Option<&dyn CompositeTypeCatalog>,
     type_oid: u32,
 ) -> Result<Arc<CompositeTypeDescriptor>> {
+    let catalog = catalog
+        .ok_or_else(|| SQLError::Internal("composite type catalog is unavailable".into()))?;
     catalog
-        .map(|catalog| catalog.composite_type(type_oid))
-        .transpose()?
-        .flatten()
-        .ok_or_else(|| {
-            SQLError::Internal(format!(
-                "composite type OID {type_oid} is not available in the statement catalog"
-            ))
+        .composite_type(type_oid)?
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("type with OID {type_oid} does not exist"),
         })
 }
 

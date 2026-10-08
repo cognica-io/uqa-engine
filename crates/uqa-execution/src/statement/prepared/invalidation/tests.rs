@@ -79,6 +79,7 @@ fn cached_entry(executable: &str) -> PreparedStatementPlan {
     let lower = |sql: &str| UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
     let source = Arc::new(lower("SELECT lower('HELLO') AS value"));
     PreparedStatementPlan {
+        composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         source_plan: Arc::clone(&source),
         logical_plan: source,
         needs_analysis: false,
@@ -132,6 +133,7 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
                     object_id: None,
                     dispatch: None,
                     invocation: None,
+                    composite_field: None,
                     resolution_error: None,
                 });
             }

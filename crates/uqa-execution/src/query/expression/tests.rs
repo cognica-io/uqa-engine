@@ -141,6 +141,7 @@ fn binding(builtin: bool) -> FunctionBinding {
         builtin,
         dispatch: None,
         invocation: None,
+        composite_field: None,
         resolution_error: None,
     }
 }

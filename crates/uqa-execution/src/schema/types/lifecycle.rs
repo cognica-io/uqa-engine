@@ -26,11 +26,20 @@ pub fn alter_type_object(
     context: &TypeLifecycleContext<'_>,
     statement: AlterTypeObject,
 ) -> Result<(), SQLError> {
-    if let AlterTypeObjectAction::AddAttributes(attributes) = &statement.action {
-        return crate::schema::composites::addition::add_attributes(
+    let changes = match &statement.action {
+        AlterTypeObjectAction::AddAttributes(additions) => Some((&[][..], additions.as_slice())),
+        AlterTypeObjectAction::AlterAttributes {
+            removals,
+            additions,
+        } => Some((removals.as_slice(), additions.as_slice())),
+        _ => None,
+    };
+    if let Some((removals, additions)) = changes {
+        return crate::schema::composites::alteration::alter_attributes(
             &context.composite_attributes,
             &statement.name,
-            attributes,
+            removals,
+            additions,
         );
     }
     context.writer.prepare_writer()?;
@@ -44,7 +53,7 @@ pub fn alter_type_object(
         AlterTypeObjectAction::OwnerTo(owner) => {
             set_owner(context, statement.kind, &statement.name, &owner)
         }
-        AlterTypeObjectAction::AddAttributes(_) => {
+        AlterTypeObjectAction::AddAttributes(_) | AlterTypeObjectAction::AlterAttributes { .. } => {
             unreachable!("attribute changes bind before writer admission")
         }
     }

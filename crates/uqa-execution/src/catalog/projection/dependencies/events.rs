@@ -219,12 +219,29 @@ impl DependencyBuilder<'_> {
             }
             let expressions = self.expressions();
             let mut types = Vec::new();
+            let table = self.relation_object(relation)?;
+            let transitions = super::composite_fields::transition_schema(&table.columns);
             for action in &definition.actions {
+                for address in
+                    uqa_sql::binding::composite_dependencies::statement_composite_dependencies(
+                        self.context.routines,
+                        action,
+                        &self.field_binding_context(),
+                        &transitions,
+                    )?
+                {
+                    references.add(address);
+                }
                 types.extend(uqa_sql::catalog::stored_ast::stored_statement_type_names(
                     action,
                 )?);
             }
             if let Some(condition) = &definition.condition {
+                expressions.collect_composite_fields(
+                    condition,
+                    ColumnScope::Trigger(relation, table),
+                    &mut references,
+                )?;
                 types.extend(uqa_sql::catalog::stored_ast::stored_expression_type_names(
                     condition,
                 )?);

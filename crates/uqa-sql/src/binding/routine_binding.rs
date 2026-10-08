@@ -620,8 +620,14 @@ impl SchemaScope {
         self.canonicalize_stored_outer_columns(expression, schema);
         self.canonicalize_routine_parameters(expression, schema);
         self.resolve_variable_sites(expression, schema);
-        if !self.binds_routine_identities {
-            return Ok(());
+        match self.scalar_binding {
+            super::ScalarBindingMode::References => return Ok(()),
+            super::ScalarBindingMode::CompositeInputs => {
+                return self.retain_composite_inputs_in_scope(
+                    engine, expression, schema, subqueries, params,
+                )
+            }
+            super::ScalarBindingMode::Stored => {}
         }
         let mut failure = None;
         crate::plan::rewrite_scalar_expression(expression, &mut |expression| {
@@ -685,7 +691,8 @@ impl SchemaScope {
             }
         });
         failure.map_or(Ok(()), Err)?;
-        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)
+        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)?;
+        self.record_composite_dependencies(engine, expression, schema, subqueries, params)
     }
 
     /// Name user-defined types by OID identity and keep the enum constants that binding coerces from `unknown` literals by label identity, as `PostgreSQL` stores type and label OIDs in analyzed expressions.

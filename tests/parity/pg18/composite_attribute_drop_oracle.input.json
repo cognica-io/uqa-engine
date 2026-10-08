@@ -1,0 +1,624 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "missing_relation",
+      "sql": "ALTER TYPE cd_missing DROP ATTRIBUTE IF EXISTS x"
+    },
+    {
+      "id": "scalar_type",
+      "sql": "ALTER TYPE integer DROP ATTRIBUTE x"
+    },
+    {
+      "id": "create",
+      "sql": "CREATE TYPE cd_pair AS (a integer,b text,c bigint)"
+    },
+    {
+      "id": "rows",
+      "sql": "CREATE TABLE cd_rows(id integer PRIMARY KEY,v cd_pair); INSERT INTO cd_rows VALUES(1,(1,'x',3)),(2,NULL),(3,(NULL,NULL,NULL))"
+    },
+    {
+      "id": "whole_view",
+      "sql": "CREATE VIEW cd_whole AS SELECT v FROM cd_rows"
+    },
+    {
+      "id": "missing_attribute",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE absent"
+    },
+    {
+      "id": "missing_notice",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE IF EXISTS absent"
+    },
+    {
+      "id": "system_attribute",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE ctid"
+    },
+    {
+      "id": "drop",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE b"
+    },
+    {
+      "id": "read",
+      "sql": "SELECT id,v,(v).a,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "whole_view_read",
+      "sql": "SELECT v FROM cd_whole ORDER BY v"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT a.attnum,a.attname,a.attisdropped,a.atttypid FROM pg_attribute a JOIN pg_type t ON t.typrelid=a.attrelid WHERE t.typname='cd_pair' AND a.attnum>0 ORDER BY a.attnum"
+    },
+    {
+      "id": "drop_again",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE b"
+    },
+    {
+      "id": "drop_again_notice",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE IF EXISTS b"
+    },
+    {
+      "id": "readd",
+      "sql": "ALTER TYPE cd_pair ADD ATTRIBUTE b text"
+    },
+    {
+      "id": "readd_read",
+      "sql": "SELECT id,v,(v).b FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "rollback",
+      "sql": "BEGIN; ALTER TYPE cd_pair DROP ATTRIBUTE c; ROLLBACK"
+    },
+    {
+      "id": "rollback_read",
+      "sql": "SELECT id,v,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "mixed_failed",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE c, ADD ATTRIBUTE bad numeric(0)"
+    },
+    {
+      "id": "mixed_failed_read",
+      "sql": "SELECT id,v,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "add_drop_order",
+      "sql": "ALTER TYPE cd_pair ADD ATTRIBUTE a text, DROP ATTRIBUTE a"
+    },
+    {
+      "id": "add_drop_read",
+      "sql": "SELECT id,v,(v).a FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "add_missing_drop",
+      "sql": "ALTER TYPE cd_pair ADD ATTRIBUTE absent text, DROP ATTRIBUTE absent"
+    },
+    {
+      "id": "double_drop_atomic",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE c, DROP ATTRIBUTE c"
+    },
+    {
+      "id": "double_drop_read",
+      "sql": "SELECT id,v,(v).c FROM cd_rows ORDER BY id"
+    },
+    {
+      "id": "double_drop_notice",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE c, DROP ATTRIBUTE IF EXISTS c"
+    },
+    {
+      "id": "notice_before_error",
+      "sql": "ALTER TYPE cd_pair DROP ATTRIBUTE IF EXISTS absent, ADD ATTRIBUTE bad numeric(0)"
+    },
+    {
+      "id": "ordinary_table",
+      "sql": "ALTER TYPE cd_rows DROP ATTRIBUTE v"
+    },
+    {
+      "id": "ordinary_view",
+      "sql": "ALTER TYPE cd_whole DROP ATTRIBUTE v"
+    },
+    {
+      "id": "dependency_create",
+      "sql": "CREATE TYPE cd_dep AS(a integer,b text); CREATE TABLE cd_dep_rows(v cd_dep); CREATE VIEW cd_field AS SELECT (v).b AS b FROM cd_dep_rows"
+    },
+    {
+      "id": "dependency_restrict",
+      "sql": "ALTER TYPE cd_dep DROP ATTRIBUTE b"
+    },
+    {
+      "id": "dependency_cascade",
+      "sql": "ALTER TYPE cd_dep DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "dependency_removed",
+      "sql": "SELECT to_regclass('cd_field'), '(2)'::cd_dep"
+    },
+    {
+      "id": "constant_dependency",
+      "sql": "CREATE TYPE cd_const AS(a integer,b text); CREATE VIEW cd_const_field AS SELECT ('(1,x)'::cd_const).b AS b"
+    },
+    {
+      "id": "constant_restrict",
+      "sql": "ALTER TYPE cd_const DROP ATTRIBUTE b"
+    },
+    {
+      "id": "constant_cascade",
+      "sql": "ALTER TYPE cd_const DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "constructor",
+      "sql": "CREATE SEQUENCE cd_calls; CREATE TYPE cd_effect AS(a integer,b bigint); CREATE VIEW cd_constructor AS SELECT ROW(1,nextval('cd_calls'))::cd_effect AS v"
+    },
+    {
+      "id": "constructor_drop",
+      "sql": "ALTER TYPE cd_effect DROP ATTRIBUTE b"
+    },
+    {
+      "id": "constructor_read",
+      "sql": "SELECT * FROM cd_constructor; SELECT is_called FROM cd_calls"
+    },
+    {
+      "id": "constructor_readd",
+      "sql": "ALTER TYPE cd_effect ADD ATTRIBUTE b bigint"
+    },
+    {
+      "id": "constructor_readd_read",
+      "sql": "SELECT * FROM cd_constructor; SELECT is_called FROM cd_calls"
+    },
+    {
+      "id": "nested",
+      "sql": "CREATE TYPE cd_inner AS(a integer,b text); CREATE DOMAIN cd_domain AS cd_inner; CREATE TYPE cd_outer AS(v cd_domain,items cd_inner[]); CREATE TABLE cd_nested(id integer,v cd_outer,items cd_inner[]); INSERT INTO cd_nested VALUES(1,ROW(ROW(7,'seven')::cd_inner,ARRAY[ROW(8,'eight')::cd_inner,NULL])::cd_outer,ARRAY[ROW(9,'nine')::cd_inner,NULL]),(2,NULL,NULL)"
+    },
+    {
+      "id": "materialized",
+      "sql": "CREATE MATERIALIZED VIEW cd_materialized AS SELECT id,v,items FROM cd_nested"
+    },
+    {
+      "id": "nested_drop",
+      "sql": "ALTER TYPE cd_inner DROP ATTRIBUTE b"
+    },
+    {
+      "id": "nested_read",
+      "sql": "SELECT id,v,items FROM cd_nested ORDER BY id"
+    },
+    {
+      "id": "materialized_read",
+      "sql": "SELECT id,v,items FROM cd_materialized ORDER BY id"
+    },
+    {
+      "id": "stored_default",
+      "sql": "CREATE TYPE cd_default AS(a integer,b text); CREATE TABLE cd_defaults(v cd_default DEFAULT '(5,five)'::cd_default)"
+    },
+    {
+      "id": "default_drop",
+      "sql": "ALTER TYPE cd_default DROP ATTRIBUTE b"
+    },
+    {
+      "id": "default_insert",
+      "sql": "INSERT INTO cd_defaults DEFAULT VALUES RETURNING v"
+    },
+    {
+      "id": "check_create",
+      "sql": "CREATE TYPE cd_check AS(a integer,b integer); CREATE TABLE cd_checks(v cd_check CHECK ((v).b>0))"
+    },
+    {
+      "id": "check_restrict",
+      "sql": "ALTER TYPE cd_check DROP ATTRIBUTE b"
+    },
+    {
+      "id": "check_cascade",
+      "sql": "ALTER TYPE cd_check DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "check_removed",
+      "sql": "INSERT INTO cd_checks VALUES ('(2)'); SELECT v FROM cd_checks"
+    },
+    {
+      "id": "unique_create",
+      "sql": "CREATE TYPE cd_key AS(a integer,b integer); CREATE TABLE cd_keys(v cd_key UNIQUE); INSERT INTO cd_keys VALUES('(1,1)'),('(1,2)')"
+    },
+    {
+      "id": "unique_drop",
+      "sql": "ALTER TYPE cd_key DROP ATTRIBUTE b"
+    },
+    {
+      "id": "unique_read",
+      "sql": "SELECT v FROM cd_keys ORDER BY v"
+    },
+    {
+      "id": "unique_conflict",
+      "sql": "INSERT INTO cd_keys VALUES ('(1)')"
+    },
+    {
+      "id": "empty_create",
+      "sql": "CREATE TYPE cd_empty AS(a integer); CREATE TABLE cd_empties(v cd_empty); INSERT INTO cd_empties VALUES('(1)'),(NULL)"
+    },
+    {
+      "id": "empty_drop",
+      "sql": "ALTER TYPE cd_empty DROP ATTRIBUTE a"
+    },
+    {
+      "id": "empty_read",
+      "sql": "SELECT v FROM cd_empties ORDER BY v"
+    },
+    {
+      "id": "all_drop",
+      "sql": "CREATE TYPE cd_all AS(a integer,b text); ALTER TYPE cd_all DROP ATTRIBUTE a,DROP ATTRIBUTE b; SELECT ROW()::cd_all"
+    },
+    {
+      "id": "scoped_create",
+      "sql": "CREATE TYPE cd_scope AS(a integer,b text); CREATE TABLE cd_scope_rows(v cd_scope); CREATE VIEW cd_scope_view AS WITH data AS (SELECT v AS x FROM cd_scope_rows) SELECT (q.x).b AS b FROM (SELECT x FROM data) q"
+    },
+    {
+      "id": "scoped_restrict",
+      "sql": "ALTER TYPE cd_scope DROP ATTRIBUTE b"
+    },
+    {
+      "id": "scoped_cascade",
+      "sql": "ALTER TYPE cd_scope DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "array_field_create",
+      "sql": "CREATE TYPE cd_array AS(a integer,b text); CREATE TABLE cd_array_rows(v cd_array[]); CREATE VIEW cd_array_view AS SELECT (v[1]).b AS b FROM cd_array_rows"
+    },
+    {
+      "id": "array_field_restrict",
+      "sql": "ALTER TYPE cd_array DROP ATTRIBUTE b"
+    },
+    {
+      "id": "array_field_cascade",
+      "sql": "ALTER TYPE cd_array DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "domain_check_create",
+      "sql": "CREATE TYPE cd_domain_base AS(a integer,b integer); CREATE DOMAIN cd_checked AS cd_domain_base CHECK ((VALUE).b>0)"
+    },
+    {
+      "id": "domain_check_restrict",
+      "sql": "ALTER TYPE cd_domain_base DROP ATTRIBUTE b"
+    },
+    {
+      "id": "domain_check_cascade",
+      "sql": "ALTER TYPE cd_domain_base DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "domain_check_removed",
+      "sql": "SELECT '(2)'::cd_checked"
+    },
+    {
+      "id": "index_create",
+      "sql": "CREATE TYPE cd_index AS(a integer,b text); CREATE TABLE cd_index_rows(v cd_index); CREATE INDEX cd_field_index ON cd_index_rows(((v).b))"
+    },
+    {
+      "id": "index_restrict",
+      "sql": "ALTER TYPE cd_index DROP ATTRIBUTE b"
+    },
+    {
+      "id": "index_cascade",
+      "sql": "ALTER TYPE cd_index DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "routine_create",
+      "sql": "CREATE TYPE cd_routine AS(a integer,b text); CREATE FUNCTION cd_pick(v cd_routine) RETURNS text LANGUAGE SQL RETURN (v).b"
+    },
+    {
+      "id": "routine_restrict",
+      "sql": "ALTER TYPE cd_routine DROP ATTRIBUTE b"
+    },
+    {
+      "id": "routine_cascade",
+      "sql": "ALTER TYPE cd_routine DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "routine_removed",
+      "sql": "SELECT count(*) FROM pg_proc WHERE proname='cd_pick'"
+    },
+    {
+      "id": "multiple_dependency",
+      "sql": "CREATE TYPE cd_multiple AS(a integer,b text); CREATE VIEW cd_multi_view AS SELECT ('(1,x)'::cd_multiple).a AS a,('(1,x)'::cd_multiple).b AS b"
+    },
+    {
+      "id": "multiple_restrict",
+      "sql": "ALTER TYPE cd_multiple DROP ATTRIBUTE a, DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "multiple_cascade",
+      "sql": "ALTER TYPE cd_multiple DROP ATTRIBUTE a CASCADE, DROP ATTRIBUTE b"
+    },
+    {
+      "id": "persist_dependency_create",
+      "sql": "CREATE TYPE cd_persist AS(a integer,b text); CREATE TABLE cd_persist_rows(v cd_persist); CREATE VIEW cd_persist_view AS SELECT (v).b AS b FROM cd_persist_rows"
+    },
+    {
+      "id": "rule_create",
+      "sql": "CREATE TYPE cd_rule_type AS(a integer,b integer); CREATE TABLE cd_rule_rows(v cd_rule_type); CREATE TABLE cd_rule_log(n integer); CREATE RULE cd_rule AS ON INSERT TO cd_rule_rows DO ALSO INSERT INTO cd_rule_log VALUES ((NEW.v).b)"
+    },
+    {
+      "id": "rule_restrict",
+      "sql": "ALTER TYPE cd_rule_type DROP ATTRIBUTE b"
+    },
+    {
+      "id": "rule_cascade",
+      "sql": "ALTER TYPE cd_rule_type DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "rule_removed",
+      "sql": "INSERT INTO cd_rule_rows VALUES('(3)'); SELECT count(*) FROM cd_rule_log"
+    },
+    {
+      "id": "trigger_create",
+      "sql": "CREATE TYPE cd_trigger_type AS(a integer,b integer); CREATE TABLE cd_trigger_rows(v cd_trigger_type); CREATE FUNCTION cd_trigger_func() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'; CREATE TRIGGER cd_trigger BEFORE INSERT ON cd_trigger_rows FOR EACH ROW WHEN ((NEW.v).b>0) EXECUTE FUNCTION cd_trigger_func()"
+    },
+    {
+      "id": "trigger_restrict",
+      "sql": "ALTER TYPE cd_trigger_type DROP ATTRIBUTE b"
+    },
+    {
+      "id": "trigger_cascade",
+      "sql": "ALTER TYPE cd_trigger_type DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "prepared_create",
+      "sql": "CREATE TYPE cd_prepared AS(a integer,b text); PREPARE cd_literal AS SELECT '(1,x)'::cd_prepared AS v; PREPARE cd_row AS SELECT ROW(2,'y')::cd_prepared AS v"
+    },
+    {
+      "id": "prepared_drop",
+      "sql": "ALTER TYPE cd_prepared DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_read",
+      "sql": "EXECUTE cd_literal; EXECUTE cd_row"
+    },
+    {
+      "id": "prepared_readd",
+      "sql": "ALTER TYPE cd_prepared ADD ATTRIBUTE b text"
+    },
+    {
+      "id": "prepared_readd_read",
+      "sql": "EXECUTE cd_literal; EXECUTE cd_row"
+    },
+    {
+      "id": "cascade_rollback_create",
+      "sql": "CREATE TYPE cd_atomic AS(a integer,b text); CREATE TABLE cd_atomic_rows(v cd_atomic); CREATE VIEW cd_atomic_view AS SELECT (v).b AS b FROM cd_atomic_rows"
+    },
+    {
+      "id": "cascade_rollback",
+      "sql": "ALTER TYPE cd_atomic DROP ATTRIBUTE b CASCADE, ADD ATTRIBUTE bad numeric(0)"
+    },
+    {
+      "id": "cascade_restored",
+      "sql": "SELECT to_regclass('cd_atomic_view'), '(7,seven)'::cd_atomic"
+    },
+    {
+      "id": "predicate_create",
+      "sql": "CREATE TYPE cd_predicate AS(a integer,b integer); CREATE TABLE cd_predicate_rows(v cd_predicate); CREATE VIEW cd_predicate_view AS SELECT (v).a FROM cd_predicate_rows WHERE (v).b > 0"
+    },
+    {
+      "id": "predicate_restrict",
+      "sql": "ALTER TYPE cd_predicate DROP ATTRIBUTE b"
+    },
+    {
+      "id": "predicate_cascade",
+      "sql": "ALTER TYPE cd_predicate DROP ATTRIBUTE b CASCADE"
+    },
+    {
+      "id": "prepared_unplanned_create",
+      "sql": "CREATE TYPE cd_unplanned AS(a integer,b text); PREPARE cd_unplanned_q AS SELECT ('(1,x)'::cd_unplanned).b AS b"
+    },
+    {
+      "id": "prepared_unplanned_drop",
+      "sql": "ALTER TYPE cd_unplanned DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_unplanned_read",
+      "sql": "EXECUTE cd_unplanned_q"
+    },
+    {
+      "id": "prepared_unplanned_readd",
+      "sql": "ALTER TYPE cd_unplanned ADD ATTRIBUTE b text"
+    },
+    {
+      "id": "prepared_unplanned_readded",
+      "sql": "EXECUTE cd_unplanned_q"
+    },
+    {
+      "id": "prepared_mixed_create",
+      "sql": "CREATE TYPE cd_pre_mixed AS(a integer,b text); PREPARE cd_pre_mixed_q AS SELECT '(1,x)'::cd_pre_mixed AS v, ('(2,y)'::cd_pre_mixed).b AS b"
+    },
+    {
+      "id": "prepared_mixed_first",
+      "sql": "EXECUTE cd_pre_mixed_q"
+    },
+    {
+      "id": "prepared_mixed_drop",
+      "sql": "ALTER TYPE cd_pre_mixed DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_mixed_read",
+      "sql": "EXECUTE cd_pre_mixed_q"
+    },
+    {
+      "id": "prepared_mixed_readd",
+      "sql": "ALTER TYPE cd_pre_mixed ADD ATTRIBUTE b text"
+    },
+    {
+      "id": "prepared_mixed_readded",
+      "sql": "EXECUTE cd_pre_mixed_q"
+    },
+    {
+      "id": "prepared_field_create",
+      "sql": "CREATE TYPE cd_pre_field AS(a integer,b text); PREPARE cd_pre_field_q AS SELECT ('(1,x)'::cd_pre_field).b AS b"
+    },
+    {
+      "id": "prepared_field_first",
+      "sql": "EXECUTE cd_pre_field_q"
+    },
+    {
+      "id": "prepared_field_drop",
+      "sql": "ALTER TYPE cd_pre_field DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_field_dropped",
+      "sql": "EXECUTE cd_pre_field_q"
+    },
+    {
+      "id": "prepared_field_readd",
+      "sql": "ALTER TYPE cd_pre_field ADD ATTRIBUTE b text"
+    },
+    {
+      "id": "prepared_field_readded",
+      "sql": "EXECUTE cd_pre_field_q"
+    },
+    {
+      "id": "prepared_effect_create",
+      "sql": "CREATE TYPE cd_pre_eff AS(a bigint,b integer); CREATE SEQUENCE cd_pre_calls; PREPARE cd_pre_eff_q AS SELECT (ROW(nextval('cd_pre_calls'),2)::cd_pre_eff).b AS b"
+    },
+    {
+      "id": "prepared_effect_stable_create",
+      "sql": "CREATE TYPE cd_pre_stable AS(a bigint,b integer); CREATE SEQUENCE cd_pre_stable_calls"
+    },
+    {
+      "id": "prepared_effect_stable_prepare",
+      "sql": "PREPARE cd_pre_stable_q AS SELECT (ROW(nextval('cd_pre_stable_calls'),2)::cd_pre_stable).b AS b"
+    },
+    {
+      "id": "prepared_effect_stable_drop",
+      "sql": "ALTER TYPE cd_pre_stable DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_effect_stable_read",
+      "sql": "EXECUTE cd_pre_stable_q; SELECT is_called FROM cd_pre_stable_calls"
+    },
+    {
+      "id": "prepared_effect_drop",
+      "sql": "ALTER TYPE cd_pre_eff DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_effect_read",
+      "sql": "EXECUTE cd_pre_eff_q; SELECT is_called FROM cd_pre_calls"
+    },
+    {
+      "id": "prepared_rollback_create",
+      "sql": "CREATE TYPE cd_pre_undo AS(a integer,b text); PREPARE cd_pre_undo_q AS SELECT '(3,undo)'::cd_pre_undo AS v, ('(4,field)'::cd_pre_undo).b AS b"
+    },
+    {
+      "id": "prepared_rollback_begin",
+      "sql": "BEGIN; ALTER TYPE cd_pre_undo DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_rollback_dropped",
+      "sql": "EXECUTE cd_pre_undo_q"
+    },
+    {
+      "id": "prepared_rollback_end",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "prepared_rollback_read",
+      "sql": "EXECUTE cd_pre_undo_q"
+    },
+    {
+      "id": "prepared_table_create",
+      "sql": "CREATE TYPE cd_pre_table AS(a integer,b text); CREATE TABLE cd_pre_table_rows(v cd_pre_table); INSERT INTO cd_pre_table_rows VALUES('(1,old)'); PREPARE cd_pre_table_q AS SELECT (v).b AS b FROM cd_pre_table_rows"
+    },
+    {
+      "id": "prepared_table_drop",
+      "sql": "ALTER TYPE cd_pre_table DROP ATTRIBUTE b"
+    },
+    {
+      "id": "prepared_table_read",
+      "sql": "EXECUTE cd_pre_table_q"
+    },
+    {
+      "id": "prepared_table_readd",
+      "sql": "ALTER TYPE cd_pre_table ADD ATTRIBUTE b text; INSERT INTO cd_pre_table_rows VALUES('(2,new)')"
+    },
+    {
+      "id": "prepared_table_readded",
+      "sql": "EXECUTE cd_pre_table_q"
+    },
+    {
+      "id": "prepared_removed_type_create",
+      "sql": "CREATE TYPE cd_removed_type AS(a integer,b text); PREPARE cd_removed_type_q AS SELECT ('(1,x)'::cd_removed_type).b AS b"
+    },
+    {
+      "id": "prepared_removed_type_first",
+      "sql": "EXECUTE cd_removed_type_q"
+    },
+    {
+      "id": "prepared_removed_type_drop",
+      "sql": "DROP TYPE cd_removed_type"
+    },
+    {
+      "id": "prepared_removed_type_read",
+      "sql": "EXECUTE cd_removed_type_q"
+    },
+    {
+      "id": "prepared_nested_type_create",
+      "sql": "CREATE TYPE cd_pre_inner AS(a integer); CREATE TYPE cd_pre_outer AS(a integer, v cd_pre_inner); PREPARE cd_pre_outer_q AS SELECT ROW(1, ROW(2)::cd_pre_inner)::cd_pre_outer AS v"
+    },
+    {
+      "id": "prepared_nested_type_drop",
+      "sql": "ALTER TYPE cd_pre_outer DROP ATTRIBUTE v; DROP TYPE cd_pre_inner"
+    },
+    {
+      "id": "prepared_nested_type_read",
+      "sql": "DO $$ BEGIN EXECUTE 'EXECUTE cd_pre_outer_q'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE '%, %', SQLSTATE, regexp_replace(SQLERRM, '[0-9]+', '<oid>', 'g'); END $$"
+    },
+    {
+      "id": "owner_create",
+      "sql": "CREATE ROLE cd_other; CREATE TYPE cd_owned AS(a integer); SET ROLE cd_other"
+    },
+    {
+      "id": "owner_missing",
+      "sql": "ALTER TYPE cd_owned DROP ATTRIBUTE IF EXISTS absent"
+    },
+    {
+      "id": "owner_reset",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "persist_restrict",
+      "sql": "ALTER TYPE cd_persist DROP ATTRIBUTE b",
+      "reopen": true
+    },
+    {
+      "id": "persist_cascade",
+      "sql": "ALTER TYPE cd_persist DROP ATTRIBUTE b CASCADE",
+      "reopen": true
+    },
+    {
+      "id": "persist_rows",
+      "sql": "SELECT id,v FROM cd_rows ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "persist_constructor",
+      "sql": "SELECT * FROM cd_constructor; SELECT is_called FROM cd_calls",
+      "reopen": true
+    },
+    {
+      "id": "persist_nested",
+      "sql": "SELECT id,v,items FROM cd_nested ORDER BY id; SELECT id,v,items FROM cd_materialized ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "persist_default",
+      "sql": "INSERT INTO cd_defaults DEFAULT VALUES RETURNING v",
+      "reopen": true
+    },
+    {
+      "id": "persist_unique",
+      "sql": "SELECT v FROM cd_keys ORDER BY v; INSERT INTO cd_keys VALUES ('(1)')",
+      "reopen": true
+    },
+    {
+      "id": "persist_empty",
+      "sql": "SELECT v FROM cd_empties ORDER BY v",
+      "reopen": true
+    }
+  ]
+}

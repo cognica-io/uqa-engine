@@ -18,8 +18,10 @@ use uqa_sql::SQLError;
 /// The columns an expression may name.
 #[derive(Clone, Copy)]
 pub(super) enum ColumnScope<'a> {
-    /// No columns: domain constraints and defaults, and routine parameter defaults.
+    /// No columns: domain defaults and routine parameter defaults.
     None,
+    /// VALUE in a domain constraint has the domain's base type.
+    Domain(&'a ColumnType),
     /// The columns of one relation, as constraints, defaults, generation expressions, index keys and predicates, and partition keys name them.
     Relation(u32, &'a RelationObject),
     /// The columns of a trigger's relation, which its `WHEN` condition names through `OLD` and `NEW`.
@@ -30,6 +32,8 @@ pub(super) enum ColumnScope<'a> {
 pub(super) struct ExpressionReferences<'a> {
     pub context: &'a CatalogContext<'a>,
     pub objects: &'a CatalogObjects,
+    pub catalog: &'a crate::catalog::CatalogReadView,
+    pub resolution: &'a crate::catalog::RelationNameResolution,
 }
 
 #[derive(Default)]
@@ -38,6 +42,7 @@ struct Found {
     types: Vec<String>,
     routines: Vec<FunctionBinding>,
     constants: Vec<(String, i64)>,
+    composite_field: bool,
 }
 
 impl ExpressionReferences<'_> {
@@ -59,6 +64,12 @@ impl ExpressionReferences<'_> {
                     value: Value::Int(oid),
                     ty,
                 } => found.constants.push((ty.clone(), *oid)),
+                Expr::Func {
+                    binding: Some(binding),
+                    ..
+                } if binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::FieldSelect) => {
+                    found.composite_field = true;
+                }
                 _ => {}
             }
             Ok(())
@@ -87,6 +98,9 @@ impl ExpressionReferences<'_> {
         .bind_expr(&mut expression.clone(), &BTreeSet::new())?;
         found.types = types;
         found.routines = routines;
+        if found.composite_field {
+            self.collect_composite_fields(expression, scope, references)?;
+        }
         self.add_found(found, scope, references);
         self.collect_sequence_arguments(expression, references)?;
         Ok(())
@@ -161,7 +175,7 @@ impl ExpressionReferences<'_> {
                         references.add_column(oid, column);
                     }
                 }
-                ColumnScope::None => {}
+                ColumnScope::None | ColumnScope::Domain(_) => {}
             }
         }
         for name in found.types {

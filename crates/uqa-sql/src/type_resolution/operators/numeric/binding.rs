@@ -73,10 +73,11 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
         }
         Err(error) if is_resource_error(&error) => return Err(error),
         Err(error) => {
+            let outer = control.reserve(size_of::<FunctionResolutionError>())?;
             let error = retained_error(&error, control)?;
             let (error, extra) = error.into_parts();
-            *memory = control.combine(memory.take(), extra);
-            binding.resolution_error = Some(error);
+            *memory = control.combine(control.combine(memory.take(), extra), outer);
+            binding.resolution_error = Some(Box::new(error));
         }
     }
     Ok(())

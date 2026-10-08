@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn fragment() -> PreparedFragment {
     let syntax = uqa_sql::compile("SELECT 1").unwrap().remove(0);
     let analysis = ProceduralPlanAnalysis {
+        composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         result: uqa_sql::binding::statements::AnalyzedResult::Rows(vec![Some(
             uqa_sql::ColumnType::Integer,
         )]),
@@ -235,6 +236,7 @@ fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_public
         uqa_sql::prepared::planning::PreparedPlanSelection {
             plan: plan.clone(),
             update: uqa_sql::prepared::planning::PreparedPlanUpdate {
+                composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
                 reanalyzed: None,
                 generic_plan: Some(plan),
                 generic_cost: Some(1.0),

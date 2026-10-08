@@ -16,6 +16,16 @@ impl DependencyBuilder<'_> {
         let found =
             super::super::view_definition::query_references(self.catalog, self.resolution, query)?;
         let mut references = References::default();
+        let context = self.field_binding_context();
+        for address in uqa_sql::binding::composite_dependencies::query_composite_dependencies(
+            self.context.routines,
+            query,
+            &[],
+            &context,
+            None,
+        )? {
+            references.add(address);
+        }
         for name in &found.relations {
             if let Some(oid) = self.objects.relation_oid_by_name(name) {
                 references.add_relation(oid);
@@ -48,5 +58,16 @@ impl DependencyBuilder<'_> {
             super::expressions::add_constant_reference(ty, *oid, &mut references);
         }
         Ok(references)
+    }
+
+    pub(super) fn field_binding_context(&self) -> uqa_sql::binding::BindingContext<'_> {
+        uqa_sql::binding::BindingContext {
+            catalog: std::sync::Arc::new(self.catalog.clone()),
+            resolution: self.resolution.clone(),
+            ctes: std::collections::BTreeMap::new(),
+            deferred_ctes: std::collections::BTreeMap::new(),
+            non_returning_ctes: std::collections::BTreeSet::new(),
+            scalar_subqueries: &[],
+        }
     }
 }

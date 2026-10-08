@@ -25,6 +25,7 @@ pub struct PreparedDefinitionContext<'a> {
 }
 
 pub struct PreparedDefinition {
+    pub composite_inputs: super::composites::CompositeInputs,
     pub logical_plan: UnifiedPlan,
     pub parameter_types: Vec<Option<ColumnType>>,
     pub result_schema: Option<RowSchema>,
@@ -66,6 +67,10 @@ pub fn analyze_definition(
         })?;
     let result_schema = analyze_result_schema(context, &logical_plan, &input.parameter_types)?;
     Ok(PreparedDefinition {
+        composite_inputs: super::composites::CompositeInputs::capture(
+            &logical_plan,
+            context.types,
+        )?,
         logical_plan,
         parameter_types: input.parameter_types,
         result_schema,

@@ -182,7 +182,7 @@ pub fn resolve_variable_sites(
     names: Vec<ScalarExpr>,
 ) -> Result<Vec<VariableSiteResolution>, SQLError> {
     let mut scope = SchemaScope::for_analysis(ctes)?;
-    scope.binds_routine_identities = false;
+    scope.scalar_binding = super::ScalarBindingMode::References;
     scope.variable_sites = Some(VariableSites {
         resolutions: vec![VariableSiteResolution::Variable; names.len()],
         names,

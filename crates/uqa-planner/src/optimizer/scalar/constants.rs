@@ -183,6 +183,9 @@ pub(super) fn fold_authorized_literal(
             }
         }
     }
+    if let Some(literal) = composite_constant_field(&expression) {
+        return Ok(literal);
+    }
     let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
         if uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len()) == Some(true)
             && args.iter().any(|argument| literal_value(argument).is_some_and(|value| matches!(value, Value::Null))));
@@ -225,6 +228,58 @@ pub(super) fn fold_authorized_literal(
             parameter_index: None,
         },
         None => literal,
+    })
+}
+
+fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = expression
+    else {
+        return None;
+    };
+    if binding.dispatch != Some(uqa_sql::ast::FunctionDispatch::FieldSelect) {
+        return None;
+    }
+    let field = binding.composite_field.as_ref()?;
+    let [base, ScalarExpr::Literal(Value::Str(name))] = args.as_slice() else {
+        return None;
+    };
+    let base = match base {
+        ScalarExpr::Cast { expr, ty, .. } if matches!(expr.as_ref(), ScalarExpr::TypedLiteral { ty: literal_type, .. } if ty == literal_type) => {
+            expr
+        }
+        expression => expression,
+    };
+    let ScalarExpr::TypedLiteral {
+        value,
+        bound_type: Some(ColumnType::Composite(reference)),
+        ..
+    } = base
+    else {
+        return None;
+    };
+    if reference.oid != field.type_oid {
+        return None;
+    }
+    let value = match value {
+        Value::Null => Value::Null,
+        Value::Record(fields) => {
+            if field.dropped {
+                Value::Null
+            } else {
+                fields.iter().find(|(key, _)| key == name)?.1.clone()
+            }
+        }
+        _ => return None,
+    };
+    Some(ScalarExpr::TypedLiteral {
+        value,
+        ty: field.result_type.catalog_name(),
+        bound_type: Some(field.result_type.clone()),
+        parameter_index: None,
     })
 }
 

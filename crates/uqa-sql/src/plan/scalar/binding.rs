@@ -31,6 +31,7 @@ impl Lowering<'_> {
             builtin,
             dispatch,
             invocation,
+            composite_field,
             resolution_error,
         } = binding;
         Ok(FunctionBinding {
@@ -43,9 +44,24 @@ impl Lowering<'_> {
                 .as_ref()
                 .map(|invocation| self.boxed(|this| this.invocation(invocation)))
                 .transpose()?,
+            composite_field: composite_field
+                .as_ref()
+                .map(|field| {
+                    self.boxed(|this| {
+                        Ok(crate::ast::CompositeFieldBinding {
+                            type_oid: field.type_oid,
+                            number: field.number,
+                            result_type: this
+                                .scalar_type_copy(Some(&field.result_type))?
+                                .expect("field result type"),
+                            dropped: field.dropped,
+                        })
+                    })
+                })
+                .transpose()?,
             resolution_error: resolution_error
                 .as_ref()
-                .map(|error| self.resolution_error(error))
+                .map(|error| self.boxed(|this| this.resolution_error(error)))
                 .transpose()?,
         })
     }

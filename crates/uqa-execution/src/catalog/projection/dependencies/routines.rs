@@ -94,6 +94,16 @@ impl DependencyBuilder<'_> {
         let mut routines: Vec<FunctionBinding> = Vec::new();
         let mut constants = Vec::new();
         let mut parameters = BTreeSet::new();
+        for address in
+            uqa_sql::binding::composite_dependencies::routine_statement_composite_dependencies(
+                self.context.routines,
+                definition,
+                statement,
+                &self.field_binding_context(),
+            )?
+        {
+            references.add(address);
+        }
         let mut expression = |node: &mut Expr| -> Result<(), SQLError> {
             match node {
                 Expr::TypedLiteral {

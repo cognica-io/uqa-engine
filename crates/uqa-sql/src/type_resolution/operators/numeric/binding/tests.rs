@@ -25,6 +25,7 @@ impl Root {
                 builtin: true,
                 dispatch: Some(FunctionDispatch::NumericOperator(operator)),
                 invocation: None,
+                composite_field: None,
                 resolution_error: None,
             },
             memory,
@@ -114,7 +115,8 @@ fn semantic_selection_errors_retain_their_original_diagnostic_and_box() {
         &control,
     )
     .unwrap();
-    let Some(FunctionResolutionError::Operator(error)) = &root.binding.resolution_error else {
+    let Some(FunctionResolutionError::Operator(error)) = root.binding.resolution_error.as_deref()
+    else {
         panic!("operator error must be retained");
     };
     assert_eq!(Some(error.sqlstate.as_str()), expected.sqlstate());
@@ -122,6 +124,7 @@ fn semantic_selection_errors_retain_their_original_diagnostic_and_box() {
     assert_eq!(
         root.bytes(),
         root.binding.name.capacity()
+            + size_of::<FunctionResolutionError>()
             + size_of::<OperatorResolutionError>()
             + error.sqlstate.capacity()
             + error.message.capacity()

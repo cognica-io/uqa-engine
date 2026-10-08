@@ -9,6 +9,7 @@
 use crate::{ColumnType, RowSchema, SQLError, SQLParam};
 use uqa_core::Value;
 pub mod arguments;
+pub mod composites;
 pub mod definition;
 pub mod dependencies;
 pub mod entry;
@@ -52,13 +53,7 @@ pub fn analyze_prepared_plan(
     parameter_types: &[Option<ColumnType>],
     scope: &crate::binding::context::BindingContext<'_>,
 ) -> Result<Option<RowSchema>, SQLError> {
-    let params = parameter_types
-        .iter()
-        .map(|ty| match ty {
-            Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
-            None => SQLParam::Scalar(Value::Null),
-        })
-        .collect::<Vec<_>>();
+    let params = analysis_parameters(parameter_types);
     match plan {
         crate::plan::UnifiedPlan::Query(query) => {
             crate::binding::analyze_query_plan_schema(routines, query, &params, scope, None)
@@ -68,6 +63,16 @@ pub fn analyze_prepared_plan(
             crate::binding::analyze_prepared_command_schema(routines, command, &params, scope)
         }
     }
+}
+
+pub(crate) fn analysis_parameters(parameter_types: &[Option<ColumnType>]) -> Vec<SQLParam> {
+    parameter_types
+        .iter()
+        .map(|ty| match ty {
+            Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
+            None => SQLParam::Scalar(Value::Null),
+        })
+        .collect()
 }
 
 pub fn prepared_result_schema_matches(left: Option<&RowSchema>, right: Option<&RowSchema>) -> bool {
