@@ -10,6 +10,9 @@ use crate::row_locks::{LockAcquire, LockRequest, RowLockKey, RowLockManager};
 use uqa_core::CancellationToken;
 use uqa_sql::ast::{LockStrength, LockWait};
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod process;
+
 fn requests<'a>(
     manager: &RowLockManager,
     cancel: &'a CancellationToken,

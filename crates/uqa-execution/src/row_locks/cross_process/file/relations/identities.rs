@@ -403,9 +403,7 @@ impl FileLockCoordinator {
     }
 
     #[cfg(test)]
-    pub(in crate::row_locks::cross_process::file) fn relation_registry_counts(
-        &self,
-    ) -> (usize, i64) {
+    pub(in crate::row_locks) fn relation_registry_counts(&self) -> (usize, i64) {
         let state = self.state.lock();
         let identities = &state.relation_identities;
         let count = identities
