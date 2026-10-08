@@ -97,6 +97,8 @@ pub enum SQLiteError {
     LogicalSessionRequired,
     #[error("database restoration requires all existing owners to close")]
     DatabaseRestoreBusy,
+    #[error("record initialization requires incompatible database owners to close")]
+    DatabaseCoordinationUpgradeBusy,
     #[error("database restoration is incomplete; resume the original source/target request")]
     DatabaseRestoreIncomplete,
     #[error("the SQLite session already has a different retention limit")]

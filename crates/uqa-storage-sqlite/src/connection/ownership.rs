@@ -22,16 +22,42 @@ mod native;
 mod tests;
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
-use local::Admission;
+use local::{Admission, Owner};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-use native::Admission;
+use native::{Admission, Owner};
 
 pub(crate) struct DatabaseOwner {
-    _lease: Box<dyn Send + Sync>,
+    lease: Owner,
     _memory: MemoryReservation,
 }
 
 pub(super) struct RestoreAdmission(Admission);
+
+/// Excludes predecessor attachment until complete record initialization finishes.
+pub(crate) struct RecordAdmission {
+    _admission: Admission,
+}
+
+impl super::ManagedConnection {
+    pub(crate) fn admit_record_initialization(
+        &self,
+        control: &StorageReadControl,
+    ) -> Result<Option<RecordAdmission>> {
+        control.check()?;
+        self.pool
+            .owner
+            .as_ref()
+            .map(|owner| {
+                owner
+                    .lease
+                    .admit_records(control)
+                    .map(|admission| RecordAdmission {
+                        _admission: admission,
+                    })
+            })
+            .transpose()
+    }
+}
 
 fn admission(path: &Path, exclusive: bool, control: &StorageReadControl) -> Result<Admission> {
     control.check()?;
@@ -48,7 +74,7 @@ fn retain(admission: &Admission, control: &StorageReadControl) -> Result<Arc<Dat
         .reserve(std::mem::size_of::<DatabaseOwner>() + 2 * std::mem::size_of::<usize>())?;
     let lease = admission.retain(control)?;
     Ok(Arc::new(DatabaseOwner {
-        _lease: lease,
+        lease,
         _memory: memory,
     }))
 }

@@ -133,3 +133,25 @@ fn local_file_owners_exclude_restore_and_handoff_without_losing_admission() {
     drop(local::Admission::acquire(&path, true, &control).unwrap());
     assert_eq!(control.memory().used(), 0);
 }
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod protocol;
+
+#[test]
+fn local_record_admission_keeps_current_owners_and_releases_its_guard() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("protocol.db");
+    let control = StorageReadControl::with_limit(1 << 20);
+    let admission = local::Admission::acquire(&path, false, &control).unwrap();
+    let first = admission.retain(&control).unwrap();
+    let second = admission.retain(&control).unwrap();
+    drop(admission);
+    let held = first.admit_records(&control).unwrap();
+    assert!(second.admit_records(&control).is_err());
+    assert!(local::Admission::acquire(&path, false, &control).is_err());
+    drop(held);
+    drop(second.admit_records(&control).unwrap());
+    drop(first);
+    drop(second);
+    assert_eq!(control.memory().used(), 0);
+}
