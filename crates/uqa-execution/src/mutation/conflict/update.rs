@@ -5,7 +5,9 @@
 //
 
 //! INSERT conflict tuple locking, EXCLUDED projection and typed update preparation.
-use super::{find_insert_conflict, CurrentInsertConflict, InsertConflictOverlay};
+use super::{
+    conflict_constraint_table, find_insert_conflict, CurrentInsertConflict, InsertConflictOverlay,
+};
 use crate::mutation::{
     assignment::MutationAssignmentTarget,
     candidate::{MutationLockTarget, PhysicalDocumentIdentity},
@@ -30,6 +32,7 @@ use uqa_sql::{
 use uqa_storage::document_store::Document;
 pub struct InsertConflictPreparation<'a, S: Clone + 'static> {
     pub context: ReferentialContext<'a, S>,
+    pub target_table: &'a str,
     pub table: &'a str,
     pub target_qualifier: &'a str,
     pub on_conflict: &'a ConflictPlan,
@@ -154,17 +157,27 @@ impl InsertConflictLocks {
         }
     }
 
-    pub fn lock_document<S: Clone + 'static>(
+    fn lock_document<S: Clone + 'static>(
         &mut self,
-        context: &ReferentialContext<'_, S>,
-        table: &str,
-        target_qualifier: &str,
-        on_conflict: &ConflictPlan,
-        document: &Document,
+        preparation: &InsertConflictPreparation<'_, S>,
     ) -> Result<(), SQLError> {
+        let InsertConflictPreparation {
+            context,
+            target_table,
+            table,
+            target_qualifier,
+            on_conflict,
+            document,
+            ..
+        } = preparation;
         for _ in 0..=64 {
-            let Some(existing) =
-                find_insert_conflict(context.constraints, table, on_conflict, document)?
+            let Some(existing) = find_insert_conflict(
+                context.constraints,
+                target_table,
+                table,
+                on_conflict,
+                document,
+            )?
             else {
                 return Ok(());
             };
@@ -218,8 +231,13 @@ impl InsertConflictLocks {
                     .transactions
                     .refresh_explicit_statement_snapshot()?;
             }
-            if find_insert_conflict(context.constraints, table, on_conflict, document)?
-                == Some(locked)
+            if find_insert_conflict(
+                context.constraints,
+                target_table,
+                table,
+                on_conflict,
+                document,
+            )? == Some(locked)
             {
                 return Ok(());
             }
@@ -235,7 +253,8 @@ impl InsertConflictLocks {
         preparation: InsertConflictPreparation<'_, S>,
     ) -> Result<PreparedInsertConflict, SQLError> {
         let InsertConflictPreparation {
-            context,
+            ref context,
+            target_table,
             table,
             target_qualifier,
             on_conflict,
@@ -245,12 +264,15 @@ impl InsertConflictLocks {
         } = preparation;
         let key_acquisitions =
             lock_document_key_dependencies(context.constraints, table, document, None)?;
+        let constraint_table = conflict_constraint_table(target_table, table, on_conflict);
         if self.overlay.is_none() {
             self.overlay = Some(InsertConflictOverlay::new(
                 context.constraints,
-                table,
+                constraint_table,
                 on_conflict,
             )?);
+        } else if let Some(overlay) = &mut self.overlay {
+            overlay.bind_table(context.constraints, constraint_table, on_conflict)?;
         }
         let current = self
             .overlay
@@ -274,7 +296,7 @@ impl InsertConflictLocks {
             }
             Some(CurrentInsertConflict::Base(_)) => {}
         }
-        self.lock_document(&context, table, target_qualifier, on_conflict, document)?;
+        self.lock_document(&preparation)?;
         let current = self
             .overlay
             .as_ref()
@@ -310,7 +332,7 @@ impl InsertConflictLocks {
             return Err(on_conflict_cardinality_violation());
         }
         match build_conflict_update(
-            &context,
+            context,
             &existing.table,
             target_qualifier,
             existing.doc_id,
@@ -344,14 +366,14 @@ impl InsertConflictLocks {
                 };
                 new_document = triggered_document;
                 let prepared = prepare_document_rewrite(
-                    &context,
+                    context,
                     &existing.table,
                     &existing.table,
                     existing.doc_id,
                     old_document,
                     new_document,
                 )?;
-                reject_partition_rewrite(&context, &prepared, params)?;
+                reject_partition_rewrite(context, &prepared, params)?;
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?

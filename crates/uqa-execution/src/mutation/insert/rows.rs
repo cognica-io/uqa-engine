@@ -100,6 +100,7 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
     let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
         conflict_locks.prepare_document(InsertConflictPreparation {
             context: services.referential,
+            target_table: &stmt.table,
             table: &target_table,
             target_qualifier: &stmt.target_qualifier,
             on_conflict,
