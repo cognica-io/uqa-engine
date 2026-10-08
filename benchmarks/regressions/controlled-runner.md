@@ -27,7 +27,7 @@ The operator installs `run-controlled-performance.py`, `controlled_runner_host.p
 - [x] Measure #266's independent-process scaling and record the evidence-based decision to retain the current mutex/batching; all sixteen case/phase comparisons pass, and no sidecar-format correction is justified by this workload.
 - [x] Connect the controlled path to automatic CI, retain compact results and detailed artifacts, and stop the instance after completion.
 - [x] Publish the measured conclusions, synchronize issue/design records and preserve the unresolved tasks when closing #266.
-- [ ] Resolve #261's Q1 run-level variation before claiming its 10% qualification; do not discard its slow reference execution, widen the limit or retry measurements until a favorable result appears.
+- [ ] Complete #261's remaining timing qualification with the reviewed eight-pair protocol. Preserve both four-pair runs and their decisions; do not widen limits or retry unchanged measurements until a favorable result appears.
 
 The separately tracked SQLite dependency default (#348) is outside this measurement change. The maintainer closed #125 pending recurrence; successful startup diagnostics do not claim that its historical loader cause was fixed.
 
