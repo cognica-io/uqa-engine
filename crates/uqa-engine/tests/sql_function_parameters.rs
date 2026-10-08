@@ -217,6 +217,15 @@ fn output_columns_and_whole_row_relations_take_a_name_before_a_parameter() {
             ),
         ],
     );
+    for mode in ["auto", "force_custom_plan", "force_generic_plan"] {
+        sql(&engine, &format!("SET plan_cache_mode = '{mode}'"));
+        for parameter in [0, 1, 2, -1, 99, 0, 2] {
+            assert_eq!(
+                value(&engine, &format!("SELECT ob2({parameter})")),
+                Value::Int(1),
+            );
+        }
+    }
 }
 
 #[test]

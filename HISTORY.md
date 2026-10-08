@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve computed integer ordering keys as values after constant folding, including custom plans in SQL routines, instead of reinterpreting them as output-column positions.
+
 - Restore separately persisted HNSW edges with one bounded source-node buffer, avoiding per-edge rewrites of spilled vectors while preserving topology validation and memory limits.
 
 - Retain HNSW indexes for SQL replacements whose canonical vector bits and ordinals are unchanged, while preserving ordinary row publication and actual vector changes.

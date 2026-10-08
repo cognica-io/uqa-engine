@@ -52,6 +52,32 @@ fn query_block(plan: &UnifiedPlan) -> &QueryBlockPlan {
     block
 }
 
+#[test]
+fn folded_integer_order_keys_keep_values_instead_of_output_positions() {
+    let output = vec![("v".into(), ScalarExpr::Column("v".into()))];
+    for (expression, expected) in [("0 + 0", 0), ("1 + 1", 2), ("-1 + 0", -1)] {
+        let plan = optimized(&format!("SELECT v FROM t ORDER BY {expression}, v"));
+        let key = uqa_execution::query::ordering::resolve_order_expression(
+            &query_block(&plan).order_by[0].expr,
+            &output,
+        )
+        .unwrap();
+        assert_eq!(
+            uqa_execution::scalar::eval_constant_scalar(&key).unwrap(),
+            Value::Int(expected),
+        );
+    }
+    let ordinal = optimized("SELECT v FROM t ORDER BY 1");
+    assert_eq!(
+        uqa_execution::query::ordering::resolve_order_expression(
+            &query_block(&ordinal).order_by[0].expr,
+            &output,
+        )
+        .unwrap(),
+        ScalarExpr::Column("v".into()),
+    );
+}
+
 fn source_aliases(source: &SourcePlan) -> BTreeSet<String> {
     match source {
         SourcePlan::Table { name, alias, .. } => {

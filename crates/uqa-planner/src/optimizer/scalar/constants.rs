@@ -190,7 +190,10 @@ pub(super) fn fold_authorized_literal(
         evaluate(&expression)?
     };
     let literal = ScalarExpr::Literal(value.clone());
-    if !matches!(expression, ScalarExpr::Cast { .. }) && scalar_type(&literal, &schema, &[])? == ty
+    // Evaluated integers are values, not the bare integer syntax that ORDER BY and DISTINCT ON interpret as output positions.
+    if !matches!(value, Value::Int(_))
+        && !matches!(expression, ScalarExpr::Cast { .. })
+        && scalar_type(&literal, &schema, &[])? == ty
     {
         return Ok(literal);
     }

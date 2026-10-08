@@ -354,7 +354,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(expression, ScalarExpr::Literal(Value::Int(20)));
+        assert!(matches!(
+            expression,
+            ScalarExpr::TypedLiteral {
+                value: Value::Int(20),
+                bound_type: Some(uqa_sql::ColumnType::Integer),
+                ..
+            }
+        ));
     }
 
     #[test]
