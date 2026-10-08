@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -99,7 +100,7 @@ class RecoverySourceTest(unittest.TestCase):
                      {"object": {"type": "commit", "sha": COMMIT}},
                  ]) as api:
                 RECOVERY.main()
-            self.assertEqual(output.read_text(), f"ready=true\ntag={TAG}\ncommit={COMMIT}\nrun_id=123\n")
+            self.assertEqual(output.read_text(), f"ready=true\ntag={TAG}\ncommit={COMMIT}\nrun_id=123\npython_repair=false\nrepair_matrix=[]\n")
             self.assertIn(f"/git/tags/{'b' * 40}", api.call_args.args[0])
 
     def test_active_successful_absent_or_already_recovered_runs_do_not_start_publication(self):
@@ -115,6 +116,97 @@ class RecoverySourceTest(unittest.TestCase):
                     RECOVERY.main()
                 self.assertFalse(output.exists())
                 api.assert_called_once()
+
+
+class PythonArtifactRecoveryTest(unittest.TestCase):
+    def fixture(self):
+        run, jobs, artifacts = fixture()
+        target = "x86_64-apple-darwin"
+        job = next(job for job in jobs if job["name"] == "python / macos x86_64")
+        job.update(conclusion="failure", steps=[
+            *({"name": name, "conclusion": "success"} for name in RECOVERY.WHEEL_CHECKS),
+            {"name": "Retain native Nori diagnostic evidence", "conclusion": "failure"},
+            {"name": "Run actions/upload-artifact@v4", "conclusion": "skipped"},
+        ])
+        next(job for job in jobs if job["name"] == "python / minimum supported python")["conclusion"] = "skipped"
+        artifacts = [item for item in artifacts if item["name"] != "python-wheel-" + target]
+        return run, jobs, artifacts
+
+    def validate(self, jobs=None, artifacts=None):
+        run, original_jobs, original_artifacts = self.fixture()
+        return RECOVERY.validate(run, TAG, COMMIT, REPOSITORY,
+                                 jobs if jobs is not None else original_jobs,
+                                 artifacts if artifacts is not None else original_artifacts,
+                                 allow_python_repair=True)
+
+    def test_failed_diagnostic_transport_rebuilds_only_the_missing_verified_wheel(self):
+        self.assertEqual(self.validate(), [RECOVERY.WHEEL_MATRIX["python / macos x86_64"]])
+        _, _, complete = fixture()
+        # The already-retained original wheel is never replaced; only minimum-Python validation remains.
+        self.assertEqual(self.validate(artifacts=complete), [])
+
+    def test_failed_skipped_or_missing_product_validation_never_qualifies(self):
+        _, jobs, _ = self.fixture()
+        original = next(job for job in jobs if job["name"] == "python / macos x86_64")
+        for name in RECOVERY.WHEEL_CHECKS:
+            for conclusion in ("failure", "cancelled", "skipped", None):
+                changed = copy.deepcopy(jobs)
+                job = next(job for job in changed if job["name"] == original["name"])
+                next(step for step in job["steps"] if step["name"] == name)["conclusion"] = conclusion
+                with self.subTest(name=name, conclusion=conclusion), self.assertRaises(ValueError):
+                    self.validate(jobs=changed)
+            changed = copy.deepcopy(jobs)
+            job = next(job for job in changed if job["name"] == original["name"])
+            job["steps"] = [step for step in job["steps"] if step["name"] != name]
+            with self.assertRaises(ValueError):
+                self.validate(jobs=changed)
+
+    def test_unrelated_failures_and_missing_artifacts_remain_blocking(self):
+        _, jobs, artifacts = self.fixture()
+        for name in ("python / minimum supported python", "python / source distribution", "javascript packages / node macos x86_64"):
+            changed = copy.deepcopy(jobs)
+            next(job for job in changed if job["name"] == name)["conclusion"] = "failure"
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.validate(jobs=changed)
+        with self.assertRaises(ValueError):
+            self.validate(jobs=jobs + [{"name": "python / new platform", "conclusion": "failure"}])
+        for name in ("python-wheel-aarch64-apple-darwin", "python-sdist", "node-packages"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "artifacts"):
+                self.validate(artifacts=[item for item in artifacts if item["name"] != name])
+
+    def test_unknown_step_failure_is_not_an_upload_failure(self):
+        _, jobs, _ = self.fixture()
+        next(job for job in jobs if job["name"] == "python / macos x86_64")["steps"].append(
+            {"name": "Additional product check", "conclusion": "failure"})
+        with self.assertRaises(ValueError):
+            self.validate(jobs=jobs)
+
+    def test_recovered_bytes_are_bound_to_original_commit_version_and_target(self):
+        matrix = self.validate()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            artifact = root / ("python-wheel-" + matrix[0]["target"])
+            artifact.mkdir()
+            wheel = artifact / "uqa-0.5.1-cp38-abi3-macosx_10_12_x86_64.whl"
+            wheel.write_bytes(b"independently built wheel")
+            provenance = {"commit": COMMIT, "target": matrix[0]["target"], "filename": wheel.name,
+                          "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
+            record = artifact / "recovery-provenance.json"
+            record.write_text(json.dumps(provenance))
+            RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, matrix)
+            for key, value in (("commit", "b" * 40), ("target", "aarch64-apple-darwin"),
+                               ("filename", "another.whl"), ("sha256", "0" * 64)):
+                record.write_text(json.dumps({**provenance, key: value}))
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, matrix)
+            record.write_text(json.dumps(provenance))
+            with self.assertRaises(ValueError):
+                RECOVERY.verify_repaired_artifacts(root, COMMIT, "v0.5.2", matrix)
+            wheel.write_bytes(b"changed bytes")
+            with self.assertRaises(ValueError):
+                RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, matrix)
+            with self.assertRaises(ValueError):
+                RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, [])
 
 
 class CompletedPublicationTest(unittest.TestCase):
