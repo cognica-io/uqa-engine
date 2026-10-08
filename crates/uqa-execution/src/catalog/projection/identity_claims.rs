@@ -151,13 +151,17 @@ pub fn largest_catalog_oid(
     for graph in snapshot.definitions.graph_catalog_oids.values() {
         oids.extend(graph.claimed().map(i64::from));
     }
-    // Namespaces without a catalog tuple, the extension schema and graphs created before OIDs were recorded, derive their OIDs from their names.
+    // Bootstrap namespaces have reserved identities, including the extension schema's derived OID; they do not advance the user allocation sequence.
     oids.extend(
         snapshot
             .definitions
             .schemas
-            .values()
-            .filter_map(|security| security.tuple.map(|tuple| tuple.oid)),
+            .iter()
+            .filter(|(name, _)| {
+                !uqa_sql::catalog::security::BoundSchemaSecurity::BUILTIN_NAMES
+                    .contains(&name.as_str())
+            })
+            .filter_map(|(_, security)| security.tuple.map(|tuple| tuple.oid)),
     );
     oids.extend(row_oids(super::pg_catalog::build_pg_constraint(
         catalog, resolution,
@@ -389,3 +393,6 @@ fn trigger_address_in_use(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod tests;
