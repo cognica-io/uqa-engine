@@ -229,7 +229,7 @@ PR #638 resolves issue #633, an independent follow-up found during composite-att
 - [x] Implement scalar/array input and output, numeric OID casts, catalog metadata and `to_regcollation` through the owning interfaces.
 - [x] Verify all 82 independent PostgreSQL cases on memory, native SQLite, SQLite Key/Value and redb, including prepared parameter metadata, analysis-time failures, stored expressions and six reopen observations. The affected existing OID alias and manual integration tests also pass.
 - [x] Update public documentation and preserve the inherited ledger.
-- [ ] Finish review, merge the independent correction, and close #633.
+- [x] Review the independent correction and fix the manual’s function-OID list; PR #638 links the verification, merge and #633 closure records.
 
 The carrier is the existing unsigned 32-bit OID domain represented by `Value::Int`; the alias changes name resolution and text output, not the stored integer or relational identity. Numeric aliases preserve their OID bits, unknown OIDs remain numeric, and NULL remains NULL. Array conversion preserves dimensions, bounds, order and NULL positions. For OIDs admitted by input, comparison, equality, hashing and indexing continue to use the same OID value. Hence relational operators observe the same carrier values before and after persistence, while catalog-aware text conversion adds only the declared naming observation. The PostgreSQL fixture, rather than UQA output, supplies diagnostic order, quoting and lookup-versus-input expectations.
 
