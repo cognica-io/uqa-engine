@@ -36,3 +36,20 @@ fn composite_attribute_types_match_postgresql(#[case] provider: usize) {
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_attribute_dependents_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("composite-dependents.db");
+    let engine = super::addition::open(provider, &path);
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/composite_attribute_dependency_oracle.expected.json"
+        ),
+    );
+}

@@ -195,13 +195,29 @@ impl Definition {
                         "constraint definition did not reparse as ALTER TABLE".into(),
                     ));
                 };
-                let AlterTableAction::AddCheckConstraint { constraint } =
+                let AlterTableAction::AddCheckConstraint { mut constraint } =
                     statement.actions.remove(0)
                 else {
                     return Err(SQLError::Internal(
                         "composite field dependency is not a CHECK".into(),
                     ));
                 };
+                let table = snapshot.snapshot().tables.get(&relation).ok_or_else(|| {
+                    SQLError::Internal("dependent CHECK table disappeared".into())
+                })?;
+                constraint.is_local = table
+                    .checks
+                    .iter()
+                    .find(|check| check.name.as_deref() == Some(&name))
+                    .map(|check| check.is_local)
+                    .or_else(|| {
+                        table
+                            .columns
+                            .iter()
+                            .find(|column| column.check_name.as_deref() == Some(&name))
+                            .map(|column| column.check_is_local)
+                    })
+                    .ok_or_else(|| SQLError::Internal("dependent CHECK disappeared".into()))?;
                 Ok(Definition::Check {
                     table: relation,
                     constraint,

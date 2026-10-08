@@ -127,22 +127,6 @@ pub fn run_create_index(
         }
         _ => {}
     }
-    if context
-        .namespace
-        .relation_exists(&relation.qualified_name())?
-    {
-        if c.if_not_exists {
-            context.notices.push(
-                uqa_sql::SQLNotice::notice(format!("relation \"{name}\" already exists, skipping"))
-                    .with_sqlstate("42P07"),
-            );
-            return Ok(SQLResult::empty());
-        }
-        return Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{name}\" already exists"),
-        });
-    }
 
     publish_prepared(context, &c, &relation, &definition, &am)?;
     Ok(SQLResult::empty())
@@ -172,6 +156,23 @@ fn publish_prepared(
     am: &str,
 ) -> Result<(), SQLError> {
     let name = &relation.name;
+    if context
+        .namespace
+        .relation_exists(&relation.qualified_name())?
+    {
+        if c.if_not_exists {
+            context.notices.push(
+                uqa_sql::SQLNotice::notice(format!("relation \"{name}\" already exists, skipping"))
+                    .with_sqlstate("42P07"),
+            );
+            return Ok(());
+        }
+        return Err(SQLError::Routine {
+            sqlstate: "42P07".into(),
+            message: format!("relation \"{name}\" already exists"),
+        });
+    }
+
     // Publish the original option values and bound key metadata so reopening restores the same physical index.
     let catalog_index_type = if am.is_empty() { "btree" } else { am };
     let partitioned = context
