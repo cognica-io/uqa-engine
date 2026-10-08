@@ -1,0 +1,314 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "known_oids",
+      "sql": "SELECT 950::regcollation,951::regcollation,100::regcollation,811::regcollation,962::regcollation,963::regcollation,6411::regcollation"
+    },
+    {
+      "id": "input_0",
+      "sql": "SELECT '\"C\"'::regcollation"
+    },
+    {
+      "id": "lookup_0",
+      "sql": "SELECT to_regcollation('\"C\"')"
+    },
+    {
+      "id": "input_1",
+      "sql": "SELECT '\"POSIX\"'::regcollation"
+    },
+    {
+      "id": "lookup_1",
+      "sql": "SELECT to_regcollation('\"POSIX\"')"
+    },
+    {
+      "id": "input_2",
+      "sql": "SELECT '\"default\"'::regcollation"
+    },
+    {
+      "id": "lookup_2",
+      "sql": "SELECT to_regcollation('\"default\"')"
+    },
+    {
+      "id": "input_3",
+      "sql": "SELECT 'pg_c_utf8'::regcollation"
+    },
+    {
+      "id": "lookup_3",
+      "sql": "SELECT to_regcollation('pg_c_utf8')"
+    },
+    {
+      "id": "input_4",
+      "sql": "SELECT 'ucs_basic'::regcollation"
+    },
+    {
+      "id": "lookup_4",
+      "sql": "SELECT to_regcollation('ucs_basic')"
+    },
+    {
+      "id": "input_5",
+      "sql": "SELECT 'unicode'::regcollation"
+    },
+    {
+      "id": "lookup_5",
+      "sql": "SELECT to_regcollation('unicode')"
+    },
+    {
+      "id": "input_6",
+      "sql": "SELECT 'pg_unicode_fast'::regcollation"
+    },
+    {
+      "id": "lookup_6",
+      "sql": "SELECT to_regcollation('pg_unicode_fast')"
+    },
+    {
+      "id": "input_7",
+      "sql": "SELECT 'pg_catalog.\"C\"'::regcollation"
+    },
+    {
+      "id": "lookup_7",
+      "sql": "SELECT to_regcollation('pg_catalog.\"C\"')"
+    },
+    {
+      "id": "input_8",
+      "sql": "SELECT '950'::regcollation"
+    },
+    {
+      "id": "lookup_8",
+      "sql": "SELECT to_regcollation('950')"
+    },
+    {
+      "id": "input_9",
+      "sql": "SELECT '0'::regcollation"
+    },
+    {
+      "id": "lookup_9",
+      "sql": "SELECT to_regcollation('0')"
+    },
+    {
+      "id": "input_10",
+      "sql": "SELECT '-'::regcollation"
+    },
+    {
+      "id": "lookup_10",
+      "sql": "SELECT to_regcollation('-')"
+    },
+    {
+      "id": "input_11",
+      "sql": "SELECT '-1'::regcollation"
+    },
+    {
+      "id": "lookup_11",
+      "sql": "SELECT to_regcollation('-1')"
+    },
+    {
+      "id": "input_12",
+      "sql": "SELECT '4294967295'::regcollation"
+    },
+    {
+      "id": "lookup_12",
+      "sql": "SELECT to_regcollation('4294967295')"
+    },
+    {
+      "id": "input_13",
+      "sql": "SELECT '4294967296'::regcollation"
+    },
+    {
+      "id": "lookup_13",
+      "sql": "SELECT to_regcollation('4294967296')"
+    },
+    {
+      "id": "input_14",
+      "sql": "SELECT '+950'::regcollation"
+    },
+    {
+      "id": "lookup_14",
+      "sql": "SELECT to_regcollation('+950')"
+    },
+    {
+      "id": "input_15",
+      "sql": "SELECT ' 950 '::regcollation"
+    },
+    {
+      "id": "lookup_15",
+      "sql": "SELECT to_regcollation(' 950 ')"
+    },
+    {
+      "id": "input_16",
+      "sql": "SELECT '950x'::regcollation"
+    },
+    {
+      "id": "lookup_16",
+      "sql": "SELECT to_regcollation('950x')"
+    },
+    {
+      "id": "input_17",
+      "sql": "SELECT ''::regcollation"
+    },
+    {
+      "id": "lookup_17",
+      "sql": "SELECT to_regcollation('')"
+    },
+    {
+      "id": "input_18",
+      "sql": "SELECT 'c'::regcollation"
+    },
+    {
+      "id": "lookup_18",
+      "sql": "SELECT to_regcollation('c')"
+    },
+    {
+      "id": "input_19",
+      "sql": "SELECT 'C'::regcollation"
+    },
+    {
+      "id": "lookup_19",
+      "sql": "SELECT to_regcollation('C')"
+    },
+    {
+      "id": "input_20",
+      "sql": "SELECT 'absent_collation'::regcollation"
+    },
+    {
+      "id": "lookup_20",
+      "sql": "SELECT to_regcollation('absent_collation')"
+    },
+    {
+      "id": "input_21",
+      "sql": "SELECT 'missing_schema.\"C\"'::regcollation"
+    },
+    {
+      "id": "lookup_21",
+      "sql": "SELECT to_regcollation('missing_schema.\"C\"')"
+    },
+    {
+      "id": "input_22",
+      "sql": "SELECT 'absent_db.pg_catalog.\"C\"'::regcollation"
+    },
+    {
+      "id": "lookup_22",
+      "sql": "SELECT to_regcollation('absent_db.pg_catalog.\"C\"')"
+    },
+    {
+      "id": "input_23",
+      "sql": "SELECT 'a.b.c.d'::regcollation"
+    },
+    {
+      "id": "lookup_23",
+      "sql": "SELECT to_regcollation('a.b.c.d')"
+    },
+    {
+      "id": "input_24",
+      "sql": "SELECT '\"unterminated'::regcollation"
+    },
+    {
+      "id": "lookup_24",
+      "sql": "SELECT to_regcollation('\"unterminated')"
+    },
+    {
+      "id": "numeric_casts",
+      "sql": "SELECT (-1)::integer::regcollation,4294967295::bigint::regcollation,950::oid::regcollation,950::regcollation::integer,950::regcollation::bigint,950::regcollation::oid"
+    },
+    {
+      "id": "numeric_overflow",
+      "sql": "SELECT 4294967296::bigint::regcollation"
+    },
+    {
+      "id": "numeric_negative",
+      "sql": "SELECT (-1)::bigint::regcollation"
+    },
+    {
+      "id": "null",
+      "sql": "SELECT NULL::regcollation,NULL::regcollation[],to_regcollation(NULL)"
+    },
+    {
+      "id": "arrays",
+      "sql": "SELECT ARRAY[950,951,0,123456]::regcollation[],ARRAY[950,951]::regcollation[]::oid[],ARRAY[950,951]::regcollation[]::text"
+    },
+    {
+      "id": "input_array",
+      "sql": "SELECT '{\"\\\"C\\\"\",\"\\\"POSIX\\\"\",NULL,123456}'::regcollation[]"
+    },
+    {
+      "id": "bounded_array",
+      "sql": "SELECT '[0:1]={950,951}'::regcollation[],array_lower('[0:1]={950,951}'::regcollation[],1)"
+    },
+    {
+      "id": "numeric_unknown",
+      "sql": "SELECT 123456::regcollation,0::regcollation,123456::regcollation::text"
+    },
+    {
+      "id": "type_metadata",
+      "sql": "SELECT oid,typname,typlen,typbyval,typcategory,typarray,typelem,typinput::oid,typoutput::oid,typreceive::oid,typsend::oid FROM pg_type WHERE oid IN (4191,4192) ORDER BY oid"
+    },
+    {
+      "id": "lookup_identity",
+      "sql": "SELECT 'to_regcollation(text)'::regprocedure::oid"
+    },
+    {
+      "id": "input_error_before_filter",
+      "sql": "SELECT 'absent_collation'::regcollation WHERE false"
+    },
+    {
+      "id": "input_error_before_zero",
+      "sql": "SELECT 'absent_collation'::regcollation,1/0"
+    },
+    {
+      "id": "prepared",
+      "sql": "PREPARE rc(regcollation) AS SELECT $1,$1::oid,$1::text"
+    },
+    {
+      "id": "prepared_metadata",
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='rc'"
+    },
+    {
+      "id": "prepared_name",
+      "sql": "EXECUTE rc('\"C\"')"
+    },
+    {
+      "id": "prepared_oid",
+      "sql": "EXECUTE rc(951)"
+    },
+    {
+      "id": "prepared_finish",
+      "sql": "DEALLOCATE rc"
+    },
+    {
+      "id": "stored",
+      "sql": "CREATE TABLE rc_values(id integer PRIMARY KEY,c regcollation DEFAULT '\"C\"',a regcollation[]); INSERT INTO rc_values(id,a) VALUES(1,ARRAY[950,951]::regcollation[]); INSERT INTO rc_values VALUES(2,123456,ARRAY[123456,NULL]::regcollation[]); CREATE INDEX rc_index ON rc_values(c); CREATE VIEW rc_view AS SELECT '\"POSIX\"'::regcollation AS c"
+    },
+    {
+      "id": "stored_values",
+      "sql": "SELECT id,c,c::oid,c::text,a FROM rc_values ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "stored_lookup",
+      "sql": "SELECT id FROM rc_values WHERE c=950::regcollation ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "stored_metadata",
+      "sql": "SELECT attname,atttypid,attlen,attbyval FROM pg_attribute WHERE attrelid='rc_values'::regclass AND attnum>0 ORDER BY attnum",
+      "reopen": true
+    },
+    {
+      "id": "stored_default",
+      "sql": "SELECT pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d WHERE d.adrelid='rc_values'::regclass",
+      "reopen": true
+    },
+    {
+      "id": "stored_view",
+      "sql": "SELECT c,c::oid FROM rc_view",
+      "reopen": true
+    },
+    {
+      "id": "stored_view_definition",
+      "sql": "SELECT pg_get_viewdef('rc_view'::regclass,true)",
+      "reopen": true
+    }
+  ]
+}
