@@ -71,6 +71,20 @@ pub fn values_equal_nullable_with_control(
     control.check()?;
     let equal = match (a, b) {
         (Value::Null, _) | (_, Value::Null) => None,
+        (Value::Datum(datum), _) => {
+            return values_equal_nullable_with_control(
+                &*super::super::datums::read_with_control(datum, control)?,
+                b,
+                control,
+            )
+        }
+        (_, Value::Datum(datum)) => {
+            return values_equal_nullable_with_control(
+                a,
+                &*super::super::datums::read_with_control(datum, control)?,
+                control,
+            )
+        }
         (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => Some(
             x.parse_same_kind_in_order_with_control(
                 y,
@@ -124,6 +138,16 @@ pub fn compare_nullable_with_control(
     control.check()?;
     match (a, b) {
         (Value::Null, _) | (_, Value::Null) => Ok(None),
+        (Value::Datum(datum), _) => compare_nullable_with_control(
+            &*super::super::datums::read_with_control(datum, control)?,
+            b,
+            control,
+        ),
+        (_, Value::Datum(datum)) => compare_nullable_with_control(
+            a,
+            &*super::super::datums::read_with_control(datum, control)?,
+            control,
+        ),
         (
             Value::Int(_) | Value::Float(_) | Value::Decimal(_),
             Value::Int(_) | Value::Float(_) | Value::Decimal(_),
@@ -210,6 +234,20 @@ pub fn compare_typed_values_with_control(
         (Value::Null, Value::Null) => return Ok(Ordering::Equal),
         (Value::Null, _) => return Ok(Ordering::Greater),
         (_, Value::Null) => return Ok(Ordering::Less),
+        (Value::Datum(datum), _) => {
+            return compare_typed_values_with_control(
+                &*super::super::datums::read_with_control(datum, control)?,
+                right,
+                control,
+            )
+        }
+        (_, Value::Datum(datum)) => {
+            return compare_typed_values_with_control(
+                left,
+                &*super::super::datums::read_with_control(datum, control)?,
+                control,
+            )
+        }
         (Value::Array(left), Value::Array(right)) => {
             return left.cmp_by_with_control(right, control, compare_typed_values_with_control);
         }
@@ -276,7 +314,7 @@ pub fn validate_legacy_vector_comparison(vector: &uqa_core::LegacyVectorValue) -
 pub fn type_comparison_can_fail(ty: &crate::ast::ColumnType) -> bool {
     use crate::ast::ColumnType;
     match ty {
-        ColumnType::OidVector | ColumnType::Record => true,
+        ColumnType::OidVector | ColumnType::Record | ColumnType::Composite(_) => true,
         ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
             type_comparison_can_fail(element)
         }
@@ -287,6 +325,7 @@ pub fn type_comparison_can_fail(ty: &crate::ast::ColumnType) -> bool {
 /// Whether an opaque value key can suppress a SQL operator failure. A single such input remains legal until an operator compares it.
 pub fn value_comparison_can_fail(value: &Value) -> bool {
     match value {
+        Value::Datum(_) => true,
         Value::LegacyVector(vector) => {
             vector.kind() == uqa_core::LegacyVectorKind::Oid && !vector.has_vector_layout()
         }

@@ -8,9 +8,12 @@
 
 use crate::catalog::node_tree::invalid;
 use crate::SQLError;
-use uqa_core::DecimalValue;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionString},
+    DecimalValue,
+};
 
-pub(super) fn encode(value: &DecimalValue) -> Result<Vec<u8>, SQLError> {
+pub(crate) fn encode(value: &DecimalValue) -> Result<Vec<u8>, SQLError> {
     let special = if value.is_nan() {
         Some(0xc000_u16)
     } else if value.is_positive_infinity() {
@@ -86,6 +89,18 @@ pub(super) fn encode(value: &DecimalValue) -> Result<Vec<u8>, SQLError> {
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<String, SQLError> {
+    decode_with_control(bytes, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary numeric Datum output")
+    })
+}
+
+pub(crate) fn decode_with_control(
+    bytes: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    control.check()?;
     if bytes.len() < 2 || !bytes.len().is_multiple_of(2) {
         return Err(invalid("invalid numeric Datum length"));
     }
@@ -95,9 +110,9 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<String, SQLError> {
             return Err(invalid("invalid special numeric Datum length"));
         }
         return match header {
-            0xc000 => Ok("NaN".into()),
-            0xd000 => Ok("Infinity".into()),
-            0xf000 => Ok("-Infinity".into()),
+            0xc000 => Ok(control.copy_text("NaN")?),
+            0xd000 => Ok(control.copy_text("Infinity")?),
+            0xf000 => Ok(control.copy_text("-Infinity")?),
             _ => Err(invalid("invalid special numeric Datum")),
         };
     }
@@ -115,43 +130,42 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<String, SQLError> {
             4,
         )
     };
-    let digits = bytes[offset..]
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect::<Vec<_>>();
-    if digits.iter().any(|digit| *digit >= 10_000) {
-        return Err(invalid("invalid numeric base-10000 digit"));
+    let digits = bytes[offset..].as_chunks::<2>().0;
+    for digit in digits {
+        control.check()?;
+        if u16::from_le_bytes(*digit) >= 10_000 {
+            return Err(invalid("invalid numeric base-10000 digit"));
+        }
     }
     let digit_at = |position: i32| {
         usize::try_from(weight - position)
             .ok()
             .and_then(|index| digits.get(index))
             .copied()
+            .map(u16::from_le_bytes)
             .unwrap_or(0)
     };
-    let mut text = String::new();
+    let mut text = ProductionString::new(*control);
     if negative {
-        text.push('-');
+        text.push('-')?;
     }
     if weight < 0 {
-        text.push('0');
+        text.push('0')?;
     } else {
-        text.push_str(&digit_at(weight).to_string());
+        text.push_str(&control.format(format_args!("{}", digit_at(weight)))?)?;
         for position in (0..weight).rev() {
-            use std::fmt::Write;
-            write!(text, "{:04}", digit_at(position)).expect("writing a String");
+            text.push_str(&control.format(format_args!("{:04}", digit_at(position)))?)?;
         }
     }
     if scale > 0 {
-        text.push('.');
-        let end = text.len() + usize::from(scale);
+        text.push('.')?;
+        let mut remaining = usize::from(scale);
         for group in 1..=i32::from(scale.div_ceil(4)) {
-            use std::fmt::Write;
-            write!(text, "{:04}", digit_at(-group)).expect("writing a String");
+            let digits = control.format(format_args!("{:04}", digit_at(-group)))?;
+            let count = remaining.min(4);
+            text.push_str(&digits[..count])?;
+            remaining -= count;
         }
-        text.truncate(end);
     }
-    Ok(text)
+    Ok(text.finish()?)
 }

@@ -14,6 +14,7 @@ use uqa_sql::expr::RowLookup as _;
 use super::*;
 use crate::ColumnIdentity;
 
+mod datums;
 mod enums;
 mod legacy_vectors;
 

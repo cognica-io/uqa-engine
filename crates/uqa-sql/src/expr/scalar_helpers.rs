@@ -45,6 +45,7 @@ pub(super) fn typeof_value(v: &Value) -> String {
         Value::Row(_) | Value::Record(_) => "record".into(),
         Value::Map(_) => "jsonb".into(),
         Value::Enum(_) => "anyenum".into(),
+        Value::Datum(value) => super::datums::type_name(value).into(),
     }
 }
 

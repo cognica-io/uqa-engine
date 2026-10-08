@@ -80,12 +80,12 @@ pub trait RowPredicate: Send + Sync {
 
 pub type SharedRowPredicate<'a> = Arc<dyn RowPredicate + 'a>;
 
-pub(super) struct DefaultExpressionEvaluator {
+pub(crate) struct DefaultExpressionEvaluator {
     params: Vec<SQLParam>,
 }
 
 impl DefaultExpressionEvaluator {
-    pub(super) fn shared(params: Vec<SQLParam>) -> SharedExpressionEvaluator<'static> {
+    pub(crate) fn shared(params: Vec<SQLParam>) -> SharedExpressionEvaluator<'static> {
         Arc::new(Self { params })
     }
 }

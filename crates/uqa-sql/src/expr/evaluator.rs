@@ -267,8 +267,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         }
         Expr::IsNull { expr, negated } => {
             let v = eval(expr, ctx)?;
-            let is_null = matches!(v, Value::Null);
-            Ok(Value::Bool(if *negated { !is_null } else { is_null }))
+            Ok(Value::Bool(uqa_core::sql_null_test(Some(&v), *negated)))
         }
         Expr::Between { expr, low, high } => {
             let v = eval(expr, ctx)?;

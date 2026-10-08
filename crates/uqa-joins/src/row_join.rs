@@ -80,6 +80,12 @@ impl Hash for JoinKey {
 
 fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
     match value {
+        Value::Datum(datum) => {
+            16_u8.hash(state);
+            datum.type_oid().hash(state);
+            datum.offset().hash(state);
+            datum.bytes().hash(state);
+        }
         Value::Null => 0_u8.hash(state),
         Value::Void => 13_u8.hash(state),
         Value::Bool(value) => hash_decimal_numeric(&DecimalValue::from_bool(*value), state),

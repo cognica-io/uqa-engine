@@ -7,8 +7,8 @@
 //! Dynamic document values, serialization, and cross-numeric ordering.
 
 use super::{
-    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DecimalValue, Deserialize, Deserializer,
-    EnumValue, LegacyVectorValue, RowValue, Serialize, Serializer, TemporalValue,
+    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DatumValue, DecimalValue, Deserialize,
+    Deserializer, EnumValue, LegacyVectorValue, RowValue, Serialize, Serializer, TemporalValue,
 };
 
 pub(super) mod comparison_control;
@@ -65,6 +65,8 @@ pub enum Value {
     /// Label of a user-defined enum type. The immutable label key orders
     /// values in declaration order; label text is resolved from the catalog.
     Enum(EnumValue),
+    /// A retained SQL field that has not been physically interpreted. SQL must read it before value-based operations; NULL tests and type inspection do not read its bytes.
+    Datum(DatumValue),
 }
 
 impl Value {
@@ -121,6 +123,15 @@ struct TaggedRecord<'a> {
     fields: &'a [(String, Value)],
 }
 
+#[derive(Serialize)]
+struct TaggedDatum<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    type_oid: u32,
+    offset: u32,
+    hex: &'a str,
+}
+
 impl Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -166,6 +177,13 @@ impl Serialize for Value {
             Self::Record(fields) => TaggedRecord {
                 kind: "record",
                 fields,
+            }
+            .serialize(serializer),
+            Self::Datum(value) => TaggedDatum {
+                kind: "datum",
+                type_oid: value.type_oid(),
+                offset: value.offset(),
+                hex: &hex_text::<S::Error>(value.bytes())?,
             }
             .serialize(serializer),
             Self::Map(value) => value.serialize(serializer),
@@ -464,6 +482,7 @@ impl Ord for Value {
             (Value::Record(a), Value::Record(b)) => compare_postgres_record_values(a, b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
             (Value::Enum(a), Value::Enum(b)) => a.cmp(b),
+            (Value::Datum(a), Value::Datum(b)) => a.cmp(b),
             _ => discriminant(self).cmp(&discriminant(other)),
         }
     }
@@ -487,6 +506,7 @@ fn discriminant(v: &Value) -> u8 {
         Value::Map(_) => 13,
         Value::LegacyVector(_) => 14,
         Value::Enum(_) => 15,
+        Value::Datum(_) => 16,
     }
 }
 

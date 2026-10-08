@@ -126,6 +126,13 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
     Ok(match value {
         Value::Null => Node::Null,
         Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
+        Value::Datum(value) => {
+            return from_value(
+                &*crate::expr::datums::read_with_control(value, control)?,
+                core_carrier,
+                control,
+            )
+        }
         Value::Void => Node::String(control.copy_text("")?),
         Value::Bool(value) => Node::Bool(*value),
         Value::Int(value) => Node::Number(control.format(format_args!("{value}"))?),
@@ -162,16 +169,7 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
         Value::Bytes(bytes) if core_carrier => {
             Node::String(utf8_lossy_with_control(bytes, control)?)
         }
-        Value::Bytes(bytes) => {
-            let mut text = ProductionString::new(*control);
-            text.push_str("0x")?;
-            const HEX: &[u8; 16] = b"0123456789abcdef";
-            for byte in bytes {
-                text.push(char::from(HEX[usize::from(byte >> 4)]))?;
-                text.push(char::from(HEX[usize::from(byte & 15)]))?;
-            }
-            Node::String(text.finish()?)
-        }
+        Value::Bytes(bytes) => binary_node(bytes, control)?,
         Value::Temporal(value) => Node::String(value.to_sql_string_with_control(control)?),
         Value::Json(text) | Value::JsonB(text) => match parsed::parse_optional(text, control)? {
             Some(value) => value,
@@ -222,6 +220,17 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
             control,
         )?,
     })
+}
+
+fn binary_node(bytes: &[u8], control: &ProductionControl<'_>) -> Result<Node> {
+    let mut text = ProductionString::new(*control);
+    text.push_str("0x")?;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in bytes {
+        text.push(char::from(HEX[usize::from(byte >> 4)]))?;
+        text.push(char::from(HEX[usize::from(byte & 15)]))?;
+    }
+    Ok(Node::String(text.finish()?))
 }
 
 fn array_node(

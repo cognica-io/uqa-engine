@@ -44,7 +44,7 @@ impl CanonicalRowHashSet {
     /// Returns `true` only when this is the first SQL-equal key.
     pub fn insert_borrowed(&mut self, values: &[&Value]) -> ExecResult<bool> {
         let hash = hash_canonical_row(self.index.hasher(), values.iter().copied().map(Some))?;
-        if self.matching_borrowed(hash, values) {
+        if self.matching(hash, values.iter().copied())? {
             return Ok(false);
         }
 
@@ -62,7 +62,7 @@ impl CanonicalRowHashSet {
     /// carrier. Values are copied only for a previously unseen key.
     pub fn insert_values(&mut self, values: &[Value]) -> ExecResult<bool> {
         let hash = hash_canonical_row(self.index.hasher(), values.iter().map(Some))?;
-        if self.matching_values(hash, values) {
+        if self.matching(hash, values.iter())? {
             return Ok(false);
         }
 
@@ -76,35 +76,46 @@ impl CanonicalRowHashSet {
     /// copying the key.
     pub fn contains_borrowed(&self, values: &[&Value]) -> ExecResult<bool> {
         let hash = hash_canonical_row(self.index.hasher(), values.iter().copied().map(Some))?;
-        Ok(self.matching_borrowed(hash, values))
+        self.matching(hash, values.iter().copied())
     }
 
     /// Probe with an already positional value slice.
     pub fn contains_values(&self, values: &[Value]) -> ExecResult<bool> {
         let hash = hash_canonical_row(self.index.hasher(), values.iter().map(Some))?;
-        Ok(self.matching_values(hash, values))
+        self.matching(hash, values.iter())
     }
 
-    fn matching_borrowed(&self, hash: u64, values: &[&Value]) -> bool {
-        self.index.get(&hash).is_some_and(|bucket| {
-            bucket.iter().copied().any(|index| {
-                let stored = &self.rows[index];
-                stored.len() == values.len()
-                    && stored
-                        .iter()
-                        .zip(values)
-                        .all(|(stored, value)| stored == *value)
-            })
-        })
-    }
-
-    fn matching_values(&self, hash: u64, values: &[Value]) -> bool {
-        self.index.get(&hash).is_some_and(|bucket| {
-            bucket
-                .iter()
-                .copied()
-                .any(|index| self.rows[index].as_slice() == values)
-        })
+    fn matching<'a>(
+        &self,
+        hash: u64,
+        values: impl ExactSizeIterator<Item = &'a Value> + Clone,
+    ) -> ExecResult<bool> {
+        let Some(bucket) = self.index.get(&hash) else {
+            return Ok(false);
+        };
+        for index in bucket {
+            let stored = &self.rows[*index];
+            if stored.len() != values.len() {
+                continue;
+            }
+            let mut equal = true;
+            for (stored, value) in stored.iter().zip(values.clone()) {
+                if !uqa_sql::expr::compare_typed_values_with_control(
+                    stored,
+                    value,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )?
+                .is_eq()
+                {
+                    equal = false;
+                    break;
+                }
+            }
+            if equal {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

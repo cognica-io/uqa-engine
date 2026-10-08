@@ -1,0 +1,200 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE ce AS(a integer,b text); PREPARE ce_false AS SELECT '(2,tail)'::ce WHERE false; PREPARE ce_n AS SELECT '(2,tail)'::ce IS NULL, '(2,tail)'::ce IS NOT NULL; PREPARE ce_o AS SELECT '(2,tail)'::ce; PREPARE ce_b AS SELECT ('(2,tail)'::ce).b; PREPARE ce_a AS SELECT ('(2,tail)'::ce).a; PREPARE ce_typ AS SELECT pg_typeof('(2,tail)'::ce); PREPARE ce_eq AS SELECT '(2,tail)'::ce = '(2,tail)'::ce; PREPARE ce_co AS SELECT coalesce('(2,tail)'::ce, NULL::ce) IS NOT NULL; PREPARE ce_one AS SELECT 1 FROM (SELECT '(2,tail)'::ce AS v) q GROUP BY v; PREPARE ce_drop AS SELECT 1 FROM (SELECT '(2,tail)'::ce AS v) q ORDER BY v; ALTER TYPE ce ALTER ATTRIBUTE a TYPE numeric"
+    },
+    {
+      "id": "false",
+      "sql": "EXECUTE ce_false"
+    },
+    {
+      "id": "n",
+      "sql": "EXECUTE ce_n"
+    },
+    {
+      "id": "a",
+      "sql": "EXECUTE ce_a"
+    },
+    {
+      "id": "b",
+      "sql": "EXECUTE ce_b"
+    },
+    {
+      "id": "o",
+      "sql": "EXECUTE ce_o"
+    },
+    {
+      "id": "typ",
+      "sql": "EXECUTE ce_typ"
+    },
+    {
+      "id": "eq",
+      "sql": "EXECUTE ce_eq"
+    },
+    {
+      "id": "co",
+      "sql": "EXECUTE ce_co"
+    },
+    {
+      "id": "one",
+      "sql": "EXECUTE ce_one"
+    },
+    {
+      "id": "drop",
+      "sql": "EXECUTE ce_drop"
+    },
+    {
+      "id": "empty_constant_group",
+      "sql": "SELECT count(*) FROM (SELECT 4 AS key WHERE false) AS q GROUP BY key"
+    },
+    {
+      "id": "populated_constant_group",
+      "sql": "SELECT count(*) FROM (SELECT 4 AS key) AS q GROUP BY key"
+    },
+    {
+      "id": "many_rows_constant_group",
+      "sql": "SELECT count(*) FROM (VALUES (1),(2)) AS q(v) GROUP BY CAST('same' AS text)"
+    },
+    {
+      "id": "short_header_setup",
+      "sql": "CREATE TYPE short_datum AS(a integer,b text); PREPARE short_datum_p AS SELECT '(3,hello)'::short_datum; ALTER TYPE short_datum ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "short_header_output",
+      "sql": "EXECUTE short_datum_p"
+    },
+    {
+      "id": "binary_setup",
+      "sql": "CREATE TYPE binary_datum AS(a text,b integer); PREPARE binary_datum_p AS SELECT '(hello,8)'::binary_datum; ALTER TYPE binary_datum ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "binary_output",
+      "sql": "EXECUTE binary_datum_p"
+    },
+    {
+      "id": "binary_restore",
+      "sql": "ALTER TYPE binary_datum ALTER ATTRIBUTE a TYPE text; EXECUTE binary_datum_p"
+    },
+    {
+      "id": "external_shape_0",
+      "sql": "CREATE TYPE external_shape_0 AS (a integer,b text); PREPARE external_shape_0_p AS SELECT '(1,hello)'::external_shape_0; EXECUTE external_shape_0_p; ALTER TYPE external_shape_0 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_1",
+      "sql": "EXECUTE external_shape_0_p"
+    },
+    {
+      "id": "external_shape_2",
+      "sql": "CREATE TYPE external_shape_1 AS (a integer); PREPARE external_shape_1_p AS SELECT '(1)'::external_shape_1; EXECUTE external_shape_1_p; ALTER TYPE external_shape_1 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_3",
+      "sql": "EXECUTE external_shape_1_p"
+    },
+    {
+      "id": "external_shape_4",
+      "sql": "CREATE TYPE external_shape_2 AS (a integer,b integer); PREPARE external_shape_2_p AS SELECT '(1,2)'::external_shape_2; EXECUTE external_shape_2_p; ALTER TYPE external_shape_2 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_5",
+      "sql": "EXECUTE external_shape_2_p"
+    },
+    {
+      "id": "external_shape_6",
+      "sql": "CREATE TYPE external_shape_3 AS (a integer,b integer,c text); PREPARE external_shape_3_p AS SELECT '(1,2,z)'::external_shape_3; EXECUTE external_shape_3_p; ALTER TYPE external_shape_3 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_7",
+      "sql": "EXECUTE external_shape_3_p"
+    },
+    {
+      "id": "external_shape_8",
+      "sql": "CREATE TYPE external_shape_4 AS (pad integer,a integer,b text); PREPARE external_shape_4_p AS SELECT '(42,1,hello)'::external_shape_4; EXECUTE external_shape_4_p; ALTER TYPE external_shape_4 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_9",
+      "sql": "EXECUTE external_shape_4_p"
+    },
+    {
+      "id": "external_shape_10",
+      "sql": "CREATE TYPE external_shape_5 AS (pad bigint,a integer,b text); PREPARE external_shape_5_p AS SELECT '(42,1,hello)'::external_shape_5; EXECUTE external_shape_5_p; ALTER TYPE external_shape_5 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_11",
+      "sql": "EXECUTE external_shape_5_p"
+    },
+    {
+      "id": "external_shape_12",
+      "sql": "CREATE TYPE external_shape_6 AS (pad text,a integer,b text); PREPARE external_shape_6_p AS SELECT '(abc,1,hello)'::external_shape_6; EXECUTE external_shape_6_p; ALTER TYPE external_shape_6 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_13",
+      "sql": "EXECUTE external_shape_6_p"
+    },
+    {
+      "id": "external_shape_14",
+      "sql": "CREATE TYPE external_shape_7 AS (pad text,a integer,b text); PREPARE external_shape_7_p AS SELECT '(,1,hello)'::external_shape_7; EXECUTE external_shape_7_p; ALTER TYPE external_shape_7 ALTER ATTRIBUTE a TYPE varchar"
+    },
+    {
+      "id": "external_shape_15",
+      "sql": "EXECUTE external_shape_7_p"
+    },
+    {
+      "id": "external_shape_16",
+      "sql": "DROP TYPE external_shape_0 CASCADE; DROP TYPE external_shape_1 CASCADE; DROP TYPE external_shape_2 CASCADE; DROP TYPE external_shape_3 CASCADE; DROP TYPE external_shape_4 CASCADE; DROP TYPE external_shape_5 CASCADE; DROP TYPE external_shape_6 CASCADE; DROP TYPE external_shape_7 CASCADE"
+    },
+    {
+      "id": "set_setup",
+      "sql": "CREATE TYPE datum_set AS(a text,b integer); PREPARE datum_union(datum_set) AS SELECT count(*) FROM (SELECT '(hello,8)'::datum_set AS v UNION SELECT $1 AS v) q; PREPARE datum_distinct(datum_set) AS SELECT count(*) FROM (SELECT DISTINCT CASE n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END AS v FROM (VALUES (1),(2)) q(n)) d; PREPARE datum_group(datum_set) AS SELECT count(*) FROM (VALUES (1),(2)) q(n) GROUP BY CASE n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END; PREPARE datum_join(datum_set) AS SELECT count(*) FROM (VALUES (1),(2)) l(n) JOIN (VALUES (1),(2)) r(n) ON CASE l.n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END = CASE r.n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END; ALTER TYPE datum_set ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "set_union",
+      "sql": "EXECUTE datum_union(ROW(decode('68656c6c6f','hex'),8)::datum_set)"
+    },
+    {
+      "id": "set_distinct",
+      "sql": "EXECUTE datum_distinct(ROW(decode('68656c6c6f','hex'),8)::datum_set)"
+    },
+    {
+      "id": "set_group",
+      "sql": "EXECUTE datum_group(ROW(decode('68656c6c6f','hex'),8)::datum_set)"
+    },
+    {
+      "id": "set_join",
+      "sql": "EXECUTE datum_join(ROW(decode('68656c6c6f','hex'),8)::datum_set)"
+    },
+    {
+      "id": "set_cleanup",
+      "sql": "DROP TYPE datum_set CASCADE"
+    },
+    {
+      "id": "malformed_setup",
+      "sql": "CREATE TYPE datum_bad AS (a integer,b text); PREPARE bad_d AS SELECT count(*) FROM (SELECT DISTINCT '(2,tail)'::datum_bad AS v FROM (VALUES (1)) q(n)) d; PREPARE bad_d2 AS SELECT count(*) FROM (SELECT DISTINCT CASE n WHEN 1 THEN '(2,tail)'::datum_bad ELSE '(2,tail)'::datum_bad END AS v FROM (VALUES (1),(2)) q(n)) d; PREPARE bad_u AS SELECT count(*) FROM (SELECT '(2,tail)'::datum_bad AS v UNION SELECT '(2,tail)'::datum_bad AS v WHERE false) d; PREPARE bad_u2 AS SELECT count(*) FROM (SELECT '(2,tail)'::datum_bad AS v UNION SELECT '(2,tail)'::datum_bad AS v) d; ALTER TYPE datum_bad ALTER ATTRIBUTE a TYPE numeric"
+    },
+    {
+      "id": "malformed_bad_d",
+      "sql": "EXECUTE bad_d"
+    },
+    {
+      "id": "malformed_bad_d2",
+      "sql": "EXECUTE bad_d2"
+    },
+    {
+      "id": "malformed_bad_u",
+      "sql": "EXECUTE bad_u"
+    },
+    {
+      "id": "malformed_bad_u2",
+      "sql": "EXECUTE bad_u2"
+    },
+    {
+      "id": "malformed_cleanup",
+      "sql": "DROP TYPE datum_bad CASCADE"
+    }
+  ]
+}

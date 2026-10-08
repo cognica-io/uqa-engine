@@ -4,64 +4,99 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fixed-width tuple data is laid out once under its original descriptor and read under the current descriptor. NULL slots take no bytes; dropped non-NULL slots retain their physical width and alignment.
+//! Form the original tuple once and deform it under the current descriptor. Variable-width fields retain byte views until an operation reads them; NULL tests inspect only the tuple's null bitmap.
 
 use super::super::{datum, CompositeTypeDescriptor};
-use crate::catalog::type_metadata::{pg_type_align, pg_type_len};
-use uqa_core::Value;
+use crate::catalog::type_metadata::{pg_type_align, pg_type_len, pg_type_oid, pg_type_storage};
+use crate::ColumnType;
+use uqa_core::{DatumValue, Value};
+
+mod encoding;
 
 pub(super) fn project(
     fields: &[(String, Value)],
     before: &CompositeTypeDescriptor,
     after: &CompositeTypeDescriptor,
 ) -> Option<Value> {
-    let mut bytes = Vec::new();
-    for attribute in &before.attributes {
-        let value = fields.iter().find(|(name, _)| *name == attribute.name)?;
-        if matches!(value.1, Value::Null) {
-            continue;
-        }
-        let length = width(pg_type_len(&attribute.ty))?;
-        let offset = align(bytes.len(), pg_type_align(&attribute.ty).as_bytes()[0])?;
-        bytes.resize(offset, 0);
-        bytes.extend_from_slice(
-            &datum::encode_bits(&value.1, &attribute.ty)?.to_le_bytes()[..length],
-        );
-    }
-
+    let (bytes, positions, start) = encoding::encode(fields, before)?;
+    let backing = DatumValue::new(0, 0, bytes);
+    let bytes = backing.bytes();
     let mut output = after
         .attributes
         .iter()
         .map(|attribute| (attribute.name.clone(), Value::Null))
         .collect::<Vec<_>>();
-    let mut offset = 0;
-    for original in &before.attributes {
-        let (_, value) = fields.iter().find(|(name, _)| *name == original.name)?;
-        if matches!(value, Value::Null) {
+    let mut offset = start;
+    for (original, position) in before.attributes.iter().zip(positions) {
+        let Some(position) = position else {
             continue;
-        }
-        if let Some((index, attribute)) = after
+        };
+        let (_, value) = fields.iter().find(|(name, _)| *name == original.name)?;
+        let current = after
             .attributes
             .iter()
             .enumerate()
-            .find(|(_, attribute)| attribute.number == original.number)
-        {
-            let length = width(pg_type_len(&attribute.ty))?;
-            offset = align(offset, pg_type_align(&attribute.ty).as_bytes()[0])?;
-            let end = offset.checked_add(length)?;
-            let mut bits = [0; 8];
-            bits[..length].copy_from_slice(bytes.get(offset..end)?);
-            output[index].1 = datum::decode_bits(u64::from_le_bytes(bits), &attribute.ty)?;
-            offset = end;
+            .find(|(_, attribute)| attribute.number == original.number);
+        let (length, alignment) = if let Some((_, attribute)) = current {
+            (
+                pg_type_len(&attribute.ty),
+                pg_type_align(&attribute.ty).as_bytes()[0],
+            )
         } else {
             let dropped = after
                 .dropped
                 .iter()
                 .find(|attribute| attribute.number == original.number)?;
-            offset = align(offset, dropped.alignment)?.checked_add(width(dropped.length)?)?;
+            (dropped.length, dropped.alignment)
+        };
+        // att_align_pointer leaves packed varlena values unaligned. Zero is the pad byte preceding a four-byte header.
+        if length != -1 || bytes.get(offset) == Some(&0) {
+            offset = align(offset, alignment)?;
         }
+        if let Some((index, attribute)) = current {
+            output[index].1 = if position == offset && original.ty == attribute.ty {
+                value.clone()
+            } else if length == -1 {
+                Value::Datum(backing.field(base_oid(&attribute.ty)?, u32::try_from(offset).ok()?))
+            } else {
+                let length = width(length)?;
+                let end = offset.checked_add(length)?;
+                let mut bits = [0; 8];
+                bits[..length].copy_from_slice(bytes.get(offset..end)?);
+                datum::decode_bits(u64::from_le_bytes(bits), &attribute.ty)?
+            };
+        }
+        offset = offset.checked_add(if length == -1 {
+            bytes.get(offset..).and_then(variable_length).unwrap_or(0)
+        } else {
+            usize::try_from(length).ok()?
+        })?;
     }
     Some(Value::Record(output))
+}
+
+fn base_oid(ty: &ColumnType) -> Option<u32> {
+    match ty {
+        ColumnType::Domain { base, .. } => base_oid(base),
+        _ => u32::try_from(pg_type_oid(ty)).ok(),
+    }
+}
+
+fn variable_length(bytes: &[u8]) -> Option<usize> {
+    let first = *bytes.first()?;
+    if first == 1 {
+        // External on-disk pointers occupy eighteen bytes; indirect and expanded pointers occupy ten.
+        return Some(match bytes.get(1) {
+            Some(1..=3) => 10,
+            Some(18) => 18,
+            _ => 2,
+        });
+    }
+    if first & 1 != 0 {
+        Some(usize::from(first >> 1))
+    } else {
+        Some((u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) >> 2) as usize)
+    }
 }
 
 fn width(length: i64) -> Option<usize> {

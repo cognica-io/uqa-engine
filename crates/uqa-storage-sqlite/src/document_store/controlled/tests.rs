@@ -91,6 +91,11 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ])
             .unwrap(),
         ),
+        Value::Datum(uqa_core::DatumValue::new(
+            1700,
+            0,
+            vec![2, 0, 0, 0, 3, b'x'],
+        )),
         Value::Enum(EnumValue::new(
             16_390,
             EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap(),

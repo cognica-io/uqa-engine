@@ -291,6 +291,7 @@ fn schema_literal_text(value: &Value) -> Result<String, SQLError> {
         Value::Json(value) => format!("'{}'::json", value.replace('\'', "''")),
         Value::JsonB(value) => format!("'{}'::jsonb", value.replace('\'', "''")),
         Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
+        Value::Datum(value) => return schema_literal_text(&crate::expr::datums::read(value)?),
         Value::LegacyVector(vector) => crate::render::legacy_vector_expression(vector)
             .expect("stored SQL vector has SQL-produced bounds"),
         Value::Array(array)

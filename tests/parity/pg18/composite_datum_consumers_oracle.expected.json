@@ -1,0 +1,1271 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE ce AS(a integer,b text); PREPARE ce_false AS SELECT '(2,tail)'::ce WHERE false; PREPARE ce_n AS SELECT '(2,tail)'::ce IS NULL, '(2,tail)'::ce IS NOT NULL; PREPARE ce_o AS SELECT '(2,tail)'::ce; PREPARE ce_b AS SELECT ('(2,tail)'::ce).b; PREPARE ce_a AS SELECT ('(2,tail)'::ce).a; PREPARE ce_typ AS SELECT pg_typeof('(2,tail)'::ce); PREPARE ce_eq AS SELECT '(2,tail)'::ce = '(2,tail)'::ce; PREPARE ce_co AS SELECT coalesce('(2,tail)'::ce, NULL::ce) IS NOT NULL; PREPARE ce_one AS SELECT 1 FROM (SELECT '(2,tail)'::ce AS v) q GROUP BY v; PREPARE ce_drop AS SELECT 1 FROM (SELECT '(2,tail)'::ce AS v) q ORDER BY v; ALTER TYPE ce ALTER ATTRIBUTE a TYPE numeric",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "EXECUTE ce_false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ce"
+          ],
+          "type_oids": [
+            18727
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "false"
+    },
+    {
+      "sql": "EXECUTE ce_n",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "n"
+    },
+    {
+      "sql": "EXECUTE ce_a",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "attribute 1 has wrong type",
+        "detail": "Table has type numeric, but query expects integer.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "a"
+    },
+    {
+      "sql": "EXECUTE ce_b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed lz4 data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "b"
+    },
+    {
+      "sql": "EXECUTE ce_o",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed lz4 data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "o"
+    },
+    {
+      "sql": "EXECUTE ce_typ",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "ce"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "typ"
+    },
+    {
+      "sql": "EXECUTE ce_eq",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed lz4 data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "eq"
+    },
+    {
+      "sql": "EXECUTE ce_co",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "co"
+    },
+    {
+      "sql": "EXECUTE ce_one",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "one"
+    },
+    {
+      "sql": "EXECUTE ce_drop",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "drop"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 4 AS key WHERE false) AS q GROUP BY key",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "empty_constant_group"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT 4 AS key) AS q GROUP BY key",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "populated_constant_group"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES (1),(2)) AS q(v) GROUP BY CAST('same' AS text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "many_rows_constant_group"
+    },
+    {
+      "sql": "CREATE TYPE short_datum AS(a integer,b text); PREPARE short_datum_p AS SELECT '(3,hello)'::short_datum; ALTER TYPE short_datum ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "short_header_setup"
+    },
+    {
+      "sql": "EXECUTE short_datum_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "short_datum"
+          ],
+          "type_oids": [
+            18730
+          ],
+          "rows": [
+            [
+              "(\"\",hello)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "short_header_output"
+    },
+    {
+      "sql": "CREATE TYPE binary_datum AS(a text,b integer); PREPARE binary_datum_p AS SELECT '(hello,8)'::binary_datum; ALTER TYPE binary_datum ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "binary_setup"
+    },
+    {
+      "sql": "EXECUTE binary_datum_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "binary_datum"
+          ],
+          "type_oids": [
+            18733
+          ],
+          "rows": [
+            [
+              "(\"\\\\x68656c6c6f\",8)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "binary_output"
+    },
+    {
+      "sql": "ALTER TYPE binary_datum ALTER ATTRIBUTE a TYPE text; EXECUTE binary_datum_p",
+      "command_tags": [
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "binary_datum"
+          ],
+          "type_oids": [
+            18733
+          ],
+          "rows": [
+            [
+              "(hello,8)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "binary_restore"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_0 AS (a integer,b text); PREPARE external_shape_0_p AS SELECT '(1,hello)'::external_shape_0; EXECUTE external_shape_0_p; ALTER TYPE external_shape_0 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_0"
+          ],
+          "type_oids": [
+            18736
+          ],
+          "rows": [
+            [
+              "(1,hello)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_0"
+    },
+    {
+      "sql": "EXECUTE external_shape_0_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "pfree called with invalid pointer 0xaaab0ed02518 (header 0x0200020000ffffff)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_1"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_1 AS (a integer); PREPARE external_shape_1_p AS SELECT '(1)'::external_shape_1; EXECUTE external_shape_1_p; ALTER TYPE external_shape_1 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_1"
+          ],
+          "type_oids": [
+            18739
+          ],
+          "rows": [
+            [
+              "(1)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_2"
+    },
+    {
+      "sql": "EXECUTE external_shape_1_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "pfree called with invalid pointer 0xaaab0ed02508 (header 0x0000010000ffffff)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_3"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_2 AS (a integer,b integer); PREPARE external_shape_2_p AS SELECT '(1,2)'::external_shape_2; EXECUTE external_shape_2_p; ALTER TYPE external_shape_2 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_2"
+          ],
+          "type_oids": [
+            18742
+          ],
+          "rows": [
+            [
+              "(1,2)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_4"
+    },
+    {
+      "sql": "EXECUTE external_shape_2_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "pfree called with invalid pointer 0xaaab0ed024f8 (header 0x0000020000ffffff)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_5"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_3 AS (a integer,b integer,c text); PREPARE external_shape_3_p AS SELECT '(1,2,z)'::external_shape_3; EXECUTE external_shape_3_p; ALTER TYPE external_shape_3 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_3"
+          ],
+          "type_oids": [
+            18745
+          ],
+          "rows": [
+            [
+              "(1,2,z)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_6"
+    },
+    {
+      "sql": "EXECUTE external_shape_3_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "pfree called with invalid pointer 0xaaab0ed02540 (header 0x0200030000ffffff)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_7"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_4 AS (pad integer,a integer,b text); PREPARE external_shape_4_p AS SELECT '(42,1,hello)'::external_shape_4; EXECUTE external_shape_4_p; ALTER TYPE external_shape_4 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_4"
+          ],
+          "type_oids": [
+            18748
+          ],
+          "rows": [
+            [
+              "(42,1,hello)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_8"
+    },
+    {
+      "sql": "EXECUTE external_shape_4_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "invalid memory alloc request size 18446744073709551613",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_9"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_5 AS (pad bigint,a integer,b text); PREPARE external_shape_5_p AS SELECT '(42,1,hello)'::external_shape_5; EXECUTE external_shape_5_p; ALTER TYPE external_shape_5 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_5"
+          ],
+          "type_oids": [
+            18751
+          ],
+          "rows": [
+            [
+              "(42,1,hello)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_10"
+    },
+    {
+      "sql": "EXECUTE external_shape_5_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "invalid memory alloc request size 18446744073709551613",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_11"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_6 AS (pad text,a integer,b text); PREPARE external_shape_6_p AS SELECT '(abc,1,hello)'::external_shape_6; EXECUTE external_shape_6_p; ALTER TYPE external_shape_6 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_6"
+          ],
+          "type_oids": [
+            18754
+          ],
+          "rows": [
+            [
+              "(abc,1,hello)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_12"
+    },
+    {
+      "sql": "EXECUTE external_shape_6_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "pfree called with invalid pointer 0xaaab0ed02550 (header 0x0900180002000300)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_13"
+    },
+    {
+      "sql": "CREATE TYPE external_shape_7 AS (pad text,a integer,b text); PREPARE external_shape_7_p AS SELECT '(,1,hello)'::external_shape_7; EXECUTE external_shape_7_p; ALTER TYPE external_shape_7 ALTER ATTRIBUTE a TYPE varchar",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "SELECT 1",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "external_shape_7"
+          ],
+          "type_oids": [
+            18757
+          ],
+          "rows": [
+            [
+              "(,1,hello)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_14"
+    },
+    {
+      "sql": "EXECUTE external_shape_7_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "pfree called with invalid pointer 0xaaab0ed02540 (header 0x0300030000ffffff)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "external_shape_15"
+    },
+    {
+      "sql": "DROP TYPE external_shape_0 CASCADE; DROP TYPE external_shape_1 CASCADE; DROP TYPE external_shape_2 CASCADE; DROP TYPE external_shape_3 CASCADE; DROP TYPE external_shape_4 CASCADE; DROP TYPE external_shape_5 CASCADE; DROP TYPE external_shape_6 CASCADE; DROP TYPE external_shape_7 CASCADE",
+      "command_tags": [
+        "DROP TYPE",
+        "DROP TYPE",
+        "DROP TYPE",
+        "DROP TYPE",
+        "DROP TYPE",
+        "DROP TYPE",
+        "DROP TYPE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "external_shape_16"
+    },
+    {
+      "sql": "CREATE TYPE datum_set AS(a text,b integer); PREPARE datum_union(datum_set) AS SELECT count(*) FROM (SELECT '(hello,8)'::datum_set AS v UNION SELECT $1 AS v) q; PREPARE datum_distinct(datum_set) AS SELECT count(*) FROM (SELECT DISTINCT CASE n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END AS v FROM (VALUES (1),(2)) q(n)) d; PREPARE datum_group(datum_set) AS SELECT count(*) FROM (VALUES (1),(2)) q(n) GROUP BY CASE n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END; PREPARE datum_join(datum_set) AS SELECT count(*) FROM (VALUES (1),(2)) l(n) JOIN (VALUES (1),(2)) r(n) ON CASE l.n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END = CASE r.n WHEN 1 THEN '(hello,8)'::datum_set ELSE $1 END; ALTER TYPE datum_set ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "set_setup"
+    },
+    {
+      "sql": "EXECUTE datum_union(ROW(decode('68656c6c6f','hex'),8)::datum_set)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_union"
+    },
+    {
+      "sql": "EXECUTE datum_distinct(ROW(decode('68656c6c6f','hex'),8)::datum_set)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "set_distinct"
+    },
+    {
+      "sql": "EXECUTE datum_group(ROW(decode('68656c6c6f','hex'),8)::datum_set)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "set_group"
+    },
+    {
+      "sql": "EXECUTE datum_join(ROW(decode('68656c6c6f','hex'),8)::datum_set)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "id": "set_join"
+    },
+    {
+      "sql": "DROP TYPE datum_set CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "set_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE datum_bad AS (a integer,b text); PREPARE bad_d AS SELECT count(*) FROM (SELECT DISTINCT '(2,tail)'::datum_bad AS v FROM (VALUES (1)) q(n)) d; PREPARE bad_d2 AS SELECT count(*) FROM (SELECT DISTINCT CASE n WHEN 1 THEN '(2,tail)'::datum_bad ELSE '(2,tail)'::datum_bad END AS v FROM (VALUES (1),(2)) q(n)) d; PREPARE bad_u AS SELECT count(*) FROM (SELECT '(2,tail)'::datum_bad AS v UNION SELECT '(2,tail)'::datum_bad AS v WHERE false) d; PREPARE bad_u2 AS SELECT count(*) FROM (SELECT '(2,tail)'::datum_bad AS v UNION SELECT '(2,tail)'::datum_bad AS v) d; ALTER TYPE datum_bad ALTER ATTRIBUTE a TYPE numeric",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "malformed_setup"
+    },
+    {
+      "sql": "EXECUTE bad_d",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "malformed_bad_d"
+    },
+    {
+      "sql": "EXECUTE bad_d2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed lz4 data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "malformed_bad_d2"
+    },
+    {
+      "sql": "EXECUTE bad_u",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "malformed_bad_u"
+    },
+    {
+      "sql": "EXECUTE bad_u2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed lz4 data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "malformed_bad_u2"
+    },
+    {
+      "sql": "DROP TYPE datum_bad CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "malformed_cleanup"
+    }
+  ]
+}

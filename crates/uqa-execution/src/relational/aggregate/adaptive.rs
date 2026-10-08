@@ -339,6 +339,7 @@ fn value_retained_bytes(value: &Value) -> usize {
         }
         Value::Bytes(value) => value.capacity(),
         Value::Enum(value) => value.retained_bytes(),
+        Value::Datum(value) => value.retained_bytes(),
         Value::LegacyVector(vector) => vector.retained_bytes(),
         Value::Array(array) => array
             .retained_header_bytes()

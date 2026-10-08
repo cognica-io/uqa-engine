@@ -695,6 +695,7 @@ fn string_literal(value: &str) -> String {
 
 fn value_sql(value: &Value) -> Result<String, SQLError> {
     Ok(match value {
+        Value::Datum(value) => return value_sql(&crate::expr::datums::read(value)?),
         Value::Null => "NULL".into(),
         Value::Void => "''::void".into(),
         Value::Bool(value) => if *value { "true" } else { "false" }.into(),

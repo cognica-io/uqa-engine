@@ -220,6 +220,10 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
     }
     add_size(total, 1, "value tag")?;
     match value {
+        Value::Datum(value) => {
+            add_size(total, 16, "datum identity, offset and length")?;
+            add_size(total, value.bytes().len(), "datum bytes")
+        }
         Value::Null | Value::Void => Ok(()),
         Value::Bool(_) => add_size(total, 1, "boolean value"),
         Value::Int(_) | Value::Float(_) => add_size(total, 8, "numeric value"),
@@ -280,15 +284,7 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         Value::Row(values) => {
             add_size(total, 8, "row length")?;
             if let Some(fields) = values.field_types() {
-                add_size(total, 8, "row descriptor length")?;
-                add_size(
-                    total,
-                    fields
-                        .len()
-                        .checked_mul(8)
-                        .ok_or_else(|| spill_error("row descriptor size overflow"))?,
-                    "row descriptor",
-                )?;
+                add_row_descriptor_size(total, fields.len())?;
             }
             for value in values {
                 add_value_size(total, value, depth + 1)?;
@@ -312,6 +308,17 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             Ok(())
         }
     }
+}
+
+fn add_row_descriptor_size(total: &mut usize, fields: usize) -> ExecResult<()> {
+    add_size(total, 8, "row descriptor length")?;
+    add_size(
+        total,
+        fields
+            .checked_mul(8)
+            .ok_or_else(|| spill_error("row descriptor size overflow"))?,
+        "row descriptor",
+    )
 }
 
 fn temporal_payload_size(value: &TemporalValue) -> usize {
@@ -485,6 +492,12 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
         return Err(spill_error("spill value nesting exceeds 128 levels"));
     }
     match value {
+        Value::Datum(value) => {
+            write_tag(writer, 20)?;
+            write_raw(writer, &value.type_oid().to_le_bytes(), "datum type OID")?;
+            write_raw(writer, &value.offset().to_le_bytes(), "datum offset")?;
+            write_bytes(writer, value.bytes())
+        }
         Value::Null => write_tag(writer, 0),
         Value::Void => write_tag(writer, 16),
         Value::Enum(value) => {

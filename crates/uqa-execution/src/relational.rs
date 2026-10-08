@@ -46,7 +46,7 @@ pub use sort::{compare_sort_key_values, Sort, SortKey};
 pub use window::{Window, WindowExecutor, WindowKind, WindowSpec};
 
 use aggregate::value_to_f64;
-use evaluator::DefaultExpressionEvaluator;
+pub(crate) use evaluator::DefaultExpressionEvaluator;
 use sort::compare_values;
 
 #[cfg(test)]

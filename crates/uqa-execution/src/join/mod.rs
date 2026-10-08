@@ -411,11 +411,13 @@ impl<'a> HashJoin<'a> {
             return Ok(());
         }
 
-        let direct_is_unique = direct_index.as_ref().is_some_and(|direct| {
-            direct_positions.is_some_and(|(positions, _)| {
-                !left.has_spilled() && direct.keys_are_unique(&left, &left.schema, positions)
-            })
-        });
+        let direct_is_unique = if let (Some(direct), Some((positions, _))) =
+            (direct_index.as_ref(), direct_positions)
+        {
+            !left.has_spilled() && direct.keys_are_unique(&left, &left.schema, positions)?
+        } else {
+            false
+        };
         if direct_is_unique {
             self.right.open()?;
             self.streaming_unique = Some(UniqueHashJoinState {
@@ -685,11 +687,13 @@ impl PhysicalOperator for HashJoin<'_> {
             return Ok(());
         }
 
-        let direct_is_unique = direct_index.as_ref().is_some_and(|direct| {
-            direct_positions.is_some_and(|(positions, _)| {
-                !right.has_spilled() && direct.keys_are_unique(&right, &right.schema, positions)
-            })
-        });
+        let direct_is_unique = if let (Some(direct), Some((positions, _))) =
+            (direct_index.as_ref(), direct_positions)
+        {
+            !right.has_spilled() && direct.keys_are_unique(&right, &right.schema, positions)?
+        } else {
+            false
+        };
         if direct_is_unique {
             self.left.open()?;
             self.streaming_unique = Some(UniqueHashJoinState {

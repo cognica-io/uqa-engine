@@ -32,6 +32,7 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Map(_) => "jsonb",
         // Runtime carriers name their type class, as arrays use `anyarray`; bound expressions report declared names.
         Value::Enum(_) => "anyenum",
+        Value::Datum(value) => super::datums::type_name(value),
     }
 }
 

@@ -15,6 +15,9 @@ pub use read::parse;
 pub mod deparse;
 pub mod expressions;
 mod values;
+pub(crate) use values::numeric::{
+    decode_with_control as decode_numeric_datum_with_control, encode as encode_numeric_datum,
+};
 pub(crate) use values::temporal::{
     decode as decode_temporal_datum, encode as encode_temporal_datum,
 };

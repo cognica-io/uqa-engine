@@ -18,6 +18,7 @@ use crate::params::SQLParam;
 use crate::result::ResultRow;
 
 mod array_transform;
+pub mod datums;
 mod encoding;
 mod floating;
 mod in_range;

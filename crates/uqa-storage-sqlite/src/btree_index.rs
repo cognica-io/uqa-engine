@@ -67,6 +67,7 @@ enum StoredValue {
     Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
     Enum(EnumValue),
+    Datum(uqa_core::DatumValue),
 }
 
 impl From<&Value> for StoredValue {
@@ -102,6 +103,7 @@ impl From<&Value> for StoredValue {
                     .collect(),
             ),
             Value::Enum(value) => Self::Enum(value.clone()),
+            Value::Datum(value) => Self::Datum(value.clone()),
         }
     }
 }
@@ -139,6 +141,7 @@ impl StoredValue {
                     .collect(),
             ),
             Self::Enum(value) => Value::Enum(value),
+            Self::Datum(value) => Value::Datum(value),
         }
     }
 }

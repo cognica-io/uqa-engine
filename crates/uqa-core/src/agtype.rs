@@ -182,7 +182,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
             Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => 9,
             Value::Record(_) | Value::Map(_) | Value::Enum(_) => 10,
             Value::Json(text) | Value::JsonB(text) => json_type_ordinal(text),
-            Value::Bytes(_) | Value::Temporal(_) => 11,
+            Value::Bytes(_) | Value::Temporal(_) | Value::Datum(_) => 11,
         },
     }
 }
@@ -206,6 +206,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Json(text) | Value::JsonB(text) => json_type_name(text),
             Value::Bytes(_) => "bytea",
             Value::Temporal(_) => "temporal",
+            Value::Datum(_) => "datum",
         },
     }
 }
@@ -280,6 +281,22 @@ fn render_plain_into(value: &Value, out: &mut String) {
         Value::FixedChar(s) => render_json_string(s.trim_end_matches(' '), out),
         Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
         Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
+        Value::Datum(datum) => {
+            let mut hex = String::with_capacity(datum.bytes().len() * 2);
+            for byte in datum.bytes() {
+                use std::fmt::Write;
+                write!(hex, "{byte:02x}").expect("writing to String cannot fail");
+            }
+            render_plain_into(
+                &Value::Map(BTreeMap::from([
+                    ("$uqa_type".into(), Value::Str("datum".into())),
+                    ("type_oid".into(), Value::Int(i64::from(datum.type_oid()))),
+                    ("offset".into(), Value::Int(i64::from(datum.offset()))),
+                    ("hex".into(), Value::Str(hex)),
+                ])),
+                out,
+            );
+        }
         Value::Json(text) | Value::JsonB(text) => out.push_str(text),
         Value::Array(array) => render_sequence(array.elements(), out),
         Value::LegacyVector(vector) => render_sequence(vector.elements(), out),
@@ -407,6 +424,7 @@ fn sort_priority(value: &Value) -> u8 {
             Value::Bool(_) => 6,
             Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 7,
             Value::Null => 8,
+            Value::Datum(_) => 9,
         },
     }
 }

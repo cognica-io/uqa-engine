@@ -109,6 +109,7 @@ impl Value {
                     | Self::Json(text)
                     | Self::JsonB(text) => (text.capacity(), None),
                     Self::Bytes(bytes) => (bytes.capacity(), None),
+                    Self::Datum(value) => (value.retained_bytes(), None),
                     Self::Enum(value) => (value.retained_bytes(), None),
                     Self::Decimal(decimal) => (decimal.retained_bytes(), None),
                     Self::Array(array) => (

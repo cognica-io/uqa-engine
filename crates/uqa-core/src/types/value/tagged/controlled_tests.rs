@@ -57,6 +57,7 @@ fn controlled_tags_preserve_ordinary_and_serde_semantics_with_exact_final_leases
         r#"{"$uqa_type":"json","value":" {\"a\": 1} "}"#,
         r#"{"$uqa_type":"jsonb","value":"{\"a\":1}"}"#,
         r#"{"$uqa_type":"bytes","hex":"00FfaB"}"#,
+        r#"{"$uqa_type":"datum","type_oid":1700,"offset":32,"hex":"020000000b7461696c"}"#,
         r#"{"$uqa_type":"bytes","hex":"0z"}"#,
         r#"{"$uqa_type":"bytes","hex":"0"}"#,
         r#"{"$uqa_type":"row","values":[1,"text",null]}"#,

@@ -127,6 +127,7 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
         Value::Temporal(value) => serde_json::Value::String(value.to_sql_string()).to_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
+        Value::Datum(value) => return value_to_json_text(&super::datums::read(value)?),
         Value::LegacyVector(vector) => legacy_vector_json(vector).to_string(),
         Value::Array(array) => {
             let values = array
@@ -276,6 +277,9 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
 #[cfg(test)]
 pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
+        Value::Datum(datum) => {
+            value_to_json(&super::datums::read(datum).expect("test datum output"))
+        }
         Value::Null => serde_json::Value::Null,
         Value::Void => serde_json::Value::String(String::new()),
         Value::Bool(b) => serde_json::Value::Bool(*b),

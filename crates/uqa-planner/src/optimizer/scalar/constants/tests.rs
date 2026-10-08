@@ -487,6 +487,28 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
             .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42804"));
     assert_eq!(error.to_string(), "attribute 2 has wrong type");
+    let mut retained = call.clone();
+    if let ScalarExpr::Func { args, .. } = &mut retained {
+        if let ScalarExpr::Cast { expr, .. } = &mut args[0] {
+            if let ScalarExpr::TypedLiteral {
+                composite_source,
+                value,
+                ..
+            } = expr.as_mut()
+            {
+                *composite_source = Some(Box::new(
+                    uqa_sql::expr::composites::CompositeConstantSource {
+                        value: value.clone(),
+                        descriptors: Vec::new(),
+                    },
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        fold_literal_expression(retained.clone(), |_| panic!("retained field position")).unwrap(),
+        retained
+    );
     let folded =
         fold_literal_expression(call.clone(), |_| panic!("already-read constant")).unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Str("x".into())));

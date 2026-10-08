@@ -463,6 +463,14 @@ impl<'a> BinaryReader<'a> {
                     .map(Value::Array)
                     .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
             }
+            20 => {
+                let type_oid = u32::from_le_bytes(self.read_i32("datum type OID")?.to_le_bytes());
+                let offset = u32::from_le_bytes(self.read_i32("datum offset")?.to_le_bytes());
+                let bytes = self.read_bytes("datum bytes")?.to_vec();
+                Ok(Value::Datum(uqa_core::DatumValue::new(
+                    type_oid, offset, bytes,
+                )))
+            }
             16 => Ok(Value::Void),
             18 => {
                 let type_oid = u32::from_le_bytes(self.read_i32("enum type OID")?.to_le_bytes());

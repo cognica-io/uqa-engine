@@ -262,12 +262,14 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr
     let ScalarExpr::TypedLiteral {
         value,
         bound_type: Some(ColumnType::Composite(reference)),
+        composite_source,
         ..
     } = base
     else {
         return None;
     };
-    if reference.oid != field.type_oid {
+    if reference.oid != field.type_oid || composite_source.is_some() {
+        // The retained source will be deformed under the execution descriptor. Folding this field now would freeze its old byte position even when its own type is unchanged.
         return None;
     }
     let value = match value {

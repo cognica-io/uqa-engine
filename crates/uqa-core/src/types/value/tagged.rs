@@ -114,6 +114,9 @@ fn convert(
                 }
             }
         }
+        "datum" if map.len() == 4 => {
+            return decoded_datum(&map, workspace).map(Value::Datum);
+        }
         "array" if map.len() == 3 => {
             if let Some(array) = decoded_array(&mut map, workspace)? {
                 return Ok(Value::Array(array));
@@ -165,6 +168,24 @@ fn convert(
         _ => {}
     }
     Ok(Value::Map(map))
+}
+
+fn decoded_datum(
+    map: &BTreeMap<String, Value>,
+    workspace: &mut Workspace<'_>,
+) -> Result<crate::DatumValue, ValueRetentionError> {
+    let malformed = || ValueRetentionError::Malformed {
+        kind: "datum",
+        reason: "invalid type OID, byte offset or backing bytes".into(),
+    };
+    let type_oid = int_field::<u32>(map, "type_oid").ok_or_else(malformed)?;
+    let offset = int_field::<u32>(map, "offset").ok_or_else(malformed)?;
+    let Some(Value::Str(hex)) = map.get("hex") else {
+        return Err(malformed());
+    };
+    let bytes = decode_hex_bytes(hex, workspace)?.ok_or_else(malformed)?;
+    workspace.reserve(size_of::<Vec<u8>>() + 2 * size_of::<usize>())?;
+    Ok(crate::DatumValue::new(type_oid, offset, bytes))
 }
 
 /// Enum carriers are recognized by their exact field set and then validated strictly; a stored label key that does not satisfy the key invariant is corruption rather than a document map.

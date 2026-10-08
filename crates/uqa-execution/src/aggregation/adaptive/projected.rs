@@ -201,7 +201,7 @@ impl AdaptiveAggregateSet {
         row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
-        let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)
+        let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)?
         else {
             return Ok(false);
         };
@@ -296,7 +296,7 @@ impl AdaptiveAggregateSet {
         row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<bool, SQLError> {
-        let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)
+        let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)?
         else {
             return Ok(false);
         };

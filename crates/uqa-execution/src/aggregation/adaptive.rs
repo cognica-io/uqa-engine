@@ -257,7 +257,7 @@ impl AdaptiveAggregateSet {
         key: &[Value],
         context: &ScalarEvalContext<'_>,
     ) -> Result<bool, SQLError> {
-        let Some(index) = matching_group_index(&self.group_index, &self.groups, hash, key) else {
+        let Some(index) = matching_group_index(&self.group_index, &self.groups, hash, key)? else {
             return Ok(false);
         };
         let entry = &mut self.groups[index];
@@ -349,7 +349,7 @@ impl AdaptiveAggregateSet {
 
     fn ensure_active_group(&mut self, key: &[Value]) -> Result<u64, SQLError> {
         let hash = self.group_hash(key)?;
-        let exists = matching_group_index(&self.group_index, &self.groups, hash, key).is_some();
+        let exists = matching_group_index(&self.group_index, &self.groups, hash, key)?.is_some();
         if !exists && !self.insert_group(key, hash)? {
             Err(SQLError::Internal(
                 "abandoned aggregate state cannot accept projected rows".into(),
@@ -431,13 +431,28 @@ fn matching_group_index(
     groups: &[GroupEntry],
     hash: u64,
     key: &[Value],
-) -> Option<usize> {
-    index.get(&hash).and_then(|bucket| {
-        bucket
-            .iter()
-            .copied()
-            .find(|group| groups[*group].key == key)
-    })
+) -> Result<Option<usize>, SQLError> {
+    let Some(bucket) = index.get(&hash) else {
+        return Ok(None);
+    };
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    for group in bucket {
+        let candidate = &groups[*group].key;
+        if candidate.len() != key.len() {
+            continue;
+        }
+        let mut equal = true;
+        for (left, right) in candidate.iter().zip(key) {
+            if !uqa_sql::expr::compare_typed_values_with_control(left, right, &control)?.is_eq() {
+                equal = false;
+                break;
+            }
+        }
+        if equal {
+            return Ok(Some(*group));
+        }
+    }
+    Ok(None)
 }
 
 pub(super) fn supports_adaptive_grouping(
@@ -616,6 +631,7 @@ fn value_retained_bytes(value: &Value) -> usize {
         }
         Value::Bytes(value) => value.capacity(),
         Value::Enum(value) => value.retained_bytes(),
+        Value::Datum(value) => value.retained_bytes(),
         Value::LegacyVector(vector) => vector.retained_bytes(),
         Value::Array(array) => array
             .retained_header_bytes()
@@ -671,6 +687,37 @@ fn value_retained_bytes(value: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn datum_hash_buckets_compare_decoded_sql_values() {
+        let old = Value::Record(vec![(
+            "a".into(),
+            Value::Datum(uqa_core::DatumValue::new(
+                17,
+                0,
+                vec![13, b'h', b'e', b'l', b'l', b'o'],
+            )),
+        )]);
+        let fresh = Value::Record(vec![("a".into(), Value::Bytes(b"hello".to_vec()))]);
+        let mut index = GroupIndex::with_hasher(ahash::RandomState::new());
+        let hash = hash_canonical_row(index.hasher(), [Some(&old)].into_iter()).unwrap();
+        assert_eq!(
+            hash,
+            hash_canonical_row(index.hasher(), [Some(&fresh)].into_iter()).unwrap()
+        );
+        index.insert(hash, SmallVec::from_slice(&[0]));
+        let groups = vec![GroupEntry {
+            key: vec![old],
+            state: GroupState {
+                accumulators: Vec::new(),
+                retained_bytes: 0,
+            },
+        }];
+        assert_eq!(
+            matching_group_index(&index, &groups, hash, &[fresh]).unwrap(),
+            Some(0)
+        );
+    }
 
     #[test]
     fn row_group_accounting_includes_the_header_and_descriptor_capacity() {

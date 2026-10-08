@@ -43,6 +43,14 @@ pub fn cast_value_from_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
+    if let Value::Datum(datum) = v {
+        return cast_value_from_with_control(
+            &*super::datums::read_with_control(datum, control)?,
+            ty,
+            source_ty,
+            control,
+        );
+    }
     if array_scalar_type_name(ty).is_some_and(|element| {
         element.trim().eq_ignore_ascii_case("void")
             || element.trim().eq_ignore_ascii_case("pg_catalog.void")
@@ -541,6 +549,7 @@ fn canonical_cast_source_with_control(
         Value::JsonB(_) => "jsonb",
         Value::Array(_) => "anyarray",
         Value::Enum(_) => "anyenum",
+        Value::Datum(value) => super::datums::type_name(value),
         Value::LegacyVector(vector) => vector.kind().type_name(),
         Value::List(_) => "anyarray",
         Value::Row(_) | Value::Record(_) => "record",

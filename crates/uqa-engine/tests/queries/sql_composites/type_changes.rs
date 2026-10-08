@@ -136,3 +136,19 @@ fn composite_tuple_widths_match_postgresql(#[case] provider: usize) {
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_datum_consumers_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = super::addition::open(provider, &directory.path().join("datum-consumers.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/composite_datum_consumers_oracle.expected.json"
+        ),
+    );
+}

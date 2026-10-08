@@ -269,7 +269,7 @@ pub(crate) fn value_type_with_control(
     control.check()?;
     let scalar = match value {
         // A runtime enum carrier knows only its type OID; declared expression types supply the enum's identity.
-        Value::Null | Value::Map(_) | Value::Enum(_) => None,
+        Value::Null | Value::Map(_) | Value::Enum(_) | Value::Datum(_) => None,
         Value::Void => Some(ColumnType::Void),
         Value::Row(_) | Value::Record(_) => Some(ColumnType::Record),
         Value::Bool(_) => Some(ColumnType::Boolean),

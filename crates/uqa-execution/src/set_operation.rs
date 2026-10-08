@@ -301,7 +301,7 @@ impl<'a> RowCursor<'a> {
         };
         let mut count = 1_usize;
         while let Some(row) = self.next_row()? {
-            if compare_rows(&first, &row, schema) == Ordering::Equal {
+            if compare_rows(&first, &row, schema)? == Ordering::Equal {
                 count = count
                     .checked_add(1)
                     .ok_or_else(|| ExecError::Other("set-operation group count overflow".into()))?;
@@ -329,20 +329,32 @@ enum DirectionalAppendPosition {
     AfterLast,
 }
 
-fn compare_rows(left: &PhysicalRow, right: &PhysicalRow, schema: &RowSchema) -> Ordering {
+fn compare_rows(
+    left: &PhysicalRow,
+    right: &PhysicalRow,
+    schema: &RowSchema,
+) -> ExecResult<Ordering> {
     let left = schema.view(left);
     let right = schema.view(right);
     let null = Value::Null;
     for position in 0..schema.len() {
-        let ordering = left
-            .value_at(position)
-            .unwrap_or(&null)
-            .cmp(right.value_at(position).unwrap_or(&null));
+        let left = left.value_at(position).unwrap_or(&null);
+        let right = right.value_at(position).unwrap_or(&null);
+        let ordering = match (left, right) {
+            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Null, _) => Ordering::Less,
+            (_, Value::Null) => Ordering::Greater,
+            _ => uqa_sql::expr::compare_typed_values_with_control(
+                left,
+                right,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?,
+        };
         if ordering != Ordering::Equal {
-            return ordering;
+            return Ok(ordering);
         }
     }
-    Ordering::Equal
+    Ok(Ordering::Equal)
 }
 
 /// `UNION` / `INTERSECT` / `EXCEPT` physical operator.
@@ -570,7 +582,7 @@ impl<'a> ExternalSetOperation<'a> {
     fn choose_group(&mut self) -> ExecResult<Option<(PhysicalRow, usize)>> {
         self.load_groups()?;
         let ordering = match (&self.left_group, &self.right_group) {
-            (Some(left), Some(right)) => Some(compare_rows(&left.row, &right.row, &self.schema)),
+            (Some(left), Some(right)) => Some(compare_rows(&left.row, &right.row, &self.schema)?),
             (Some(_), None) => Some(Ordering::Less),
             (None, Some(_)) => Some(Ordering::Greater),
             (None, None) => None,

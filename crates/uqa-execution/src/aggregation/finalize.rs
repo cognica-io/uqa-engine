@@ -306,6 +306,7 @@ pub fn percentile_fraction(args: &[ScalarExpr]) -> Result<f64, SQLError> {
 pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
     uqa_sql::expr::validate_json_object_key_type(value)?;
     Ok(match value {
+        Value::Datum(datum) => return aggregate_json_key(&uqa_sql::expr::datums::read(datum)?),
         Value::Null | Value::Void => String::new(),
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),

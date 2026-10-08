@@ -49,6 +49,11 @@ impl FromNapiValue for JSValue {
 pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
     unsafe {
         match value {
+            Value::Datum(datum) => value_to_napi(
+                env,
+                uqa_sql::expr::datums::read(&datum)
+                    .map_err(|error| Error::from_reason(error.to_string()))?,
+            ),
             Value::Null => Null::to_napi_value(env, Null),
             Value::Void => String::to_napi_value(env, String::new()),
             Value::Bool(value) => bool::to_napi_value(env, value),

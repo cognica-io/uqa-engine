@@ -14,6 +14,7 @@
 use crate::RowSchemaExecution;
 mod encoding;
 mod memory;
+pub(crate) mod ordered;
 mod spill;
 
 use std::path::{Path, PathBuf};

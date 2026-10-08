@@ -153,6 +153,25 @@ pub fn eval_binary_values_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Ok(control.finish(Value::Null, control.empty_reservation())?);
+    }
+    if let Value::Datum(datum) = l {
+        return eval_binary_values_with_control(
+            op,
+            &*super::datums::read_with_control(datum, control)?,
+            r,
+            control,
+        );
+    }
+    if let Value::Datum(datum) = r {
+        return eval_binary_values_with_control(
+            op,
+            l,
+            &*super::datums::read_with_control(datum, control)?,
+            control,
+        );
+    }
     match op {
         BinaryOp::Equal
         | BinaryOp::NotEqual

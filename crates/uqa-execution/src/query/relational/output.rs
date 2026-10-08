@@ -132,12 +132,23 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
     if original.distinct {
         let work_mem_bytes = physical_work_mem_bytes(runtime)?;
         operator = if original.distinct_on.is_empty() {
+            let mut ordered = false;
             for position in 0..columns.len() {
                 if let Some(ty) = operator.row_schema().column_type(position) {
                     crate::require_equality_operator(ty)?;
+                    ordered |= uqa_sql::expr::type_comparison_can_fail(ty);
                 }
             }
-            Box::new(Distinct::all_with_work_mem(operator, work_mem_bytes))
+            if ordered {
+                crate::distinct::ordered::operator(
+                    operator,
+                    (0..columns.len()).map(ScalarExpr::Position).collect(),
+                    context.evaluator(params, ctes),
+                    work_mem_bytes,
+                )
+            } else {
+                Box::new(Distinct::all_with_work_mem(operator, work_mem_bytes))
+            }
         } else {
             let output = identity_order_columns(&columns);
             let mut distinct_on: Vec<ScalarExpr> = Vec::with_capacity(original.distinct_on.len());
@@ -161,17 +172,28 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
                 };
                 distinct_on.push(key);
             }
+            let mut ordered = false;
             for expression in &distinct_on {
                 if let Some(ty) = crate::scalar_type(expression, operator.row_schema(), params)? {
                     crate::require_equality_operator(&ty)?;
+                    ordered |= uqa_sql::expr::type_comparison_can_fail(&ty);
                 }
             }
-            Box::new(Distinct::on_with_work_mem(
-                operator,
-                distinct_on,
-                context.evaluator(params, ctes),
-                work_mem_bytes,
-            ))
+            if ordered {
+                crate::distinct::ordered::operator(
+                    operator,
+                    distinct_on,
+                    context.evaluator(params, ctes),
+                    work_mem_bytes,
+                )
+            } else {
+                Box::new(Distinct::on_with_work_mem(
+                    operator,
+                    distinct_on,
+                    context.evaluator(params, ctes),
+                    work_mem_bytes,
+                ))
+            }
         };
     }
     if should_defer_distinct_limit(original) {
