@@ -126,7 +126,7 @@ class ControlledHost:
                     and file_hash(Path(item["path"])) == item["sha256"] for item in cached.values()):
                 (self.output / (role + "-build.json")).write_text(json.dumps(cached, indent=2) + "\n")
                 return source, cached
-        args = ["cargo", "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
+        args = [str(self.rust_bin / "cargo"), "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
                 "--bench", "analytical_comparison", "--message-format=json-render-diagnostics"]
         if claims:
             args += ["-p", "uqa-execution", "--example", "row_claim_contention"]
