@@ -72,6 +72,71 @@ fn value() -> Value {
 }
 
 #[test]
+fn retained_numeric_fields_use_postgresql_datum_bits_and_restore_after_rollback() {
+    for (before, after, input, expected) in [
+        (
+            ColumnType::Integer,
+            ColumnType::Real,
+            Value::Int(1_065_353_216),
+            Value::Float(1.0),
+        ),
+        (
+            ColumnType::Real,
+            ColumnType::Integer,
+            Value::Float(1.0),
+            Value::Int(1_065_353_216),
+        ),
+        (
+            ColumnType::Integer,
+            ColumnType::Oid,
+            Value::Int(-1),
+            Value::Int(4_294_967_295),
+        ),
+        (
+            ColumnType::Oid,
+            ColumnType::Integer,
+            Value::Int(4_294_967_295),
+            Value::Int(-1),
+        ),
+        (
+            ColumnType::BigInteger,
+            ColumnType::DoublePrecision,
+            Value::Int(4_607_182_418_800_017_408),
+            Value::Float(1.0),
+        ),
+        (
+            ColumnType::DoublePrecision,
+            ColumnType::BigInteger,
+            Value::Float(1.0),
+            Value::Int(4_607_182_418_800_017_408),
+        ),
+    ] {
+        let mut original = descriptor(2).as_ref().clone();
+        original.attributes[0].ty = before;
+        let mut current = original.clone();
+        current.attributes[0].ty = after;
+        let original = BTreeMap::from([(20_001, Arc::new(original))]);
+        let current = BTreeMap::from([(20_001, Arc::new(current))]);
+        let record = |value| {
+            Value::Record(vec![
+                ("a".into(), value),
+                ("b".into(), Value::Str("tail".into())),
+            ])
+        };
+        let input = record(input);
+        assert_eq!(
+            project(&input, &ty(), &original, &current).unwrap(),
+            record(expected)
+        );
+        assert_eq!(project(&input, &ty(), &original, &original).unwrap(), input);
+        assert_eq!(
+            project(&record(Value::Null), &ty(), &original, &current).unwrap(),
+            record(Value::Null)
+        );
+    }
+}
+
+#[test]
 fn projection_uses_original_numbers_preserves_array_bounds_and_can_restore_after_rollback() {
     let original = BTreeMap::from([(20_001, descriptor(2))]);
     let current = BTreeMap::from([(20_001, descriptor(3))]);

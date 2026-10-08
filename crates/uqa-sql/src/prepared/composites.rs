@@ -15,6 +15,8 @@ use crate::{
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, Value};
 
+mod datum;
+
 type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
 
 /// Logical and optimized inputs retain their own descriptors and values across rollback. Reading either plan projects a copy without rerunning already-folded expressions.
@@ -306,9 +308,20 @@ fn project(
                         .attributes
                         .iter()
                         .find(|old| old.number == attribute.number)
-                        .and_then(|old| fields.iter().find(|(name, _)| *name == old.name));
-                    let value = retained.map_or(Ok(Value::Null), |(_, value)| {
-                        project(value, &attribute.ty, original, current)
+                        .and_then(|old| {
+                            fields
+                                .iter()
+                                .find(|(name, _)| *name == old.name)
+                                .map(|(_, value)| (old, value))
+                        });
+                    let value = retained.map_or(Ok(Value::Null), |(old, value)| {
+                        let reinterpreted = datum::reinterpret(value, &old.ty, &attribute.ty);
+                        project(
+                            reinterpreted.as_ref().unwrap_or(value),
+                            &attribute.ty,
+                            original,
+                            current,
+                        )
                     })?;
                     Ok((attribute.name.clone(), value))
                 })

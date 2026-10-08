@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "0_setup",
+      "sql": "CREATE TYPE cr_layout_0 AS(a integer,b text); PREPARE cr_layout_0_p AS SELECT '(1065353216,tail)'::cr_layout_0 AS v; EXECUTE cr_layout_0_p"
+    },
+    {
+      "id": "0_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_0 ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "0_read",
+      "sql": "EXECUTE cr_layout_0_p"
+    },
+    {
+      "id": "0_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_0_p; DEALLOCATE cr_layout_0_p; DROP TYPE cr_layout_0"
+    },
+    {
+      "id": "1_setup",
+      "sql": "CREATE TYPE cr_layout_1 AS(a real,b text); PREPARE cr_layout_1_p AS SELECT '(1,tail)'::cr_layout_1 AS v; EXECUTE cr_layout_1_p"
+    },
+    {
+      "id": "1_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_1 ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "1_read",
+      "sql": "EXECUTE cr_layout_1_p"
+    },
+    {
+      "id": "1_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_1_p; DEALLOCATE cr_layout_1_p; DROP TYPE cr_layout_1"
+    },
+    {
+      "id": "2_setup",
+      "sql": "CREATE TYPE cr_layout_2 AS(a integer,b text); PREPARE cr_layout_2_p AS SELECT '(-1,tail)'::cr_layout_2 AS v; EXECUTE cr_layout_2_p"
+    },
+    {
+      "id": "2_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_2 ALTER ATTRIBUTE a TYPE oid"
+    },
+    {
+      "id": "2_read",
+      "sql": "EXECUTE cr_layout_2_p"
+    },
+    {
+      "id": "2_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_2_p; DEALLOCATE cr_layout_2_p; DROP TYPE cr_layout_2"
+    },
+    {
+      "id": "3_setup",
+      "sql": "CREATE TYPE cr_layout_3 AS(a oid,b text); PREPARE cr_layout_3_p AS SELECT '(4294967295,tail)'::cr_layout_3 AS v; EXECUTE cr_layout_3_p"
+    },
+    {
+      "id": "3_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_3 ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "3_read",
+      "sql": "EXECUTE cr_layout_3_p"
+    },
+    {
+      "id": "3_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_3_p; DEALLOCATE cr_layout_3_p; DROP TYPE cr_layout_3"
+    },
+    {
+      "id": "4_setup",
+      "sql": "CREATE TYPE cr_layout_4 AS(a bigint,b text); PREPARE cr_layout_4_p AS SELECT '(4607182418800017408,tail)'::cr_layout_4 AS v; EXECUTE cr_layout_4_p"
+    },
+    {
+      "id": "4_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_4 ALTER ATTRIBUTE a TYPE double precision"
+    },
+    {
+      "id": "4_read",
+      "sql": "EXECUTE cr_layout_4_p"
+    },
+    {
+      "id": "4_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_4_p; DEALLOCATE cr_layout_4_p; DROP TYPE cr_layout_4"
+    },
+    {
+      "id": "5_setup",
+      "sql": "CREATE TYPE cr_layout_5 AS(a double precision,b text); PREPARE cr_layout_5_p AS SELECT '(1,tail)'::cr_layout_5 AS v; EXECUTE cr_layout_5_p"
+    },
+    {
+      "id": "5_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_5 ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "5_read",
+      "sql": "EXECUTE cr_layout_5_p"
+    },
+    {
+      "id": "5_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_5_p; DEALLOCATE cr_layout_5_p; DROP TYPE cr_layout_5"
+    },
+    {
+      "id": "nested_setup",
+      "sql": "CREATE TYPE cl_inner AS(a integer,b text); CREATE TYPE cl_outer AS(v cl_inner); PREPARE cl_nested AS SELECT '[0:1]={\"(1065353216,tail)\",\"(,tail)\"}'::cl_inner[] AS a, ROW('(1065353216,tail)'::cl_inner)::cl_outer AS n, NULL::cl_inner AS nil; EXECUTE cl_nested"
+    },
+    {
+      "id": "nested_alter",
+      "sql": "BEGIN; ALTER TYPE cl_inner ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "nested_read",
+      "sql": "EXECUTE cl_nested"
+    },
+    {
+      "id": "nested_undo",
+      "sql": "ROLLBACK; EXECUTE cl_nested; DEALLOCATE cl_nested; DROP TYPE cl_outer; DROP TYPE cl_inner"
+    },
+    {
+      "id": "domain_setup",
+      "sql": "CREATE DOMAIN cl_negative AS real CHECK(VALUE<0); CREATE TYPE cl_domain AS(a integer,b text); PREPARE cl_domain_p AS SELECT '(1065353216,tail)'::cl_domain AS v; EXECUTE cl_domain_p"
+    },
+    {
+      "id": "domain_alter",
+      "sql": "BEGIN; ALTER TYPE cl_domain ALTER ATTRIBUTE a TYPE cl_negative"
+    },
+    {
+      "id": "domain_read",
+      "sql": "EXECUTE cl_domain_p"
+    },
+    {
+      "id": "domain_fresh",
+      "sql": "SELECT '(1,tail)'::cl_domain"
+    },
+    {
+      "id": "domain_undo",
+      "sql": "ROLLBACK; EXECUTE cl_domain_p; DEALLOCATE cl_domain_p; DROP TYPE cl_domain; DROP DOMAIN cl_negative"
+    }
+  ]
+}
