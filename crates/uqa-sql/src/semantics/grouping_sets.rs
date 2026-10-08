@@ -409,6 +409,8 @@ fn input_requires_catalog(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Named(_)
         | ColumnType::Domain { .. }
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_)
         | ColumnType::Regproc
         | ColumnType::Regprocedure
         | ColumnType::Regclass

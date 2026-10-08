@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain catalog-dependent composite and enum input casts during grouping analysis, including their array forms, instead of evaluating them through builtin-only conversion.
+
 - Protect original composite constant metadata from older writers with SQLite record format 61 and redb record format 57; preserve record history, receipts and sequence durability during the upgrade.
 
 - Preserve PostgreSQL named ROW constructor folding and argument-type checks across prepared execution, composite attribute changes and rollback, before evaluating argument effects.
