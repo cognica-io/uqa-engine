@@ -9,6 +9,34 @@ use uqa_core::Value;
 use uqa_sql::{ColumnType, SQLParam, ScalarExpr};
 
 #[test]
+fn integer_parameter_order_keys_are_values_not_output_positions() {
+    let output = vec![("v".into(), ScalarExpr::Column("v".into()))];
+    for value in [0, 1, 2, -1, i64::MAX] {
+        let mut plan = crate::UnifiedPlan::lower(
+            uqa_sql::compile("SELECT v FROM t ORDER BY $1, v")
+                .unwrap()
+                .remove(0),
+        );
+        specialize_parameters(&mut plan, &[SQLParam::Scalar(Value::Int(value))]);
+        let crate::UnifiedPlan::Query(query) = plan else {
+            panic!("query expected")
+        };
+        let crate::RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("query block expected")
+        };
+        let key = uqa_execution::query::ordering::resolve_order_expression(
+            &block.order_by[0].expr,
+            &output,
+        )
+        .unwrap();
+        assert_eq!(
+            uqa_execution::scalar::eval_constant_scalar(&key).unwrap(),
+            Value::Int(value)
+        );
+    }
+}
+
+#[test]
 fn custom_plan_selection_respects_parameterless_queries_sampling_and_cost_ties() {
     let usage = PreparedPlanUsage {
         has_parameters: true,

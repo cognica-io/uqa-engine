@@ -12,6 +12,26 @@ use uqa_sql::{scalar_type, RowSchema, ScalarExpr};
 
 use super::Value;
 
+pub(crate) fn retain_computed_integer(
+    expression: ScalarExpr,
+    parameter_index: Option<usize>,
+) -> ScalarExpr {
+    let ScalarExpr::Literal(Value::Int(value)) = expression else {
+        return expression;
+    };
+    let ty = match uqa_sql::expr::integer_width_for_literal(value) {
+        uqa_sql::expr::IntegerWidth::SmallInt => ColumnType::SmallInteger,
+        uqa_sql::expr::IntegerWidth::Integer => ColumnType::Integer,
+        uqa_sql::expr::IntegerWidth::BigInt => ColumnType::BigInteger,
+    };
+    ScalarExpr::TypedLiteral {
+        value: Value::Int(value),
+        ty: ty.sql_name(),
+        bound_type: Some(ty),
+        parameter_index,
+    }
+}
+
 pub(super) fn literal_value(expression: &ScalarExpr) -> Option<&Value> {
     match expression {
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value),
@@ -190,7 +210,10 @@ pub(super) fn fold_authorized_literal(
         evaluate(&expression)?
     };
     let literal = ScalarExpr::Literal(value.clone());
-    if !matches!(expression, ScalarExpr::Cast { .. }) && scalar_type(&literal, &schema, &[])? == ty
+    // Evaluated integers are values, not the bare integer syntax that ORDER BY and DISTINCT ON interpret as output positions.
+    if !matches!(value, Value::Int(_))
+        && !matches!(expression, ScalarExpr::Cast { .. })
+        && scalar_type(&literal, &schema, &[])? == ty
     {
         return Ok(literal);
     }

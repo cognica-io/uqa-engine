@@ -245,10 +245,7 @@ fn native_diskann_change_row_bound_matches_independent_envelope_bytes() {
 fn native_diskann_change_completion_retry_keeps_one_durable_mutation() {
     let connection = memory();
     let control = StorageReadControl::with_limit(1 << 22);
-    connection.with_physical(|sqlite| {
-        sqlite.execute_batch("CREATE TRIGGER reject_change_ack BEFORE UPDATE ON _uqa_mvcc_transactions WHEN NEW.status=4 BEGIN SELECT RAISE(ABORT, 'injected change acknowledgement failure'); END;")?;
-        Ok(())
-    }).unwrap();
+    let rejected = reject_terminal_receipt_validation(&connection);
     let error = canonical(&connection, "docs", "embedding", 2)
         .replace(1, &[vec![3.0, 4.0]], &control)
         .unwrap_err();
@@ -256,8 +253,10 @@ fn native_diskann_change_completion_retry_keeps_one_durable_mutation() {
     else {
         panic!("durable publication outcome was lost: {error}");
     };
+    assert!(rejected.load(std::sync::atomic::Ordering::Acquire));
     assert!(connection.in_transaction());
     let peer = connection.new_session();
+    permit_receipt_validation(&peer);
     let source = canonical(&peer, "docs", "embedding", 2)
         .retain(&control)
         .unwrap();
@@ -266,11 +265,6 @@ fn native_diskann_change_completion_retry_keeps_one_durable_mutation() {
     assert_eq!(version.revision(), 1);
     assert_change(&source, 1, version, &control);
     assert_eq!(change_count(&peer), 1);
-    peer.with_physical(|sqlite| {
-        sqlite.execute_batch("DROP TRIGGER reject_change_ack")?;
-        Ok(())
-    })
-    .unwrap();
     connection.commit_transaction().unwrap();
     assert!(!connection.in_transaction());
     assert_eq!(change_count(&connection), 1);

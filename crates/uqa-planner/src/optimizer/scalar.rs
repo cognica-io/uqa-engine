@@ -85,6 +85,7 @@ fn optimize_scalar(
     expression: ScalarExpr,
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
+    let integer_syntax = matches!(&expression, ScalarExpr::Literal(Value::Int(_)));
     let optimized = match expression {
         ScalarExpr::Array(items) => ScalarExpr::Array(optimize_list(items, config)?),
         ScalarExpr::Row(items) => ScalarExpr::Row(optimize_list(items, config)?),
@@ -222,15 +223,21 @@ fn optimize_scalar(
             if let Some(inlined) = context.prepare(binding, args, &config.active_inline_routines)? {
                 let mut nested = config.clone();
                 nested.active_inline_routines.push(inlined.identity);
-                return optimize_scalar(inlined.expression, &nested);
+                return optimize_scalar(inlined.expression, &nested)
+                    .map(|expression| constants::retain_computed_integer(expression, None));
             }
         }
     }
-    fold_authorized_literal(
+    let optimized = fold_authorized_literal(
         optimized,
         config.constant_evaluator,
         config.builtin_permissions.as_deref(),
-    )
+    )?;
+    Ok(if integer_syntax {
+        optimized
+    } else {
+        constants::retain_computed_integer(optimized, None)
+    })
 }
 
 fn optimize_frame_bound(
@@ -354,7 +361,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(expression, ScalarExpr::Literal(Value::Int(20)));
+        assert!(matches!(
+            expression,
+            ScalarExpr::TypedLiteral {
+                value: Value::Int(20),
+                bound_type: Some(uqa_sql::ColumnType::Integer),
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -52,6 +52,44 @@ fn query_block(plan: &UnifiedPlan) -> &QueryBlockPlan {
     block
 }
 
+#[test]
+fn computed_integer_order_keys_keep_values_instead_of_output_positions() {
+    let output = vec![("v".into(), ScalarExpr::Column("v".into()))];
+    for (sql, expected) in [
+        ("SELECT v FROM t ORDER BY 0 + 0, v", 0),
+        ("SELECT v FROM t ORDER BY 1 + 1, v", 2),
+        ("SELECT v FROM t ORDER BY -1 + 0, v", -1),
+        (
+            "SELECT v FROM t ORDER BY CASE WHEN true THEN 0 ELSE 1 END, v",
+            0,
+        ),
+        ("SELECT v FROM t ORDER BY coalesce(NULL::integer, 0), v", 0),
+        ("SELECT v FROM (VALUES (0)) AS input(v) ORDER BY v", 0),
+    ] {
+        let mut config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        config.coerced_conditionals = true;
+        let plan = optimize(UnifiedPlan::lower(compile(sql).unwrap().remove(0)), &config).unwrap();
+        let key = uqa_execution::query::ordering::resolve_order_expression(
+            &query_block(&plan).order_by[0].expr,
+            &output,
+        )
+        .unwrap();
+        assert_eq!(
+            uqa_execution::scalar::eval_constant_scalar(&key).unwrap(),
+            Value::Int(expected),
+        );
+    }
+    let ordinal = optimized("SELECT v FROM t ORDER BY 1");
+    assert_eq!(
+        uqa_execution::query::ordering::resolve_order_expression(
+            &query_block(&ordinal).order_by[0].expr,
+            &output,
+        )
+        .unwrap(),
+        ScalarExpr::Column("v".into()),
+    );
+}
+
 fn source_aliases(source: &SourcePlan) -> BTreeSet<String> {
     match source {
         SourcePlan::Table { name, alias, .. } => {
