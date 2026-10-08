@@ -11,10 +11,11 @@ For a reported head/base ratio $r$, the independently established noise factor $
 - [x] Implement and test signed calibration/run validation and the conservative ratio decision, including outward-rounded reported intervals and exact comparisons at floating-point boundaries.
 - [x] Connect qualified evidence to analytical reports while preserving unqualified diagnostics.
 - [x] Document the controller's invocation and evidence contract.
-- [ ] Connect an actual trusted controller and controlled runner to automatic CI without manual dispatch, fabricated calibration or uncontrolled timing runs.
+- [x] Connect the actual dedicated EC2 controller to automatic main CI, with independently calibrated signed evidence and stop-on-exit lifecycle in PRs #599 and #600.
 - [x] Add a bounded [independent-process contention workload](../../benchmarks/regressions/claim-contention.md) for #266, with a correctness-only verification mode and separate acquisition/release observations.
-- [ ] Consume actual qualified contention evidence before deciding on partitioned locking for #266.
-- [ ] Obtain and verify authoritative controlled-host/noise evidence; keep #261 and #266 open until their actual acceptance criteria pass.
+- [x] Consume [actual controlled contention evidence](../../benchmarks/regressions/ec2-results-2026-10-08.md) for #266: all sixteen comparisons pass, with the current mutex retained under the documented scaling limits and revisit criterion.
+- [x] Obtain and independently verify the real host/noise evidence and complete retained observations from automatic run 37734616093; #266's measurement decision is complete.
+- [ ] Resolve #261's Q1 qualification. Q6 and both scans are accepted, but a slow reference execution gives Q1 an interval crossing its unchanged 10% limit. Its cause remains unidentified, so Q1 is inconclusive and #261 stays open.
 - [ ] Resolve #348 through a dependency path that fixes downstream builds without breaking the existing public connection contract.
 - [x] Close #125 at the maintainer's request pending recurrence; the historical startup cause is not claimed fixed.
 
