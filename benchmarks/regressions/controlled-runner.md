@@ -30,3 +30,13 @@ The operator installs `run-controlled-performance.py`, `controlled_runner_host.p
 - [ ] Resolve #261's Q1 run-level variation before claiming its 10% qualification; do not discard its slow reference execution, widen the limit or retry measurements until a favorable result appears.
 
 The separately tracked SQLite dependency default (#348) is outside this measurement change. The maintainer closed #125 pending recurrence; successful startup diagnostics do not claim that its historical loader cause was fixed.
+
+## Investigating session variation
+
+The retained calibration pair 25 from run 37734616093 has correlated slowdown across workloads: Q6 takes about 4.05 ms in both executions versus about 3.55 ms in neighboring pairs, and materialized scans take about 14.13 ms versus about 10 ms. Q1 takes 5.19 ms in one execution versus 3.81 ms in the other. This is not sufficient evidence of a grouping-specific defect. Preserve the complete pair and inspect task CPU time, CPU migrations, kernel activity and memory pressure before selecting an implementation change.
+
+- [x] Compare all workloads in the anomalous pair with adjacent retained executions.
+- [ ] Capture a bounded diagnostic session on the retained dedicated instance, with per-execution resource evidence and no acceptance claim.
+- [ ] Correct the demonstrated execution or isolation cause and verify the correction without changing the workload, estimator or regression limits.
+- [ ] Deploy the reviewed correction, obtain fresh independent calibration through automatic CI, and publish the complete qualification decision.
+- [ ] Close issue #261 only when its acceptance conditions are satisfied; stop the instance and clean the merged branch.
