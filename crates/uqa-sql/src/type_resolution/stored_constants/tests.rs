@@ -9,6 +9,8 @@
 use super::*;
 use crate::{plan::ExpressionPlan, RowSchema};
 
+mod enums;
+
 struct Catalog;
 
 impl FunctionTypeResolver for Catalog {
