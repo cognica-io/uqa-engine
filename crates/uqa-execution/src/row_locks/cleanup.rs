@@ -11,11 +11,13 @@ use super::{remove_inactive_versions, RowLockAcquisition, RowLockManager};
 impl RowLockManager {
     pub fn release_mark_above(&self, session_id: u64, mark: u32) {
         let mut released_rows = Vec::new();
+        let mut retained_identities = Vec::new();
         let mut released_relations = Vec::new();
         let mut state = self.state.lock();
         state.rows.retain(|key, grants| {
             grants.retain_mut(|grant| {
                 if grant.session_id == session_id {
+                    retained_identities.extend(grant.identity.clone());
                     grant.acquisitions.retain(|acquisition| {
                         let keep = acquisition.mark <= mark;
                         if !keep {
@@ -49,6 +51,7 @@ impl RowLockManager {
         remove_inactive_versions(&mut state);
         drop(state);
         self.release_row_claims(session_id, &released_rows);
+        drop(retained_identities);
         for (table, mode) in released_relations {
             self.release_relation_claims(session_id, table, mode);
         }
@@ -57,11 +60,13 @@ impl RowLockManager {
 
     pub fn release_session(&self, session_id: u64) {
         let mut released_rows = Vec::new();
+        let mut retained_identities = Vec::new();
         let mut released_relations = Vec::new();
         let mut state = self.state.lock();
         state.rows.retain(|key, grants| {
             grants.retain(|grant| {
                 if grant.session_id == session_id {
+                    retained_identities.extend(grant.identity.clone());
                     for acquisition in &grant.acquisitions {
                         released_rows.push((*key, acquisition.strength));
                     }
@@ -89,6 +94,7 @@ impl RowLockManager {
         remove_inactive_versions(&mut state);
         drop(state);
         self.release_row_claims(session_id, &released_rows);
+        drop(retained_identities);
         for (table, mode) in released_relations {
             self.release_relation_claims(session_id, table, mode);
         }
@@ -97,12 +103,14 @@ impl RowLockManager {
 
     pub fn rollback_acquisition(&self, acquisition: RowLockAcquisition) {
         let mut released = None;
+        let mut retained_identity = None;
         let mut state = self.state.lock();
         let Some(grants) = state.rows.get_mut(&acquisition.key) else {
             return;
         };
         grants.retain_mut(|grant| {
             if grant.session_id == acquisition.session_id {
+                retained_identity.clone_from(&grant.identity);
                 grant.acquisitions.retain(|marked| {
                     let keep = marked.acquisition_id != acquisition.acquisition_id;
                     if !keep {
@@ -121,6 +129,7 @@ impl RowLockManager {
         if let Some(strength) = released {
             self.release_row_claims(acquisition.session_id, &[(acquisition.key, strength)]);
         }
+        drop(retained_identity);
         self.wake.notify_all();
     }
 }

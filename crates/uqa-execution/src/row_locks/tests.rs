@@ -283,6 +283,7 @@ fn deadlock_edges_ignore_compatible_holders() {
     };
     let grant = |session_id, strength, acquisition_id| LockGrant {
         session_id,
+        identity: None,
         acquisitions: vec![MarkedStrength {
             acquisition_id,
             strength,

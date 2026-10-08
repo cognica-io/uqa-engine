@@ -52,6 +52,7 @@ impl RowLockManager {
 
     pub fn acquire(&self, request: &LockRequest<'_>) -> Result<LockAcquire, SQLError> {
         let coordinator = self.coordinator()?;
+        let retained = self.identities.retain(request.key.table);
         let relation = self.relation_bytes(request.key.table);
         let mut identity = coordinator
             .map(|coordinator| coordinator.pin_row(&relation, request.key.doc_id, request.cancel))
@@ -76,11 +77,9 @@ impl RowLockManager {
             }
             let attempt = try_grant(
                 &mut state,
-                request.session_id,
-                request.key,
-                request.strength,
-                request.mark,
+                request,
                 &self.next_acquisition,
+                retained.as_ref(),
             );
             let contended_claim = match attempt {
                 GrantAttempt::Granted(acquisition) => {

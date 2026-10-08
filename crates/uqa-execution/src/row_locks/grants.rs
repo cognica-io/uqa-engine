@@ -14,6 +14,7 @@ use super::{
 #[derive(Clone, Debug)]
 pub(super) struct LockGrant {
     pub(super) session_id: u64,
+    pub(super) identity: Option<super::KeyReservationIdentity>,
     pub(super) acquisitions: Vec<MarkedStrength>,
 }
 
@@ -98,12 +99,17 @@ pub(super) fn rollback_grant(state: &mut LockTable, acquisition: RowLockAcquisit
 
 pub(super) fn try_grant(
     state: &mut LockTable,
-    session_id: u64,
-    key: RowLockKey,
-    strength: LockStrength,
-    mark: u32,
+    request: &LockRequest<'_>,
     next_acquisition: &AtomicU64,
+    identity: Option<&super::KeyReservationIdentity>,
 ) -> GrantAttempt {
+    let LockRequest {
+        session_id,
+        key,
+        strength,
+        mark,
+        ..
+    } = *request;
     let grants = state.rows.entry(key).or_default();
     if grants.iter().any(|grant| {
         grant.session_id != session_id
@@ -133,6 +139,7 @@ pub(super) fn try_grant(
     let acquisition_id = next_acquisition.fetch_add(1, Ordering::Relaxed);
     grants.push(LockGrant {
         session_id,
+        identity: identity.cloned(),
         acquisitions: vec![MarkedStrength {
             acquisition_id,
             strength,

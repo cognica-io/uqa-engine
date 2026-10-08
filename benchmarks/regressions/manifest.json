@@ -472,6 +472,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "released_statement_key_reservations_leave_no_identity_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/identity_registry/tests.rs",
+      "capability": "Key reservation identity lifetime",
+      "workload": "256 acquire/release transactions with distinct full digests, using local and persistent managers.",
+      "invariant": "Each active grant retains its exact identity; completion reclaims both interning directions and leaves bounded map capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "released_key_batches_reclaim_high_water_capacity_and_preserve_table_ids",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/identity_registry/tests.rs",
+      "capability": "Key reservation identity lifetime",
+      "workload": "4,096 simultaneous key reservations and an existing permanent SQL table identity.",
+      "invariant": "Every key remains available while granted; final release reclaims transient entries and high-water allocations while the table ID stays stable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_waiter_keeps_key_identity_after_its_previous_holder_releases",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/identity_registry/tests.rs",
+      "capability": "Key reservation identity lifetime",
+      "workload": "A competing local session waits for the same digest while the initial holder releases its final request handle and grant.",
+      "invariant": "The waiter and resulting grant keep the original exact identity; final release leaves no transient entry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "the_last_attached_process_alone_returns_or_discards_the_reservation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/cross_process/file/xids/tests.rs",
+      "capability": "Cross-process reservation recovery",
+      "workload": "Two attached processes allocate through a shared XID cursor; the remaining process then dies forcibly.",
+      "invariant": "Peer-observed reservation limits remain unchanged before death, and reopening resumes at the durable limit rather than a possibly stale cursor.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

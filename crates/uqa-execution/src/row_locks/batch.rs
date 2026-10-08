@@ -39,6 +39,10 @@ impl RowLockManager {
             return Ok(None);
         }
         let coordinator = self.coordinator()?;
+        let retained = requests
+            .iter()
+            .map(|request| self.identities.retain(request.key.table))
+            .collect::<Vec<_>>();
         let relations = requests
             .iter()
             .map(|request| self.relation_bytes(request.key.table))
@@ -58,15 +62,13 @@ impl RowLockManager {
         let mut acquisitions = Vec::with_capacity(requests.len());
         let mut claims = Vec::with_capacity(requests.len() * 2);
         let attempt = (|| {
-            for (request, identity) in requests.iter().zip(&identities) {
+            for ((request, identity), retained) in requests.iter().zip(&identities).zip(&retained) {
                 request.cancel.check()?;
                 match try_grant(
                     &mut state,
-                    session,
-                    request.key,
-                    request.strength,
-                    request.mark,
+                    request,
                     &self.next_acquisition,
+                    retained.as_ref(),
                 ) {
                     GrantAttempt::Conflict => return Ok(false),
                     GrantAttempt::Granted(acquisition) => {
