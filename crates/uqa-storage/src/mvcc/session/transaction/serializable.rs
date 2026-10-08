@@ -41,9 +41,12 @@ impl Transaction {
                 );
             }
         };
-        persistence
-            .acknowledge_transaction(acknowledgement, control)
-            .map_err(|error| self.completion_error(error.into_storage_error()))
+        let result = if let Some(owner) = &self.receipt_owner {
+            persistence.acknowledge_retained_transaction(owner, acknowledgement, control)
+        } else {
+            persistence.acknowledge_transaction(acknowledgement, control)
+        };
+        result.map_err(|error| self.completion_error(error.into_storage_error()))
     }
 
     pub(in crate::mvcc::session) fn pending_completion(&self) -> Option<TransactionOutcomeId> {

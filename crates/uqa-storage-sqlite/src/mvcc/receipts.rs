@@ -143,6 +143,34 @@ pub(super) fn acknowledge(
     admission::commit(transaction, control)
 }
 
+/// A live managed lease keeps the terminal receipt available throughout this read. Dropping that lease after successful validation authorizes the existing recovery path; it never changes the durable outcome or SSI retention.
+pub(super) fn validate_retained(
+    connection: &Connection,
+    native: Option<native::NativeRecordNamespace>,
+    acknowledgement: ReceiptAcknowledgement,
+    control: &StorageReadControl,
+) -> PhysicalResult<bool> {
+    admission::retry(connection, true, control, || {
+        let read = connection.unchecked_transaction()?;
+        let id = acknowledgement.transaction();
+        native::check_mapping(&read, native)?;
+        let header = codec::header(&read, id.database())?;
+        if id.allocation() > header.allocated {
+            return Err(VersionError::UnknownTransaction.into());
+        }
+        acknowledgement.validate(codec::status(&read, id)?)?;
+        let managed = read
+            .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+            .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
+                row.get::<_, bool>(0)
+            })
+            .optional()?;
+        control.check().map_err(VersionError::from)?;
+        read.commit()?;
+        Ok(managed == Some(true))
+    })
+}
+
 /// SSI and receipt admission remain held across this atomic main write. Authoritatively dead managed owners release their retry rights; manual owners never do so implicitly. Their original physical state still decides commit/abort, and every retained graph reference remains protected.
 fn reclaim(
     connection: &Connection,

@@ -524,6 +524,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "autonomous_sequence_logs_need_only_publication_and_amortized_allocation_commits",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/completion.rs",
+      "capability": "Autonomous sequence publication",
+      "workload": "Sixteen independent warmed sequence log sessions, then cold reopen.",
+      "invariant": "Exactly seventeen FULL physical commits: sixteen publications and one allocation reserve; zero acknowledgement commits and exact persisted sequence values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_completion_never_commits_and_waits_for_lease_release_before_reclamation",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/completion.rs",
+      "capability": "Managed receipt completion",
+      "workload": "Committed and aborted owners in five SQLite modes and raw/native mappings.",
+      "invariant": "Repeated completion performs zero physical commits, protects live ownership, and becomes reclaimable only after final lease release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_completion_preserves_overlapping_serializable_references",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/completion.rs",
+      "capability": "Serializable receipt retention",
+      "workload": "Completed writer with an overlapping older serializable participant.",
+      "invariant": "Reclamation preserves the exact authoritative receipt until every durable SSI reference disappears.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "acknowledgement_failure_keeps_terminal_completion_and_retries_without_republishing",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/batches.rs",
+      "capability": "Provider completion retry",
+      "workload": "Implicit and explicit transactions using a legacy provider with a lost acknowledgement reply.",
+      "invariant": "The default retained-owner capability preserves exact retry evidence and acknowledges again without replaying publication.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

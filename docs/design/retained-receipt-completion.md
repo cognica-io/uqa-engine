@@ -8,8 +8,10 @@ Let $R(t)$ be the authoritative durable receipt of transaction $t$, $L(t)$ its l
 
 - [x] Inspect Common Storage/SQLite dependencies, features, session completion, receipt leases and bounded recovery.
 - [x] Add the conservative provider capability and SQLite read-only terminal validation.
-- [ ] Verify no acknowledgement commit, live-owner protection, manual fallback, errors, cancellation, SSI overlap and autonomous sequence writes.
+- [x] Verify no acknowledgement commit, live-owner protection, manual fallback, errors, cancellation, SSI overlap and autonomous sequence writes.
 - [ ] Pass focused provider/common/sequence checks, formatting, strict Clippy and ownership/dependency checks.
 - [ ] Update the manual, HISTORY and regression inventory; commit, push, review, merge and clean up.
 
 Acceptance uses physical commit counts and exact state/recovery assertions. It makes no latency claim on the shared local host. Each required sequence log still needs its durable publication; this change removes its redundant acknowledgement transaction.
+
+The focused SQLite receipt/admission suite passes 28 cases, and Common Storage completion/retry, sequence and notification checks pass 25 cases. Strict Common Storage/SQLite Clippy and ownership, dependency, test-harness, file-size and header checks pass. The inventory validator and its 19 unit tests pass, with 40 checks / 96 required cases. Broader provider/common suites were stopped after they selected unrelated long-running DiskANN and migration cases; they are not reported as completed.

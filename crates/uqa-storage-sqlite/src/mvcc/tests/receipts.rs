@@ -13,6 +13,7 @@ use uqa_storage::mvcc::{ReceiptAcknowledgement, SerializableCoordinator, Seriali
 mod process;
 
 mod allocations;
+mod completion;
 
 fn open(path: &std::path::Path, mode: usize) -> ManagedConnection {
     if mode == 4 {

@@ -301,7 +301,22 @@ pub trait VersionedPersistence: Send + Sync {
         Ok(())
     }
 
-    /// Reclaim explicitly acknowledged receipts only after their final durable SSI publication reference has disappeared. Pending and unacknowledged receipts survive, including unknown completion owners. This is separate from record-history reclamation and does not advance allocation or visibility.
+    /// Confirm a retained owner's terminal outcome before the caller drops it. Providers with durable managed-owner metadata may rely on final lease release and their existing abandoned-owner recovery instead of writing a separate acknowledgement. They must validate the same exact outcome, preserve live owners and SSI references, and never infer commit or abort from lease death. Errors leave the owner available for retry. The default keeps explicit acknowledgement for untracked and legacy providers.
+    fn acknowledge_retained_transaction(
+        &self,
+        owner: &super::RetainedTransactionAllocation,
+        acknowledgement: super::ReceiptAcknowledgement,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        if owner.transaction() != acknowledgement.transaction() {
+            return Err(VersionError::InvalidEncoding(
+                "receipt acknowledgement owner mismatch",
+            ));
+        }
+        self.acknowledge_transaction(acknowledgement, control)
+    }
+
+    /// Reclaim acknowledged receipts only after their final durable SSI publication reference has disappeared. Providers may also recover managed owners whose final lease is authoritatively absent, using the durable physical outcome rather than inferring it from owner death. Live or unknown owners and unacknowledged manual receipts survive. This is separate from record-history reclamation and does not advance allocation or visibility.
     fn reclaim_transaction_receipts(&self, _control: &StorageReadControl) -> VersionResult<u64> {
         Ok(0)
     }

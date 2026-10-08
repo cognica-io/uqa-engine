@@ -27,14 +27,14 @@ pub fn receipt_lease_id(transaction: StorageTransactionId) -> SerializableTransa
 /// Keeps a managed allocation's resolution owner alive through publication and acknowledgement retries. Dropping the final lease permits provider recovery, but never establishes a physical outcome by itself. The conservative untracked form preserves legacy providers' manually retained receipt semantics.
 pub struct RetainedTransactionAllocation {
     transaction: StorageTransactionId,
-    _lease: Option<SerializableParticipant>,
+    lease: Option<SerializableParticipant>,
 }
 
 impl RetainedTransactionAllocation {
     pub fn untracked(transaction: StorageTransactionId) -> Self {
         Self {
             transaction,
-            _lease: None,
+            lease: None,
         }
     }
 
@@ -49,12 +49,17 @@ impl RetainedTransactionAllocation {
         }
         Ok(Self {
             transaction,
-            _lease: Some(lease),
+            lease: Some(lease),
         })
     }
 
     pub fn transaction(&self) -> StorageTransactionId {
         self.transaction
+    }
+
+    /// Whether this owner retains a resolution lease. Providers must also verify their durable managed-owner flag before using lease death to reclaim a receipt.
+    pub fn has_resolution_lease(&self) -> bool {
+        self.lease.is_some()
     }
 }
 
