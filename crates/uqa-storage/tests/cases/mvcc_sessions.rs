@@ -48,6 +48,8 @@ mod read_limits;
 mod retained;
 #[path = "mvcc_sessions/retained_sources.rs"]
 mod retained_sources;
+#[path = "mvcc_sessions/sequence_durability.rs"]
+mod sequence_durability;
 #[path = "mvcc_sessions/sequences.rs"]
 mod sequences;
 #[path = "mvcc_sessions/serializable.rs"]
@@ -163,6 +165,9 @@ struct State {
     required_keys: Vec<Vec<u8>>,
     acknowledgements: Vec<ReceiptAcknowledgement>,
     acknowledgement_fault: bool,
+    sequence_syncs: usize,
+    sequence_sync_fault: bool,
+    sequence_publications: Vec<SequencePublicationLease>,
     /// The commit monitor's value, for a test that gives the persistence one.
     monitor: Option<u64>,
     captures: usize,
@@ -194,6 +199,9 @@ impl Persistence {
                 required_keys: Vec::new(),
                 acknowledgements: Vec::new(),
                 acknowledgement_fault: false,
+                sequence_syncs: 0,
+                sequence_sync_fault: false,
+                sequence_publications: Vec::new(),
                 monitor: None,
                 captures: 0,
                 adoptions: None,
@@ -227,6 +235,27 @@ impl ResourceLeaseProvider for Persistence {
 }
 
 impl VersionedPersistence for Persistence {
+    fn sequence_value_persistence(
+        &self,
+        owner: SequencePublicationLease,
+    ) -> Option<Arc<dyn VersionedPersistence>> {
+        self.state.lock().sequence_publications.push(owner);
+        None
+    }
+
+    fn synchronize_sequence_values(&self, control: &StorageReadControl) -> VersionResult<()> {
+        control.check()?;
+        let mut state = self.state.lock();
+        state.sequence_syncs += 1;
+        if std::mem::take(&mut state.sequence_sync_fault) {
+            return Err(StorageBackendError::Other(
+                "injected sequence synchronization failure".into(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     fn diskann_population_record_layout(&self) -> Option<&dyn DiskANNPopulationRecordLayout> {
         Some(&uqa_storage::key_value::KeyValueDiskANNPopulationRecords)
     }

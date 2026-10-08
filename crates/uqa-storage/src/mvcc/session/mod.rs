@@ -12,6 +12,8 @@ mod notifications;
 mod observed;
 mod read;
 pub use read::RecordRead;
+mod sequence_values;
+pub use sequence_values::SequencePublicationLease;
 mod serializable;
 pub use serializable::{
     SerializableReadContext, SerializableSession, SerializableSnapshotCapture,
@@ -65,6 +67,9 @@ pub struct VersionedKeyValueStore {
     /// The commit monitor value and the committed sequence of this session's last capture. While the monitor returns that value nothing was committed since, so the sequence is still the latest and a caller that asks only for it needs no capture.
     latest: Mutex<Option<(u64, super::CommitSequence)>>,
     completed: Mutex<Option<super::CommitReceipt>>,
+    /// Retained readers attribute sequence use to the original completion owner. Savepoints do not undo nontransactional sequence effects.
+    sequence_durability: Arc<sequence_values::SequenceDurability>,
+    sequence_generation: Option<u64>,
 }
 
 impl VersionedKeyValueStore {
@@ -252,6 +257,8 @@ impl VersionedKeyValueStore {
             observed: Mutex::default(),
             latest: Mutex::new(None),
             completed: Mutex::new(None),
+            sequence_durability: Arc::default(),
+            sequence_generation: None,
         }
     }
 
@@ -290,11 +297,19 @@ impl VersionedKeyValueStore {
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<Self> {
         cancellation.check()?;
-        let retained = self.view().map_err(VersionError::into_storage_error)?;
+        let active = self.active.lock();
+        let retained = self
+            .view_locked(active.as_ref())
+            .map_err(VersionError::into_storage_error)?;
         let mut session = self.new_session_with_cancellation(cancellation);
         session.control =
             StorageReadControl::new(self.control.memory(), session.control.cancellation());
         session.retained = Some(retained);
+        session.sequence_durability = Arc::clone(&self.sequence_durability);
+        session.sequence_generation = Some(
+            self.sequence_generation
+                .unwrap_or_else(|| self.sequence_durability.generation()),
+        );
         Ok(session)
     }
 
@@ -415,12 +430,16 @@ impl VersionedKeyValueStore {
             ));
         }
         *self.completed.lock() = None;
-        *active = Some(match self.retained.as_ref() {
+        let transaction = match self.retained.as_ref() {
             Some(view) => Transaction::at_snapshot(view.retain_committed(), true, &self.control),
             None => self
                 .capture(read_only)
                 .map_err(VersionError::into_storage_error)?,
-        });
+        };
+        if self.retained.is_none() {
+            self.sequence_durability.begin()?;
+        }
+        *active = Some(transaction);
         Ok(())
     }
 
@@ -446,11 +465,14 @@ impl VersionedKeyValueStore {
     }
 
     fn view(&self) -> VersionResult<MergedRecordSnapshot> {
+        self.view_locked(self.active.lock().as_ref())
+    }
+
+    fn view_locked(&self, active: Option<&Transaction>) -> VersionResult<MergedRecordSnapshot> {
         if let Some(view) = self.retained.as_ref() {
             return view.try_clone();
         }
-        let active = self.active.lock();
-        if let Some(transaction) = active.as_ref() {
+        if let Some(transaction) = active {
             transaction.view()
         } else {
             self.capture(true)?.view()
@@ -879,31 +901,60 @@ impl KeyValueStore for VersionedKeyValueStore {
 
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
-        active
-            .as_mut()
-            .ok_or_else(no_transaction)?
-            .commit(&*self.persistence, &self.write_control())?;
+        let sequence_completion = self
+            .retained
+            .is_none()
+            .then(|| self.sequence_durability.close());
+        let transaction = active.as_mut().ok_or_else(no_transaction)?;
+        // A sequence-only reader must synchronize before its logical SSI outcome becomes committed. Ordinary record publication can cover the same prefix itself.
+        let synchronized_first = !transaction.has_record_publication();
+        if synchronized_first {
+            self.synchronize_sequence_values(&self.write_control())
+                .map_err(|error| transaction.completion_error(error))?;
+        }
+        transaction.commit(&*self.persistence, &self.write_control())?;
+        if !synchronized_first {
+            self.synchronize_sequence_values(&self.control)
+                .map_err(|error| transaction.completion_error(error))?;
+        }
         active
             .as_ref()
             .expect("completed attempt")
             .acknowledge_completion(&*self.persistence, &self.control)?;
         *self.completed.lock() = active.as_ref().and_then(Transaction::committed_receipt);
         *active = None;
+        if sequence_completion.is_some() {
+            self.sequence_durability.clear();
+        }
         Ok(())
     }
 
     fn rollback_transaction(&self) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
+        let sequence_completion = self
+            .retained
+            .is_none()
+            .then(|| self.sequence_durability.close());
         active
             .as_mut()
             .ok_or_else(no_transaction)?
             .abort(&*self.persistence, &self.control)?;
+        self.synchronize_sequence_values(&self.control)
+            .map_err(|error| {
+                active
+                    .as_ref()
+                    .expect("completed attempt")
+                    .completion_error(error)
+            })?;
         active
             .as_ref()
             .expect("completed attempt")
             .acknowledge_completion(&*self.persistence, &self.control)?;
         *self.completed.lock() = None;
         *active = None;
+        if sequence_completion.is_some() {
+            self.sequence_durability.clear();
+        }
         Ok(())
     }
 

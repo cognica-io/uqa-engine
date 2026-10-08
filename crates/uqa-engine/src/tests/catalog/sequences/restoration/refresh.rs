@@ -84,10 +84,13 @@ fn callback_catalog_refresh_can_resolve_a_private_sequence() {
                 })
                 .unwrap();
             sql(&engine, &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t; CREATE SEQUENCE private_ids"));
+            let relation = RelationIdentity::new("public", "private_ids");
+            let oid = super::super::sequence_oid(&engine, &relation);
             assert_eq!(
                 sql(&engine, "SELECT publish_then_allocate() AS n").rows[0]["n"],
                 Value::Int(1)
             );
+            assert_eq!(super::super::sequence_oid(&engine, &relation), oid);
             sql(&engine, "ROLLBACK");
             assert!(!engine
                 .new_session()

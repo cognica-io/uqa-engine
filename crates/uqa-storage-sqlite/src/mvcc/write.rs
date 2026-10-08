@@ -149,11 +149,21 @@ pub(super) fn commit(
     id: StorageTransactionId,
     prepared: &PreparedRecordCommit,
     native: Option<native::NativeRecordNamespace>,
+    sequence_publication: bool,
     control: &StorageReadControl,
     retain_data_commit: impl FnOnce(CommitReceipt),
 ) -> CommitResult {
     let rejected = |error: Error| CommitFailure::Rejected(error.into_version());
-    let _permit = admission::permit(connection, control).map_err(rejected)?;
+    let permit = admission::permit(connection, control).map_err(rejected)?;
+    let relaxed = if sequence_publication
+        && native.is_some()
+        && super::sequence_durability::eligible(prepared, control).map_err(rejected)?
+    {
+        super::synchronization::RelaxedSynchronization::relax(connection, &permit)
+            .map_err(rejected)?
+    } else {
+        None
+    };
     let transaction = admission::begin(connection, control).map_err(rejected)?;
     native::check_mapping(&transaction, native).map_err(rejected)?;
     let current = codec::header(&transaction, id.database()).map_err(rejected)?;
@@ -182,7 +192,7 @@ pub(super) fn commit(
     } else {
         false
     };
-    stage(&transaction, prepared, receipt, control).map_err(rejected)?;
+    stage(&transaction, prepared, receipt, relaxed.is_none(), control).map_err(rejected)?;
     admission::commit(transaction, control).map_err(|error| match error {
         Error::Version(error @ VersionError::Cancelled(_)) => CommitFailure::Rejected(error),
         error => CommitFailure::Indeterminate {
@@ -200,6 +210,7 @@ fn stage(
     connection: &Connection,
     prepared: &PreparedRecordCommit,
     receipt: CommitReceipt,
+    synchronized: bool,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let sequence = receipt.sequence.as_u64().to_be_bytes();
@@ -234,8 +245,8 @@ fn stage(
         }
     }
     connection
-        .prepare_cached("UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1")?
-        .execute(params![sequence.as_slice()])?;
+        .prepare_cached("UPDATE _uqa_mvcc_metadata SET sequence = ?1, sequence_durable = CASE WHEN ?2 THEN ?1 ELSE sequence_durable END WHERE singleton = 1")?
+        .execute(params![sequence.as_slice(), synchronized])?;
     connection.prepare_cached("UPDATE _uqa_mvcc_transactions SET status = 2, sequence = ?1, fingerprint = ?2 WHERE allocation = ?3")?.execute(params![sequence.as_slice(), receipt.fingerprint.as_slice(), receipt.transaction.allocation().to_be_bytes().as_slice()])?;
     control.cancellation().check().map_err(VersionError::from)?;
     Ok(())

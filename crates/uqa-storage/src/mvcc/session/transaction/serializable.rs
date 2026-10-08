@@ -347,7 +347,10 @@ impl Transaction {
         }
     }
 
-    fn completion_error(&self, source: StorageBackendError) -> StorageBackendError {
+    pub(in crate::mvcc::session) fn completion_error(
+        &self,
+        source: StorageBackendError,
+    ) -> StorageBackendError {
         if let Some(outcome) = self
             .outcome
             .map(TransactionOutcome::from)

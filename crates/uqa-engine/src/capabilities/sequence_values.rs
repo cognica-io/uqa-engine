@@ -54,9 +54,22 @@ impl SequenceValueRuntime for Engine {
     fn current_transaction_is_read_only(&self) -> bool {
         Engine::current_transaction_is_read_only(self)
     }
+    fn require_sequence_value_durability(&self) -> StorageBackendResult<()> {
+        self.storage.backend.as_ref().map_or(Ok(()), |backend| {
+            backend.require_sequence_value_durability()
+        })
+    }
     fn open_nontransactional_sequence_session(
         &self,
     ) -> StorageBackendResult<Option<PersistentStorageSession>> {
+        if self.versioned_backend_transactions() {
+            return self
+                .storage
+                .backend
+                .as_ref()
+                .map(|backend| backend.open_sequence_value_session(&self.runtime.cancellation))
+                .transpose();
+        }
         Engine::open_independent_catalog_session(self, Some(&self.runtime.cancellation))
     }
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError> {

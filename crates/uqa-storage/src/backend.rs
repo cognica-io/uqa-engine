@@ -309,6 +309,19 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Retain the durability obligation of a persistent sequence value until this session completes. Capable wrappers must forward this together with `open_sequence_value_session`; unsupported providers publish sequence values synchronously.
+    fn require_sequence_value_durability(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    /// Open an independent sequence value session. A provider may defer WAL synchronization only when the invoking session retains the matching completion obligation. The default retains ordinary synchronous publication.
+    fn open_sequence_value_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        self.open_session_with_cancellation(cancellation)
+    }
+
     /// Shared allowance for this session's private state and retained query resources. Versioned wrappers must forward it; nested retained readers keep the original allowance rather than granting another limit.
     fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
         None

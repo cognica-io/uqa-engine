@@ -42,6 +42,35 @@ impl BoundRecordSession {
 }
 
 impl ManagedConnection {
+    pub(crate) fn require_sequence_value_durability(&self) -> Result<()> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        if let Some(logical) = self.session.logical.get() {
+            logical.require_sequence_value_durability()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn new_sequence_value_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<Self> {
+        cancellation.check()?;
+        let _gate = self.session.gate.read();
+        let session = SessionState::with_cancellation(cancellation.clone());
+        if let Some(logical) = self.session.logical.get() {
+            let _ = session.logical.set(Arc::new(BoundRecordSession {
+                store: Arc::new(logical.new_sequence_value_session(cancellation)),
+                native: logical.native,
+            }));
+        }
+        Ok(Self {
+            pool: Arc::clone(&self.pool),
+            session: Arc::new(session),
+            record_access: self.record_access,
+        })
+    }
+
     pub(crate) fn completed_commit(&self) -> Option<uqa_storage::mvcc::CommitReceipt> {
         // An optional cache hint must not consume the next operation's cleanup diagnostic.
         if self.session.cleanup_failure.lock().is_some() {

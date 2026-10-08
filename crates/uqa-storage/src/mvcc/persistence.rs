@@ -159,6 +159,19 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 
 /// Versioned record persistence. Every mutation of the current sequence, records and receipt must share one physical commit. Implementations retain no physical writer between calls and must distinguish rejection from an uncertain native commit outcome.
 pub trait VersionedPersistence: Send + Sync {
+    /// Select autonomous sequence publication whose WAL synchronization is completed by the consuming transaction. Unsupported providers keep ordinary durable commits. Implementations may defer only recognized sequence value replacements, must retain `owner.with_publication` admission across physical publication, and must implement `synchronize_sequence_values` on ordinary sessions over the same database. An expired owner requires ordinary synchronous publication.
+    fn sequence_value_persistence(
+        &self,
+        _owner: super::SequencePublicationLease,
+    ) -> Option<std::sync::Arc<dyn VersionedPersistence>> {
+        None
+    }
+
+    /// Make all currently published sequence values durable without changing record visibility. A caller retains this obligation across savepoint undo and retries completion after failure. Ordinary synchronous providers have no deferred work.
+    fn synchronize_sequence_values(&self, _control: &StorageReadControl) -> VersionResult<()> {
+        Ok(())
+    }
+
     /// Whether this exact receipt's native catalog generations changed only data, column statistics or maintenance. Implementations retain bounded completion evidence and must not read a newer snapshot to establish this property. Missing evidence requires ordinary cache refresh.
     fn commit_preserves_catalog_definitions(&self, _receipt: CommitReceipt) -> bool {
         false

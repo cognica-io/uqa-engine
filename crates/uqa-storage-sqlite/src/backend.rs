@@ -134,6 +134,22 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
 }
 
 impl PersistentStorageBackend for SQLiteStorageBackend {
+    fn require_sequence_value_durability(&self) -> StorageBackendResult<()> {
+        self.conn
+            .require_sequence_value_durability()
+            .map_err(Into::into)
+    }
+
+    fn open_sequence_value_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let connection = self.conn.new_sequence_value_session(cancellation)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(connection));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn retention_control(&self) -> Option<uqa_storage::read_control::StorageReadControl> {
         self.conn.retention_control()
     }

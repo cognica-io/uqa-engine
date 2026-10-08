@@ -23,6 +23,7 @@ pub(crate) mod restore;
 mod retention;
 mod runs;
 mod schema;
+mod sequence_durability;
 mod serializable;
 mod synchronization;
 #[cfg(test)]
@@ -87,6 +88,7 @@ pub struct SQLiteRecordStore {
     connection: ManagedConnection,
     identity: DatabaseId,
     native: Option<native::NativeRecordNamespace>,
+    sequence_publication: Option<uqa_storage::mvcc::SequencePublicationLease>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
     managed_allocations: receipts::ManagedAllocations,
     /// Evidence from a successful physical commit, bounded independently of receipt retention.
@@ -121,6 +123,7 @@ impl SQLiteRecordStore {
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
             data_commit: Arc::default(),
+            sequence_publication: None,
             snapshots: retention::registry(connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -150,6 +153,7 @@ impl SQLiteRecordStore {
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
             data_commit: Arc::default(),
+            sequence_publication: None,
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -183,6 +187,7 @@ impl SQLiteRecordStore {
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
             data_commit: Arc::default(),
+            sequence_publication: None,
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -207,6 +212,7 @@ impl SQLiteRecordStore {
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
             data_commit: Arc::default(),
+            sequence_publication: None,
             snapshots: retention::registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
@@ -311,6 +317,22 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn sequence_value_persistence(
+        &self,
+        owner: uqa_storage::mvcc::SequencePublicationLease,
+    ) -> Option<Arc<dyn VersionedPersistence>> {
+        self.native?;
+        let mut records = self.clone();
+        records.sequence_publication = Some(owner);
+        Some(Arc::new(records))
+    }
+
+    fn synchronize_sequence_values(&self, control: &StorageReadControl) -> VersionResult<()> {
+        self.with_write(control, |connection| {
+            sequence_durability::synchronize(connection, self.identity, self.native, control)
+        })
+    }
+
     fn commit_preserves_catalog_definitions(&self, receipt: CommitReceipt) -> bool {
         *self.data_commit.lock() == Some(receipt)
     }
@@ -519,17 +541,24 @@ impl VersionedPersistence for SQLiteRecordStore {
         self.check_transaction(transaction)?;
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
-        self.with_write(control, |connection| {
-            let _cache = commit_cache::CommitCache::grow(connection, prepared, control)?;
-            Ok(write::commit(
-                connection,
-                transaction,
-                prepared,
-                self.native,
-                control,
-                |receipt| *self.data_commit.lock() = Some(receipt),
-            ))
-        })?
+        let publish = |deferred| {
+            self.with_write(control, |connection| {
+                let _cache = commit_cache::CommitCache::grow(connection, prepared, control)?;
+                Ok(write::commit(
+                    connection,
+                    transaction,
+                    prepared,
+                    self.native,
+                    deferred,
+                    control,
+                    |receipt| *self.data_commit.lock() = Some(receipt),
+                ))
+            })?
+        };
+        match &self.sequence_publication {
+            Some(owner) => owner.with_publication(publish),
+            None => publish(false),
+        }
     }
     fn commit_status(
         &self,

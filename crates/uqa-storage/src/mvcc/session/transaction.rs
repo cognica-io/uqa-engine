@@ -65,6 +65,13 @@ pub(super) struct Transaction {
 }
 
 impl Transaction {
+    pub(super) fn has_record_publication(&self) -> bool {
+        self.allocation.is_some()
+            || self.changes.has_written()
+            || self.has_derived_changes()
+            || self.notification.is_some()
+    }
+
     pub(super) fn committed_receipt(&self) -> Option<super::super::CommitReceipt> {
         match self.outcome {
             Some(CommitErrorOutcome::Committed(receipt)) => Some(receipt),

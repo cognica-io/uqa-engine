@@ -15,6 +15,7 @@ pub(super) struct Header {
     pub(super) allocated: u64,
     pub(super) receipt_limit: u64,
     pub(super) sequence: CommitSequence,
+    pub(super) sequence_durable: CommitSequence,
     pub(super) key_value_mapping: bool,
 }
 
@@ -64,6 +65,13 @@ pub(super) fn restoration_header(
     if pending == Some(database) {
         return Err(VersionError::InvalidRestoreIdentity.into());
     }
+    let sequence = CommitSequence::from_u64(integer(bytes(row, 4)?)?);
+    let sequence_durable = CommitSequence::from_u64(integer(bytes(row, 8)?)?);
+    if sequence_durable > sequence {
+        return Err(
+            VersionError::InvalidEncoding("sequence durability exceeds publication").into(),
+        );
+    }
     Ok((
         database,
         Header {
@@ -74,7 +82,8 @@ pub(super) fn restoration_header(
                 .ok_or(VersionError::InvalidEncoding(
                     "invalid receipt retention limit",
                 ))?,
-            sequence: CommitSequence::from_u64(integer(bytes(row, 4)?)?),
+            sequence,
+            sequence_durable,
             key_value_mapping: match row.get::<_, i64>(5)? {
                 0 => false,
                 1 => true,
