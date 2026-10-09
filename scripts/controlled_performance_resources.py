@@ -14,6 +14,7 @@ import threading
 import time
 
 from performance_qualification import QualificationError
+from performance_hardware_counters import HardwareCounters
 
 
 WORKQUEUE_MASK = Path('/sys/devices/virtual/workqueue/cpumask')
@@ -44,13 +45,20 @@ def snapshot() -> dict:
                       if (fields := line.split())[0] in {f'cpu{cpu}' for cpu in range(8, 16)}},
         'pressure': {name: (PROC / 'pressure' / name).read_text()
                      for name in ('cpu', 'memory', 'io')},
+        'virtual_memory': {fields[0]: int(fields[1])
+                           for line in (PROC / 'vmstat').read_text().splitlines()
+                           if (fields := line.split())[0] in {
+                               'pgfault', 'pgmajfault', 'pgscan_kswapd', 'pgscan_direct',
+                               'compact_stall', 'compact_success', 'thp_collapse_alloc',
+                               'thp_fault_alloc'}},
     }
 
 
 class MeasurementResources:
     """Sample resource diagnostics; these are not query timings or acceptance limits."""
 
-    def __init__(self, group: Path, output: Path, cpus: str, *, executable: Path | None = None):
+    def __init__(self, group: Path, output: Path, cpus: str, *, executable: Path | None = None,
+                 benchmark_log: Path | None = None):
         self.group, self.output, self.cpus = group, output, cpus
         self.executable = executable.resolve() if executable is not None else None
         self.layouts = {}
@@ -60,6 +68,38 @@ class MeasurementResources:
         self.samples = 0
         self.error = None
         self.before = snapshot()
+        self.hardware = HardwareCounters(cpus)
+        self.benchmark_log = benchmark_log
+        self.benchmark_markers = []
+
+    def sample_benchmark_marker(self):
+        if self.benchmark_log is None:
+            return
+        try:
+            with self.benchmark_log.open('rb') as stream:
+                end = stream.seek(0, 2)
+                offset = max(0, end - 16 * 1024)
+                stream.seek(offset)
+                raw = stream.read(16 * 1024)
+        except FileNotFoundError:
+            return  # The resource observer starts before the workload log opens.
+        lines = raw.splitlines()
+        if offset:
+            lines = lines[1:]  # Never interpret a truncated first line as a marker.
+        if raw and not raw.endswith(b'\n'):
+            lines = lines[:-1]  # Wait until the writer finishes its current line.
+        marker = next((line for line in reversed(lines) if line.startswith(b'Benchmarking ')), None)
+        if marker is None:
+            return
+        if len(marker) > 1024:
+            raise QualificationError('benchmark marker exceeded its bound')
+        marker = marker.decode('utf-8', errors='replace')
+        if self.benchmark_markers and self.benchmark_markers[-1]['message'] == marker:
+            return
+        if len(self.benchmark_markers) >= 64:
+            raise QualificationError('benchmark marker inventory exceeded its bound')
+        self.benchmark_markers.append({'observed_monotonic_seconds': time.monotonic(),
+                                       'message': marker})
 
     def sample_layout(self, process: str):
         if self.executable is None:
@@ -94,6 +134,7 @@ class MeasurementResources:
             return
 
     def sample(self):
+        self.sample_benchmark_marker()
         try:
             processes = (self.group / 'cgroup.procs').read_text().split()
             effective = (self.group / 'cpuset.cpus.effective').read_text().strip()
@@ -119,6 +160,7 @@ class MeasurementResources:
                 cpu = fields[36]
                 row['sampled_cpus'][cpu] = row['sampled_cpus'].get(cpu, 0) + 1
                 row.update(CPU_nanoseconds=running, run_queue_nanoseconds=waiting, timeslices=switches)
+                row.update(minor_faults=int(fields[7]), major_faults=int(fields[9]))
         self.samples += 1
 
     def observe(self):
@@ -130,17 +172,32 @@ class MeasurementResources:
             self.error = str(error)
 
     def __enter__(self):
-        self.thread.start()
+        try:
+            self.hardware.start()
+            self.thread.start()
+        except BaseException:
+            try:
+                self.hardware.finish()
+            except Exception:
+                pass  # Preserve the observer-start failure.
+            raise
         return self
 
     def __exit__(self, *exception):
         self.stopped.set()
         self.thread.join()
+        try:
+            hardware = self.hardware.finish()
+        except Exception as error:
+            hardware = {'sampling_error': f'hardware counter cleanup failed: {error}'}
+        self.error = self.error or hardware['sampling_error']
         record = {'schema_version': 1, 'allowed_cpus': self.cpus, 'before': self.before,
                   'after': snapshot(), 'sample_interval_seconds': 0.25,
                   'samples': self.samples, 'last_observed_tasks': self.tasks,
                   'fixed_layout_executable': str(self.executable) if self.executable else None,
                   'fixed_layout_processes': self.layouts,
+                  'hardware_counters': hardware,
+                  'benchmark_markers': self.benchmark_markers,
                   'sampling_error': self.error,
                   'scope': 'whole invocation including fixture, warmup and analysis; task counters end at their last observed sample, not necessarily exit'}
         if not self.tasks and not self.error:

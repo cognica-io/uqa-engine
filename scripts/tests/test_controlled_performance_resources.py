@@ -20,6 +20,12 @@ from performance_qualification import QualificationError
 
 
 class ResourceEvidenceTest(unittest.TestCase):
+    def setUp(self):
+        self.hardware = SimpleNamespace(start=lambda: None, finish=lambda: {'sampling_error': None})
+        patcher = patch.object(resources, 'HardwareCounters', return_value=self.hardware)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def layout_fixture(self, root):
         executable = (root / 'benchmark').resolve()
         executable.touch()
@@ -81,6 +87,7 @@ class ResourceEvidenceTest(unittest.TestCase):
                 host.unit('measured', ['/program', '--verify'], root, measurement=True, writable=root)
                 self.assertEqual(run.call_args.args[0][-4:], ['/usr/bin/setarch', '--addr-no-randomize', '/program', '--verify'])
                 self.assertEqual(capture.call_args.kwargs['executable'], Path('/program'))
+                self.assertEqual(capture.call_args.kwargs['benchmark_log'], root / 'measured.stderr')
                 host.unit('build', ['/compiler'], root)
                 self.assertNotIn('/usr/bin/setarch', run.call_args.args[0])
                 self.assertEqual(capture.call_count, 1)
@@ -110,7 +117,7 @@ class ResourceEvidenceTest(unittest.TestCase):
                 task = proc / pid / 'task' / pid
                 task.mkdir(parents=True)
                 fields = ['0'] * 50
-                fields[19], fields[36] = '123', '8'
+                fields[7], fields[9], fields[19], fields[36] = '45', '2', '123', '8'
                 (task / 'stat').write_text(f'{pid} (a name) ' + ' '.join(fields))
                 (task / 'schedstat').write_text('10000 100 2\n')
             with patch.object(resources, 'PROC', proc):
@@ -120,6 +127,8 @@ class ResourceEvidenceTest(unittest.TestCase):
                 self.assertEqual(list(monitor.tasks), ['100/100/123'])
                 self.assertEqual(monitor.tasks['100/100/123']['sampled_cpus'], {'8': 2})
                 self.assertEqual(monitor.tasks['100/100/123']['CPU_nanoseconds'], 10000)
+                self.assertEqual(monitor.tasks['100/100/123']['minor_faults'], 45)
+                self.assertEqual(monitor.tasks['100/100/123']['major_faults'], 2)
                 (group / 'cpuset.cpus.effective').write_text('8-15')
                 with self.assertRaises(QualificationError):
                     monitor.sample()
@@ -144,6 +153,82 @@ class ResourceEvidenceTest(unittest.TestCase):
                         monitor.thread.join()
                         raise RuntimeError('workload failure')
             self.assertEqual(json.loads((root / 'result.json').read_text())['sampling_error'], 'diagnostic failure')
+
+    def test_hardware_failure_is_retained_without_hiding_workload_failure(self):
+        for workload_fails in (False, True):
+            with self.subTest(workload_fails=workload_fails), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(resources, 'snapshot', return_value={}):
+                root = Path(temporary)
+                monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+                self.hardware.finish = lambda: {'sampling_error': 'missing hardware counter'}
+                with patch.object(monitor, 'sample'):
+                    expected = RuntimeError if workload_fails else QualificationError
+                    with self.assertRaisesRegex(expected, 'workload failure' if workload_fails else 'missing hardware'):
+                        with monitor:
+                            if workload_fails:
+                                raise RuntimeError('workload failure')
+                record = json.loads((root / 'result.json').read_text())
+                self.assertEqual(record['hardware_counters']['sampling_error'], 'missing hardware counter')
+                self.assertEqual(record['sampling_error'], 'missing hardware counter')
+
+    def test_cleanup_exception_cannot_replace_observer_start_or_workload_failure(self):
+        def cleanup_failure():
+            raise OSError('cleanup failure')
+
+        self.hardware.finish = cleanup_failure
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+            with patch.object(monitor, 'sample'), self.assertRaisesRegex(RuntimeError, 'workload failure'):
+                with monitor:
+                    raise RuntimeError('workload failure')
+            record = json.loads((root / 'result.json').read_text())
+            self.assertEqual(record['sampling_error'], 'hardware counter cleanup failed: cleanup failure')
+            def start_failure():
+                raise RuntimeError('start failure')
+            self.hardware.start = start_failure
+            monitor = resources.MeasurementResources(root, root / 'startup.json', '8')
+            with self.assertRaisesRegex(RuntimeError, 'start failure'):
+                with monitor:
+                    self.fail('failed observer must not start the workload')
+
+    def test_benchmark_markers_follow_complete_log_lines_and_keep_observation_times(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            log = root / 'workload.stderr'
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8', benchmark_log=log)
+            monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers, [])
+            log.write_text('Benchmarking q1: Warming up\nBenchmarking q1: Collec')
+            with patch.object(resources.time, 'monotonic', return_value=12.5):
+                monitor.sample_benchmark_marker()
+                monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers, [
+                {'observed_monotonic_seconds': 12.5, 'message': 'Benchmarking q1: Warming up'}])
+            with log.open('a') as stream:
+                stream.write('ting 20 samples\nWarning: an unrelated line\n')
+            with patch.object(resources.time, 'monotonic', return_value=13.0):
+                monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers[-1], {
+                'observed_monotonic_seconds': 13.0, 'message': 'Benchmarking q1: Collecting 20 samples'})
+            log.write_text('discarded prefix\n' * 2000 + 'Benchmarking q1: Analyzing\n')
+            monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers[-1]['message'], 'Benchmarking q1: Analyzing')
+
+    def test_benchmark_marker_size_and_inventory_are_bounded(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            log = root / 'workload.stderr'
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8', benchmark_log=log)
+            log.write_text('Benchmarking ' + 'x' * 1024 + '\n')
+            with self.assertRaisesRegex(QualificationError, 'marker exceeded'):
+                monitor.sample_benchmark_marker()
+            for index in range(64):
+                log.write_text(f'Benchmarking q{index}: Analyzing\n')
+                monitor.sample_benchmark_marker()
+            log.write_text('Benchmarking q65: Analyzing\n')
+            with self.assertRaisesRegex(QualificationError, 'inventory exceeded'):
+                monitor.sample_benchmark_marker()
 
 
 if __name__ == '__main__':
