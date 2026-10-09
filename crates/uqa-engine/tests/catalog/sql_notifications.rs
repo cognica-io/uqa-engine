@@ -374,20 +374,26 @@ fn void_has_no_equality_or_ordering_operators() {
         "SELECT CASE 'value'::void WHEN 'candidate'::void THEN 1 END",
         "SELECT 'value'::void IN (SELECT 'candidate'::void)",
         "SELECT DISTINCT 'ignored'::void",
+        "SELECT DISTINCT 'ignored'::void WHERE false",
         "SELECT DISTINCT ON ('ignored'::void) 1",
+        "SELECT DISTINCT ON (1) 'ignored'::void",
         "SELECT 'ignored'::void GROUP BY 1",
         "SELECT 'ignored'::void ORDER BY 1",
         "SELECT count(DISTINCT 'ignored'::void)",
         "SELECT array_agg(1 ORDER BY 'ignored'::void)",
         "SELECT row_number() OVER (PARTITION BY 'ignored'::void)",
         "SELECT row_number() OVER (ORDER BY 'ignored'::void)",
+        "SELECT 1 WINDOW unused AS (PARTITION BY 'ignored'::void)",
+        "SELECT 1 WINDOW unused AS (ORDER BY 'ignored'::void)",
+        "SELECT 'left'::void UNION ALL SELECT 'right'::void ORDER BY 1",
         "SELECT 'left'::void UNION SELECT 'right'::void",
         "SELECT 'left'::void INTERSECT ALL SELECT 'right'::void",
         "SELECT 'left'::void EXCEPT ALL SELECT 'right'::void",
     ] {
-        let error = engine
-            .sql(sql, &[])
-            .expect_err("void has no PostgreSQL equality or ordering operators");
+        let error = match engine.sql(sql, &[]) {
+            Err(error) => error,
+            Ok(result) => panic!("{sql} unexpectedly succeeded: {result:?}"),
+        };
         assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
     }
 

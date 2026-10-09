@@ -145,12 +145,15 @@ fn require_operator_capability(
     available: bool,
 ) -> Result<(), SQLError> {
     if !available {
-        return Err(SQLError::Routine {
+        return Err(SQLError::Diagnostic {
             sqlstate: "42883".into(),
             message: format!(
                 "could not identify an {capability} operator for type {}",
                 ty.sql_name()
             ),
+            detail: None,
+            hint: (capability == "ordering")
+                .then(|| "Use an explicit ordering operator or modify the query.".into()),
         });
     }
     Ok(())

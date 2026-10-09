@@ -18,6 +18,8 @@ use uqa_sql::{
     SQLError,
 };
 
+pub use uqa_sql::semantics::output_position_error;
+
 /// Build collision-free physical target columns for a plain SELECT whose ORDER BY must be able to see both input columns and SELECT-list aliases. Public aliases cannot safely be appended directly: `SELECT x + 1 AS x ... ORDER BY x` must order by the output alias, while `ORDER BY x + 1` still resolves `x` against the input namespace. Each non-star target is therefore computed once under an opaque internal attribute and assigned its public label only after Sort/Limit has consumed it.
 pub fn order_projection(
     projections: &[ProjectionPlan],
@@ -139,11 +141,11 @@ pub fn resolve_order_expression(
 ) -> Result<ScalarExpr, SQLError> {
     match expression {
         ScalarExpr::Literal(Value::Int(position)) => {
-            let index = usize::try_from(*position)
-                .ok()
-                .and_then(|position| position.checked_sub(1))
-                .filter(|index| *index < output_columns.len())
-                .ok_or_else(|| output_position_error("ORDER BY", *position))?;
+            let index = uqa_sql::semantics::query_output_position(
+                *position,
+                output_columns.len(),
+                "ORDER BY",
+            )?;
             Ok(output_columns[index].1.clone())
         }
         ScalarExpr::Column(name) => {
@@ -190,11 +192,8 @@ fn output_target_position_for(
 ) -> Result<Option<OutputTarget>, SQLError> {
     match expression {
         ScalarExpr::Literal(Value::Int(position)) => {
-            let position = usize::try_from(*position)
-                .ok()
-                .and_then(|position| position.checked_sub(1))
-                .filter(|position| *position < output.len())
-                .ok_or_else(|| output_position_error(clause, *position))?;
+            let position =
+                uqa_sql::semantics::query_output_position(*position, output.len(), clause)?;
             return Ok(Some(OutputTarget {
                 position,
                 direct: true,
@@ -230,13 +229,6 @@ fn output_target_position_for(
             position,
             direct: false,
         }))
-}
-
-pub fn output_position_error(clause: &str, position: i64) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42P10".into(),
-        message: format!("{clause} position {position} is not in the select list"),
-    }
 }
 
 pub fn one_based_output_position(position: usize) -> Result<ScalarExpr, SQLError> {

@@ -147,6 +147,9 @@ impl Preparation<'_> {
             let mut value = self.expression(&item.expr, input, subqueries)?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
+            if let Some(ty) = &value.ty {
+                crate::require_ordering_operator(ty)?;
+            }
             if order_type.is_none() {
                 order_type = value.ty;
             }
@@ -155,6 +158,9 @@ impl Preparation<'_> {
             let mut value = self.expression(item, input, subqueries)?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
+            if let Some(ty) = &value.ty {
+                crate::require_equality_operator(ty)?;
+            }
         }
         let (order_count, order_type) = if spec.order_by.is_empty() {
             inherited.cloned().unwrap_or_default()
