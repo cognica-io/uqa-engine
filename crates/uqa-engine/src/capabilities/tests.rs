@@ -318,8 +318,8 @@ fn relation_resolution_preserves_the_missing_namespace_outcome() {
 }
 
 #[rstest::rstest]
-#[case(false)]
-#[case(true)]
+#[case::memory(false)]
+#[case::sqlite(true)]
 fn information_schema_filter_catalog_captures_do_not_scale_with_rows(#[case] persistent: bool) {
     let captures = [1, 32].map(|table_count| {
         let directory = tempfile::tempdir().unwrap();
