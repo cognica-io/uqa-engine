@@ -1279,8 +1279,21 @@
       "workload": "20,000 deterministic analytical rows, two BETWEEN predicates and one ordinary inequality, with a catalog and prepared per-comparison state.",
       "invariant": "All row decisions match independent integer predicates and numeric comparisons perform zero private enum call-state lookups.",
       "case_names": [
-        "analytical_numeric_predicates_do_not_probe_enum_call_state"
+        ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "parsed_analytical_ranges_read_each_needed_field_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/projected_predicate/evaluate/tests.rs",
+      "capability": "Projected range predicates",
+      "workload": "Real parsed BETWEEN and flattened comparison forms over the 20,000-row analytical fixture.",
+      "invariant": "Exactly one borrowed read per needed field, at most three per row; identical predicate output and short circuit across direct/indexed projections."
     }
   ]
 }
