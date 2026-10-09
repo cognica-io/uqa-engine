@@ -18,6 +18,13 @@ use super::dependencies::{check_constraint_columns, named_constraint_columns};
 use super::oids::split_schema_name;
 use super::rows::catalog_ordinal;
 
+mod cache;
+pub(in crate::catalog) use cache::ConstraintDefinitions;
+pub(crate) use cache::{
+    constraint_catalog_row_by_oid, constraint_catalog_rows, domain_constraint_by_oid,
+    DomainConstraint,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstraintCatalogKind {
     PrimaryKey,
@@ -203,7 +210,7 @@ pub struct PendingConstraintCatalogRow {
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn constraint_catalog_rows(
+fn build_constraint_catalog_rows(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ConstraintCatalogRow>, SQLError> {
@@ -213,6 +220,8 @@ pub fn constraint_catalog_rows(
     let resolution = &resolution;
     let mut out = Vec::new();
     for table_name in catalog.table_names() {
+        #[cfg(test)]
+        cache::record_table_read();
         let (schema, table) = split_schema_name(&table_name)?;
         let table_snapshot = catalog
             .table(resolution, &table_name)?
@@ -415,6 +424,8 @@ pub fn constraint_catalog_rows(
         }
     }
     for (table_name, foreign_table) in catalog.foreign_tables() {
+        #[cfg(test)]
+        cache::record_table_read();
         let (schema, table) = split_schema_name(&table_name)?;
         let columns = foreign_table.columns;
         let mut pending = Vec::new();

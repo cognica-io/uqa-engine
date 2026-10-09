@@ -45,6 +45,7 @@ pub struct CatalogReadView {
     relation_descriptors: Arc<composite_type::relations::RelationDescriptorCache>,
     dependencies: Arc<projection::DependencyCatalogCache>,
     index_relations: Arc<cache::CatalogDerivation<projection::IndexRelations>>,
+    constraint_definitions: Arc<cache::CatalogDerivation<projection::ConstraintDefinitions>>,
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
     /// The owning session's catalog records, read only inside its retained statement transaction.
     prepared_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
@@ -156,6 +157,7 @@ impl CatalogReadView {
             relation_descriptors: Arc::default(),
             dependencies: Arc::default(),
             index_relations: Arc::default(),
+            constraint_definitions: Arc::default(),
             graph_reads: None,
             prepared_catalog: None,
             sequence_positions: None,

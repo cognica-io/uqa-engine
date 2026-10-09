@@ -13,6 +13,7 @@ pub(in crate::catalog) struct IndexRelations {
     rows: Vec<CatalogIndexRelation>,
     by_oid: BTreeMap<i64, usize>,
     by_name: BTreeMap<RelationIdentity, usize>,
+    by_constraint: BTreeMap<[u8; 16], usize>,
 }
 
 fn retained(catalog: &CatalogReadView) -> Result<&IndexRelations, SQLError> {
@@ -20,15 +21,20 @@ fn retained(catalog: &CatalogReadView) -> Result<&IndexRelations, SQLError> {
         let rows = super::build_index_relations(catalog)?;
         let mut by_oid = BTreeMap::new();
         let mut by_name = BTreeMap::new();
+        let mut by_constraint = BTreeMap::new();
         for (position, row) in rows.iter().enumerate() {
             // Identity-claim validation reports collisions separately; inquiries preserve the first row's order.
             by_oid.entry(row.oid()).or_insert(position);
             by_name.entry(row.relation.clone()).or_insert(position);
+            if let Some(owner) = row.definition.relationships.owning_constraint {
+                by_constraint.entry(owner).or_insert(position);
+            }
         }
         Ok(IndexRelations {
             rows,
             by_oid,
             by_name,
+            by_constraint,
         })
     })
 }
@@ -47,6 +53,16 @@ pub(crate) fn catalog_index_by_oid(
     Ok(indexes
         .by_oid
         .get(&oid)
+        .map(|&position| &indexes.rows[position]))
+}
+
+pub(crate) fn catalog_index_for_constraint(
+    catalog: &CatalogReadView,
+    owner: Option<[u8; 16]>,
+) -> Result<Option<&CatalogIndexRelation>, SQLError> {
+    let indexes = retained(catalog)?;
+    Ok(owner
+        .and_then(|owner| indexes.by_constraint.get(&owner))
         .map(|&position| &indexes.rows[position]))
 }
 

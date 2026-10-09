@@ -17,6 +17,9 @@ mod type_metadata;
 #[path = "sql_information_schema/definition_lookups.rs"]
 mod definition_lookups;
 
+#[path = "sql_information_schema/constraint_lookups.rs"]
+mod constraint_lookups;
+
 use type_metadata::{domain_layout, pg_type_routine_layout};
 
 fn array(values: Vec<Value>) -> Value {

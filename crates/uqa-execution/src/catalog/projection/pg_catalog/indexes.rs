@@ -93,7 +93,7 @@ impl CatalogIndexRelation {
 mod cache;
 pub(crate) mod legacy;
 pub(in crate::catalog) use cache::IndexRelations;
-pub(crate) use cache::{catalog_index_by_name, catalog_index_by_oid};
+pub(crate) use cache::{catalog_index_by_name, catalog_index_by_oid, catalog_index_for_constraint};
 
 pub fn catalog_index_relations<'a>(
     catalog: &'a CatalogReadView,

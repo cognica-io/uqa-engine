@@ -17,11 +17,11 @@ use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::constraints::{
-    constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
+    constraint_catalog_row_by_oid, domain_constraint_by_oid, ConstraintCatalogKind,
+    ConstraintCatalogRow, DomainConstraint,
 };
 use super::super::helpers::oids::namespace_oid;
 use super::super::helpers::rows::{bool_value, int_value, row, str_value};
-use super::constraints::{constraint_index_oid, constraint_row_oid};
 
 pub fn pg_get_constraintdef_value(
     context: &CatalogContext<'_>,
@@ -48,15 +48,12 @@ pub fn pg_get_constraintdef_value(
     };
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
-    if let Some(constraint) = constraint_catalog_rows(&catalog, &resolution)?
-        .into_iter()
-        .find(|constraint| constraint_row_oid(constraint) == *oid)
-    {
+    if let Some(constraint) = constraint_catalog_row_by_oid(&catalog, &resolution, *oid)? {
         return relation_constraint_definition(
             Some(&crate::catalog::projection::CatalogOutput(*context)),
             &catalog,
             &resolution,
-            &constraint,
+            constraint,
             *pretty,
         )
         .map(Value::Str);
@@ -98,7 +95,7 @@ fn relation_constraint_definition(
                 )
             }
             ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. } => {
-                key_constraint_definition(catalog, resolution, constraint)?
+                key_constraint_definition(catalog, constraint)?
             }
             ConstraintCatalogKind::ForeignKey => {
                 foreign_key_definition(catalog, resolution, constraint)?
@@ -130,7 +127,6 @@ fn relation_constraint_definition(
 /// `PRIMARY KEY` or `UNIQUE` with its key columns and the non-key columns its index includes.
 fn key_constraint_definition(
     catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
     constraint: &ConstraintCatalogRow,
 ) -> Result<String, SQLError> {
     let mut definition = if constraint.kind == ConstraintCatalogKind::PrimaryKey {
@@ -151,9 +147,9 @@ fn key_constraint_definition(
         }
     }
     write!(definition, "({})", keys.join(", ")).expect("writing to a String cannot fail");
-    let indexes = super::catalog_index_relations(catalog, resolution)?;
-    let index_oid = constraint_index_oid(constraint, indexes);
-    if let Some(index) = indexes.iter().find(|index| index.oid() == index_oid) {
+    let index_oid = super::catalog_index_for_constraint(catalog, constraint.object_id)?
+        .map_or(0, super::CatalogIndexRelation::oid);
+    if let Some(index) = super::catalog_index_by_oid(catalog, index_oid)? {
         let included = &index.definition.included_columns;
         if !included.is_empty() {
             let included = included
@@ -266,22 +262,10 @@ fn domain_constraint_definition(
     oid: i64,
     pretty: bool,
 ) -> Result<Option<String>, SQLError> {
-    for domain in catalog.domains() {
-        if domain
-            .definition
-            .not_null
-            .as_ref()
-            .and_then(|constraint| constraint.catalog_identity)
-            .is_some_and(|identity| identity.oid == oid)
-        {
-            return Ok(Some("NOT NULL".into()));
-        }
-        if let Some(check) = domain.definition.checks.iter().find(|check| {
-            check
-                .catalog_identity
-                .is_some_and(|identity| identity.oid == oid)
-        }) {
-            return super::super::view_definition::stored_domain_expression_definition(
+    match domain_constraint_by_oid(catalog, resolution, oid)? {
+        Some(DomainConstraint::NotNull) => Ok(Some("NOT NULL".into())),
+        Some(DomainConstraint::Check(check)) => {
+            super::super::view_definition::stored_domain_expression_definition(
                 output,
                 catalog,
                 resolution,
@@ -291,10 +275,10 @@ fn domain_constraint_definition(
             .map(|expression| {
                 let validation = if check.validated { "" } else { " NOT VALID" };
                 Some(format!("CHECK ({expression}){validation}"))
-            });
+            })
         }
+        None => Ok(None),
     }
-    Ok(None)
 }
 
 /// `pg_constraint` rows of domain constraints: they constrain a type rather than a relation.
