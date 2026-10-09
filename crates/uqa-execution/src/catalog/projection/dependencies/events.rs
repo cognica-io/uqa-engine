@@ -25,11 +25,8 @@ impl DependencyBuilder<'_> {
             let Some(relation) = self.objects.relation_oid_by_name(&definition.table) else {
                 continue;
             };
-            let oid = super::catalog_oid(trigger_catalog_oid(
-                self.catalog,
-                self.resolution,
-                &trigger,
-            )?)?;
+            let oid =
+                super::catalog_oid(trigger_catalog_oid(self.catalog, self.resolution, trigger)?)?;
             self.objects.add_member(
                 TRIGGER_CLASS,
                 oid,
@@ -39,7 +36,7 @@ impl DependencyBuilder<'_> {
                 },
             );
             let address = ObjectAddress::whole(TRIGGER_CLASS, oid);
-            if let Some(function) = self.trigger_function_oid(&trigger) {
+            if let Some(function) = self.trigger_function_oid(trigger) {
                 self.recorder.record(
                     address,
                     ObjectAddress::whole(PROCEDURE_CLASS, function),
@@ -63,9 +60,9 @@ impl DependencyBuilder<'_> {
                 );
             }
             if definition.constraint {
-                self.record_trigger_constraint(&trigger, address, relation)?;
+                self.record_trigger_constraint(trigger, address, relation)?;
             }
-            if let Ok(parent @ 1..) = u32::try_from(parent) {
+            if let Ok(parent @ 1..) = u32::try_from(*parent) {
                 self.recorder.record(
                     address,
                     ObjectAddress::whole(TRIGGER_CLASS, parent),
