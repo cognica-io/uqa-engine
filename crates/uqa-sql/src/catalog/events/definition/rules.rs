@@ -25,6 +25,9 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+#[cfg(test)]
+mod tests;
+
 fn rule_condition_has_subquery(condition: &Expr) -> bool {
     condition.any_node(&|node| {
         matches!(
@@ -457,17 +460,13 @@ impl EventAnalysisContext<'_> {
         dependencies: &mut RuleDependencies,
     ) -> Result<(), SQLError> {
         if let Some(plan) = condition_plan {
-            if crate::type_resolution::composite_rows::expression_requires_binding(
-                condition,
-                self.routines,
-            )? {
-                let lowered =
-                    crate::plan::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
-                        self.routines.has_registered_aggregate_function(name)
-                    });
-                let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, plan)?;
-                crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
-            }
+            // Every analyzed constant and coercion belongs to the stored definition, including implicit enum inputs.
+            let lowered =
+                crate::plan::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
+                    self.routines.has_registered_aggregate_function(name)
+                });
+            let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, plan)?;
+            crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
             crate::catalog::events::dependencies::collect_expression_routine_dependencies(
                 plan,
                 dependencies,
