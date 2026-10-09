@@ -693,3 +693,6 @@ fn and_truth(lhs: Option<bool>, rhs: Option<bool>) -> Option<bool> {
 fn truth_to_value(truth: Option<bool>) -> Value {
     truth.map(Value::Bool).unwrap_or(Value::Null)
 }
+
+#[cfg(test)]
+mod tests;

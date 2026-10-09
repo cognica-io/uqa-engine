@@ -1281,6 +1281,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "parsed_analytical_ranges_read_each_needed_field_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/projected_predicate/evaluate/tests.rs",
+      "capability": "Projected range predicates",
+      "workload": "Real parsed BETWEEN and flattened comparison forms over the 20,000-row analytical fixture.",
+      "invariant": "Exactly one borrowed read per needed field, at most three per row; identical predicate output and short circuit across direct/indexed projections."
     }
   ]
 }

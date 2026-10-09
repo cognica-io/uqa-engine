@@ -175,34 +175,96 @@ fn compiled_and(items: Vec<ProjectedExpr>) -> ProjectedExpr {
     let all_integer_fields = items.iter().all(|item| {
         matches!(
             item,
-            ProjectedExpr::IntFieldComparison { .. } | ProjectedExpr::IntFieldBetween { .. }
+            ProjectedExpr::IntFieldComparison { .. }
+                | ProjectedExpr::IntFieldBetween { .. }
+                | ProjectedExpr::IntFieldConjunction(_)
         )
     });
     if !all_integer_fields {
         return ProjectedExpr::And(items);
     }
-    ProjectedExpr::IntFieldConjunction(
-        items
-            .into_iter()
-            .map(|item| match item {
-                ProjectedExpr::IntFieldComparison {
-                    field,
-                    op,
-                    literal,
-                    field_on_left,
-                } => ProjectedIntPredicate::Comparison {
-                    field,
-                    op,
-                    literal,
-                    field_on_left,
-                },
-                ProjectedExpr::IntFieldBetween { field, low, high } => {
-                    ProjectedIntPredicate::Between { field, low, high }
+    let mut predicates = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            ProjectedExpr::IntFieldComparison {
+                field,
+                op,
+                literal,
+                field_on_left,
+            } => {
+                push_integer_predicate(
+                    &mut predicates,
+                    ProjectedIntPredicate::Comparison {
+                        field,
+                        op,
+                        literal,
+                        field_on_left,
+                    },
+                );
+            }
+            ProjectedExpr::IntFieldBetween { field, low, high } => {
+                push_integer_predicate(
+                    &mut predicates,
+                    ProjectedIntPredicate::Between { field, low, high },
+                );
+            }
+            ProjectedExpr::IntFieldConjunction(items) => {
+                for item in items {
+                    push_integer_predicate(&mut predicates, item);
                 }
-                _ => unreachable!("integer predicate conjunction was validated"),
-            })
-            .collect(),
-    )
+            }
+            _ => unreachable!("integer predicate conjunction was validated"),
+        }
+    }
+    ProjectedExpr::IntFieldConjunction(predicates)
+}
+
+fn push_integer_predicate(
+    predicates: &mut Vec<ProjectedIntPredicate>,
+    next: ProjectedIntPredicate,
+) {
+    if let Some(range) = predicates
+        .last()
+        .and_then(|previous| adjacent_range(previous, &next))
+    {
+        *predicates
+            .last_mut()
+            .expect("matched the preceding comparison") = range;
+    } else {
+        predicates.push(next);
+    }
+}
+
+/// Borrowing one field is stable within the input row. Coalesce only adjacent
+/// inclusive lower/upper comparisons; no cast, effect or intervening predicate moves.
+/// Commuted operands keep their original order in fallback error diagnostics.
+fn adjacent_range(
+    lower: &ProjectedIntPredicate,
+    upper: &ProjectedIntPredicate,
+) -> Option<ProjectedIntPredicate> {
+    use uqa_sql::ast::BinaryOp::{GreaterEqual, LessEqual};
+    let (
+        ProjectedIntPredicate::Comparison {
+            field: lower_field,
+            op: GreaterEqual,
+            literal: low,
+            field_on_left: true,
+        },
+        ProjectedIntPredicate::Comparison {
+            field: upper_field,
+            op: LessEqual,
+            literal: high,
+            field_on_left: true,
+        },
+    ) = (lower, upper)
+    else {
+        return None;
+    };
+    (*lower_field == *upper_field).then_some(ProjectedIntPredicate::Between {
+        field: *lower_field,
+        low: *low,
+        high: *high,
+    })
 }
 
 fn is_integer_type(ty: &str) -> bool {
