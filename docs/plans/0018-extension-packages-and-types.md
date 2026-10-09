@@ -223,7 +223,7 @@ Final local evidence for product source `15aeb6fa6`: all 93 PostgreSQL cases mat
 
 ### Composite attribute type changes
 
-Current verification includes retained builtin/domain arrays, JSONB, binary consumers, nested composite formation and original enum label OIDs on all four providers. Catalog-dependent deferred decoding and reads outside the owned tuple remain required before final review and merge; the evidence below records each completed correction.
+PR #630 contains the verified composite attribute changes and retained-value corrections recorded below, including catalog-dependent arrays and physical named-record consumers on all four providers. The requested merge includes these completed corrections. Reads beyond the original tuple remain an unresolved bug tracked in [#656](https://github.com/cognica-io/uqa-engine/issues/656); this PR does not close that issue or claim full physical-layout equivalence. The earlier progress entries are historical evidence, and the inherited task checklist remains unchanged.
 
 This independent unit continues the inherited PR #549 task after merged PR #625. SQL owns ordered target/type/USAGE/collation checks and dependency rejection; Execution owns retained definition locks, prepare-before-publication ordering and atomic descriptor publication. The SQL, Execution and Engine manifests, enabled features, workspace dependency policy and manual ownership boundaries were reviewed; no dependency or feature change is required.
 
@@ -232,7 +232,7 @@ The independent PostgreSQL 18.4 fixture is `tests/parity/pg18/composite_attribut
 - [x] Capture independent diagnostics, values and catalog effects before implementation.
 - [x] Implement original-descriptor preparation, DROP/TYPE/ADD publication order, recursive storage-use rejection and field dependency checks in their owning crates.
 - [x] Verify memory, native SQLite, SQLite Key/Value and redb, including durable reopen, prepared inputs and transactional rollback.
-- [ ] Update public behavior, retained-input evidence, history and the inherited task ledger; finish static checks and merge the independent PR.
+- [x] Update public behavior, retained-input evidence, history and the inherited task ledger; finish static checks. PR #630 records its review and merge outcome; #656 retains the unresolved tuple-boundary work.
 
 #### Descriptor change preservation argument
 
