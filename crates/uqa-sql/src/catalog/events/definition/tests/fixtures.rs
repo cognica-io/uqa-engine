@@ -34,7 +34,7 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 
-pub(super) struct Catalog {
+pub(in crate::catalog::events::definition) struct Catalog {
     pub events: Mutex<Vec<String>>,
     pub kind: &'static str,
     pub allow_owner: bool,

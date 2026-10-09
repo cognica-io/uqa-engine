@@ -9,7 +9,7 @@ use crate::{
     ast::{CreateRule, CreateTrigger, Statement},
     catalog::view::StoredViewKind,
 };
-mod fixtures;
+pub(super) mod fixtures;
 use fixtures::Catalog;
 
 fn trigger() -> CreateTrigger {

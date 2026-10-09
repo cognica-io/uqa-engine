@@ -20,7 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Avoid discarded catalog captures during DDL and unnecessary snapshot copies during index-name restoration and partition key preparation, while preserving validation, identities, rollback and post-lock freshness.
 
-- Preserve lazy OLD/NEW view expressions in RULE conditions, including CASE, COALESCE and nested scalar subqueries, without discarding required volatile projection effects or live whole-row fields.
+- Preserve lazy OLD/NEW view expressions in RULE conditions, including CASE, COALESCE and nested scalar subqueries, without discarding required volatile projection effects or live whole-row fields. Retain analyzed constants and coercions in stored RULE conditions so enum definitions follow label renames and rollback.
 
 - Reuse catalog inputs for scoped builtin permissions, scalar metadata, routine signatures and read-only view analysis; retain relation type descriptors, reuse validated index definitions for OID/name inquiries and share dependency derivation across catalog aliases and object descriptions, with one concurrent cold initialization. Preserve private DDL, role changes, rollback, portal generations and fresh dependency checks after DDL locks. OID-based constraint and trigger definitions no longer incorrectly require schema USAGE; rendered names retain invoking-role visibility. Include existing routine pseudo types in catalog output so trigger function definitions print their return type correctly.
 
