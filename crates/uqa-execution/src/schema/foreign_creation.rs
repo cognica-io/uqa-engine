@@ -316,7 +316,10 @@ impl ForeignCreationContext<'_> {
                 .identities
                 .allocator(crate::catalog::identity::allocate_catalog_object_id),
             &crate::schema::constraints::names::name_scope(
-                &self.identities.catalog.current_catalog_snapshot(),
+                self.identities
+                    .catalog
+                    .current_catalog_snapshot()
+                    .snapshot(),
                 relation,
             ),
             not_nulls,

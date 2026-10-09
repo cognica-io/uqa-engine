@@ -7,6 +7,8 @@
 use super::*;
 use std::sync::Arc;
 
+mod projection;
+
 fn fixture() -> (TableSchema, TableConstraintSet, KeyConstraintNames) {
     let key: TableKeyConstraint = serde_json::from_value(serde_json::json!({
         "name": "original", "columns": ["v"], "kind": "Unique",

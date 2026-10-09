@@ -95,7 +95,10 @@ pub fn finish_restore(
         let names = schemas
             .entry(domain.identity.schema.clone())
             .or_insert_with(|| {
-                crate::schema::constraints::names::schema_names(catalog, &domain.identity.schema)
+                crate::schema::constraints::names::schema_names(
+                    catalog.snapshot(),
+                    &domain.identity.schema,
+                )
             });
         constraints::assign_names(&mut domain.definition, names).map_err(invalid)?;
         names.extend(

@@ -14,6 +14,9 @@ use crate::catalog::{CatalogReadSnapshot, CatalogReadView};
 use crate::schema::publication::{TableSchemaCatalog, TableSchemaState};
 use uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names;
 
+#[cfg(test)]
+mod tests;
+
 pub(in crate::schema::indexes) struct OwnerChange {
     pub relation: RelationIdentity,
     pub object_id: [u8; 16],
@@ -167,9 +170,9 @@ pub(in crate::schema::indexes) fn prepare_descendants(
                     )
                     .map_err(invalid)?;
                 }
-                let view = CatalogReadView::new(candidate.clone());
                 let names = partitions::CandidateNames {
-                    catalog: &view,
+                    catalog: original,
+                    snapshot: candidate,
                     rows: &candidate.definitions.catalog_indexes,
                 };
                 uqa_sql::schema::indexes::names::name_constraint_indexes(
@@ -187,7 +190,7 @@ pub(in crate::schema::indexes) fn prepare_descendants(
                             .iter()
                             .cloned(),
                     );
-                let names = crate::schema::constraints::names::name_scope(&view, &child);
+                let names = crate::schema::constraints::names::name_scope(candidate, &child);
                 materialize_constraint_metadata_with_names(
                     &child,
                     &mut columns,

@@ -7,7 +7,7 @@
 //! Materialize index ancestry from prepared table and constraint candidates.
 
 use super::{index_definition, invalid, metadata_error, IndexCatalogIdentity, IndexDefinition};
-use crate::catalog::CatalogReadView;
+use crate::catalog::{CatalogReadSnapshot, CatalogReadView};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -79,7 +79,11 @@ pub(in crate::schema::indexes) fn materialize(
                     )));
                 }
                 let name = uqa_sql::schema::indexes::names::allocate_default_index_name(
-                    &CandidateNames { catalog, rows },
+                    &CandidateNames {
+                        catalog,
+                        snapshot: catalog.snapshot(),
+                        rows,
+                    },
                     child_name,
                     &parent_keys,
                 )
@@ -165,6 +169,7 @@ pub(in crate::schema::indexes) fn constraint_kind(
 
 pub(super) struct CandidateNames<'a> {
     pub catalog: &'a CatalogReadView,
+    pub snapshot: &'a CatalogReadSnapshot,
     pub rows: &'a BTreeMap<RelationIdentity, CatalogIndexRow>,
 }
 
@@ -175,7 +180,7 @@ impl IndexNameCatalog for CandidateNames<'_> {
     ) -> Result<std::collections::BTreeSet<String>, SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         Ok(crate::schema::constraints::names::schema_names(
-            self.catalog,
+            self.snapshot,
             &relation.schema,
         ))
     }
@@ -185,15 +190,14 @@ impl IndexNameCatalog for CandidateNames<'_> {
     ) -> Result<std::collections::BTreeSet<String>, SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         Ok(crate::schema::constraints::names::existing_names(
-            self.catalog,
+            self.snapshot,
             &relation,
         ))
     }
     fn existing_constraint_keys(&self, table: &str) -> Result<Vec<TableKeyConstraint>, SQLError> {
         let table = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         Ok(self
-            .catalog
-            .snapshot()
+            .snapshot
             .tables
             .get(&table)
             .map(|table| table.keys.as_ref().clone())
@@ -202,7 +206,7 @@ impl IndexNameCatalog for CandidateNames<'_> {
 
     fn relation_name_available(&self, name: &str) -> Result<bool, SQLError> {
         let name = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
-        let snapshot = self.catalog.snapshot();
+        let snapshot = self.snapshot;
         Ok(!self.rows.contains_key(&name)
             && !snapshot.tables.contains_key(&name)
             && !snapshot.definitions.views.contains_key(&name)
