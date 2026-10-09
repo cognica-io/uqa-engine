@@ -956,6 +956,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unchanged_key_names_retain_the_complete_catalog_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/projection.rs",
+      "capability": "DDL catalog snapshots",
+      "workload": "Zero, one and 256 unrelated relations with unchanged or legacy key names.",
+      "invariant": "Identical catalog snapshot allocation and empty change set.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "changed_key_names_copy_only_changed_constraint_collections",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/projection.rs",
+      "capability": "DDL catalog snapshots",
+      "workload": "256 unrelated relations; direct, inherited and combined key renames.",
+      "invariant": "Only changed key collections are copied; unrelated allocations, original names and object identities survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "descendant_names_borrow_the_candidate_without_copying_unrelated_tables",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/schema/tests.rs",
+      "capability": "DDL catalog snapshots",
+      "workload": "One and 256 unrelated relations; two partition names collide at the identifier limit.",
+      "invariant": "No extra whole-map reference during allocation; PostgreSQL names, independent child identities and original candidate isolation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "definition_refresh_captures_only_the_requested_current_catalog",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests.rs",
+      "capability": "DDL catalog snapshots",
+      "workload": "Zero and 32 unrelated relations during dependency discovery.",
+      "invariant": "Refresh captures zero views; dependency discovery captures exactly one current view.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

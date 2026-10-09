@@ -30,7 +30,7 @@ fn graph_error(error: GraphStoreError) -> SQLError {
 }
 
 impl CatalogReadView {
-    pub(in crate::catalog) fn metadata_view(&self) -> Cow<'_, Self> {
+    pub(crate) fn metadata_view(&self) -> Cow<'_, Self> {
         if self.graph_reads.is_none() {
             return Cow::Borrowed(self);
         }

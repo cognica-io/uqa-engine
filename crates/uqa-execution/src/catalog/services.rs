@@ -74,6 +74,10 @@ pub trait CatalogNamespace: Sync {
 pub trait CatalogSnapshotSource: Sync {
     fn catalog_snapshot(&self) -> super::CatalogReadView;
     fn refreshed_catalog_snapshot(&self) -> Result<super::CatalogReadView, SQLError>;
+    /// Refresh definitions without capturing a query view that definition coordination will discard.
+    fn refresh_catalog(&self) -> Result<(), SQLError> {
+        self.refreshed_catalog_snapshot().map(|_| ())
+    }
     /// Attach the original query participant without replacing the retained catalog or observing unused sources.
     fn bind_query_reads(
         &self,
@@ -85,6 +89,9 @@ pub trait CatalogSnapshotSource: Sync {
     fn current_catalog_snapshot(&self) -> super::CatalogReadView;
 }
 impl CatalogSnapshotSource for super::CatalogReadView {
+    fn refresh_catalog(&self) -> Result<(), SQLError> {
+        Ok(())
+    }
     fn current_catalog_snapshot(&self) -> super::CatalogReadView {
         self.clone()
     }

@@ -6,9 +6,39 @@
 
 //! Minimal immutable catalog and routine fixtures for execution unit tests.
 
-use super::{CatalogDefinitionSnapshot, CatalogReadSnapshot, CatalogReadView};
+use super::{
+    CatalogDefinitionSnapshot, CatalogReadSnapshot, CatalogReadView, CatalogTableSnapshot,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{ast::FunctionBinding, ColumnType, SQLError};
+
+pub(crate) fn table_snapshot(
+    object_id: [u8; 16],
+    columns: Vec<uqa_sql::ast::ColumnDef>,
+    constraints: uqa_sql::ast::TableConstraintSet,
+) -> CatalogTableSnapshot {
+    CatalogTableSnapshot {
+        dropped_attributes: constraints.dropped_attributes.into(),
+        object_id,
+        catalog_oids: constraints.catalog_oids.unwrap_or_else(|| {
+            uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+                uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+                &object_id,
+            )
+        }),
+        row_type_array_name: constraints.row_type_array_name,
+        security: Arc::new(super::security::BoundTableSecurity::owner(
+            uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+        )),
+        columns: columns.into(),
+        columns_declared: true,
+        checks: constraints.checks.into(),
+        foreign_keys: constraints.foreign_keys.into(),
+        keys: constraints.key_constraints.into(),
+        hierarchy: constraints.hierarchy.into(),
+        persistence: constraints.persistence,
+    }
+}
 
 pub(crate) fn empty_catalog() -> CatalogReadView {
     CatalogReadView::new(CatalogReadSnapshot {

@@ -6,11 +6,44 @@
 
 //! Domain catalog publication must preserve independent concurrent declarations.
 
-use crate::tests::relation_lock_support::{before_commit, error, reopen, sessions, sql};
+use crate::tests::relation_lock_support::{
+    after_wait, before_commit, error, reopen, sessions, sql,
+};
 use uqa_core::Value;
 
 mod constraint_identities;
 mod type_names;
+
+#[test]
+fn domain_validation_refreshes_values_after_a_relation_lock_wait() {
+    for provider in 0..3 {
+        for commit in [true, false] {
+            let (_directory, holder, worker) = sessions(provider);
+            sql(&holder, "CREATE DOMAIN positive AS int; CREATE TABLE domain_values(v positive); INSERT INTO domain_values VALUES(1)");
+            sql(&holder, "BEGIN; INSERT INTO domain_values VALUES(-1)");
+            let (worker, result) = after_wait(
+                &holder,
+                worker,
+                "ALTER DOMAIN positive ADD CONSTRAINT positive_check CHECK(VALUE > 0)",
+                "public.domain_values",
+                if commit { "COMMIT" } else { "ROLLBACK" },
+            );
+            if commit {
+                assert_eq!(result.unwrap_err().sqlstate(), Some("23514"));
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(
+                sql(
+                    &worker,
+                    "SELECT count(*) AS n FROM pg_constraint WHERE contypid='positive'::regtype"
+                )
+                .rows[0]["n"],
+                Value::Int(i64::from(!commit)),
+            );
+        }
+    }
+}
 
 #[test]
 fn domains_with_matching_constraint_names_commit_independently() {

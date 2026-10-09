@@ -73,6 +73,7 @@ impl IndexRegistryContext<'_> {
         uqa_sql::schema::indexes::names::name_constraint_indexes(
             &partitions::CandidateNames {
                 catalog: &catalog,
+                snapshot: catalog.snapshot(),
                 rows: &catalog.snapshot().definitions.catalog_indexes,
             },
             table,

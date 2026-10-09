@@ -127,7 +127,7 @@ pub fn drop_table_on_commit(
 
 /// The dependencies of the catalog as other sessions last committed it, with relation names bound as the catalog stores them: `findDependentObjects` scans `pg_depend` with a fresh catalog snapshot, so a search after a lock wait sees the definitions changed while it waited, not a query's retained snapshot.
 pub fn catalog_dependencies(context: &CatalogContext<'_>) -> Result<CatalogDependencies, SQLError> {
-    context.catalog.refreshed_catalog_snapshot()?;
+    context.catalog.refresh_catalog()?;
     let catalog = context.catalog.current_catalog_snapshot();
     let mut resolution = context.session_execution_view().relation_name_resolution();
     resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);

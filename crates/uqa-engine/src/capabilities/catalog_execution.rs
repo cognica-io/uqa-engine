@@ -133,11 +133,16 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
     fn refreshed_catalog_snapshot(
         &self,
     ) -> Result<uqa_execution::catalog::CatalogReadView, SQLError> {
+        self.refresh_catalog()?;
+        Ok(self.catalog_read_view())
+    }
+
+    fn refresh_catalog(&self) -> Result<(), SQLError> {
         self.synchronize_table_catalog()
             .map_err(|error| SQLError::Internal(format!("load table catalog: {error}")))?;
         self.synchronize_catalog_registries()
             .map_err(|error| SQLError::Internal(format!("load relation catalog: {error}")))?;
-        Ok(self.catalog_read_view())
+        Ok(())
     }
 
     fn catalog_snapshot(&self) -> uqa_execution::catalog::CatalogReadView {

@@ -6,7 +6,9 @@
 
 //! Retain a constraint destination within its immutable owning relation.
 
-use crate::catalog::{services::CatalogSnapshotSource, CatalogReadView, CatalogTableSnapshot};
+use crate::catalog::{
+    services::CatalogSnapshotSource, CatalogReadSnapshot, CatalogReadView, CatalogTableSnapshot,
+};
 use crate::row_locks::{
     shared_objects::{SharedCatalogLock, SharedObjectLockSession},
     RelationLockMode,
@@ -38,11 +40,10 @@ fn table_names(table: &CatalogTableSnapshot) -> ConstraintNames<'_> {
 }
 
 fn trigger_names<'a>(
-    catalog: &'a CatalogReadView,
+    catalog: &'a CatalogReadSnapshot,
     relation: &RelationIdentity,
 ) -> impl Iterator<Item = &'a str> {
     catalog
-        .snapshot()
         .definitions
         .triggers
         .get(relation)
@@ -58,11 +59,10 @@ fn trigger_names<'a>(
 }
 
 pub(crate) fn existing_names(
-    catalog: &CatalogReadView,
+    catalog: &CatalogReadSnapshot,
     relation: &RelationIdentity,
 ) -> BTreeSet<String> {
     catalog
-        .snapshot()
         .tables
         .get(relation)
         .into_iter()
@@ -73,7 +73,7 @@ pub(crate) fn existing_names(
 }
 
 pub(crate) fn event_names(
-    catalog: &CatalogReadView,
+    catalog: &CatalogReadSnapshot,
     relation: &RelationIdentity,
 ) -> BTreeSet<String> {
     trigger_names(catalog, relation)
@@ -81,8 +81,8 @@ pub(crate) fn event_names(
         .collect()
 }
 
-pub(crate) fn schema_names(catalog: &CatalogReadView, schema: &str) -> BTreeSet<String> {
-    let snapshot = catalog.snapshot();
+pub(crate) fn schema_names(catalog: &CatalogReadSnapshot, schema: &str) -> BTreeSet<String> {
+    let snapshot = catalog;
     let mut names = BTreeSet::new();
     for (relation, table) in &snapshot.tables {
         if relation.schema == schema {
@@ -140,7 +140,7 @@ pub(crate) fn schema_names(catalog: &CatalogReadView, schema: &str) -> BTreeSet<
 }
 
 pub(crate) fn name_scope(
-    catalog: &CatalogReadView,
+    catalog: &CatalogReadSnapshot,
     relation: &RelationIdentity,
 ) -> ConstraintNameScope {
     ConstraintNameScope {
@@ -165,19 +165,19 @@ impl ConstraintNameContext<'_> {
     pub fn existing_names(&self, table: &str) -> Result<BTreeSet<String>, SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         Ok(existing_names(
-            &self.catalog.current_catalog_snapshot(),
+            self.catalog.current_catalog_snapshot().snapshot(),
             &relation,
         ))
     }
 
     pub fn name_scope(&self, relation: &RelationIdentity) -> ConstraintNameScope {
-        name_scope(&self.catalog.current_catalog_snapshot(), relation)
+        name_scope(self.catalog.current_catalog_snapshot().snapshot(), relation)
     }
 
     pub fn automatic_names(&self, table: &str) -> Result<BTreeSet<String>, SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         Ok(schema_names(
-            &self.catalog.current_catalog_snapshot(),
+            self.catalog.current_catalog_snapshot().snapshot(),
             &relation.schema,
         ))
     }
@@ -198,7 +198,7 @@ impl ConstraintNameContext<'_> {
         Ok(table_names(table)
             .entries()
             .any(|constraint| constraint.name == name)
-            || trigger_names(&catalog, relation).any(|candidate| candidate == name))
+            || trigger_names(catalog.snapshot(), relation).any(|candidate| candidate == name))
     }
 
     pub fn ensure_available(&self, table: &str, name: Option<&str>) -> Result<(), SQLError> {

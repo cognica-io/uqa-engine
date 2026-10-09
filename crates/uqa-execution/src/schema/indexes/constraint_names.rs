@@ -121,35 +121,39 @@ impl KeyConstraintNames {
         crate::catalog::CatalogReadView,
         std::collections::BTreeSet<RelationIdentity>,
     )> {
-        let mut snapshot = catalog.snapshot().clone();
+        let mut snapshot = None;
         let mut changed = std::collections::BTreeSet::new();
         if let Some(names) = &self.names {
-            for (relation, table) in &mut snapshot.tables {
+            for (relation, table) in &catalog.snapshot().tables {
                 if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
                     continue;
                 }
-                for key in std::sync::Arc::make_mut(&mut table.keys).iter_mut().chain(
-                    std::sync::Arc::make_mut(&mut table.hierarchy)
-                        .partition_inherited_key_constraints
-                        .iter_mut(),
-                ) {
-                    let owner = key
-                        .catalog_identity
-                        .ok_or_else(|| invalid("key name has no constraint identity"))?;
-                    let name = names
-                        .get(&owner.object_id)
-                        .ok_or_else(|| invalid("key constraint has no owned index name"))?;
-                    if &name.table != relation || name.table_object_id != table.object_id {
-                        return Err(invalid("key constraint name belongs to a different table"));
-                    }
-                    if key.name.as_ref() != Some(&name.name) {
-                        key.name = Some(name.name.clone());
-                        changed.insert(relation.clone());
-                    }
+                let keys = project_keys(names, relation, table.object_id, &table.keys)?;
+                let inherited = project_keys(
+                    names,
+                    relation,
+                    table.object_id,
+                    &table.hierarchy.partition_inherited_key_constraints,
+                )?;
+                if keys.is_none() && inherited.is_none() {
+                    continue;
                 }
+                let candidate = snapshot.get_or_insert_with(|| catalog.snapshot().clone());
+                let table = candidate.tables.get_mut(relation).expect("retained table");
+                if let Some(keys) = keys {
+                    table.keys = keys.into();
+                }
+                if let Some(inherited) = inherited {
+                    std::sync::Arc::make_mut(&mut table.hierarchy)
+                        .partition_inherited_key_constraints = inherited;
+                }
+                changed.insert(relation.clone());
             }
         }
-        Ok((crate::catalog::CatalogReadView::new(snapshot), changed))
+        Ok((
+            snapshot.map_or_else(|| catalog.clone(), crate::catalog::CatalogReadView::new),
+            changed,
+        ))
     }
 
     pub fn encode(&self, constraints: &TableConstraintSet) -> StorageBackendResult<String> {
@@ -159,6 +163,31 @@ impl KeyConstraintNames {
             serde_json::to_string(constraints).map_err(Into::into)
         }
     }
+}
+
+/// Validate every owner even when its name is unchanged, and copy only a changed key collection.
+fn project_keys(
+    names: &BTreeMap<[u8; 16], KeyName>,
+    relation: &RelationIdentity,
+    table_object_id: [u8; 16],
+    keys: &[TableKeyConstraint],
+) -> StorageBackendResult<Option<Vec<TableKeyConstraint>>> {
+    let mut projected = None;
+    for (index, key) in keys.iter().enumerate() {
+        let owner = key
+            .catalog_identity
+            .ok_or_else(|| invalid("key name has no constraint identity"))?;
+        let name = names
+            .get(&owner.object_id)
+            .ok_or_else(|| invalid("key constraint has no owned index name"))?;
+        if &name.table != relation || name.table_object_id != table_object_id {
+            return Err(invalid("key constraint name belongs to a different table"));
+        }
+        if key.name.as_ref() != Some(&name.name) {
+            projected.get_or_insert_with(|| keys.to_vec())[index].name = Some(name.name.clone());
+        }
+    }
+    Ok(projected)
 }
 
 fn index_owns_names(catalog: &dyn CatalogFacade) -> StorageBackendResult<bool> {
