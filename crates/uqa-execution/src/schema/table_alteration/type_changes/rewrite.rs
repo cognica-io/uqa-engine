@@ -264,6 +264,8 @@ impl RelationRewrite {
                 .deferral
                 .needs_physical_rewrite(&self.table);
         let generated_columns = self.generated_rewrite_columns(context);
+        let assignment = context.columns.generated.assignment;
+        let scope = assignment.scopes.current_routine_scope();
         for position in 0..self.original.rows.len() {
             context.columns.rewrite.cancellation.check()?;
             let original = self.original.rows.get(position)?;
@@ -274,8 +276,8 @@ impl RelationRewrite {
                     continue;
                 };
                 let value = crate::query::catalog_expression::eval_expression_plan_with_schema(
-                    context.columns.generated.assignment.expressions.expressions,
-                    crate::query::CteScope::default(),
+                    assignment.expressions.expressions,
+                    scope.clone(),
                     analyzed.plan.clone(),
                     &original.document,
                     analyzed.row_schema(),
@@ -306,7 +308,7 @@ impl RelationRewrite {
                 }
             }
             crate::mutation::assignment::refresh_selected_stored_generated_columns(
-                context.columns.generated.assignment,
+                assignment,
                 &self.table,
                 &mut document,
                 Some(&generated_columns),

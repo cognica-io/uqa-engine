@@ -275,6 +275,8 @@ impl Engine {
         durable: &DurableCatalogSnapshot,
         table_sources: BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
     ) -> CatalogReadView {
+        #[cfg(test)]
+        tests::record_catalog_capture();
         let tables = table_sources
             .into_iter()
             .map(|(relation, table)| {
