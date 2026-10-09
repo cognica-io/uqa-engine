@@ -14,6 +14,7 @@ import threading
 import time
 
 from performance_qualification import QualificationError
+from performance_hardware_counters import HardwareCounters
 
 
 WORKQUEUE_MASK = Path('/sys/devices/virtual/workqueue/cpumask')
@@ -44,6 +45,12 @@ def snapshot() -> dict:
                       if (fields := line.split())[0] in {f'cpu{cpu}' for cpu in range(8, 16)}},
         'pressure': {name: (PROC / 'pressure' / name).read_text()
                      for name in ('cpu', 'memory', 'io')},
+        'virtual_memory': {fields[0]: int(fields[1])
+                           for line in (PROC / 'vmstat').read_text().splitlines()
+                           if (fields := line.split())[0] in {
+                               'pgfault', 'pgmajfault', 'pgscan_kswapd', 'pgscan_direct',
+                               'compact_stall', 'compact_success', 'thp_collapse_alloc',
+                               'thp_fault_alloc'}},
     }
 
 
@@ -60,6 +67,7 @@ class MeasurementResources:
         self.samples = 0
         self.error = None
         self.before = snapshot()
+        self.hardware = HardwareCounters(cpus)
 
     def sample_layout(self, process: str):
         if self.executable is None:
@@ -119,6 +127,7 @@ class MeasurementResources:
                 cpu = fields[36]
                 row['sampled_cpus'][cpu] = row['sampled_cpus'].get(cpu, 0) + 1
                 row.update(CPU_nanoseconds=running, run_queue_nanoseconds=waiting, timeslices=switches)
+                row.update(minor_faults=int(fields[7]), major_faults=int(fields[9]))
         self.samples += 1
 
     def observe(self):
@@ -130,17 +139,25 @@ class MeasurementResources:
             self.error = str(error)
 
     def __enter__(self):
-        self.thread.start()
+        try:
+            self.hardware.start()
+            self.thread.start()
+        except BaseException:
+            self.hardware.finish()
+            raise
         return self
 
     def __exit__(self, *exception):
         self.stopped.set()
         self.thread.join()
+        hardware = self.hardware.finish()
+        self.error = self.error or hardware['sampling_error']
         record = {'schema_version': 1, 'allowed_cpus': self.cpus, 'before': self.before,
                   'after': snapshot(), 'sample_interval_seconds': 0.25,
                   'samples': self.samples, 'last_observed_tasks': self.tasks,
                   'fixed_layout_executable': str(self.executable) if self.executable else None,
                   'fixed_layout_processes': self.layouts,
+                  'hardware_counters': hardware,
                   'sampling_error': self.error,
                   'scope': 'whole invocation including fixture, warmup and analysis; task counters end at their last observed sample, not necessarily exit'}
         if not self.tasks and not self.error:

@@ -20,6 +20,12 @@ from performance_qualification import QualificationError
 
 
 class ResourceEvidenceTest(unittest.TestCase):
+    def setUp(self):
+        self.hardware = SimpleNamespace(start=lambda: None, finish=lambda: {'sampling_error': None})
+        patcher = patch.object(resources, 'HardwareCounters', return_value=self.hardware)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def layout_fixture(self, root):
         executable = (root / 'benchmark').resolve()
         executable.touch()
@@ -110,7 +116,7 @@ class ResourceEvidenceTest(unittest.TestCase):
                 task = proc / pid / 'task' / pid
                 task.mkdir(parents=True)
                 fields = ['0'] * 50
-                fields[19], fields[36] = '123', '8'
+                fields[7], fields[9], fields[19], fields[36] = '45', '2', '123', '8'
                 (task / 'stat').write_text(f'{pid} (a name) ' + ' '.join(fields))
                 (task / 'schedstat').write_text('10000 100 2\n')
             with patch.object(resources, 'PROC', proc):
@@ -120,6 +126,8 @@ class ResourceEvidenceTest(unittest.TestCase):
                 self.assertEqual(list(monitor.tasks), ['100/100/123'])
                 self.assertEqual(monitor.tasks['100/100/123']['sampled_cpus'], {'8': 2})
                 self.assertEqual(monitor.tasks['100/100/123']['CPU_nanoseconds'], 10000)
+                self.assertEqual(monitor.tasks['100/100/123']['minor_faults'], 45)
+                self.assertEqual(monitor.tasks['100/100/123']['major_faults'], 2)
                 (group / 'cpuset.cpus.effective').write_text('8-15')
                 with self.assertRaises(QualificationError):
                     monitor.sample()
@@ -144,6 +152,23 @@ class ResourceEvidenceTest(unittest.TestCase):
                         monitor.thread.join()
                         raise RuntimeError('workload failure')
             self.assertEqual(json.loads((root / 'result.json').read_text())['sampling_error'], 'diagnostic failure')
+
+    def test_hardware_failure_is_retained_without_hiding_workload_failure(self):
+        for workload_fails in (False, True):
+            with self.subTest(workload_fails=workload_fails), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(resources, 'snapshot', return_value={}):
+                root = Path(temporary)
+                monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+                self.hardware.finish = lambda: {'sampling_error': 'missing hardware counter'}
+                with patch.object(monitor, 'sample'):
+                    expected = RuntimeError if workload_fails else QualificationError
+                    with self.assertRaisesRegex(expected, 'workload failure' if workload_fails else 'missing hardware'):
+                        with monitor:
+                            if workload_fails:
+                                raise RuntimeError('workload failure')
+                record = json.loads((root / 'result.json').read_text())
+                self.assertEqual(record['hardware_counters']['sampling_error'], 'missing hardware counter')
+                self.assertEqual(record['sampling_error'], 'missing hardware counter')
 
 
 if __name__ == '__main__':
