@@ -27,7 +27,7 @@ impl DependencyBuilder<'_> {
             let Some(relation_oid) = self.objects.relation_oid(&relation) else {
                 continue;
             };
-            let oid = super::catalog_oid(constraint_row_oid(&constraint))?;
+            let oid = super::catalog_oid(constraint_row_oid(constraint))?;
             self.objects.add_member(
                 CONSTRAINT_CLASS,
                 oid,
@@ -71,7 +71,7 @@ impl DependencyBuilder<'_> {
                         }
                     }
                 }
-                if let Ok(index @ 1..) = u32::try_from(constraint_index_oid(&constraint, indexes)) {
+                if let Ok(index @ 1..) = u32::try_from(constraint_index_oid(constraint, indexes)) {
                     referenced.add_relation(index);
                 }
                 self.recorder
@@ -105,7 +105,7 @@ impl DependencyBuilder<'_> {
                     );
                 }
             } else if let Ok(parent @ 1..) =
-                u32::try_from(constraint_parent_oid(self.catalog, &constraint, indexes))
+                u32::try_from(constraint_parent_oid(self.catalog, constraint, indexes))
             {
                 // `index_constraint_create`: a partition's key constraint belongs to its parent's and to the partition.
                 self.recorder.record(

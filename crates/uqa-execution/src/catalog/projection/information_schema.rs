@@ -823,7 +823,7 @@ pub fn build_info_table_constraints(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     Ok(constraint_catalog_rows(catalog, resolution)?
-        .into_iter()
+        .iter()
         .map(|constraint| {
             let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
                 "CHECK"
@@ -839,9 +839,9 @@ pub fn build_info_table_constraints(
             row([
                 ("constraint_catalog", catalog_name()),
                 ("constraint_schema", str_value(constraint.schema.clone())),
-                ("constraint_name", str_value(constraint.name)),
-                ("table_schema", str_value(constraint.schema)),
-                ("table_name", str_value(constraint.table)),
+                ("constraint_name", str_value(constraint.name.as_str())),
+                ("table_schema", str_value(constraint.schema.as_str())),
+                ("table_name", str_value(constraint.table.as_str())),
                 ("constraint_type", str_value(constraint_type)),
                 (
                     "is_deferrable",

@@ -146,6 +146,7 @@ mod view_definition;
 pub use view_definition::pg_get_viewdef_value;
 pub use view_definition::{rename_view_column_query, view_query_references_column};
 mod helpers;
+pub(super) use helpers::constraints::ConstraintDefinitions;
 pub(crate) use helpers::index_definitions::index_key_definition;
 pub use uqa_sql::catalog::result_type::{postgres_result_type, SQLTypeMetadata};
 mod information_schema;
@@ -192,12 +193,12 @@ pub fn runtime_constraints(
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
     let mut constraints = helpers::constraints::constraint_catalog_rows(&catalog, &resolution)?
-        .into_iter()
+        .iter()
         .map(|constraint| {
             Ok(RuntimeConstraint {
                 identity: ConstraintIdentity {
-                    relation: RelationIdentity::new(constraint.schema, constraint.table),
-                    name: constraint.name,
+                    relation: RelationIdentity::new(&constraint.schema, &constraint.table),
+                    name: constraint.name.clone(),
                     object_id: constraint.object_id,
                 },
                 deferrable: constraint.state.deferrable(),

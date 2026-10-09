@@ -1099,6 +1099,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constraint_inquiries_borrow_one_validated_collection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests.rs",
+      "capability": "Catalog constraint inquiries",
+      "workload": "Repeated full and OID constraint inquiries with zero, one and 128 unrelated tables.",
+      "invariant": "Exactly one complete collection visits each table once; repeated inquiries borrow the same validated definitions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_constraint_readers_collect_the_catalog_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests.rs",
+      "capability": "Catalog constraint inquiries",
+      "workload": "Eight cold readers selecting a constraint in a 129-table catalog.",
+      "invariant": "All readers share one definition allocation and together visit exactly 129 tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "domain_inquiries_build_addresses_once_without_copying_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests/domains.rs",
+      "capability": "Catalog constraint inquiries",
+      "workload": "Repeated table and domain OID inquiries with zero, one and 128 unrelated domains.",
+      "invariant": "Table hits do not enumerate domains; domain inquiries enumerate each domain once and borrow its original CHECK expression.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_domain_readers_collect_addresses_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests/domains.rs",
+      "capability": "Catalog constraint inquiries",
+      "workload": "Eight cold readers selecting one constraint from 129 domains.",
+      "invariant": "All domain readers together enumerate exactly 129 domains.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

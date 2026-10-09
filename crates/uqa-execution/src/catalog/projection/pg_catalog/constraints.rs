@@ -30,7 +30,7 @@ pub fn build_pg_constraint(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let indexes = super::catalog_index_relations(catalog, resolution)?;
     let mut rows = constraint_catalog_rows(catalog, resolution)?
-        .into_iter()
+        .iter()
         .map(|constraint| -> Result<ResultRow, SQLError> {
             let foreign_key = constraint.foreign_key.as_ref();
             let constrained_key: Vec<i64> = constraint
@@ -79,16 +79,16 @@ pub fn build_pg_constraint(
                 )?,
                 None => 0,
             };
-            let index_oid = constraint_index_oid(&constraint, indexes);
-            let parent_index_constraint_oid = constraint_parent_oid(catalog, &constraint, indexes);
+            let index_oid = constraint_index_oid(constraint, indexes);
+            let parent_index_constraint_oid = constraint_parent_oid(catalog, constraint, indexes);
             let (inheritance_count, is_local) = if constraint.parent_oid.is_some() {
                 (1, false)
             } else {
-                constraint_inheritance_state(catalog, resolution, &constraint)?
+                constraint_inheritance_state(catalog, resolution, constraint)?
             };
             Ok(row([
-                ("oid", int_value(constraint_row_oid(&constraint))),
-                ("conname", str_value(constraint.name)),
+                ("oid", int_value(constraint_row_oid(constraint))),
+                ("conname", str_value(constraint.name.as_str())),
                 (
                     "connamespace",
                     int_value(namespace_oid(catalog, &constraint.schema)),
