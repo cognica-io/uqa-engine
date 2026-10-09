@@ -1203,6 +1203,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_expression_outputs_share_one_catalog_across_columns_and_aliases",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/expression_metadata.rs",
+      "capability": "Stored expression catalog output",
+      "workload": "Four full columns projections, each with two stored alias defaults per table and zero, one or 128 unrelated tables.",
+      "invariant": "All expression deparsers and source aliases share one namespace/procedure/type metadata construction for the selected generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_expression_outputs_build_alias_metadata_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/expression_metadata.rs",
+      "capability": "Stored expression catalog output",
+      "workload": "Eight simultaneous expression-output readers of one cold catalog with 129 tables.",
+      "invariant": "Exactly one metadata assembly supplies the same immutable allocation to every reader.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

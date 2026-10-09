@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod expression_metadata;
 mod output_cache;
 
 #[test]

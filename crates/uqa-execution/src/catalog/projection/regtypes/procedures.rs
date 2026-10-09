@@ -245,7 +245,8 @@ mod tests {
                     (25, entry("text", 11, &[], false)),
                 ]),
                 dependencies: crate::catalog::projection::DependencyCatalogCache::default(),
-            },
+            }
+            .into(),
             visibility: OutputVisibility {
                 schemas: vec!["body_shadow".into(), "pg_catalog".into()],
             },
@@ -304,8 +305,8 @@ mod tests {
     #[test]
     fn name_parts_preserve_identifiers_until_the_caller_quotes_them() {
         let mut output = output();
-        output
-            .catalog
+        std::sync::Arc::get_mut(&mut output.catalog)
+            .unwrap()
             .procs
             .insert(20_002, entry("a.b \"quoted\"", 20_000, &[], false));
         let names = output
