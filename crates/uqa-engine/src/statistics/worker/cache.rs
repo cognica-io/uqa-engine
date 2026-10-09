@@ -20,9 +20,39 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct MaintenanceCache {
     entries: BTreeMap<String, Entry>,
+    completed: Option<CompletedPass>,
+    #[cfg(test)]
+    pub(super) full_passes: usize,
+}
+
+struct CompletedPass {
+    version: u64,
+    next_due_at: Option<u64>,
 }
 
 impl MaintenanceCache {
+    pub(super) fn unchanged(&self, version: Option<u64>, now: u64) -> bool {
+        self.completed.as_ref().is_some_and(|pass| {
+            version == Some(pass.version) && pass.next_due_at.is_none_or(|deadline| now < deadline)
+        })
+    }
+
+    pub(super) fn begin_pass(&mut self) {
+        // A failed, interrupted or concurrently changed pass never suppresses a retry.
+        self.completed = None;
+        #[cfg(test)]
+        {
+            self.full_passes += 1;
+        }
+    }
+
+    pub(super) fn complete_pass(&mut self, version: u64, next_due_at: Option<u64>) {
+        self.completed = Some(CompletedPass {
+            version,
+            next_due_at,
+        });
+    }
+
     pub(super) fn retain<'a>(&mut self, names: impl Iterator<Item = &'a str>) {
         let names = names.collect::<BTreeSet<_>>();
         self.entries.retain(|name, _| names.contains(name.as_str()));
@@ -66,6 +96,21 @@ impl MaintenanceCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_completed_pass_requires_a_known_unchanged_version_and_an_unexpired_deadline() {
+        let mut cache = MaintenanceCache::default();
+        assert!(!cache.unchanged(Some(1), 0));
+        cache.complete_pass(1, None);
+        assert!(cache.unchanged(Some(1), u64::MAX));
+        assert!(!cache.unchanged(None, 0));
+        assert!(!cache.unchanged(Some(2), 0));
+        cache.complete_pass(1, Some(60_100));
+        assert!(cache.unchanged(Some(1), 60_099));
+        assert!(!cache.unchanged(Some(1), 60_100));
+        cache.begin_pass();
+        assert!(!cache.unchanged(Some(1), 60_099));
+    }
 
     #[test]
     fn unchanged_polls_decode_once_and_revisions_objects_and_removal_invalidate() {

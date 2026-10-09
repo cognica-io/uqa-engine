@@ -23,6 +23,33 @@ fn automatic_refresh_covers_first_use_threshold_and_small_idle_changes() {
 }
 
 #[test]
+fn next_analysis_deadline_preserves_clean_dirty_missing_and_obsolete_states() {
+    let mut state = StatisticsMaintenance {
+        analyzed_rows: Some(100),
+        statistics_format: 1,
+        ..StatisticsMaintenance::default()
+    };
+    assert_eq!(state.next_due_at(false, 100, 1), None);
+    assert_eq!(state.next_due_at(true, 100, 1), Some(100));
+    assert_eq!(state.next_due_at(false, 100, 2), Some(100));
+    state.record_changes([1; 16], 1, Some(100), 100).unwrap();
+    for now in [0, 100, 1_000, 60_099] {
+        assert_eq!(state.next_due_at(false, now, 1), Some(60_100));
+        assert!(!state.due(false, now, 1));
+    }
+    assert_eq!(state.next_due_at(false, 60_100, 1), Some(60_100));
+    state.changes = 60;
+    assert_eq!(state.next_due_at(false, 101, 1), Some(101));
+    state.changes = 1;
+    state.analyzed_rows = Some(0);
+    assert_eq!(state.next_due_at(false, 101, 1), Some(101));
+    state.analyzed_rows = Some(100);
+    state.dirty_since_ms = u64::MAX - 1;
+    assert_eq!(state.next_due_at(false, u64::MAX, 1), None);
+    assert!(!state.due(false, u64::MAX, 1));
+}
+
+#[test]
 fn a_session_keeps_only_the_changes_that_decide_nothing() {
     // Clean statistics: the first change marks them stale and starts their age.
     let clean = StatisticsMaintenance {

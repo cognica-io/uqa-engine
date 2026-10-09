@@ -98,6 +98,19 @@ impl StatisticsMaintenance {
                     || now.saturating_sub(self.dirty_since_ms) >= MAX_DIRTY_AGE_MS))
     }
 
+    /// Earliest clock value that can make this unchanged state due. A clean
+    /// state has no deadline; missing, obsolete or already due statistics must
+    /// be revisited now. New committed changes still invalidate this decision.
+    pub fn next_due_at(&self, missing: bool, now: u64, statistics_format: u32) -> Option<u64> {
+        if self.due(missing, now, statistics_format) {
+            Some(now)
+        } else if self.dirty() {
+            self.dirty_since_ms.checked_add(MAX_DIRTY_AGE_MS)
+        } else {
+            None
+        }
+    }
+
     /// Whether a session may keep `unrecorded` changes of its commits to itself instead of recording them now. A record written by every commit is a write of two records to each of them, and the count decides only when an analysis becomes due, so a session records the changes that decide something: the first one after an analysis, which marks the statistics stale and starts their age, and the ones that make an analysis due. Otherwise it keeps up to a quarter of what makes one due, or sixteen changes of a small table, which bounds what sessions hide from one another and what a session loses when it ends. While an analysis is due already, more changes decide nothing.
     pub fn defers(&self, unrecorded: u64, now: u64) -> bool {
         if !self.dirty() {
