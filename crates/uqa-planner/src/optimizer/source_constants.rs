@@ -37,6 +37,16 @@ pub(super) fn propagate_source_constants(
             .cloned()
             .unwrap_or_else(|| format!("column{}", index + 1));
         let value = constant_literal(value, types).then(|| match value {
+            // SELECT targets and one-row VALUES resolve unknown literals to text before an outer query can observe their type. Substitution must preserve that boundary.
+            ScalarExpr::Literal(value @ (uqa_core::Value::Null | uqa_core::Value::Str(_))) => {
+                ScalarExpr::TypedLiteral {
+                    composite_source: None,
+                    value: value.clone(),
+                    ty: "text".into(),
+                    bound_type: Some(ColumnType::Text),
+                    parameter_index: None,
+                }
+            }
             ScalarExpr::Cast { expr, .. } => expr.as_ref().clone(),
             value => value.clone(),
         });

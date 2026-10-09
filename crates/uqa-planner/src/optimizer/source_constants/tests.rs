@@ -84,3 +84,38 @@ fn volatile_view_outputs_and_ordinary_tables_are_not_substituted() {
         assert_eq!(serde_json::to_value(&*block).unwrap(), before);
     }
 }
+
+#[test]
+fn source_constants_preserve_resolved_unknown_output_types() {
+    for source in [
+        "(SELECT NULL AS x) s",
+        "(VALUES (NULL)) s(x)",
+        "(SELECT 'label' AS x) s",
+        "(VALUES ('label')) s(x)",
+        "literal_view",
+    ] {
+        let views = Views(query("SELECT NULL AS x"));
+        let mut plan = query(&format!("SELECT x FROM {source}"));
+        let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+            panic!("query block")
+        };
+        if let Some(SourcePlan::Table { bound_columns, .. }) = &mut block.from {
+            *bound_columns = Some(vec!["x".into()]);
+        }
+        let original_source = serde_json::to_value(&block.from).unwrap();
+        propagate_source_constants(block, None, Some(&views)).unwrap();
+        assert!(
+            matches!(
+                &block.projections[0].expr,
+                ScalarExpr::TypedLiteral {
+                    value: uqa_core::Value::Null | uqa_core::Value::Str(_),
+                    bound_type: Some(ColumnType::Text),
+                    parameter_index: None,
+                    ..
+                }
+            ),
+            "{source}"
+        );
+        assert_eq!(serde_json::to_value(&block.from).unwrap(), original_source);
+    }
+}

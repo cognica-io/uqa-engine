@@ -553,7 +553,11 @@ impl Binder<'_, '_> {
         self.bind_optional_calls(&mut call, &mut infer)?;
         self.bind_enum_call(&mut call)?;
         if helpers::is_pg_typeof(&call.name) && call.arguments.len() == 1 {
-            let ty = self.semantic(self.infer(&call.arguments[0]))?.flatten();
+            let ty = if super::is_unknown_literal(&call.arguments[0]) {
+                None
+            } else {
+                self.semantic(self.infer(&call.arguments[0]))?.flatten()
+            };
             let cast = control.copy_text("regtype")?;
             // A user-defined type is folded by OID: its name may be shadowed by a built-in type or depend on the search path.
             if let Some(ty) = ty.as_deref().filter(|ty| helpers::is_user_defined_type(ty)) {

@@ -109,6 +109,33 @@ fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls()
 }
 
 #[test]
+fn computed_strings_retain_text_type_instead_of_becoming_unknown_literals() {
+    let call = bound_call(
+        "upper",
+        vec![ScalarExpr::Literal(Value::Str("label".into()))],
+    );
+    let folded =
+        fold_literal_expression(call, uqa_execution::scalar::eval_constant_scalar).unwrap();
+    assert!(matches!(
+        &folded,
+        ScalarExpr::TypedLiteral {
+            value: Value::Str(value),
+            bound_type: Some(ColumnType::Text),
+            ..
+        } if value == "LABEL"
+    ));
+    let bound = uqa_sql::bind_type_introspection(
+        bound_call("pg_typeof", vec![folded]),
+        &RowSchema::default(),
+        &[],
+    );
+    assert!(matches!(
+        bound, ScalarExpr::Cast { expr, .. }
+            if matches!(*expr, ScalarExpr::Literal(Value::Str(ref name)) if name == "text")
+    ));
+}
+
+#[test]
 fn named_arguments_keep_their_call_context_during_constant_planning() {
     let uqa_sql::Statement::Select(mut select) = uqa_sql::compile(
         "SELECT json_strip_nulls(strip_in_arrays => true, target => '{\"keep\":1,\"drop\":null}'::json)",

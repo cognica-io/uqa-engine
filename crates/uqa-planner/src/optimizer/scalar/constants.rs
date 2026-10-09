@@ -234,8 +234,8 @@ pub(super) fn fold_authorized_literal(
         evaluate(&expression)?
     };
     let literal = ScalarExpr::Literal(value.clone());
-    // Evaluated integers are values, not the bare integer syntax that ORDER BY and DISTINCT ON interpret as output positions.
-    if !matches!(value, Value::Int(_))
+    // Computed integers are not ORDER BY positions, and computed strings are not fresh unknown literals. Preserve their resolved types when replacing the expression.
+    if !matches!(value, Value::Int(_) | Value::Str(_))
         && !matches!(expression, ScalarExpr::Cast { .. })
         && scalar_type(&literal, &schema, &[])? == ty
     {

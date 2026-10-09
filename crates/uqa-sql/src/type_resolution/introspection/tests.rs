@@ -32,6 +32,31 @@ fn input(expression: &Expr, budget: &MemoryBudget) -> Produced<ScalarExpr> {
 }
 
 #[test]
+fn typeof_distinguishes_unknown_literals_from_resolved_text_inputs() {
+    let schema = RowSchema::with_types(vec!["s".into()], vec![Some(ColumnType::Text)]);
+    for (argument, expected) in [
+        (Expr::Literal(Value::Null), "unknown"),
+        (Expr::Literal(Value::Str("label".into())), "unknown"),
+        (Expr::Column("s".into()), "text"),
+        (
+            Expr::Cast {
+                implicit: false,
+                expr: Box::new(Expr::Literal(Value::Null)),
+                ty: "text".into(),
+            },
+            "text",
+        ),
+    ] {
+        let expression = ExpressionPlan::lower(call("pg_typeof", vec![argument])).scalar;
+        let bound = bind_type_introspection(expression, &schema, &[]);
+        assert!(matches!(
+            bound, ScalarExpr::Cast {ty, expr, ..}
+                if ty == "regtype" && matches!(*expr, ScalarExpr::Literal(Value::Str(ref name)) if name == expected)
+        ));
+    }
+}
+
+#[test]
 fn controlled_binding_preserves_cast_common_type_and_selected_call_semantics() {
     let schema = RowSchema::with_types(
         vec!["small".into(), "real".into()],
