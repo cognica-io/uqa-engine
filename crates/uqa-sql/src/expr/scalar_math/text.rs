@@ -195,12 +195,12 @@ fn encode(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
         ));
     }
     let owned;
-    let input = match &args[0] {
-        Value::Bytes(bytes) => bytes.as_slice(),
-        value => {
-            owned = value_to_string_with_control(value, control)?;
-            owned.as_bytes()
-        }
+    let binary = crate::expr::datums::binary_payload(&args[0], control)?;
+    let input = if let Some(payload) = &binary {
+        payload.bytes()
+    } else {
+        owned = value_to_string_with_control(&args[0], control)?;
+        owned.as_bytes()
     };
     if name == "md5" {
         return string(md5_hex_with_control(input, control)?, control);

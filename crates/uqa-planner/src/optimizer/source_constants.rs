@@ -10,17 +10,24 @@ use std::{borrow::Cow, collections::BTreeMap};
 
 use crate::{QueryBlockPlan, RelationalPlan, SourcePlan};
 use uqa_sql::routines::declaration::RoutineTypeCatalog;
-use uqa_sql::{ColumnType, ScalarExpr};
+use uqa_sql::{ColumnType, SQLError, ScalarExpr};
 
 type ConstantRow<'a> = (Cow<'a, [ScalarExpr]>, Cow<'a, [String]>);
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn propagate_source_constants(
     block: &mut QueryBlockPlan,
     types: Option<&dyn RoutineTypeCatalog>,
-) {
-    let Some(source) = &block.from else { return };
-    let Some((row, columns)) = single_constant_row(source, types) else {
-        return;
+    views: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
+) -> Result<(), SQLError> {
+    let Some(source) = &block.from else {
+        return Ok(());
+    };
+    let view = constant_view_source(source, views)?;
+    let Some((row, columns)) = single_constant_row(view.as_ref().unwrap_or(source), types) else {
+        return Ok(());
     };
     let qualifier = source.visible_qualifier().map(str::to_string);
     let mut constants = BTreeMap::<String, Option<ScalarExpr>>::new();
@@ -81,6 +88,42 @@ pub(super) fn propagate_source_constants(
     {
         rewrite(expression, &mut replace);
     }
+    Ok(())
+}
+
+fn constant_view_source(
+    source: &SourcePlan,
+    views: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
+) -> Result<Option<SourcePlan>, SQLError> {
+    let (
+        Some(views),
+        SourcePlan::Table {
+            name,
+            bound_columns,
+            column_aliases,
+            ..
+        },
+    ) = (views, source)
+    else {
+        return Ok(None);
+    };
+    let Some(body) = views.view_query(name)? else {
+        return Ok(None);
+    };
+    let mut names = bound_columns.clone().unwrap_or_default();
+    for (index, alias) in column_aliases.iter().enumerate() {
+        if let Some(name) = names.get_mut(index) {
+            name.clone_from(alias);
+        } else {
+            names.push(alias.clone());
+        }
+    }
+    // Inspect literal outputs without removing the view source: its authorization, row count and dependency observations still execute normally.
+    Ok(Some(SourcePlan::Subquery {
+        body: Box::new(body),
+        alias: None,
+        column_aliases: names,
+    }))
 }
 
 fn single_constant_row<'a>(

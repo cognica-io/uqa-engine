@@ -1,0 +1,337 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT oid,proname,prorettype,proargtypes::text,proisstrict,provolatile,proparallel,proleakproof,prosrc FROM pg_proc WHERE oid='get_byte(bytea,integer)'::regprocedure",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prorettype",
+            "proargtypes",
+            "proisstrict",
+            "provolatile",
+            "proparallel",
+            "proleakproof",
+            "prosrc"
+          ],
+          "type_oids": [
+            26,
+            19,
+            26,
+            25,
+            16,
+            18,
+            18,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "721",
+              "get_byte",
+              "23",
+              "17 23",
+              "t",
+              "i",
+              "s",
+              "f",
+              "byteaGetByte"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "catalog"
+    },
+    {
+      "sql": "SELECT get_byte('\\x0080ff'::bytea,0),get_byte('\\x0080ff'::bytea,1),get_byte('\\x0080ff'::bytea,2),pg_typeof(get_byte('\\x0080ff'::bytea,0))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "get_byte",
+            "get_byte",
+            "get_byte",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            2206
+          ],
+          "rows": [
+            [
+              "0",
+              "128",
+              "255",
+              "integer"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytes"
+    },
+    {
+      "sql": "SELECT pg_catalog.get_byte('abc'::bytea,1::smallint)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "get_byte"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "98"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "qualified"
+    },
+    {
+      "sql": "SELECT get_byte('abc'::bytea,-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2202E",
+        "message": "index -1 out of valid range, 0..2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "negative"
+    },
+    {
+      "sql": "SELECT get_byte('abc'::bytea,3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2202E",
+        "message": "index 3 out of valid range, 0..2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "upper"
+    },
+    {
+      "sql": "SELECT get_byte(''::bytea,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2202E",
+        "message": "index 0 out of valid range, 0..-1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "empty"
+    },
+    {
+      "sql": "SELECT get_byte(''::bytea,-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2202E",
+        "message": "index -1 out of valid range, 0..-1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "empty_negative"
+    },
+    {
+      "sql": "SELECT get_byte(NULL::bytea,-1),get_byte('abc'::bytea,NULL::integer),get_byte(NULL::bytea,NULL::integer)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "get_byte",
+            "get_byte",
+            "get_byte"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nulls"
+    },
+    {
+      "sql": "SELECT get_byte('abc'::bytea,1::bigint)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function get_byte(bytea, bigint) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "bigint"
+    },
+    {
+      "sql": "SELECT get_byte('abc'::bytea,1.0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function get_byte(bytea, numeric) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "decimal"
+    },
+    {
+      "sql": "SELECT get_byte('abc'::text,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function get_byte(text, integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "text"
+    },
+    {
+      "sql": "SELECT get_byte('abc'::bytea)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function get_byte(bytea) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "arity"
+    },
+    {
+      "sql": "PREPARE get_byte_parameter(bytea,integer) AS SELECT get_byte($1,$2) AS n",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE get_byte_parameter('\\x0080ff'::bytea,2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "255"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "execute"
+    },
+    {
+      "sql": "EXECUTE get_byte_parameter('\\x0080ff'::bytea,3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2202E",
+        "message": "index 3 out of valid range, 0..2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "execute_error"
+    },
+    {
+      "sql": "DEALLOCATE get_byte_parameter",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup"
+    }
+  ]
+}

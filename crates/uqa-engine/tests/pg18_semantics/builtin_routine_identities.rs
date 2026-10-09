@@ -59,3 +59,31 @@ fn builtin_routine_identities_match_postgresql_and_survive_reopen(#[case] provid
     reference["cases"] = serde_json::json!([default_after_reopen]);
     crate::pg18_oracle::verify(&engine, &reference.to_string());
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn binary_byte_inspection_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("byte-inspection.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/binary_byte_inspection_oracle.expected.json"),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn binary_string_consumers_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("binary-consumers.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/binary_string_consumers_oracle.expected.json"),
+    );
+}

@@ -190,6 +190,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         nonnull,
         |_| panic!("denied function ran"),
         Some(&DeniedBuiltin),
+        None,
     )
     .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
@@ -207,6 +208,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         null,
         |_| panic!("strict NULL function ran"),
         Some(&DeniedBuiltin),
+        None,
     )
     .unwrap();
     assert_eq!(literal_value(&output), Some(&Value::Null));
@@ -258,6 +260,7 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         expression,
         |_| panic!("strict NULL evaluated a sibling"),
         Some(&DeniedBuiltin),
+        None,
     )
     .unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Null));
@@ -397,7 +400,8 @@ fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
             ty: ty.into(),
         };
         let result =
-            fold_authorized_literal(expression, |_| panic!("a NULL cast evaluated"), None).unwrap();
+            fold_authorized_literal(expression, |_| panic!("a NULL cast evaluated"), None, None)
+                .unwrap();
         assert_eq!(literal_value(&result), Some(&Value::Null));
         assert_eq!(
             uqa_sql::scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
@@ -516,6 +520,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         fold_literal_expression(literal.clone(), |_| panic!("whole record")).unwrap(),
         literal
     );
+    assert_malformed_constant_field_copy(&call);
     if let ScalarExpr::Func {
         binding: Some(binding),
         args,
@@ -529,4 +534,72 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         fold_literal_expression(call.clone(), |_| panic!("base must still execute")).unwrap(),
         call
     );
+}
+
+fn assert_malformed_constant_field_copy(call: &ScalarExpr) {
+    let mut physical = call.clone();
+    if let ScalarExpr::Func { args, .. } = &mut physical {
+        if let ScalarExpr::Cast { expr, .. } = &mut args[0] {
+            if let ScalarExpr::TypedLiteral { value, .. } = expr.as_mut() {
+                *value = Value::Record(vec![(
+                    "b".into(),
+                    Value::Datum(uqa_core::DatumValue::new(
+                        25,
+                        0,
+                        vec![2, 0, 0, 0, 3, 0, 0, 0],
+                    )),
+                )]);
+            }
+        }
+    }
+    let error = fold_literal_expression(physical, |_| panic!("field copy precedes evaluation"))
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX001"));
+    assert_eq!(error.to_string(), "compressed pglz data is corrupt");
+}
+
+#[test]
+fn strict_null_folding_keeps_the_selected_fixed_return_type() {
+    let mut call = bound_call(
+        "get_byte",
+        vec![
+            ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                ty: "catalog_bytea_domain".into(),
+                bound_type: None,
+                parameter_index: None,
+                composite_source: None,
+            },
+            ScalarExpr::Literal(Value::Null),
+        ],
+    );
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut call
+    {
+        *binding = uqa_sql::resolve_fixed_builtin_call(
+            "get_byte",
+            None,
+            &[None, None],
+            &[Some(ColumnType::Bytea), Some(ColumnType::Integer)],
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .selected
+        .binding;
+    }
+    let folded =
+        fold_literal_expression(call, |_| panic!("strict NULL does not invoke the function"))
+            .unwrap();
+    assert!(matches!(
+        folded,
+        ScalarExpr::TypedLiteral {
+            value: Value::Null,
+            bound_type: Some(ColumnType::Integer),
+            ..
+        }
+    ));
 }

@@ -8,6 +8,134 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn constant_field_copy_observes_compression_before_scalar_consumers() {
+    let malformed = Value::Datum(DatumValue::new(17, 0, vec![2, 0, 0, 0, 3, 0, 0, 0]));
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(0);
+    let control = ProductionControl::new(&memory, &token, &token);
+    assert_eq!(binary_length(&malformed, &control).unwrap(), Some(3));
+    for ty in [crate::ColumnType::Bytea, crate::ColumnType::Text] {
+        let error = copy_constant_field(&malformed, &ty).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX001"));
+        assert_eq!(error.to_string(), "compressed pglz data is corrupt");
+    }
+    let jsonb = Value::Datum(DatumValue::new(3802, 0, vec![11, 42, 0, 0, 0]));
+    let Value::Datum(copied) = copy_constant_field(&jsonb, &crate::ColumnType::JsonB).unwrap()
+    else {
+        panic!("constant copy must preserve physical scalar contents")
+    };
+    assert_eq!(copied.bytes(), &[32, 0, 0, 0, 42, 0, 0, 0]);
+    assert_eq!(copied.offset(), 0);
+    assert_eq!(
+        read(&copied).unwrap_err().to_string(),
+        "unknown type of jsonb container"
+    );
+    for (start, length, expected) in [(-2, 1, None), (1, -1, Some("22011"))] {
+        let result = crate::expr::scalar_dispatch::eval_generated_scalar_function(
+            "substr",
+            &[malformed.clone(), Value::Int(start), Value::Int(length)],
+            &control,
+        );
+        match expected {
+            Some(sqlstate) => assert_eq!(result.unwrap_err().sqlstate(), Some(sqlstate)),
+            None => assert_eq!(*result.unwrap(), Value::Bytes(Vec::new())),
+        }
+    }
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn binary_consumers_borrow_physical_payload_and_retain_only_their_output() {
+    use crate::expr::scalar_dispatch::eval_generated_scalar_function as eval;
+    let value = Value::Datum(DatumValue::new(17, 0, vec![11, 0x41, 0xc3, 0xa9, 0x7a]));
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(4096);
+    let control = ProductionControl::new(&memory, &token, &token);
+    for (name, args, expected) in [
+        (
+            "substr",
+            vec![value.clone(), Value::Int(2), Value::Int(2)],
+            Value::Bytes(vec![0xc3, 0xa9]),
+        ),
+        (
+            "substr",
+            vec![value.clone(), Value::Int(0), Value::Int(2)],
+            Value::Bytes(vec![0x41]),
+        ),
+        (
+            "substr",
+            vec![value.clone(), Value::Int(8)],
+            Value::Bytes(vec![]),
+        ),
+        (
+            "reverse",
+            vec![value.clone()],
+            Value::Bytes(vec![0x7a, 0xa9, 0xc3, 0x41]),
+        ),
+        (
+            "encode",
+            vec![value.clone(), Value::Str("hex".into())],
+            Value::Str("41c3a97a".into()),
+        ),
+        (
+            "md5",
+            vec![value.clone()],
+            Value::Str("71ea09eff300c4da2ef1c65cfca7525a".into()),
+        ),
+        (
+            "concat_op",
+            vec![value.clone(), Value::Bytes(vec![0])],
+            Value::Bytes(vec![0x41, 0xc3, 0xa9, 0x7a, 0]),
+        ),
+        (
+            "strpos",
+            vec![value.clone(), Value::Bytes(vec![0xc3, 0xa9])],
+            Value::Int(2),
+        ),
+        (
+            "strpos",
+            vec![value.clone(), Value::Bytes(vec![])],
+            Value::Int(1),
+        ),
+    ] {
+        let output = eval(name, &args, &control).unwrap();
+        assert_eq!(*output, expected, "{name}");
+        assert_eq!(memory.used(), output.reserved_bytes(), "{name}");
+        drop(output);
+        assert_eq!(memory.used(), 0);
+    }
+    let zero = MemoryBudget::new(0);
+    let control = ProductionControl::new(&zero, &token, &token);
+    for (name, args, expected) in [
+        ("length", vec![value.clone()], 4),
+        ("octet_length", vec![value.clone()], 4),
+        ("bit_length", vec![value.clone()], 32),
+        ("crc32", vec![value.clone()], 1_578_129_375),
+        ("crc32c", vec![value.clone()], 2_288_826_224),
+        ("get_byte", vec![value.clone(), Value::Int(1)], 195),
+    ] {
+        assert_eq!(
+            *eval(name, &args, &control).unwrap(),
+            Value::Int(expected),
+            "{name}"
+        );
+        assert_eq!(zero.used(), 0);
+    }
+    assert!(eval("reverse", std::slice::from_ref(&value), &control).is_err());
+    assert_eq!(zero.used(), 0);
+    let invalid = Value::Datum(DatumValue::new(17, 0, Vec::new()));
+    assert_eq!(
+        *eval("substr", &[invalid, Value::Null], &control).unwrap(),
+        Value::Null
+    );
+    token.cancel();
+    assert_eq!(
+        eval("length", &[value], &control).unwrap_err().sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
 fn retained_array_header_controls_elements_bounds_and_resource_ownership() {
     // Captured by interpreting PostgreSQL's retained integer[][] field as bytea; the payload includes its null bitmap and non-default bounds.
     let hex = "0200000028000000170000000200000002000000ffffffff020000000d00000000000000010000000300000004000000";

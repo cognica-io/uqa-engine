@@ -10,6 +10,7 @@ use super::conversion::{float1_with_control, to_f64_with_control, to_i64_with_co
 use super::{float_to_i64_trunc, out_of_range, DecimalValue, Result, SQLError, Value};
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod binary;
 mod format;
 mod text;
 
@@ -63,6 +64,7 @@ pub(super) fn eval_math_functions_with_control(
         "lgamma",
         "crc32",
         "crc32c",
+        "get_byte",
         "sign",
         "trunc",
         "pi",
@@ -84,6 +86,9 @@ pub(super) fn eval_math_functions_with_control(
     }
     Some((|| -> Result<Produced<Value>> {
         control.check()?;
+        if name == "get_byte" {
+            return binary::get_byte(args, control);
+        }
         if matches!(
             name,
             "lpad"
@@ -153,8 +158,9 @@ pub(super) fn eval_math_functions_with_control(
                     if args.len() != 1 {
                         return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
                     }
-                    match &args[0] {
-                        Value::Bytes(bytes) => {
+                    match crate::expr::datums::binary_payload(&args[0], control)? {
+                        Some(payload) => {
+                            let bytes = payload.bytes();
                             let checksum = if name == "crc32" {
                                 let mut hasher = crc32fast::Hasher::new();
                                 for chunk in bytes.chunks(4096) {
@@ -167,9 +173,10 @@ pub(super) fn eval_math_functions_with_control(
                             };
                             Ok(Value::Int(i64::from(checksum)))
                         }
-                        Value::Null => Ok(Value::Null),
-                        other => Err(SQLError::TypeMismatch(format!(
-                            "{name}: expected bytea, got {other:?}"
+                        None if matches!(args[0], Value::Null) => Ok(Value::Null),
+                        None => Err(SQLError::TypeMismatch(format!(
+                            "{name}: expected bytea, got {:?}",
+                            args[0]
                         ))),
                     }
                 }

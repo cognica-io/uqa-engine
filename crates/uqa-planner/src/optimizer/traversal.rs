@@ -112,7 +112,11 @@ pub(super) fn optimize_query_block(
             .routine_inlining
             .as_ref()
             .map(|context| context.types),
-    );
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.volatility),
+    )?;
     super::optimize_projections(&mut block.projections, config)?;
     if let Some(predicate) = &mut block.r#where {
         optimize_scalar_slot(predicate, config)?;

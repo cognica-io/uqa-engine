@@ -82,6 +82,7 @@ fn is_pg_catalog_function(local: &str) -> bool {
             | "character_length"
             | "crc32"
             | "crc32c"
+            | "get_byte"
             | "gamma"
             | "json_strip_nulls"
             | "jsonb_strip_nulls"

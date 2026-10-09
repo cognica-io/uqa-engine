@@ -159,13 +159,14 @@ pub(super) fn fold_literal_expression(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
 ) -> Result<ScalarExpr, SQLError> {
-    fold_authorized_literal(expression, evaluate, None)
+    fold_authorized_literal(expression, evaluate, None, None)
 }
 
 pub(super) fn fold_authorized_literal(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
     permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
 ) -> Result<ScalarExpr, SQLError> {
     if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
         if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
@@ -188,7 +189,7 @@ pub(super) fn fold_authorized_literal(
             }
         }
     }
-    if let Some(literal) = composite_constant_field(&expression) {
+    if let Some(literal) = composite_constant_field(&expression, types) {
         return literal;
     }
     let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
@@ -198,7 +199,22 @@ pub(super) fn fold_authorized_literal(
         return Ok(expression);
     }
     let schema = RowSchema::default();
-    let ty = scalar_type(&expression, &schema, &[])?;
+    let selected_type = match &expression {
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if strict_null => {
+            if let Some(error) = &binding.resolution_error {
+                return Err(error.sql_error());
+            }
+            uqa_sql::type_resolution::fixed_builtin_return_type(binding)
+        }
+        _ => None,
+    };
+    let ty = match selected_type {
+        Some(ty) => Some(ty),
+        None => scalar_type(&expression, &schema, &[])?,
+    };
     // Keep operator-selected casts before evaluation can replace the expression with a literal, including PostgreSQL unknown string inputs.
     let expression = uqa_sql::bind_type_introspection(expression, &schema, &[]);
     let value = if strict_null {
@@ -237,7 +253,10 @@ pub(super) fn fold_authorized_literal(
     })
 }
 
-fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr, SQLError>> {
+fn composite_constant_field(
+    expression: &ScalarExpr,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+) -> Option<Result<ScalarExpr, SQLError>> {
     let ScalarExpr::Func {
         binding: Some(binding),
         args,
@@ -249,12 +268,17 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr
     if binding.dispatch != Some(uqa_sql::ast::FunctionDispatch::FieldSelect) {
         return None;
     }
-    let field = binding.composite_field.as_ref()?;
     let [base, ScalarExpr::Literal(Value::Str(name))] = args.as_slice() else {
         return None;
     };
     let base = match base {
-        ScalarExpr::Cast { expr, ty, .. } if matches!(expr.as_ref(), ScalarExpr::TypedLiteral { ty: literal_type, .. } if ty == literal_type) => {
+        ScalarExpr::Cast { expr, ty, .. }
+            if matches!(expr.as_ref(), ScalarExpr::TypedLiteral { ty: literal_type, bound_type, .. }
+            if ty == literal_type || match (bound_type, types) {
+                (Some(ColumnType::Composite(reference)), Some(types)) => types.resolve_catalog_column_type_name(ty).is_ok_and(|target| matches!(target, ColumnType::Composite(target) if target.oid == reference.oid)),
+                _ => false,
+            }) =>
+        {
             expr
         }
         expression => expression,
@@ -268,8 +292,26 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr
     else {
         return None;
     };
-    if reference.oid != field.type_oid || composite_source.is_some() {
-        // The retained source will be deformed under the execution descriptor. Folding this field now would freeze its old byte position even when its own type is unchanged.
+    let resolved;
+    let field = if let Some(field) = binding.composite_field.as_deref() {
+        field
+    } else {
+        let descriptor =
+            match uqa_sql::expr::composites::descriptor(types?.composite_types(), reference.oid) {
+                Ok(descriptor) => descriptor,
+                Err(error) => return Some(Err(error)),
+            };
+        let (_, attribute) = descriptor.attribute(name)?;
+        resolved = uqa_sql::ast::CompositeFieldBinding {
+            type_oid: reference.oid,
+            number: attribute.number,
+            result_type: attribute.ty.clone(),
+            dropped: false,
+            changed_type: None,
+        };
+        &resolved
+    };
+    if reference.oid != field.type_oid {
         return None;
     }
     let value = match value {
@@ -281,11 +323,21 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<Result<ScalarExpr
                 if let Err(error) = uqa_sql::expr::composites::validate_field_result(field) {
                     return Some(Err(error));
                 }
-                fields.iter().find(|(key, _)| key == name)?.1.clone()
+                match uqa_sql::expr::datums::copy_constant_field(
+                    &fields.iter().find(|(key, _)| key == name)?.1,
+                    &field.result_type,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => return Some(Err(error)),
+                }
             }
         }
         _ => return None,
     };
+    if composite_source.is_some() {
+        // Copying a selected constant can fail during planning. Keep the immutable source afterward so later descriptor changes still recompute its byte position.
+        return None;
+    }
     Some(Ok(ScalarExpr::TypedLiteral {
         composite_source: None,
         value,

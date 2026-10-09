@@ -9,6 +9,7 @@ use crate::{
     error::{Result, SQLError},
     expr::{
         conversion::{to_i64_with_control, value_to_string_with_control},
+        datums::binary_payload,
         out_of_range,
         scalar_helpers::{casing, CompiledLikePattern},
     },
@@ -68,13 +69,15 @@ pub(super) fn evaluate(
 
 fn unary(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     if name == "reverse" {
-        if let [Value::Bytes(bytes)] = args {
-            let mut output = ProductionVec::new(*control);
-            for byte in bytes.iter().rev() {
-                output.push_copy(*byte)?;
+        if let [value] = args {
+            if let Some(payload) = binary_payload(value, control)? {
+                let mut output = ProductionVec::new(*control);
+                for byte in payload.bytes().iter().rev() {
+                    output.push_copy(*byte)?;
+                }
+                let (output, memory) = output.finish()?.into_parts();
+                return Ok(control.finish(Value::Bytes(output), memory)?);
             }
-            let (output, memory) = output.finish()?.into_parts();
-            return Ok(control.finish(Value::Bytes(output), memory)?);
         }
     }
     let Some(value) = args.first() else {
@@ -126,6 +129,11 @@ fn length(
             .into(),
         ));
     };
+    if bytes {
+        if let Some(length) = crate::expr::datums::binary_length(value, control)? {
+            return plain(Value::Int(length), control);
+        }
+    }
     let length = match value {
         Value::Null => return plain(Value::Null, control),
         Value::Str(text) => {
@@ -233,12 +241,14 @@ fn concat(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
         return Ok(value);
     }
     // `bytea || bytea` joins the bytes; analysis reads an `unknown` operand as `bytea`, while `bytea || text` is `anytextcat`, which concatenates the output texts.
-    if args.iter().all(|arg| matches!(arg, Value::Bytes(_))) {
+    if args.iter().all(|arg| {
+        matches!(arg, Value::Bytes(_))
+            || matches!(arg, Value::Datum(datum) if datum.type_oid() == 17)
+    }) {
         let mut output = ProductionVec::new(*control);
         for value in args {
-            let Value::Bytes(bytes) = value else {
-                unreachable!("every argument is bytea");
-            };
+            let payload = binary_payload(value, control)?.expect("every argument is bytea");
+            let bytes = payload.bytes();
             output.reserve(bytes.len())?;
             for byte in bytes {
                 output.push_copy(*byte)?;
@@ -283,9 +293,7 @@ fn substring(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
     if args.iter().any(|arg| matches!(arg, Value::Null)) {
         return plain(Value::Null, control);
     }
-    let source = value_to_string_with_control(&args[0], control)?;
     let start = to_i64_with_control(&args[1], control)?;
-    let count = character_count(&source, control)? as i64;
     let end = if let Some(length) = args.get(2) {
         let length = to_i64_with_control(length, control)?;
         if length < 0 {
@@ -300,8 +308,38 @@ fn substring(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
     } else {
         i64::MAX
     };
+    if end < 1 {
+        return if matches!(&args[0], Value::Bytes(_))
+            || matches!(&args[0], Value::Datum(datum) if datum.type_oid() == 17)
+        {
+            plain(Value::Bytes(Vec::new()), control)
+        } else {
+            string(control.copy_text("")?, control)
+        };
+    }
+    let binary = binary_payload(&args[0], control)?;
+    let source = if binary.is_none() {
+        Some(value_to_string_with_control(&args[0], control)?)
+    } else {
+        None
+    };
+    let count = match &binary {
+        Some(payload) => payload.bytes().len(),
+        None => character_count(source.as_ref().expect("text substring"), control)?,
+    } as i64;
     let first = start.max(1).min(count + 1);
     let last = end.clamp(1, count + 1);
+    if let Some(payload) = binary {
+        let mut output = ProductionVec::new(*control);
+        if last > first {
+            for byte in &payload.bytes()[(first - 1) as usize..(last - 1) as usize] {
+                output.push_copy(*byte)?;
+            }
+        }
+        let (output, memory) = output.finish()?.into_parts();
+        return Ok(control.finish(Value::Bytes(output), memory)?);
+    }
+    let source = source.expect("text substring");
     if last <= first {
         return string(control.copy_text("")?, control);
     }
@@ -370,6 +408,32 @@ fn search(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
             .into(),
         ));
     }
+    if args.iter().any(|value| matches!(value, Value::Null)) {
+        return plain(Value::Null, control);
+    }
+    if let (Some(source), Some(needle)) = (
+        binary_payload(&args[0], control)?,
+        binary_payload(&args[1], control)?,
+    ) {
+        let source = source.bytes();
+        let needle = needle.bytes();
+        if name == "starts_with" {
+            return plain(Value::Bool(source.starts_with(needle)), control);
+        }
+        let mut position = 0;
+        if needle.is_empty() {
+            position = 1;
+        } else {
+            for (index, window) in source.windows(needle.len()).enumerate() {
+                control.check()?;
+                if window == needle {
+                    position = index as i64 + 1;
+                    break;
+                }
+            }
+        }
+        return plain(Value::Int(position), control);
+    }
     let source = value_to_string_with_control(&args[0], control)?;
     let needle = value_to_string_with_control(&args[1], control)?;
     control.check()?;
@@ -377,7 +441,7 @@ fn search(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
         return plain(Value::Bool(source.starts_with(needle.as_str())), control);
     }
     let position = if needle.is_empty() {
-        0
+        1
     } else if let Some(index) = source.find(needle.as_str()) {
         character_count(&source[..index], control)? as i64 + 1
     } else {

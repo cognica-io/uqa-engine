@@ -1,0 +1,160 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "plain",
+      "sql": "SELECT substr('\\x0080ff6162'::bytea,2,2),substring('\\x0080ff6162'::bytea FROM 2 FOR 2),substr('\\x0080ff6162'::bytea,4),pg_typeof(substr('\\x0080ff'::bytea,1,1))"
+    },
+    {
+      "id": "bounds",
+      "sql": "SELECT substr('abc'::bytea,0,2),substr('abc'::bytea,-1,3),substr('abc'::bytea,9,2),substr('abc'::bytea,2,0),substr('abc'::bytea,-2147483648,2147483647),substr('abc'::bytea,2147483647,2147483647)"
+    },
+    {
+      "id": "negative",
+      "sql": "SELECT substr('abc'::bytea,1,-1)"
+    },
+    {
+      "id": "nulls",
+      "sql": "SELECT substr(NULL::bytea,1,-1),substr('abc'::bytea,NULL::integer,1),substr('abc'::bytea,1,NULL::integer)"
+    },
+    {
+      "id": "position_bounds",
+      "sql": "SELECT position('z'::bytea in 'Aéz'::bytea),position(''::bytea in 'abc'::bytea),position(''::bytea in ''::bytea),strpos('abc',''),strpos('','')"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE binary_consumer AS(a text,b integer); CREATE VIEW binary_retained AS SELECT '(Aéz,7)'::binary_consumer AS v"
+    },
+    {
+      "id": "alter",
+      "sql": "BEGIN; ALTER TYPE binary_consumer ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "slice",
+      "sql": "SELECT substr((v).a,2,2) FROM binary_retained"
+    },
+    {
+      "id": "encode",
+      "sql": "SELECT encode((v).a,'hex') FROM binary_retained"
+    },
+    {
+      "id": "reverse",
+      "sql": "SELECT reverse((v).a) FROM binary_retained"
+    },
+    {
+      "id": "length",
+      "sql": "SELECT length((v).a),octet_length((v).a),bit_length((v).a) FROM binary_retained"
+    },
+    {
+      "id": "hash",
+      "sql": "SELECT md5((v).a) FROM binary_retained"
+    },
+    {
+      "id": "crc",
+      "sql": "SELECT crc32((v).a),crc32c((v).a) FROM binary_retained"
+    },
+    {
+      "id": "concat",
+      "sql": "SELECT (v).a || 'tail'::bytea FROM binary_retained"
+    },
+    {
+      "id": "position",
+      "sql": "SELECT position('é'::bytea in (v).a) FROM binary_retained"
+    },
+    {
+      "id": "null",
+      "sql": "SELECT substr((v).a,NULL::integer),encode((v).a,NULL::text) FROM binary_retained"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK; SELECT * FROM binary_retained"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW binary_retained; DROP TYPE binary_consumer"
+    },
+    {
+      "id": "malformed_setup",
+      "sql": "CREATE TYPE binary_header AS(a integer,b integer); CREATE VIEW binary_header_v AS SELECT '(2,3)'::binary_header AS v"
+    },
+    {
+      "id": "malformed_alter",
+      "sql": "ALTER TYPE binary_header ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "header_length",
+      "sql": "SELECT length((v).a),octet_length((v).a),bit_length((v).a) FROM binary_header_v"
+    },
+    {
+      "id": "header_negative",
+      "sql": "SELECT substr((v).a,1,-1) FROM binary_header_v"
+    },
+    {
+      "id": "header_empty",
+      "sql": "SELECT substr((v).a,-2,1) FROM binary_header_v"
+    },
+    {
+      "id": "header_past_end",
+      "sql": "SELECT substr((v).a,9,2) FROM binary_header_v"
+    },
+    {
+      "id": "header_consumed",
+      "sql": "SELECT get_byte((v).a,0) FROM binary_header_v"
+    },
+    {
+      "id": "header_null",
+      "sql": "SELECT get_byte((v).a,NULL::integer),substr((v).a,NULL::integer) FROM binary_header_v"
+    },
+    {
+      "id": "runtime_header_length",
+      "sql": "SELECT length((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a),octet_length((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a),bit_length((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a) FROM binary_header_v"
+    },
+    {
+      "id": "runtime_header_negative",
+      "sql": "SELECT substr((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a,1,-1) FROM binary_header_v"
+    },
+    {
+      "id": "runtime_header_empty",
+      "sql": "SELECT substr((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a,-2,1) FROM binary_header_v"
+    },
+    {
+      "id": "runtime_header_null",
+      "sql": "SELECT get_byte((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a,NULL::integer) FROM binary_header_v"
+    },
+    {
+      "id": "header_cleanup",
+      "sql": "DROP VIEW binary_header_v; DROP TYPE binary_header"
+    },
+    {
+      "id": "view_security_setup",
+      "sql": "CREATE ROLE binary_view_reader; CREATE VIEW binary_view_columns(public_label,private_label) AS SELECT 'public'::text,'secret'::text; GRANT SELECT(public_label) ON binary_view_columns TO binary_view_reader"
+    },
+    {
+      "id": "view_security_role",
+      "sql": "SET ROLE binary_view_reader"
+    },
+    {
+      "id": "view_security_allowed",
+      "sql": "SELECT public_label FROM binary_view_columns"
+    },
+    {
+      "id": "view_security_denied",
+      "sql": "SELECT private_label FROM binary_view_columns"
+    },
+    {
+      "id": "view_security_constant",
+      "sql": "SELECT 1 FROM binary_view_columns"
+    },
+    {
+      "id": "view_security_reset",
+      "sql": "RESET ROLE"
+    },
+    {
+      "id": "view_security_cleanup",
+      "sql": "DROP VIEW binary_view_columns; DROP ROLE binary_view_reader"
+    }
+  ]
+}

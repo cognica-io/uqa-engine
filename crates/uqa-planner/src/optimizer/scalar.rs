@@ -239,6 +239,10 @@ fn optimize_scalar(
         optimized,
         config.constant_evaluator,
         config.builtin_permissions.as_deref(),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.types),
     )?;
     Ok(if integer_syntax {
         optimized

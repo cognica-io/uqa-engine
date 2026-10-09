@@ -36,6 +36,28 @@ pub fn read(datum: &DatumValue) -> Result<Value, SQLError> {
         .map(|value| value.into_uncontrolled().expect("ordinary datum read"))
 }
 
+/// Copy a selected constant field at planning time, detoasting variable-width storage without interpreting its scalar contents. Whole records remain deferred.
+pub fn copy_constant_field(value: &Value, ty: &crate::ColumnType) -> Result<Value, SQLError> {
+    let Value::Datum(datum) = value else {
+        return Ok(value.clone());
+    };
+    if crate::catalog::type_metadata::pg_type_len(ty) != -1 {
+        return Ok(value.clone());
+    }
+    let control = ProductionControl::uncontrolled();
+    let payload = payload(datum, &control)?;
+    let size = payload
+        .bytes()
+        .len()
+        .checked_add(4)
+        .and_then(|size| u32::try_from(size).ok())
+        .and_then(|size| size.checked_mul(4))
+        .ok_or_else(|| corrupt("invalid datum length"))?;
+    let mut bytes = size.to_le_bytes().to_vec();
+    bytes.extend_from_slice(payload.bytes());
+    Ok(Value::Datum(DatumValue::new(datum.type_oid(), 0, bytes)))
+}
+
 pub fn read_with_control(
     datum: &DatumValue,
     control: &ProductionControl<'_>,
@@ -130,13 +152,63 @@ fn read_payload(
     }
 }
 
-enum Payload<'a> {
+/// Borrow ordinary and inline physical bytea payloads; compressed input retains its admitted decompression buffer through consumption.
+pub(super) fn binary_payload<'a>(
+    value: &'a Value,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Payload<'a>>, SQLError> {
+    control.check()?;
+    match value {
+        Value::Bytes(bytes) => Ok(Some(Payload::Borrowed(bytes))),
+        Value::Datum(datum) if datum.type_oid() == 17 => payload(datum, control).map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// Binary length observes the raw-size header and does not decompress the payload.
+pub(super) fn binary_length(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Option<i64>, SQLError> {
+    control.check()?;
+    let datum = match value {
+        Value::Bytes(bytes) => return Ok(Some(bytes.len() as i64)),
+        Value::Datum(datum) if datum.type_oid() == 17 => datum,
+        _ => return Ok(None),
+    };
+    let bytes = datum
+        .bytes()
+        .get(datum.offset() as usize..)
+        .ok_or_else(|| corrupt("invalid datum length"))?;
+    let first = *bytes
+        .first()
+        .ok_or_else(|| corrupt("invalid datum length"))?;
+    let size = if first == 1 && bytes.get(1) == Some(&18) {
+        i64::from(
+            word(bytes.get(2..).unwrap_or_default())
+                .ok_or_else(|| corrupt("invalid datum length"))?,
+        ) - 4
+    } else if first & 1 != 0 {
+        i64::from(first >> 1) - 1
+    } else if first & 3 == 2 {
+        i64::from(
+            word(bytes.get(4..).unwrap_or_default())
+                .ok_or_else(|| corrupt("invalid datum length"))?
+                & 0x3fff_ffff,
+        )
+    } else {
+        i64::from(word(bytes).ok_or_else(|| corrupt("invalid datum length"))? >> 2) - 4
+    };
+    Ok(Some(size))
+}
+
+pub(super) enum Payload<'a> {
     Borrowed(&'a [u8]),
     Owned(Produced<Vec<u8>>),
 }
 
 impl Payload<'_> {
-    fn bytes(&self) -> &[u8] {
+    pub(super) fn bytes(&self) -> &[u8] {
         match self {
             Self::Borrowed(bytes) => bytes,
             Self::Owned(bytes) => bytes,

@@ -1,0 +1,876 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT substr('\\x0080ff6162'::bytea,2,2),substring('\\x0080ff6162'::bytea FROM 2 FOR 2),substr('\\x0080ff6162'::bytea,4),pg_typeof(substr('\\x0080ff'::bytea,1,1))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substr",
+            "substring",
+            "substr",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            17,
+            17,
+            17,
+            2206
+          ],
+          "rows": [
+            [
+              "\\x80ff",
+              "\\x80ff",
+              "\\x6162",
+              "bytea"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "plain"
+    },
+    {
+      "sql": "SELECT substr('abc'::bytea,0,2),substr('abc'::bytea,-1,3),substr('abc'::bytea,9,2),substr('abc'::bytea,2,0),substr('abc'::bytea,-2147483648,2147483647),substr('abc'::bytea,2147483647,2147483647)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substr",
+            "substr",
+            "substr",
+            "substr",
+            "substr",
+            "substr"
+          ],
+          "type_oids": [
+            17,
+            17,
+            17,
+            17,
+            17,
+            17
+          ],
+          "rows": [
+            [
+              "\\x61",
+              "\\x61",
+              "\\x",
+              "\\x",
+              "\\x",
+              "\\x"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bounds"
+    },
+    {
+      "sql": "SELECT substr('abc'::bytea,1,-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22011",
+        "message": "negative substring length not allowed",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "negative"
+    },
+    {
+      "sql": "SELECT substr(NULL::bytea,1,-1),substr('abc'::bytea,NULL::integer,1),substr('abc'::bytea,1,NULL::integer)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substr",
+            "substr",
+            "substr"
+          ],
+          "type_oids": [
+            17,
+            17,
+            17
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nulls"
+    },
+    {
+      "sql": "SELECT position('z'::bytea in 'Aéz'::bytea),position(''::bytea in 'abc'::bytea),position(''::bytea in ''::bytea),strpos('abc',''),strpos('','')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "position",
+            "position",
+            "position",
+            "strpos",
+            "strpos"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "1",
+              "1",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_bounds"
+    },
+    {
+      "sql": "CREATE TYPE binary_consumer AS(a text,b integer); CREATE VIEW binary_retained AS SELECT '(Aéz,7)'::binary_consumer AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE binary_consumer ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "alter"
+    },
+    {
+      "sql": "SELECT substr((v).a,2,2) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substr"
+          ],
+          "type_oids": [
+            17
+          ],
+          "rows": [
+            [
+              "\\xc3a9"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "slice"
+    },
+    {
+      "sql": "SELECT encode((v).a,'hex') FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "encode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "41c3a97a"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "encode"
+    },
+    {
+      "sql": "SELECT reverse((v).a) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reverse"
+          ],
+          "type_oids": [
+            17
+          ],
+          "rows": [
+            [
+              "\\x7aa9c341"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reverse"
+    },
+    {
+      "sql": "SELECT length((v).a),octet_length((v).a),bit_length((v).a) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length",
+            "octet_length",
+            "bit_length"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "4",
+              "32"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "length"
+    },
+    {
+      "sql": "SELECT md5((v).a) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "md5"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "71ea09eff300c4da2ef1c65cfca7525a"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "hash"
+    },
+    {
+      "sql": "SELECT crc32((v).a),crc32c((v).a) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "crc32",
+            "crc32c"
+          ],
+          "type_oids": [
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1578129375",
+              "2288826224"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "crc"
+    },
+    {
+      "sql": "SELECT (v).a || 'tail'::bytea FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            17
+          ],
+          "rows": [
+            [
+              "\\x41c3a97a7461696c"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "concat"
+    },
+    {
+      "sql": "SELECT position('é'::bytea in (v).a) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "position"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position"
+    },
+    {
+      "sql": "SELECT substr((v).a,NULL::integer),encode((v).a,NULL::text) FROM binary_retained",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substr",
+            "encode"
+          ],
+          "type_oids": [
+            17,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM binary_retained",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19080
+          ],
+          "rows": [
+            [
+              "(Aéz,7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rollback"
+    },
+    {
+      "sql": "DROP VIEW binary_retained; DROP TYPE binary_consumer",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup"
+    },
+    {
+      "sql": "CREATE TYPE binary_header AS(a integer,b integer); CREATE VIEW binary_header_v AS SELECT '(2,3)'::binary_header AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "malformed_setup"
+    },
+    {
+      "sql": "ALTER TYPE binary_header ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "malformed_alter"
+    },
+    {
+      "sql": "SELECT length((v).a),octet_length((v).a),bit_length((v).a) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed pglz data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "header_length"
+    },
+    {
+      "sql": "SELECT substr((v).a,1,-1) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed pglz data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "header_negative"
+    },
+    {
+      "sql": "SELECT substr((v).a,-2,1) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed pglz data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "header_empty"
+    },
+    {
+      "sql": "SELECT substr((v).a,9,2) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed pglz data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "header_past_end"
+    },
+    {
+      "sql": "SELECT get_byte((v).a,0) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed pglz data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "header_consumed"
+    },
+    {
+      "sql": "SELECT get_byte((v).a,NULL::integer),substr((v).a,NULL::integer) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX001",
+        "message": "compressed pglz data is corrupt",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "header_null"
+    },
+    {
+      "sql": "SELECT length((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a),octet_length((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a),bit_length((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a) FROM binary_header_v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length",
+            "octet_length",
+            "bit_length"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "3",
+              "24"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "runtime_header_length"
+    },
+    {
+      "sql": "SELECT substr((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a,1,-1) FROM binary_header_v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22011",
+        "message": "negative substring length not allowed",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "runtime_header_negative"
+    },
+    {
+      "sql": "SELECT substr((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a,-2,1) FROM binary_header_v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "substr"
+          ],
+          "type_oids": [
+            17
+          ],
+          "rows": [
+            [
+              "\\x"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "runtime_header_empty"
+    },
+    {
+      "sql": "SELECT get_byte((CASE WHEN random()<2 THEN v ELSE NULL::binary_header END).a,NULL::integer) FROM binary_header_v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "get_byte"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "runtime_header_null"
+    },
+    {
+      "sql": "DROP VIEW binary_header_v; DROP TYPE binary_header",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "header_cleanup"
+    },
+    {
+      "sql": "CREATE ROLE binary_view_reader; CREATE VIEW binary_view_columns(public_label,private_label) AS SELECT 'public'::text,'secret'::text; GRANT SELECT(public_label) ON binary_view_columns TO binary_view_reader",
+      "command_tags": [
+        "CREATE ROLE",
+        "CREATE VIEW",
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "view_security_setup"
+    },
+    {
+      "sql": "SET ROLE binary_view_reader",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "view_security_role"
+    },
+    {
+      "sql": "SELECT public_label FROM binary_view_columns",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "public_label"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "public"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "view_security_allowed"
+    },
+    {
+      "sql": "SELECT private_label FROM binary_view_columns",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for view binary_view_columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "view_security_denied"
+    },
+    {
+      "sql": "SELECT 1 FROM binary_view_columns",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "view_security_constant"
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "view_security_reset"
+    },
+    {
+      "sql": "DROP VIEW binary_view_columns; DROP ROLE binary_view_reader",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "view_security_cleanup"
+    }
+  ]
+}
