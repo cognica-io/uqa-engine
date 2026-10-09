@@ -121,8 +121,8 @@ class ControlledHost:
         workload = ["/usr/bin/setarch", "--addr-no-randomize", *argv] if measurement else argv
         with resources, stdout.open("wb") as out, stderr.open("wb") as err:
             result = subprocess.run([*args, *workload], stdout=out, stderr=err, check=False)
-        if result.returncode:
-            raise QualificationError(f"{label} failed ({result.returncode}); see retained stderr")
+            if result.returncode:
+                raise QualificationError(f"{label} failed ({result.returncode}); see retained stderr")
         return stdout
 
     def build(self, revision: str, role: str, claims: bool) -> tuple[Path, dict]:
