@@ -74,7 +74,7 @@ pub(in crate::catalog::projection) fn relation_catalog_identities(
     }));
     out.extend(
         catalog_index_relations(catalog, resolution)?
-            .into_iter()
+            .iter()
             .map(|index| RelationCatalogIdentity::new(index.oid(), &index.relation, index.relkind)),
     );
     out.extend(definitions.composites.values().map(|definition| {

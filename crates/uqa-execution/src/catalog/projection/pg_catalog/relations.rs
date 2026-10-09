@@ -89,7 +89,7 @@ pub fn table_relation_oid_from(
 /// The relation that holds `oid`, as `regclassout` finds it: a table, view, sequence, foreign table, index or system relation of the catalog.
 pub fn relation_identity_for_oid(
     catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
+    _resolution: &RelationNameResolution,
     oid: i64,
 ) -> Result<Option<RelationIdentity>, SQLError> {
     if let Some(relation) =
@@ -138,10 +138,7 @@ pub fn relation_identity_for_oid(
     {
         return Ok(Some(identity.clone()));
     }
-    Ok(super::catalog_index_relations(catalog, resolution)?
-        .into_iter()
-        .find(|index| index.oid() == oid)
-        .map(|index| index.relation))
+    Ok(super::catalog_index_by_oid(catalog, oid)?.map(|index| index.relation.clone()))
 }
 
 pub fn table_rowtype_oid_from(

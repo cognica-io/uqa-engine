@@ -7,8 +7,7 @@
 //! Relation OID resolution for SQL names and already-bound dependency identities.
 
 use super::{
-    catalog_index_relations, parse_dash_or_oid, qualified_name, qualified_name_list, relation_name,
-    CatalogContext, SQLError,
+    parse_dash_or_oid, qualified_name, qualified_name_list, relation_name, CatalogContext, SQLError,
 };
 
 /// `regclassin`: `-` and a string of digits are OIDs, and any other string is a relation name, possibly schema-qualified, that the search path resolves. A name `SplitIdentifierString` rejects is `42602`, and a relation the lookup does not find, whether its schema or the relation is missing, is `42P01` naming the parsed components as `NameListToString` joins them.
@@ -102,9 +101,7 @@ pub(crate) fn resolved_relation_oid(
     if kind == "index" {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(canonical).map_err(SQLError::Internal)?;
-        let index = catalog_index_relations(catalog, resolution)?
-            .into_iter()
-            .find(|index| index.relation == relation)
+        let index = super::super::pg_catalog::catalog_index_by_name(catalog, &relation)?
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "resolved index `{canonical}` has no catalog relation"

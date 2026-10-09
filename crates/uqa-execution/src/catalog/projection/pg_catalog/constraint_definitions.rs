@@ -152,7 +152,7 @@ fn key_constraint_definition(
     }
     write!(definition, "({})", keys.join(", ")).expect("writing to a String cannot fail");
     let indexes = super::catalog_index_relations(catalog, resolution)?;
-    let index_oid = constraint_index_oid(constraint, &indexes);
+    let index_oid = constraint_index_oid(constraint, indexes);
     if let Some(index) = indexes.iter().find(|index| index.oid() == index_oid) {
         let included = &index.definition.included_columns;
         if !included.is_empty() {

@@ -83,17 +83,22 @@ fn collect_relation_claims(
         );
     }
     let indexes = if legacy {
-        super::super::pg_catalog::legacy_index_relations(catalog, resolution)?
+        std::borrow::Cow::Owned(super::super::pg_catalog::legacy_index_relations(
+            catalog, resolution,
+        )?)
     } else {
-        super::super::pg_catalog::catalog_index_relations(catalog, resolution)?
+        std::borrow::Cow::Borrowed(super::super::pg_catalog::catalog_index_relations(
+            catalog, resolution,
+        )?)
     };
-    for index in indexes {
+    for index in indexes.iter() {
         let oid = index.oid();
         claims.push(RelationClaim {
-            relation: index.relation,
+            relation: index.relation.clone(),
             object_id: index
                 .definition
                 .catalog
+                .as_ref()
                 .map(|identity| identity.identity.object_id),
             oid,
         });

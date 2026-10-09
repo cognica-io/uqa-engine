@@ -14,6 +14,9 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_storage::RelationIdentity;
 
+#[path = "sql_index_catalog_lifecycle/lookup.rs"]
+mod lookup;
+
 fn physical_relation_name(table: &str) -> String {
     RelationIdentity::from_legacy_name(table)
         .unwrap()

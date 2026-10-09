@@ -26,7 +26,7 @@ use uqa_sql::{ResultRow, SQLError};
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
-use super::pg_catalog::{build_pg_type_without_defaults, catalog_index_relations};
+use super::pg_catalog::build_pg_type_without_defaults;
 use super::pg_namespace::build_pg_namespace;
 use super::pg_proc::build_pg_proc_without_defaults;
 use super::relation_catalog::relation_catalog_identities;

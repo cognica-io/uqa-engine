@@ -12,6 +12,8 @@ mod constraint_definitions;
 mod constraints;
 pub(crate) mod foreign;
 mod indexes;
+pub(in crate::catalog) use indexes::IndexRelations;
+pub(crate) use indexes::{catalog_index_by_name, catalog_index_by_oid};
 mod languages;
 mod relations;
 mod roles;

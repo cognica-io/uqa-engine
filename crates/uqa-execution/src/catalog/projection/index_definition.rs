@@ -41,10 +41,7 @@ pub fn pg_get_indexdef_value(
     };
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
-    let Some(index) = super::pg_catalog::catalog_index_relations(&catalog, &resolution)?
-        .into_iter()
-        .find(|index| index.oid() == oid)
-    else {
+    let Some(index) = super::pg_catalog::catalog_index_by_oid(&catalog, oid)? else {
         return Ok(Value::Null);
     };
     if column != 0 {
@@ -91,7 +88,7 @@ pub fn pg_get_indexdef_value(
         Some(&crate::catalog::projection::CatalogOutput(*context)),
         &catalog,
         &resolution,
-        &index,
+        index,
         &target,
         pretty,
     )

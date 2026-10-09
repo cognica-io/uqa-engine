@@ -8,7 +8,7 @@
 use super::projection::RegtypeOutputCatalog;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use uqa_sql::SQLError;
 
 #[derive(Default)]
@@ -55,5 +55,37 @@ impl RegtypeOutputCache {
         let mut entry = self.entry.lock();
         self.revision.fetch_add(1, Ordering::AcqRel);
         entry.take();
+    }
+}
+
+/// A fallible immutable derivation whose successful value can be borrowed for the catalog's lifetime.
+pub(crate) struct CatalogDerivation<T> {
+    value: OnceLock<T>,
+    initialization: Mutex<()>,
+}
+
+impl<T> Default for CatalogDerivation<T> {
+    fn default() -> Self {
+        Self {
+            value: OnceLock::new(),
+            initialization: Mutex::new(()),
+        }
+    }
+}
+
+impl<T> CatalogDerivation<T> {
+    pub(crate) fn get_or_try_init(
+        &self,
+        build: impl FnOnce() -> Result<T, SQLError>,
+    ) -> Result<&T, SQLError> {
+        if let Some(value) = self.value.get() {
+            return Ok(value);
+        }
+        let _initialization = self.initialization.lock();
+        if let Some(value) = self.value.get() {
+            return Ok(value);
+        }
+        let value = build()?;
+        Ok(self.value.get_or_init(|| value))
     }
 }
