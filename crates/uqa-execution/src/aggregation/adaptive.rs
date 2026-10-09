@@ -572,7 +572,7 @@ fn aggregate_target_has_variable_state(
     input_schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
-    let AggregateAccumulatorTemplate::Builtin(plan) = template else {
+    let Some(plan) = template.state_plan() else {
         return Ok(true);
     };
     let ScalarExpr::Func {

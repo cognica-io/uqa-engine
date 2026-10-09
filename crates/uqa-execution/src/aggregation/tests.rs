@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::ArrayValue;
 
+mod enums;
 mod legacy_vectors;
 mod mode;
 
@@ -88,14 +89,14 @@ fn collection_aggregate_still_retains_inputs() {
 fn ordered_aggregate_buffers_reject_sequence_overflow_without_appending() {
     let mut builtin = AggregateValueBuffer::new(1024);
     builtin.next_sequence = u64::MAX;
-    let error = builtin.push(Value::Int(1), Vec::new()).unwrap_err();
+    let error = builtin.push(Value::Int(1), Vec::new(), None).unwrap_err();
     assert!(error.to_string().contains("sequence overflow"));
     assert!(builtin.rows.is_empty());
 
     let mut registered = RegisteredAggregateBuffer::new(1024);
     registered.next_sequence = u64::MAX;
     let error = registered
-        .push(vec![Value::Int(1)], Vec::new())
+        .push(vec![Value::Int(1)], Vec::new(), None)
         .unwrap_err();
     assert!(error.to_string().contains("sequence overflow"));
     assert!(registered.rows.is_empty());
@@ -124,6 +125,7 @@ fn tiny_budget_collection_aggregate_spills_and_merge_streams_exact_order() {
                 vec![super::ordering::AggregateSortKey::ascending(Value::Int(
                     value,
                 ))],
+                None,
             )
             .unwrap();
     }
@@ -147,6 +149,7 @@ fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
         .push(
             Value::Int(1),
             vec![super::ordering::AggregateSortKey::ascending(Value::Int(1))],
+            None,
         )
         .unwrap();
     let run = values.runs.first_mut().unwrap();
@@ -158,7 +161,7 @@ fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
     run.file.as_file_mut().write_all(b"\n").unwrap();
     run.file.as_file_mut().flush().unwrap();
 
-    let error = values.ordered_values().unwrap_err();
+    let error = values.ordered_values(None).unwrap_err();
     assert!(error.to_string().contains("exceeds recorded maximum"));
 }
 
@@ -172,11 +175,11 @@ fn distinct_inputs_sort_and_deduplicate_across_memory_and_spill() {
             Value::Float(1.0),
             Value::Decimal(DecimalValue::parse("1.00").unwrap()),
         ] {
-            tracker.insert(&value, Vec::new()).unwrap();
+            tracker.insert(&value, Vec::new(), None).unwrap();
         }
         let mut values = Vec::new();
         tracker
-            .for_each(|value| {
+            .for_each(None, |value| {
                 values.push(value.clone());
                 Ok(())
             })
@@ -190,7 +193,7 @@ fn distinct_inputs_sort_and_deduplicate_across_memory_and_spill() {
 fn distinct_inputs_reject_a_spill_record_larger_than_writer_metadata() {
     let mut tracker = DistinctTracker::new(1);
     tracker
-        .insert(&Value::Str("alpha".into()), Vec::new())
+        .insert(&Value::Str("alpha".into()), Vec::new(), None)
         .unwrap();
     let run = tracker.values.runs.first_mut().unwrap();
     let file = run.file.as_file_mut();
@@ -198,7 +201,7 @@ fn distinct_inputs_reject_a_spill_record_larger_than_writer_metadata() {
     file.write_all(&vec![b'x'; run.max_record_bytes]).unwrap();
     file.write_all(b"\n").unwrap();
     file.flush().unwrap();
-    let error = tracker.for_each(|_| Ok(())).unwrap_err();
+    let error = tracker.for_each(None, |_| Ok(())).unwrap_err();
     assert!(error.to_string().contains("exceeds recorded maximum"));
 }
 
@@ -275,7 +278,7 @@ fn numeric_statistical_partial_states_merge_exactly() {
     right.observe(&Value::Int(2)).unwrap();
     right.observe(&Value::Int(3)).unwrap();
 
-    super::partial_state::merge_accumulators(&mut left, right).unwrap();
+    super::partial_state::merge_accumulators(&mut left, right, None).unwrap();
     let Value::Decimal(variance) = aggregate_value("var_pop", &left, None).unwrap() else {
         panic!("integer var_pop must return numeric");
     };
@@ -301,7 +304,7 @@ fn numeric_statistical_states_center_values_before_squaring_and_merging() {
     left.observe(&Value::Decimal(huge)).unwrap();
     let mut right = AggregateAccumulator::builtin("var_pop");
     right.observe(&Value::Decimal(adjacent)).unwrap();
-    super::partial_state::merge_accumulators(&mut left, right).unwrap();
+    super::partial_state::merge_accumulators(&mut left, right, None).unwrap();
     let Value::Decimal(variance) = aggregate_value("var_pop", &left, None).unwrap() else {
         panic!("numeric var_pop must return numeric");
     };
@@ -341,7 +344,7 @@ fn exact_statistical_zero_and_special_results_match_postgresql() {
 
     let mut finite = AggregateAccumulator::builtin("var_pop");
     finite.observe(&Value::Decimal(huge)).unwrap();
-    super::partial_state::merge_accumulators(&mut special, finite).unwrap();
+    super::partial_state::merge_accumulators(&mut special, finite, None).unwrap();
     assert_eq!(
         aggregate_value("var_pop", &special, None).unwrap(),
         Value::Decimal(DecimalValue::parse("NaN").unwrap())
@@ -372,7 +375,7 @@ fn mixed_statistical_partial_states_merge_stable_moments() {
     let mut floating = AggregateAccumulator::builtin("var_pop");
     floating.observe(&Value::Float(2.0)).unwrap();
 
-    super::partial_state::merge_accumulators(&mut exact, floating).unwrap();
+    super::partial_state::merge_accumulators(&mut exact, floating, None).unwrap();
     assert_eq!(
         aggregate_value("var_pop", &exact, None).unwrap(),
         Value::Float(0.25)

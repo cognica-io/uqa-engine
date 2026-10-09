@@ -6,10 +6,7 @@
 
 //! Encoding and merging of compact, mergeable aggregate partial states.
 
-use super::{
-    value_gt, value_lt, AggregateAccumulator, DecimalValue, NumericInputKind, SQLError, ScalarExpr,
-    Value,
-};
+use super::{AggregateAccumulator, DecimalValue, NumericInputKind, SQLError, ScalarExpr, Value};
 use uqa_sql::expr::IntervalFields;
 
 pub(super) fn partial_schema(
@@ -190,6 +187,7 @@ fn next(values: &mut impl Iterator<Item = Value>) -> Result<Value, SQLError> {
 pub(super) fn merge_accumulators(
     target: &mut AggregateAccumulator,
     source: AggregateAccumulator,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> Result<(), SQLError> {
     let target_float_total = numeric_total_as_float(target)?;
     let source_float_total = numeric_total_as_float(&source)?;
@@ -238,8 +236,12 @@ pub(super) fn merge_accumulators(
         0.0
     };
     merge_statistics(target, &source)?;
-    merge_min(&mut target.min, source.min)?;
-    merge_max(&mut target.max, source.max)?;
+    if let Some(value) = source.min {
+        target.observe_min(&value, enums)?;
+    }
+    if let Some(value) = source.max {
+        target.observe_max(&value, enums)?;
+    }
     target.bool_and = match (target.bool_and, source.bool_and) {
         (Some(left), Some(right)) => Some(left && right),
         (Some(value), None) | (None, Some(value)) => Some(value),
@@ -405,32 +407,6 @@ fn decimal_component(accumulator: &AggregateAccumulator) -> Result<Option<Decima
     DecimalValue::from_i128(accumulator.integer_sum)
         .map(Some)
         .ok_or_else(|| SQLError::TypeMismatch("integer aggregate does not fit decimal".into()))
-}
-
-fn merge_min(target: &mut Option<Value>, source: Option<Value>) -> Result<(), SQLError> {
-    if let Some(source) = source {
-        let replace = match target.as_ref() {
-            Some(current) => value_lt(&source, current)?,
-            None => true,
-        };
-        if replace {
-            *target = Some(source);
-        }
-    }
-    Ok(())
-}
-
-fn merge_max(target: &mut Option<Value>, source: Option<Value>) -> Result<(), SQLError> {
-    if let Some(source) = source {
-        let replace = match target.as_ref() {
-            Some(current) => value_gt(&source, current)?,
-            None => true,
-        };
-        if replace {
-            *target = Some(source);
-        }
-    }
-    Ok(())
 }
 
 fn numeric_kind_code(kind: NumericInputKind) -> i64 {

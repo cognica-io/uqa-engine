@@ -73,6 +73,7 @@ impl AdaptiveAggregateSet {
         partials: SpillBuffer,
     ) -> Result<SpillBuffer, SQLError> {
         let group_count = self.statement.group_by.len();
+        let enums = uqa_sql::expr::EngineHook::enum_labels(context);
         let partial_schema =
             super::super::partial_state::partial_schema(self.partial_relation, group_count);
         let scan: Box<dyn PhysicalOperator + '_> =
@@ -100,13 +101,27 @@ impl AdaptiveAggregateSet {
                 .map_err(super::super::sort_fallback::exec_to_sql_error)?
             {
                 for row in batch.rows {
-                    let (key, accumulators) = super::super::partial_state::decode_partial_group(
-                        row,
-                        &self.aggregate_targets,
-                        self.accumulator_budget,
-                        group_count,
-                    )?;
-                    if current_key.as_ref().is_some_and(|current| current != &key) {
+                    let (key, mut accumulators) =
+                        super::super::partial_state::decode_partial_group(
+                            row,
+                            &self.aggregate_targets,
+                            self.accumulator_budget,
+                            group_count,
+                        )?;
+                    for (accumulator, template) in
+                        accumulators.iter_mut().zip(&self.accumulator_templates)
+                    {
+                        template.restore_comparison(accumulator);
+                    }
+                    if current_key
+                        .as_ref()
+                        .map(|current| {
+                            crate::relational::equal_sort_key_values(current, &key, enums)
+                        })
+                        .transpose()
+                        .map_err(super::super::sort_fallback::exec_to_sql_error)?
+                        .is_some_and(|equal| !equal)
+                    {
                         finish_merged_group(
                             context,
                             &self.statement,
@@ -124,7 +139,7 @@ impl AdaptiveAggregateSet {
                         current_accumulators = accumulators;
                     } else {
                         for (target, source) in current_accumulators.iter_mut().zip(accumulators) {
-                            super::super::partial_state::merge_accumulators(target, source)?;
+                            super::super::partial_state::merge_accumulators(target, source, enums)?;
                         }
                     }
                 }

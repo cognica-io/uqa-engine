@@ -106,12 +106,28 @@ pub fn aggregate_accumulator_templates(
     input_schema: &crate::RowSchema,
     params: &[uqa_sql::SQLParam],
 ) -> Result<Vec<AggregateAccumulatorTemplate>, SQLError> {
+    let has_enums = context
+        .enum_labels()
+        .is_some_and(uqa_sql::expr::enums::EnumLabelCatalog::has_enum_types);
     aggregate_targets
         .iter()
         .map(|expression| match expression {
-            ScalarExpr::Func { name, args, .. } => {
+            ScalarExpr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                ..
+            } => {
+                let key_count = if has_enums {
+                    order_by.len() + usize::from(*distinct)
+                } else {
+                    0
+                };
                 if let Some(function) = context.registered_aggregate_function(name) {
-                    return Ok(AggregateAccumulatorTemplate::registered(function));
+                    return Ok(
+                        AggregateAccumulatorTemplate::registered(function).with_ordering(key_count)
+                    );
                 }
                 let input_type = args
                     .first()
@@ -120,10 +136,10 @@ pub fn aggregate_accumulator_templates(
                     })
                     .transpose()?
                     .flatten();
-                Ok(AggregateAccumulatorTemplate::builtin(
-                    name,
-                    input_type.as_ref(),
-                ))
+                Ok(
+                    AggregateAccumulatorTemplate::builtin(name, input_type.as_ref())
+                        .with_ordering(key_count),
+                )
             }
             _ => Ok(AggregateAccumulatorTemplate::generic()),
         })
@@ -148,6 +164,9 @@ pub fn observe_aggregate(
     order_by: &[ScalarOrder],
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
+    let enums = ctx
+        .function_hook()
+        .and_then(uqa_sql::expr::EngineHook::enum_labels);
     if acc.registered.is_some() {
         let values = uqa_sql::expr::enums::render_host_arguments(
             ctx.function_hook()
@@ -161,9 +180,9 @@ pub fn observe_aggregate(
             sort_keys.push(super::ordering::AggregateSortKey::ordered(v, ob));
         }
         if distinct {
-            return acc.distinct.insert(&Value::List(values), sort_keys);
+            return acc.distinct.insert(&Value::List(values), sort_keys, enums);
         }
-        acc.observe_registered(values, sort_keys)?;
+        acc.observe_registered(values, sort_keys, enums)?;
         return Ok(());
     }
 
@@ -179,6 +198,9 @@ pub fn observe_builtin_aggregate_value(
     order_by: &[ScalarOrder],
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
+    let enums = ctx
+        .function_hook()
+        .and_then(uqa_sql::expr::EngineHook::enum_labels);
     let mut sort_keys: Vec<super::ordering::AggregateSortKey> = Vec::with_capacity(order_by.len());
     for ob in order_by {
         let v = eval_scalar(&ob.expr, ctx)?;
@@ -186,14 +208,14 @@ pub fn observe_builtin_aggregate_value(
     }
     if distinct {
         if acc.admits_null_input() || !matches!(value, Value::Null) {
-            acc.distinct.insert(value, sort_keys)?;
+            acc.distinct.insert(value, sort_keys, enums)?;
         }
         return Ok(());
     }
     if order_by.is_empty() {
-        acc.observe(value)
+        acc.observe_with_enum_catalog(value, enums)
     } else {
-        acc.observe_with_sort_keys(value, sort_keys)
+        acc.observe_with_sort_keys(value, sort_keys, enums)
     }
 }
 

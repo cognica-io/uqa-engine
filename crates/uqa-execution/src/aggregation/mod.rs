@@ -40,6 +40,7 @@ mod registered_buffer;
 mod rewrite;
 mod sort_fallback;
 mod string_agg;
+mod template;
 mod value_buffer;
 
 pub use accumulator::*;
@@ -50,6 +51,7 @@ pub use finalize::*;
 pub use ordering::compare_extrema;
 pub use registered_buffer::*;
 pub use rewrite::*;
+pub use template::AggregateAccumulatorTemplate;
 pub use value_buffer::*;
 
 #[cfg(test)]

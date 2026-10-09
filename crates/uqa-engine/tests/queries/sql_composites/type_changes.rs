@@ -450,6 +450,22 @@ fn retained_enum_window_consumers_match_postgresql(#[case] provider: usize) {
     );
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn retained_enum_aggregate_consumers_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = super::addition::open(provider, &directory.path().join("enum-aggregate.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/composite_enum_aggregate_oracle.expected.json"
+        ),
+    );
+}
+
 fn verify_enum_oracle(provider: usize, reference: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("enum-reads.db");

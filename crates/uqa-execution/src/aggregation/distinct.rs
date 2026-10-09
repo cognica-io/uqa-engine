@@ -8,6 +8,7 @@
 
 use super::{AggregateValueBuffer, SQLError, Value};
 use uqa_core::memory::ProductionControl;
+use uqa_sql::expr::enums::EnumLabelCatalog;
 
 /// Aggregate DISTINCT uses SQL ordering before eliminating adjacent equal inputs.
 /// Reusing sorted runs keeps both comparisons and spill behavior fallible.
@@ -36,26 +37,27 @@ impl DistinctTracker {
         &mut self,
         value: &Value,
         mut sort_keys: Vec<super::ordering::AggregateSortKey>,
+        enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         // Explicit ORDER BY keys come first; the complete argument tuple resolves their ties.
         sort_keys.push(super::ordering::AggregateSortKey::ascending(value.clone()));
-        self.values.push(value.clone(), sort_keys)
+        self.values.push(value.clone(), sort_keys, enums)
     }
 
     pub(super) fn for_each(
         &self,
+        enums: Option<&dyn EnumLabelCatalog>,
         mut observe: impl FnMut(&Value) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         let mut previous: Option<Value> = None;
-        self.values.for_each_ordered(|record| {
+        self.values.for_each_ordered(enums, |record| {
             if let Some(previous) = &previous {
-                if uqa_sql::expr::compare_typed_values_with_control(
+                if uqa_sql::expr::equal_typed_values_with_enum_catalog(
                     previous,
                     &record.value,
                     &ProductionControl::uncontrolled(),
-                )?
-                .is_eq()
-                {
+                    enums,
+                )? {
                     return Ok(());
                 }
             }

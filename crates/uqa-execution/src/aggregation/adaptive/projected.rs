@@ -64,6 +64,7 @@ impl AdaptiveAggregateSet {
                     &mut self.groups[0],
                     row,
                     params,
+                    enums,
                 )?;
                 return Ok(true);
             }
@@ -93,7 +94,7 @@ impl AdaptiveAggregateSet {
             row,
         );
         if let Some(compact_key) = compact_key {
-            if !self.observe_direct_compact_text(compact_key, row, params)? {
+            if !self.observe_direct_compact_text(compact_key, row, params, enums)? {
                 let null = Value::Null;
                 let key = super::super::projected::group_key(
                     self.projected_group_columns
@@ -105,7 +106,7 @@ impl AdaptiveAggregateSet {
                 if !self.insert_group(&key, compact_key)? {
                     return Ok(true);
                 }
-                if !self.observe_direct_compact_text(compact_key, row, params)? {
+                if !self.observe_direct_compact_text(compact_key, row, params, enums)? {
                     return Err(uninitialized_group());
                 }
             }
@@ -152,6 +153,7 @@ impl AdaptiveAggregateSet {
         key: u64,
         row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     ) -> Result<bool, SQLError> {
         let index = self.compact_text_group_index.as_ref().ok_or_else(|| {
             SQLError::Internal("compact text aggregate group index is unavailable".into())
@@ -169,6 +171,7 @@ impl AdaptiveAggregateSet {
             entry,
             row,
             params,
+            enums,
         )?;
         Ok(true)
     }
@@ -200,6 +203,7 @@ impl AdaptiveAggregateSet {
             entry,
             probe.row,
             params,
+            probe.enums,
         )?;
         Ok(true)
     }
@@ -225,6 +229,7 @@ impl AdaptiveAggregateSet {
             entry,
             row,
             params,
+            enums,
         )?;
         Ok(true)
     }
@@ -395,10 +400,11 @@ fn observe_direct_entry(
     entry: &mut super::GroupEntry,
     row: &ProjectedRow<'_, '_>,
     params: &[SQLParam],
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> Result<(), SQLError> {
     let state = &mut entry.state;
     let previous_bytes = state.retained_bytes;
-    plans.observe_direct(&mut state.accumulators, row, params)?;
+    plans.observe_direct(&mut state.accumulators, row, params, enums)?;
     update_entry_size(variable_state, retained_bytes, entry, previous_bytes)
 }
 

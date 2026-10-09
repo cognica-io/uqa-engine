@@ -7,9 +7,10 @@
 //! Streaming aggregate state and registered aggregate adapters.
 
 use super::{
-    value_as_f64, value_gt, value_lt, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
+    value_as_f64, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
     RegisteredAggregateBuffer, SQLAggregateFunction, SQLAggregateState, SQLError, Value,
 };
+use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
 use uqa_sql::expr::IntervalFields;
 
 pub struct AggregateAccumulator {
@@ -25,6 +26,8 @@ pub struct AggregateAccumulator {
     pub(super) numeric_inputs: NumericInputKind,
     pub(super) min: Option<Value>,
     pub(super) max: Option<Value>,
+    /// MIN/MAX's transition support function belongs to the call, across groups and frame restarts.
+    pub(super) enum_comparison: Option<Arc<EnumComparisonState>>,
     /// DISTINCT arguments are sorted with their SQL comparison operators before finalization.
     pub(super) distinct: DistinctTracker,
     /// Only collection, ordered-set, and statistical aggregates need
@@ -49,39 +52,6 @@ pub struct AggregateAccumulator {
     pub(super) statistics_origin: Option<DecimalValue>,
     pub(super) statistics_sum: Option<DecimalValue>,
     pub(super) statistics_sum_squares: Option<DecimalValue>,
-}
-
-#[derive(Clone)]
-pub enum AggregateAccumulatorTemplate {
-    Builtin(AggregateStatePlan),
-    Registered(Arc<dyn SQLAggregateFunction>),
-}
-
-impl AggregateAccumulatorTemplate {
-    pub(super) fn builtin(name: &str, input_type: Option<&uqa_sql::ast::ColumnType>) -> Self {
-        Self::Builtin(AggregateStatePlan::builtin_with_input_type(
-            name, input_type,
-        ))
-    }
-
-    pub(super) fn generic() -> Self {
-        Self::Builtin(AggregateStatePlan::Generic)
-    }
-
-    pub(super) fn registered(function: Arc<dyn SQLAggregateFunction>) -> Self {
-        Self::Registered(function)
-    }
-
-    pub(super) fn instantiate(&self, budget_bytes: usize) -> AggregateAccumulator {
-        match self {
-            Self::Builtin(state_plan) => {
-                AggregateAccumulator::from_plan_with_budget(*state_plan, budget_bytes)
-            }
-            Self::Registered(function) => {
-                AggregateAccumulator::registered_with_budget(Arc::clone(function), budget_bytes)
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -147,7 +117,10 @@ pub enum AggregateStatePlan {
 }
 
 impl AggregateStatePlan {
-    fn builtin_with_input_type(name: &str, input_type: Option<&uqa_sql::ast::ColumnType>) -> Self {
+    pub(super) fn builtin_with_input_type(
+        name: &str,
+        input_type: Option<&uqa_sql::ast::ColumnType>,
+    ) -> Self {
         use uqa_sql::ast::ColumnType;
         if let Some(ColumnType::Domain { base, .. }) = input_type {
             return Self::builtin_with_input_type(name, Some(base));
@@ -203,6 +176,7 @@ impl Default for AggregateAccumulator {
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
+            enum_comparison: None,
             distinct: DistinctTracker::default(),
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::default(),
@@ -237,6 +211,7 @@ impl AggregateAccumulator {
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
+            enum_comparison: None,
             distinct: DistinctTracker::new(component_budget),
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::new(component_budget),
@@ -268,6 +243,7 @@ impl AggregateAccumulator {
     ) -> Self {
         let mut accumulator = Self::builtin(name);
         accumulator.state_plan = AggregateStatePlan::builtin_with_input_type(name, input_type);
+        accumulator.enum_comparison = super::template::enum_extrema_state(name, input_type);
         accumulator
     }
 
@@ -296,23 +272,35 @@ impl AggregateAccumulator {
     }
 
     pub fn observe(&mut self, value: &Value) -> Result<(), SQLError> {
+        self.observe_with_enum_catalog(value, None)
+    }
+
+    pub fn observe_with_enum_catalog(
+        &mut self,
+        value: &Value,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
         if let AggregateStatePlan::BufferedArrays = self.state_plan {
             self.array_inputs.accept(value)?;
         }
         if matches!(value, Value::Null) {
-            return self.observe_null(Vec::new());
+            return self.observe_null(Vec::new(), enums);
         }
-        self.observe_state(value)?;
+        self.observe_state(value, enums)?;
         if self.state_plan.retains_values() {
-            self.values.push(value.clone(), Vec::new())?;
+            self.values.push(value.clone(), Vec::new(), enums)?;
         }
         Ok(())
     }
 
-    pub(super) fn observe_projected(&mut self, value: &Value) -> Result<(), SQLError> {
+    pub(super) fn observe_projected(
+        &mut self,
+        value: &Value,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
         match value {
             Value::Int(value) => self.observe_projected_integer(*value),
-            _ => self.observe(value),
+            _ => self.observe_with_enum_catalog(value, enums),
         }
     }
 
@@ -354,7 +342,11 @@ impl AggregateAccumulator {
         }
     }
 
-    pub(super) fn observe_state(&mut self, value: &Value) -> Result<(), SQLError> {
+    pub(super) fn observe_state(
+        &mut self,
+        value: &Value,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
         match self.state_plan {
             AggregateStatePlan::Generic => {
                 self.count = self
@@ -364,8 +356,8 @@ impl AggregateAccumulator {
                 if matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
                     self.observe_sum(value)?;
                 }
-                self.observe_min(value)?;
-                self.observe_max(value)?;
+                self.observe_min(value, enums)?;
+                self.observe_max(value, enums)?;
                 if matches!(value, Value::Bool(_)) {
                     self.observe_bool_and(value)?;
                     self.observe_bool_or(value)?;
@@ -384,8 +376,8 @@ impl AggregateAccumulator {
                     .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
                 self.observe_sum(value)?;
             }
-            AggregateStatePlan::Min => self.observe_min(value)?,
-            AggregateStatePlan::Max => self.observe_max(value)?,
+            AggregateStatePlan::Min => self.observe_min(value, enums)?,
+            AggregateStatePlan::Max => self.observe_max(value, enums)?,
             AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
             AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
             AggregateStatePlan::Buffered
@@ -602,17 +594,39 @@ impl AggregateAccumulator {
         }
     }
 
-    pub(super) fn observe_min(&mut self, value: &Value) -> Result<(), SQLError> {
+    pub(super) fn observe_min(
+        &mut self,
+        value: &Value,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
         match &self.min {
-            Some(cur) if !value_lt(value, cur)? => {}
+            Some(cur)
+                if !super::ordering::compare_extrema_with_catalog(
+                    cur,
+                    value,
+                    enums,
+                    self.enum_comparison.as_deref(),
+                )?
+                .is_gt() => {}
             _ => self.min = Some(value.clone()),
         }
         Ok(())
     }
 
-    pub(super) fn observe_max(&mut self, value: &Value) -> Result<(), SQLError> {
+    pub(super) fn observe_max(
+        &mut self,
+        value: &Value,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
         match &self.max {
-            Some(cur) if !value_gt(value, cur)? => {}
+            Some(cur)
+                if !super::ordering::compare_extrema_with_catalog(
+                    cur,
+                    value,
+                    enums,
+                    self.enum_comparison.as_deref(),
+                )?
+                .is_lt() => {}
             _ => self.max = Some(value.clone()),
         }
         Ok(())
@@ -643,17 +657,18 @@ impl AggregateAccumulator {
         &mut self,
         value: &Value,
         keys: Vec<super::ordering::AggregateSortKey>,
+        enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         if matches!(value, Value::Null) {
             return match self.state_plan {
-                AggregateStatePlan::BufferedArrays => self.values.push(Value::Null, keys),
-                _ => self.observe_null(keys),
+                AggregateStatePlan::BufferedArrays => self.values.push(Value::Null, keys, enums),
+                _ => self.observe_null(keys, enums),
             };
         }
         if self.state_plan.retains_values() {
-            self.observe_state(value)?;
+            self.observe_state(value, enums)?;
         }
-        self.values.push(value.clone(), keys)?;
+        self.values.push(value.clone(), keys, enums)?;
         Ok(())
     }
 
@@ -661,9 +676,10 @@ impl AggregateAccumulator {
     fn observe_null(
         &mut self,
         keys: Vec<super::ordering::AggregateSortKey>,
+        enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         match self.state_plan {
-            AggregateStatePlan::BufferedWithNulls => self.values.push(Value::Null, keys),
+            AggregateStatePlan::BufferedWithNulls => self.values.push(Value::Null, keys, enums),
             _ => Ok(()),
         }
     }
@@ -680,6 +696,7 @@ impl AggregateAccumulator {
         &mut self,
         values: Vec<Value>,
         sort_keys: Vec<super::ordering::AggregateSortKey>,
+        enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         if sort_keys.is_empty() {
             let state = self
@@ -689,10 +706,13 @@ impl AggregateAccumulator {
             state.observe(&values)?;
             return Ok(());
         }
-        self.registered_ordered.push(values, sort_keys)
+        self.registered_ordered.push(values, sort_keys, enums)
     }
 
-    pub(super) fn registered_value(&self) -> Option<Result<Value, SQLError>> {
+    pub(super) fn registered_value(
+        &self,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Option<Result<Value, SQLError>> {
         let function = self.registered.as_ref()?;
         if self.registered_ordered.is_empty() {
             let state = self
@@ -704,7 +724,7 @@ impl AggregateAccumulator {
         Some((|| {
             let mut state = function.create_state();
             self.registered_ordered
-                .observe_ordered_into(state.as_mut())?;
+                .observe_ordered_into(state.as_mut(), enums)?;
             state.finish()
         })())
     }
