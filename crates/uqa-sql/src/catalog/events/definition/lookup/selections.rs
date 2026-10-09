@@ -13,7 +13,7 @@ use crate::SQLError;
 
 use super::EventLookupContext;
 
-use crate::catalog::events::{StoredRule, StoredTrigger};
+use crate::catalog::events::{selection, StoredRule, StoredTrigger};
 
 impl EventLookupContext<'_> {
     pub fn rule_definitions_for(
@@ -23,43 +23,23 @@ impl EventLookupContext<'_> {
     ) -> Result<Vec<StoredRule>, SQLError> {
         let relation = self.analysis.resolve_rule_relation(table)?;
         if let Some(snapshot) = self.state.query_rules() {
-            return Ok(snapshot
-                .get(&relation)
-                .into_iter()
-                .flat_map(BTreeMap::values)
-                .filter(|rule| rule.definition.event == event)
-                .cloned()
-                .collect());
+            return Ok(selection::rule_definitions(snapshot, &relation, event));
         }
-        Ok(self
-            .registry
-            .read_rules()
-            .get(&relation)
-            .into_iter()
-            .flat_map(BTreeMap::values)
-            .filter(|rule| rule.definition.event == event)
-            .cloned()
-            .collect())
+        Ok(selection::rule_definitions(
+            &self.registry.read_rules(),
+            &relation,
+            event,
+        ))
     }
 
     pub fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
         let relation = self.analysis.resolve_rule_relation(table)?;
-        let replica = self.state.session_replication_role_is_replica();
-        Ok(self
-            .registry
-            .read_rules()
-            .get(&relation)
-            .into_iter()
-            .flat_map(BTreeMap::values)
-            .filter(|rule| {
-                (if replica {
-                    rule.enabled.fires_in_replica()
-                } else {
-                    rule.enabled.fires_in_origin()
-                }) && rule.definition.event == event
-            })
-            .cloned()
-            .collect())
+        Ok(selection::active_rules(
+            &self.registry.read_rules(),
+            &relation,
+            event,
+            self.state.session_replication_role_is_replica(),
+        ))
     }
 
     pub fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
@@ -158,21 +138,18 @@ impl EventLookupContext<'_> {
         row: bool,
     ) -> Result<bool, SQLError> {
         let relation = self.analysis.resolve_trigger_table(table)?;
-        let matches = |entries: &BTreeMap<String, StoredTrigger>| {
-            entries.values().any(|trigger| {
-                trigger.definition.timing == timing
-                    && trigger.definition.row == row
-                    && trigger.definition.events.contains(&event)
-            })
-        };
         if let Some(snapshot) = self.state.query_triggers() {
-            return Ok(snapshot.get(&relation).is_some_and(matches));
+            return Ok(selection::has_trigger_definition(
+                snapshot, &relation, timing, event, row,
+            ));
         }
-        Ok(self
-            .registry
-            .read_triggers()
-            .get(&relation)
-            .is_some_and(matches))
+        Ok(selection::has_trigger_definition(
+            &self.registry.read_triggers(),
+            &relation,
+            timing,
+            event,
+            row,
+        ))
     }
 
     pub fn has_row_triggers(&self, table: &str, event: TriggerEvent) -> Result<bool, SQLError> {

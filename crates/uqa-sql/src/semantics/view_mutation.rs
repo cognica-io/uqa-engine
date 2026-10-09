@@ -233,7 +233,7 @@ pub fn validate_view_merge_contract(
 ) -> Result<(), SQLError> {
     validate_view_merge_targets(target, plan)?;
     let source = crate::binding::analyze_source_plan_schema(
-        rewrite.catalog,
+        rewrite.routines,
         &plan.source,
         params,
         bindings,
@@ -252,7 +252,7 @@ pub fn validate_view_merge_contract(
         target.types.clone(),
     );
     super::merge::validate_merge_action_scopes(
-        rewrite.catalog,
+        rewrite.routines,
         plan,
         &target_schema,
         &source,

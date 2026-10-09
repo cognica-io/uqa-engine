@@ -889,6 +889,73 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "scoped_permissions_and_overloads_reuse_catalog_inputs",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Scoped catalog inputs",
+      "workload": "Sixteen bound lower(text) permission and domain-signature inquiries.",
+      "invariant": "Every inquiry retains the selected domain allocation and constructs zero full catalog maps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "scalar_catalog_captures_do_not_grow_with_rows",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Scoped catalog inputs",
+      "workload": "Memory/native SQLite queries returning one or nine rows with builtin, namespace, reg-object, format and type-privilege expressions.",
+      "invariant": "Equal expression results are preserved without catalog captures increasing with row count.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "view_catalog_captures_do_not_grow_with_unrelated_views",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Scoped catalog inputs",
+      "workload": "Memory/native SQLite information_schema.columns with one or four unrelated simple views.",
+      "invariant": "The same three column/updatability rows require no additional full catalog captures as views grow.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "scoped_relation_descriptors_reuse_the_selected_generation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Scoped catalog inputs",
+      "workload": "Repeated table/view row-type and absent-descriptor inquiries.",
+      "invariant": "Existing descriptors share the same allocation and inquiries construct zero full catalog maps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "relation_descriptor_cache_retains_results_and_bounds_missing_identities",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/composite_type/relations/tests.rs",
+      "capability": "Scoped catalog inputs",
+      "workload": "Thirty-two occupied OID repeats and two probes each of one hundred absent OIDs.",
+      "invariant": "One descriptor build is shared; at most one missing OID is retained and repeated absent probes do not rebuild.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

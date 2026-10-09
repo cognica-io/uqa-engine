@@ -7,6 +7,8 @@
 //! Relation row types share their owning relation's catalog identity and live columns.
 
 use crate::catalog::{context::CatalogContext, CatalogReadView};
+use parking_lot::Mutex;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -93,12 +95,66 @@ pub(crate) fn by_oid(catalog: &CatalogReadView, oid: u32) -> Option<ColumnType> 
     })
 }
 
+/// Selected relation descriptors and missing OIDs belong to one immutable read view.
+#[derive(Default)]
+pub(in crate::catalog) struct RelationDescriptorCache {
+    entries: Mutex<DescriptorEntries>,
+}
+
+#[derive(Default)]
+struct DescriptorEntries {
+    known: BTreeMap<u32, Arc<CompositeTypeDescriptor>>,
+    last_missing: Option<u32>,
+}
+
 pub fn descriptor(
     context: &CatalogContext<'_>,
     oid: u32,
 ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
     let catalog = context.catalog_read_view();
-    let Some(ColumnType::Composite(reference)) = by_oid(&catalog, oid) else {
+    catalog
+        .relation_descriptors
+        .get_or_try_init(oid, || descriptor_in(context, &catalog, oid))
+}
+
+impl RelationDescriptorCache {
+    fn get_or_try_init(
+        &self,
+        oid: u32,
+        build: impl FnOnce() -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError>,
+    ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
+        {
+            let entries = self.entries.lock();
+            if let Some(descriptor) = entries.known.get(&oid) {
+                return Ok(Some(Arc::clone(descriptor)));
+            }
+            if entries.last_missing == Some(oid) {
+                return Ok(None);
+            }
+        }
+        let descriptor = build()?;
+        let mut entries = self.entries.lock();
+        if let Some(descriptor) = descriptor {
+            Ok(Some(Arc::clone(
+                entries.known.entry(oid).or_insert(descriptor),
+            )))
+        } else {
+            // Arbitrary absent OIDs must not grow the retained metadata cache.
+            entries.last_missing = Some(oid);
+            Ok(None)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+fn descriptor_in(
+    context: &CatalogContext<'_>,
+    catalog: &CatalogReadView,
+    oid: u32,
+) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
+    let Some(ColumnType::Composite(reference)) = by_oid(catalog, oid) else {
         return Ok(None);
     };
     let identity = RelationIdentity::new(reference.schema, reference.name);

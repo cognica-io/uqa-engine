@@ -23,6 +23,7 @@ pub(crate) struct ScopedEngineHook<'a> {
     engine: &'a Engine,
     runtime: QueryRuntimeView<'a>,
     ctes: std::borrow::Cow<'a, CteScope>,
+    catalog: catalog::ScopedCatalog,
 }
 
 impl<'a> ScopedEngineHook<'a> {
@@ -31,6 +32,7 @@ impl<'a> ScopedEngineHook<'a> {
             engine,
             runtime: engine.query_runtime_view(),
             ctes: std::borrow::Cow::Borrowed(ctes),
+            catalog: catalog::ScopedCatalog::new(engine, ctes),
         }
     }
 }
@@ -53,6 +55,7 @@ impl<'a> ScopedEngineHook<'a> {
         Self {
             engine,
             runtime: engine.query_runtime_view(),
+            catalog: catalog::ScopedCatalog::new(engine, &ctes),
             ctes: std::borrow::Cow::Owned(ctes),
         }
     }
@@ -105,7 +108,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         &self,
         binding: &uqa_sql::ast::FunctionBinding,
     ) -> Result<(), SQLError> {
-        uqa_sql::expr::EngineHook::require_builtin_execute(self.engine, binding)
+        use uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution;
+        uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions::capture(
+            &self.catalog_context(),
+        ).require_execute(binding)
     }
 
     fn transaction_timestamp_micros(&self) -> Option<i64> {
@@ -117,7 +123,12 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     }
 
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
-        uqa_sql::expr::EngineHook::resolve_regtype_input(self.engine, name)
+        uqa_execution::catalog::projection::resolve_regtype_oid(&self.catalog_context(), name)?
+            .map(Some)
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("type \"{name}\" does not exist"),
+            })
     }
     fn cast_domain(
         &self,
@@ -147,58 +158,45 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     }
 
     fn resolve_type_oid(&self, oid: u32) -> Result<Option<uqa_sql::ast::ColumnType>, String> {
-        uqa_sql::expr::EngineHook::resolve_type_oid(self.engine, oid)
+        Ok(
+            uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid(
+                &self.catalog_context(),
+                oid,
+            ),
+        )
     }
 
     fn resolve_regclass_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regclass_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
+        uqa_execution::catalog::projection::resolve_regclass_oid(&self.catalog_context(), name)
     }
 
     fn resolve_regproc(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regproc_input_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
-        .map(Some)
+        uqa_execution::catalog::projection::resolve_regproc_input_oid(&self.catalog_context(), name)
+            .map(Some)
     }
 
     fn resolve_regprocedure(&self, name: &str) -> std::result::Result<Option<i64>, String> {
-        uqa_execution::catalog::projection::resolve_regprocedure_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
+        uqa_execution::catalog::projection::resolve_regprocedure_oid(&self.catalog_context(), name)
     }
 
     fn resolve_regprocedure_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
         uqa_execution::catalog::projection::resolve_regprocedure_input_oid(
-            &self.engine.catalog_execution(),
+            &self.catalog_context(),
             name,
         )
         .map(Some)
     }
 
     fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regrole_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
+        uqa_execution::catalog::projection::resolve_regrole_oid(&self.catalog_context(), name)
     }
 
     fn resolve_regnamespace(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regnamespace_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
+        uqa_execution::catalog::projection::resolve_regnamespace_oid(&self.catalog_context(), name)
     }
 
     fn resolve_regcollation(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regcollation_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
+        uqa_execution::catalog::projection::resolve_regcollation_oid(&self.catalog_context(), name)
     }
 
     fn resolve_regobject(
@@ -206,11 +204,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ty: &uqa_sql::ast::ColumnType,
         name: &str,
     ) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regobject_oid(
-            &self.engine.catalog_execution(),
-            ty,
-            name,
-        )
+        uqa_execution::catalog::projection::resolve_regobject_oid(&self.catalog_context(), ty, name)
     }
 
     fn resolve_regtype_output(
@@ -218,11 +212,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ty: &uqa_sql::ast::ColumnType,
         oid: i64,
     ) -> std::result::Result<Option<String>, String> {
-        uqa_execution::catalog::projection::resolve_regtype_output(
-            &self.engine.catalog_execution(),
-            ty,
-            oid,
-        )
+        uqa_execution::catalog::projection::resolve_regtype_output(&self.catalog_context(), ty, oid)
     }
 
     fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
@@ -230,7 +220,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     }
 
     fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
-        Some(self.engine)
+        Some(self)
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
@@ -272,7 +262,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
         uqa_execution::query::scalar_functions::call_bound_builtin(
-            &self.engine.scalar_function_context(),
+            &self.scalar_function_context(),
             binding,
             args,
         )
@@ -283,8 +273,8 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     }
 
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
-        self.engine
-            .current_schema_name_in_execution()
+        self.catalog_context()
+            .current_schema_name()
             .map_err(|error| error.to_string())
     }
 
@@ -327,8 +317,8 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         &self,
         include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
-        self.engine
-            .current_schema_names_in_execution(include_implicit)
+        self.catalog_context()
+            .current_schema_names(include_implicit)
             .map(Some)
             .map_err(|error| error.to_string())
     }
@@ -376,7 +366,7 @@ impl uqa_execution::query::expression::ScalarExpressionContext for ScopedEngineH
         evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
     ) -> Result<Option<Value>, SQLError> {
         uqa_execution::query::scalar_functions::intercept_function(
-            Some(&self.engine.scalar_function_context()),
+            Some(&self.scalar_function_context()),
             name,
             args,
             row,
@@ -385,6 +375,7 @@ impl uqa_execution::query::expression::ScalarExpressionContext for ScopedEngineH
     }
 }
 
+mod catalog;
 mod function_invocation;
 mod type_resolution;
 

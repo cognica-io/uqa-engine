@@ -13,6 +13,8 @@ thread_local! {
     static CATALOG_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+mod scoped_catalog;
+
 pub(super) fn record_catalog_capture() {
     CATALOG_CAPTURES.set(CATALOG_CAPTURES.get() + 1);
 }

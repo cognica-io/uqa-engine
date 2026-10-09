@@ -40,6 +40,23 @@ pub struct ViewCatalogMetadata {
 pub trait ViewCatalogCapabilities: Sync {
     fn view_updatability(&self, name: &str) -> Result<ViewCatalogMetadata, SQLError>;
     fn has_instead_of_trigger(&self, name: &str, event: TriggerEvent) -> Result<bool, SQLError>;
+    fn view_updatability_with_catalog(
+        &self,
+        name: &str,
+        _catalog: &super::CatalogReadView,
+        _resolution: &RelationNameResolution,
+    ) -> Result<ViewCatalogMetadata, SQLError> {
+        self.view_updatability(name)
+    }
+    fn has_instead_of_trigger_with_catalog(
+        &self,
+        name: &str,
+        event: TriggerEvent,
+        _catalog: &super::CatalogReadView,
+        _resolution: &RelationNameResolution,
+    ) -> Result<bool, SQLError> {
+        self.has_instead_of_trigger(name, event)
+    }
 }
 
 pub trait CatalogNamespace: Sync {

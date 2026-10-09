@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse catalog inputs for scoped builtin permissions, scalar metadata, routine signatures and read-only view analysis; retain relation type descriptors without repeated catalog capture, while preserving private DDL, role changes, rollback and portal generations.
+
 - Check type OID collisions directly from retained identities instead of building every `pg_type` row, while preserving builtin and user-type reservations and fresh checks after catalog lock waits.
 
 - Preserve a named record's actual tuple type through copying, storage and spill. Record output and field selection use that descriptor, and equality and ordering validate each reached field's type with PostgreSQL's NULL and short-circuit rules. Composite-to-record identity casts leave retained bytes unread.

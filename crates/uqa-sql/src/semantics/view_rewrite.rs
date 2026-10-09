@@ -356,7 +356,7 @@ fn query_block_restriction(
     } else if matches!(block.compute, ComputePlan::Aggregate)
         || (matches!(block.compute, ComputePlan::Window)
             && crate::semantics::aggregates::has_aggregate(
-                &|name: &str| services.catalog.is_registered_aggregate(name),
+                &|name: &str| services.routines.is_registered_aggregate(name),
                 &block.projections,
             ))
     {
@@ -405,12 +405,12 @@ fn view_query_shape_from_definition(
         None => RowSchema::default(),
     };
     let resolver = crate::binding::scoped_types::BindingTypeResolver {
-        routines: services.catalog,
+        routines: services.routines,
         scope: &analysis_scope,
     };
     for projection in &block.projections {
         if crate::semantics::sets::validation::expression_may_return_set(
-            services.catalog,
+            services.routines,
             &resolver,
             &projection.expr,
             &source_schema,

@@ -44,6 +44,7 @@ pub struct CteScope<S: Clone = ()> {
     scalar_subquery_cache:
         Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
     catalog: Option<CatalogReadView>,
+    catalog_revision: Option<(u64, u64)>,
     catalog_resolution: Option<RelationNameResolution>,
     privilege_subject: Option<RoleReference>,
     command_cte_snapshot: Option<Arc<S>>,
@@ -69,6 +70,7 @@ impl<S: Clone> Default for CteScope<S> {
             next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
             scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
             catalog: None,
+            catalog_revision: None,
             catalog_resolution: None,
             privilege_subject: None,
             command_cte_snapshot: None,
@@ -129,6 +131,15 @@ impl<S: Clone> CteScope<S> {
         self.catalog.clone().ok_or_else(|| {
             SQLError::Internal("query execution scope has no statement catalog snapshot".into())
         })
+    }
+
+    /// Record the caller's source identity and invalidation revision when it captures the catalog, independently of the immutable binding view.
+    pub fn set_catalog_revision(&mut self, source: u64, revision: u64) {
+        self.catalog_revision = Some((source, revision));
+    }
+
+    pub fn catalog_revision(&self) -> Option<(u64, u64)> {
+        self.catalog_revision
     }
 
     pub fn relation_name_resolution(&self) -> Result<RelationNameResolution, SQLError> {
