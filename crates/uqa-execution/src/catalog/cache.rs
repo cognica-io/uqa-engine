@@ -89,3 +89,40 @@ impl<T> CatalogDerivation<T> {
         Ok(self.value.get_or_init(|| value))
     }
 }
+
+/// OID selection stops at the first invalid address, while earlier matching entries remain usable.
+pub(crate) struct OrderedOidLookup<T> {
+    entries: std::collections::BTreeMap<i64, T>,
+    error: Option<SQLError>,
+}
+
+impl<T> OrderedOidLookup<T> {
+    pub(crate) fn build(entries: impl IntoIterator<Item = Result<(i64, T), SQLError>>) -> Self {
+        let mut lookup = Self {
+            entries: std::collections::BTreeMap::new(),
+            error: None,
+        };
+        for entry in entries {
+            match entry {
+                Ok((oid, value)) => {
+                    lookup.entries.entry(oid).or_insert(value);
+                }
+                Err(error) => {
+                    lookup.error = Some(error);
+                    break;
+                }
+            }
+        }
+        lookup
+    }
+
+    pub(crate) fn get(&self, oid: i64) -> Result<Option<&T>, SQLError> {
+        if let Some(value) = self.entries.get(&oid) {
+            return Ok(Some(value));
+        }
+        match &self.error {
+            Some(error) => Err(error.clone()),
+            None => Ok(None),
+        }
+    }
+}

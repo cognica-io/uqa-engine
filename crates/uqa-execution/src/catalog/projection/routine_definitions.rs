@@ -15,7 +15,10 @@ use uqa_sql::SQLError;
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
-use super::builtin_routines::{BuiltinRoutineCatalogEntry, PG18_BUILTIN_ROUTINE_GROUPS};
+use super::builtin_routines::BuiltinRoutineCatalogEntry;
+
+mod cache;
+pub(in crate::catalog) use cache::RoutineDefinitions;
 
 mod builtin_body;
 mod definition;
@@ -72,18 +75,11 @@ fn routine_oid_argument(name: &str, arguments: &[Value]) -> Result<Option<i64>, 
 }
 
 fn find_routine(context: &CatalogContext<'_>, oid: i64) -> Result<Option<Routine>, SQLError> {
-    for function in context.catalog_read_view().all_sql_functions() {
-        if super::pg_proc::user_routine_catalog_oid(&function)? == oid {
-            return Ok(Some(Routine::User(function)));
-        }
+    let catalog = context.catalog_read_view();
+    if let Some(function) = cache::user_routine_by_oid(&catalog, oid)? {
+        return Ok(Some(Routine::User(function.clone())));
     }
-    Ok(PG18_BUILTIN_ROUTINE_GROUPS
-        .iter()
-        .flat_map(|group| group.iter())
-        .copied()
-        .chain(super::builtin_routines::native_foreign_handlers())
-        .find(|entry| entry.oid == oid)
-        .map(Routine::Builtin))
+    Ok(cache::builtin_routine_by_oid(oid).map(Routine::Builtin))
 }
 
 /// `format_type_be` of a type OID.

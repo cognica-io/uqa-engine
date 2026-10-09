@@ -1151,6 +1151,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "event_inquiries_share_trigger_collections_and_borrow_rule_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/events/cache/tests.rs",
+      "capability": "Catalog event and routine inquiries",
+      "workload": "Repeated full/OID trigger, user-rule, view-rule and view-definition inquiries with zero, one and 128 unrelated definitions.",
+      "invariant": "Each trigger is copied once and each address is read once; rules and views remain borrowed from the retained snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_event_inquiries_derive_each_collection_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/events/cache/tests.rs",
+      "capability": "Catalog event and routine inquiries",
+      "workload": "Eight concurrent cold readers of 129 triggers, user rules and view rules.",
+      "invariant": "Readers together copy 129 original triggers and index 129 addresses for each kind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_inquiries_borrow_definitions_without_repeated_collection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/routine_definitions/cache/tests.rs",
+      "capability": "Catalog event and routine inquiries",
+      "workload": "Repeated selected/missing routine inquiries with zero, one and 128 unrelated routines.",
+      "invariant": "Routine addresses are read once with no new strong references to unrelated definitions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_routine_inquiries_index_addresses_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/routine_definitions/cache/tests.rs",
+      "capability": "Catalog event and routine inquiries",
+      "workload": "Eight concurrent cold inquiries over 129 routines.",
+      "invariant": "All readers together derive exactly 129 routine addresses.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

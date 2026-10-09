@@ -6,6 +6,10 @@
 
 //! `pg_trigger`, `pg_rewrite`, and their definition helpers.
 
+mod cache;
+pub(crate) use cache::catalog_triggers;
+pub(super) use cache::view_by_oid;
+pub(in crate::catalog) use cache::EventDefinitions;
 mod rules;
 #[cfg(test)]
 mod tests;
@@ -138,14 +142,14 @@ pub fn build_pg_trigger(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     catalog_triggers(catalog, resolution)?
-        .into_iter()
+        .iter()
         .map(|(trigger, parent_oid)| {
-            pg_trigger_row(context, catalog, resolution, trigger, parent_oid)
+            pg_trigger_row(context, catalog, resolution, trigger, *parent_oid)
         })
         .collect()
 }
 
-pub fn catalog_triggers(
+fn build_catalog_triggers(
     catalog_view: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<(StoredTrigger, i64)>, SQLError> {
@@ -153,11 +157,18 @@ pub fn catalog_triggers(
     let mut resolution = resolution.clone();
     resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let resolution = &resolution;
-    let originals = catalog_view.triggers();
+    let originals = catalog_view
+        .snapshot()
+        .definitions
+        .triggers
+        .values()
+        .flat_map(|triggers| triggers.values());
     let mut catalog = originals
-        .iter()
-        .cloned()
+        .clone()
         .map(|trigger| {
+            #[cfg(test)]
+            cache::record_trigger_copy();
+            let trigger = trigger.clone();
             (
                 (
                     trigger.definition.table.clone(),
@@ -173,7 +184,7 @@ pub fn catalog_triggers(
             continue;
         };
         for source in sources.iter().skip(1) {
-            for original in originals.iter().filter(|trigger| {
+            for original in originals.clone().filter(|trigger| {
                 trigger.definition.row && trigger.definition.table == source.qualified_name()
             }) {
                 // A partition's clone of a row trigger has OIDs of its own, derived from the trigger's identity and the partition; the recorded OIDs are those of the trigger on its own table.
@@ -223,7 +234,7 @@ pub fn build_trigger_constraints(
             (
                 "oid",
                 int_value(trigger_constraint_catalog_oid(
-                    catalog, resolution, &trigger,
+                    catalog, resolution, trigger,
                 )?),
             ),
             ("conname", str_value(constraint_name)),
@@ -277,7 +288,7 @@ fn pg_trigger_row(
     context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-    trigger: StoredTrigger,
+    trigger: &StoredTrigger,
     parent_oid: i64,
 ) -> Result<ResultRow, SQLError> {
     let definition = &trigger.definition;
@@ -300,7 +311,7 @@ fn pg_trigger_row(
         arguments.extend_from_slice(argument.as_bytes());
         arguments.push(0);
     }
-    let constraint_oid = trigger_constraint_catalog_oid(catalog, resolution, &trigger)?;
+    let constraint_oid = trigger_constraint_catalog_oid(catalog, resolution, trigger)?;
     let referenced_relation_oid = definition
         .referenced_table
         .as_deref()
@@ -310,7 +321,7 @@ fn pg_trigger_row(
     Ok(row([
         (
             "oid",
-            int_value(trigger_catalog_oid(catalog, resolution, &trigger)?),
+            int_value(trigger_catalog_oid(catalog, resolution, trigger)?),
         ),
         (
             "tgrelid",
@@ -447,10 +458,13 @@ fn resolve_trigger_function(
 /// Rule addresses without rendering stored conditions or serializing actions.
 pub(super) fn rewrite_catalog_oids(catalog: &CatalogReadView) -> Vec<i64> {
     catalog
-        .rules()
-        .iter()
+        .snapshot()
+        .definitions
+        .rules
+        .values()
+        .flat_map(|rules| rules.values())
         .map(rule_catalog_oid)
-        .chain(catalog_view_rules(catalog).map(|(_, view)| view_rule_oid(&view)))
+        .chain(catalog_view_rules(catalog).map(|(_, view)| view_rule_oid(view)))
         .collect()
 }
 
@@ -460,12 +474,15 @@ pub fn build_pg_rewrite(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = catalog
-        .rules()
-        .into_iter()
+        .snapshot()
+        .definitions
+        .rules
+        .values()
+        .flat_map(|rules| rules.values())
         .map(|rule| {
             let definition = &rule.definition;
             Ok(row([
-                ("oid", int_value(rule_catalog_oid(&rule))),
+                ("oid", int_value(rule_catalog_oid(rule))),
                 ("rulename", str_value(definition.name.clone())),
                 (
                     "ev_class",
@@ -500,11 +517,15 @@ pub fn build_pg_rewrite(
         .collect::<Result<Vec<_>, SQLError>>()?;
     for (name, view) in catalog_view_rules(catalog) {
         rows.push(row([
-            ("oid", int_value(view_rule_oid(&view))),
+            ("oid", int_value(view_rule_oid(view))),
             ("rulename", str_value("_RETURN")),
             (
                 "ev_class",
-                int_value(event_relation_oid_from(catalog, resolution, &name)?),
+                int_value(event_relation_oid_from(
+                    catalog,
+                    resolution,
+                    &name.qualified_name(),
+                )?),
             ),
             ("ev_type", str_value("1")),
             ("ev_enabled", str_value("O")),
@@ -522,8 +543,11 @@ pub fn build_pg_rules(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     catalog
-        .rules()
-        .into_iter()
+        .snapshot()
+        .definitions
+        .rules
+        .values()
+        .flat_map(|rules| rules.values())
         .filter(|rule| rule.definition.name != "_RETURN")
         .map(|rule| {
             let definition = &rule.definition;
@@ -553,16 +577,7 @@ pub fn pg_get_triggerdef_value(
     };
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
-    let mut lookup = resolution.clone();
-    lookup.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-    let mut found = None;
-    for (trigger, _) in catalog_triggers(&catalog, &lookup)? {
-        if trigger_catalog_oid(&catalog, &lookup, &trigger)? == oid {
-            found = Some(trigger);
-            break;
-        }
-    }
-    let Some(trigger) = found else {
+    let Some(trigger) = cache::trigger_by_oid(&catalog, &resolution, oid)? else {
         return Ok(Value::Null);
     };
     Ok(str_value(render_trigger_definition(
@@ -584,11 +599,7 @@ pub fn pg_get_ruledef_value(
     };
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
-    if let Some(rule) = catalog
-        .rules()
-        .into_iter()
-        .find(|rule| rule_catalog_oid(rule) == oid)
-    {
+    if let Some(rule) = cache::rule_by_oid(&catalog, oid) {
         return Ok(str_value(render_rule_definition(
             Some(&crate::catalog::projection::CatalogOutput(*context)),
             &catalog,
@@ -597,34 +608,39 @@ pub fn pg_get_ruledef_value(
             pretty,
         )?));
     }
-    for (name, view) in catalog_view_rules(&catalog) {
-        if view_rule_oid(&view) == oid {
-            let query = super::view_definition::view_definition(
-                Some(&crate::catalog::projection::CatalogOutput(*context)),
-                &catalog,
-                &resolution,
-                &view,
-                pretty,
-                0,
-            )?;
-            return Ok(str_value(format!(
-                "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO {} DO INSTEAD {query}",
-                render_rule_relation(&catalog, &resolution, &name, pretty)?
-            )));
-        }
+    if let Some((name, view)) = cache::view_rule_by_oid(&catalog, oid) {
+        let query = super::view_definition::view_definition(
+            Some(&crate::catalog::projection::CatalogOutput(*context)),
+            &catalog,
+            &resolution,
+            view,
+            pretty,
+            0,
+        )?;
+        return Ok(str_value(format!(
+            "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO {} DO INSTEAD {query}",
+            render_rule_relation(&catalog, &resolution, &name.qualified_name(), pretty)?
+        )));
     }
     Ok(Value::Null)
 }
 
 fn catalog_view_rules(
     catalog: &CatalogReadView,
-) -> impl Iterator<Item = (String, crate::catalog::view::StoredView)> + '_ {
+) -> impl Iterator<Item = (&RelationIdentity, &crate::catalog::view::StoredView)> + '_ {
     [
         crate::catalog::view::StoredViewKind::View,
         crate::catalog::view::StoredViewKind::Materialized,
     ]
     .into_iter()
-    .flat_map(|kind| catalog.views_of_kind(kind))
+    .flat_map(move |kind| {
+        catalog
+            .snapshot()
+            .definitions
+            .views
+            .iter()
+            .filter(move |(_, view)| view.kind == kind)
+    })
 }
 
 fn view_rule_oid(view: &crate::catalog::view::StoredView) -> i64 {

@@ -129,6 +129,7 @@ pub use dependencies::{
 };
 pub(super) use pg_catalog::IndexRelations;
 mod events;
+pub(super) use events::EventDefinitions;
 use uqa_sql::catalog::expression_text;
 mod index_definition;
 mod mutation;
@@ -138,6 +139,7 @@ pub use mutation::virtual_relation_mutation_error;
 pub use regtypes::resolve_regprocedure_input_oid;
 pub(crate) use regtypes::routine_oid_exists;
 pub use regtypes::{format_type_name, format_type_value};
+pub(super) use routine_definitions::RoutineDefinitions;
 pub use routine_definitions::{
     pg_get_function_arguments_value, pg_get_function_identity_arguments_value,
     pg_get_function_result_value, pg_get_function_sqlbody_value, pg_get_functiondef_value,

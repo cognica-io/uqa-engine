@@ -78,7 +78,7 @@ pub fn catalog_oid_in_use(
         }
         CatalogOidClass::Trigger => {
             for (trigger, _) in super::events::catalog_triggers(catalog, resolution)? {
-                if super::events::trigger_catalog_oid(catalog, resolution, &trigger)? == oid {
+                if super::events::trigger_catalog_oid(catalog, resolution, trigger)? == oid {
                     return Ok(true);
                 }
             }
@@ -173,10 +173,10 @@ pub fn largest_catalog_oid(
     oids.extend(super::events::rewrite_catalog_oids(catalog));
     for (trigger, _) in super::events::catalog_triggers(catalog, resolution)? {
         oids.push(super::events::trigger_catalog_oid(
-            catalog, resolution, &trigger,
+            catalog, resolution, trigger,
         )?);
         oids.push(super::events::trigger_constraint_catalog_oid(
-            catalog, resolution, &trigger,
+            catalog, resolution, trigger,
         )?);
     }
     Ok(oids
@@ -399,7 +399,7 @@ fn trigger_address_in_use(
     oid: i64,
 ) -> Result<bool, SQLError> {
     for (trigger, _) in super::events::catalog_triggers(catalog, resolution)? {
-        if super::events::trigger_constraint_catalog_oid(catalog, resolution, &trigger)? == oid {
+        if super::events::trigger_constraint_catalog_oid(catalog, resolution, trigger)? == oid {
             return Ok(true);
         }
     }

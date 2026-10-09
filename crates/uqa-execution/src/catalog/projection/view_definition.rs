@@ -13,10 +13,7 @@ use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::QueryPlan;
 use uqa_sql::{expr::quote_ident, SQLError};
 
-use crate::catalog::{
-    context::CatalogContext,
-    view::{StoredView, StoredViewKind},
-};
+use crate::catalog::{context::CatalogContext, view::StoredView};
 use crate::catalog::{
     CatalogReadView, RelationLookupMode, RelationNameResolution, RelationResolution,
 };
@@ -64,10 +61,7 @@ pub fn pg_get_viewdef_value(
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
     let view = match &arguments[0] {
-        Value::Int(oid) => [StoredViewKind::View, StoredViewKind::Materialized]
-            .into_iter()
-            .flat_map(|kind| catalog.views_of_kind(kind))
-            .find_map(|(_, view)| (super::view_relation_oid(&view) == *oid).then_some(view)),
+        Value::Int(oid) => super::events::view_by_oid(&catalog, *oid),
         Value::Str(name) | Value::FixedChar(name) => {
             let reference = view_name_reference(name)?;
             if catalog
@@ -90,7 +84,7 @@ pub fn pg_get_viewdef_value(
             };
             let mut bound = resolution.clone();
             bound.set_lookup_mode(RelationLookupMode::Bound);
-            catalog.view_resolved(&bound, &canonical)?.cloned()
+            catalog.view_resolved(&bound, &canonical)?
         }
         _ => {
             return Err(SQLError::TypeMismatch(
@@ -103,7 +97,7 @@ pub fn pg_get_viewdef_value(
             Some(&crate::catalog::projection::CatalogOutput(*context)),
             &catalog,
             &resolution,
-            &view,
+            view,
             pretty,
             wrap,
         )
