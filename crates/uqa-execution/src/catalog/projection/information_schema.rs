@@ -6,6 +6,7 @@
 
 //! Virtual `information_schema` relation builders.
 
+mod columns;
 mod foreign_tables;
 mod identity;
 mod routines;
@@ -34,6 +35,11 @@ use uqa_sql::expr::value_to_text;
 use uqa_sql::{ResultRow, SQLError};
 use uqa_storage::SequenceOwnerDependency;
 use uqa_storage::{TableAclEntry, TablePrivileges};
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static COLUMN_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 pub fn build_info_catalog_name() -> Vec<ResultRow> {
     vec![row([("catalog_name", catalog_name())])]
@@ -247,6 +253,8 @@ fn information_schema_column_row(
     updatable: bool,
     sequence: Option<&crate::catalog::sequence::SequenceState>,
 ) -> Result<ResultRow, SQLError> {
+    #[cfg(test)]
+    COLUMN_ROWS.set(COLUMN_ROWS.get() + 1);
     let description = describe_column_type(catalog, &column.ty);
     let identity = IdentityAttributes::of(column, sequence);
     Ok(row([
@@ -405,93 +413,66 @@ pub(super) fn build_info_columns(
     request: &super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
-    let sequences = catalog
-        .sequence_definitions()?
-        .into_iter()
-        .map(|(relation, state, _, _)| (relation.qualified_name(), state))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    for tname in catalog.table_names() {
-        let table_snapshot = catalog
-            .table(resolution, &tname)?
-            .ok_or_else(|| SQLError::UnknownTable(tname.clone()))?;
-        if !catalog.table_is_visible_to(table_snapshot, resolution.current_user()) {
+    for (identity, table_snapshot) in &catalog.snapshot().tables {
+        if !request.matches_relation(&identity.schema, &identity.name)
+            || !catalog.table_is_visible_to(table_snapshot, resolution.current_user())
+        {
             continue;
         }
         let cols = &table_snapshot.columns;
-        let (schema, table) = split_schema_name(&tname)?;
+        let tname = identity.qualified_name();
         for (idx, col) in cols.iter().enumerate() {
-            if !catalog.table_column_is_visible_to(
-                table_snapshot,
-                &col.name,
-                resolution.current_user(),
-            ) {
-                continue;
-            }
-            out.push(information_schema_column_row(
-                Some(&crate::catalog::projection::CatalogOutput(*context)),
-                (catalog, resolution, request),
-                (schema.clone(), table.clone()),
-                idx,
-                col,
-                true,
-                owned_identity_sequence(&sequences, &tname, col)?,
-            )?);
-        }
-    }
-    for (view_name, stored) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
-        if !catalog.view_is_visible_to(&stored, resolution.current_user()) {
-            continue;
-        }
-        let (schema, view) = split_schema_name(&view_name)?;
-        let updatability = context
-            .views
-            .view_updatability_with_catalog(&view_name, catalog, resolution)?;
-        let columns = view_columns_for(context, catalog, resolution, &stored)?;
-        for (idx, column) in columns.iter().enumerate() {
-            if !catalog.view_column_is_visible_to(&stored, &column.name, resolution.current_user())
+            if !request.matches_name("column_name", &col.name)
+                || !catalog.table_column_is_visible_to(
+                    table_snapshot,
+                    &col.name,
+                    resolution.current_user(),
+                )
             {
                 continue;
             }
             out.push(information_schema_column_row(
                 Some(&crate::catalog::projection::CatalogOutput(*context)),
                 (catalog, resolution, request),
-                (schema.clone(), view.clone()),
+                (identity.schema.clone(), identity.name.clone()),
                 idx,
-                column,
-                updatability
-                    .catalog_columns
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(false),
-                None,
+                col,
+                true,
+                owned_identity_sequence(catalog, request, &tname, col)?,
             )?);
         }
     }
-    for (foreign_name, foreign_table) in catalog.foreign_tables() {
+    columns::append_view_columns(context, catalog, resolution, request, &mut out)?;
+    for (identity, foreign_table) in catalog.snapshot().definitions.foreign_tables.iter() {
+        if !request.matches_relation(&identity.schema, &identity.name) {
+            continue;
+        }
+        let foreign_name = identity.qualified_name();
         if !catalog.foreign_table_is_visible_to(&foreign_name, resolution.current_user())? {
             continue;
         }
-        let (schema, table) = split_schema_name(&foreign_name)?;
         for (idx, column) in foreign_table.columns.iter().enumerate() {
-            if !catalog.foreign_table_column_is_visible_to(
-                &foreign_name,
-                &column.name,
-                resolution.current_user(),
-            )? {
+            if !request.matches_name("column_name", &column.name)
+                || !catalog.foreign_table_column_is_visible_to(
+                    &foreign_name,
+                    &column.name,
+                    resolution.current_user(),
+                )?
+            {
                 continue;
             }
             out.push(information_schema_column_row(
                 Some(&crate::catalog::projection::CatalogOutput(*context)),
                 (catalog, resolution, request),
-                (schema.clone(), table.clone()),
+                (identity.schema.clone(), identity.name.clone()),
                 idx,
                 column,
                 false,
-                owned_identity_sequence(&sequences, &foreign_name, column)?,
+                owned_identity_sequence(catalog, request, &foreign_name, column)?,
             )?);
         }
     }
-    out.extend(super::ag_catalog::age_info_column_rows(catalog)?);
+    out.extend(super::ag_catalog::age_info_column_rows(catalog, request)?);
     Ok(out)
 }
 

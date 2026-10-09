@@ -1242,6 +1242,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_name_bounds_limit_column_rows_and_expression_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/expression_metadata/predicate_bounds.rs",
+      "capability": "Virtual catalog predicate bounds",
+      "workload": "Repeated, aliased, missing and contradictory column sources over zero, one or 128 unrelated tables.",
+      "invariant": "Only matching column rows and their defaults are produced; missing sources perform no row, expression or alias-metadata construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_name_bounds_only_deparse_matching_domain_and_routine_defaults",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/expression_metadata/predicate_bounds.rs",
+      "capability": "Virtual catalog predicate bounds",
+      "workload": "Selected and missing domain/routine names over zero, one or 128 unrelated defaults.",
+      "invariant": "Only selected definitions are deparsed; missing names build no expression-output metadata.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -594,6 +594,11 @@ fn event_deparser<'a>(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static EXPRESSION_OUTPUTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A stored catalog expression as `pg_get_expr` prints it without pretty-printing.
 pub fn stored_expression_text(
     output: Option<&dyn uqa_sql::expr::EngineHook>,
@@ -601,6 +606,8 @@ pub fn stored_expression_text(
     resolution: &RelationNameResolution,
     expression: &uqa_sql::ast::Expr,
 ) -> Result<String, SQLError> {
+    #[cfg(test)]
+    EXPRESSION_OUTPUTS.set(EXPRESSION_OUTPUTS.get() + 1);
     stored_expression_definition(output, catalog, resolution, expression, false)
 }
 

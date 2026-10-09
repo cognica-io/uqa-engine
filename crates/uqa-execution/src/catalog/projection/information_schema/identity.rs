@@ -58,12 +58,25 @@ impl IdentityAttributes {
     }
 }
 
-/// The state of the identity sequence the column `column` of `table` owns.
+/// Borrow only the definition of the identity sequence owned by this visible column.
 pub(super) fn owned_identity_sequence<'a>(
-    sequences: &'a std::collections::BTreeMap<String, crate::catalog::sequence::SequenceState>,
+    catalog: &'a crate::catalog::CatalogReadView,
+    request: &super::super::CatalogRequest,
     table: &str,
     column: &SQLColumnDef,
 ) -> Result<Option<&'a crate::catalog::sequence::SequenceState>, SQLError> {
+    if ![
+        "identity_start",
+        "identity_increment",
+        "identity_maximum",
+        "identity_minimum",
+        "identity_cycle",
+    ]
+    .iter()
+    .any(|field| request.includes(field))
+    {
+        return Ok(None);
+    }
     let Some(provenance) = column
         .auto_increment
         .as_ref()
@@ -80,5 +93,15 @@ pub(super) fn owned_identity_sequence<'a>(
     if !uqa_sql::schema::sequences::implicit::stored_owner_names_current(&relation, column, owner) {
         return Ok(None);
     }
-    Ok(sequences.get(sequence))
+    let Ok(identity) = uqa_core::RelationIdentity::from_legacy_name(sequence) else {
+        return Ok(None);
+    };
+    // Stored provenance names are canonical keys, not names resolved through a search path.
+    if identity.qualified_name() != *sequence {
+        return Ok(None);
+    }
+    Ok(catalog.snapshot().definitions.sequences.get(&identity))
 }
+
+#[cfg(test)]
+mod tests;

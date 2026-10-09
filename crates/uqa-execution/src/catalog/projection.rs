@@ -105,20 +105,12 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgViews => build_pg_views(output, catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(output, catalog, resolution)?,
         VirtualRelation::PgType => {
-            if request.includes("typdefault") || request.includes("typdefaultbin") {
-                build_pg_type(output, catalog, resolution)?
-            } else {
-                pg_catalog::build_pg_type_without_defaults(catalog, resolution)?
-            }
+            pg_catalog::build_requested_pg_type(output, catalog, resolution, request)?
         }
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
         VirtualRelation::PgProc => {
-            if request.includes("proargdefaults") {
-                build_pg_proc(output, catalog, resolution)?
-            } else {
-                pg_proc::build_pg_proc_without_defaults(catalog, resolution)?
-            }
+            pg_proc::build_requested_pg_proc(output, catalog, resolution, request)?
         }
         VirtualRelation::PgLanguage => build_pg_language(),
         VirtualRelation::PgForeignDataWrapper => pg_catalog::foreign::wrappers(catalog)?,
@@ -385,11 +377,10 @@ use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
     build_pg_constraint, build_pg_database, build_pg_enum, build_pg_index, build_pg_indexes,
     build_pg_language, build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences,
-    build_pg_tables, build_pg_type, build_pg_user, build_pg_views,
+    build_pg_tables, build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
 pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};
-use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;
 pub use regtypes::{
     format_type_object, named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,

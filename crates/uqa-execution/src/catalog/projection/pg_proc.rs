@@ -52,20 +52,33 @@ pub fn routine_oid_in_use(
         .any(|name| stable_oid("proc", name) == oid))
 }
 
-pub fn build_pg_proc(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
-    catalog: &CatalogReadView,
-    resolution: &crate::catalog::RelationNameResolution,
-) -> Result<Vec<ResultRow>, SQLError> {
-    build_pg_proc_rows(output, catalog, resolution, true)
-}
-
 /// The `pg_proc` rows with `proargdefaults` left NULL, for the `reg*` output catalog: printing an argument default may print a `reg*` constant, whose output function reads that catalog.
 pub fn build_pg_proc_without_defaults(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    build_pg_proc_rows(None, catalog, resolution, false)
+    build_pg_proc_rows(
+        None,
+        catalog,
+        resolution,
+        false,
+        &super::CatalogRequest::default(),
+    )
+}
+
+pub(super) fn build_requested_pg_proc(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+    request: &super::CatalogRequest,
+) -> Result<Vec<ResultRow>, SQLError> {
+    build_pg_proc_rows(
+        output,
+        catalog,
+        resolution,
+        request.includes("proargdefaults"),
+        request,
+    )
 }
 
 #[expect(
@@ -77,12 +90,14 @@ fn build_pg_proc_rows(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
+    request: &super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
         .copied()
         .chain(super::builtin_routines::native_foreign_handlers())
+        .filter(|routine| request.matches_name("proname", routine.name))
         .map(|routine| {
             Ok(row([
                 ("oid", int_value(routine.oid)),
@@ -185,7 +200,10 @@ fn build_pg_proc_rows(
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    for name in registered_names() {
+    for name in registered_names()
+        .into_iter()
+        .filter(|name| request.matches_name("proname", name))
+    {
         rows.push(row([
             ("oid", int_value(stable_oid("proc", name))),
             ("proname", str_value(name)),
@@ -228,7 +246,13 @@ fn build_pg_proc_rows(
             ),
         ]));
     }
-    for function in catalog.all_sql_functions() {
+    for function in catalog
+        .snapshot()
+        .definitions
+        .sql_user_functions
+        .values()
+        .flatten()
+    {
         let def = &function.def;
         let language = language_oid(&def.language).ok_or_else(|| {
             SQLError::Internal(format!(
@@ -237,6 +261,9 @@ fn build_pg_proc_rows(
             ))
         })?;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
+        if !request.matches_name("proname", &routine_name) {
+            continue;
+        }
         let source = match &def.body {
             uqa_sql::ast::FunctionBody::Source(source) => source.clone(),
             uqa_sql::ast::FunctionBody::Statements(_) => String::new(),
@@ -338,7 +365,7 @@ fn build_pg_proc_rows(
             .unwrap_or(0);
         let return_type_oid = routine_result_type_oid(catalog, def);
         rows.push(row([
-            ("oid", int_value(user_routine_catalog_oid(&function)?)),
+            ("oid", int_value(user_routine_catalog_oid(function)?)),
             ("proname", str_value(routine_name)),
             (
                 "pronamespace",

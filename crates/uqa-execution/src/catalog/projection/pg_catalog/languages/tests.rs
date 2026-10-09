@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::catalog::{
-    projection::pg_proc::build_pg_proc, test_support::empty_catalog, CatalogReadView,
+    projection::pg_proc::build_requested_pg_proc, test_support::empty_catalog, CatalogReadView,
     RelationLookupMode, RelationNameResolution,
 };
 use std::sync::Arc;
@@ -121,21 +121,26 @@ fn user_sql_and_procedural_routines_join_the_same_language_identities() {
         lookup_mode: RelationLookupMode::Bound,
     };
     let languages = build_pg_language();
-    let mut rows = build_pg_proc(None, &catalog, &resolution)
-        .unwrap()
-        .into_iter()
-        .filter_map(|mut routine| {
-            if !matches!(routine["oid"], Value::Int(20_001 | 20_002)) {
-                return None;
-            }
-            let language = languages
-                .iter()
-                .find(|language| language["oid"] == routine["prolang"])
-                .expect("routine language exists");
-            routine.insert("lanname".into(), language["lanname"].clone());
-            Some(routine)
-        })
-        .collect::<Vec<_>>();
+    let mut rows = build_requested_pg_proc(
+        None,
+        &catalog,
+        &resolution,
+        &crate::catalog::projection::CatalogRequest::default(),
+    )
+    .unwrap()
+    .into_iter()
+    .filter_map(|mut routine| {
+        if !matches!(routine["oid"], Value::Int(20_001 | 20_002)) {
+            return None;
+        }
+        let language = languages
+            .iter()
+            .find(|language| language["oid"] == routine["prolang"])
+            .expect("routine language exists");
+        routine.insert("lanname".into(), language["lanname"].clone());
+        Some(routine)
+    })
+    .collect::<Vec<_>>();
     rows.sort_by(|left, right| left["proname"].cmp(&right["proname"]));
     assert_rows("routine_language_join", &rows);
 }

@@ -72,6 +72,7 @@ fn narrow_catalog_sources_do_not_construct_unused_expression_metadata() {
                 &[],
                 qualifier,
                 Some(&prune),
+                None,
             );
             let rows = project(&catalog, "information_schema.columns", &request);
             assert_eq!(rows.len(), 3 * (unrelated + 1));
@@ -151,8 +152,13 @@ fn catalog_field_requests_follow_source_aliases_and_whole_row_demand() {
     let mut selected = SourceProjection::default();
     selected.insert("default_value".into());
     let prune = BTreeMap::from([("c".into(), selected)]);
-    let request =
-        crate::query::source_projection::catalog_request(&columns, &aliases, "c", Some(&prune));
+    let request = crate::query::source_projection::catalog_request(
+        &columns,
+        &aliases,
+        "c",
+        Some(&prune),
+        None,
+    );
     assert!(request.includes("column_default"));
     assert!(!request.includes("generation_expression"));
     for qualifier in ["", "absent"] {
@@ -161,15 +167,26 @@ fn catalog_field_requests_follow_source_aliases_and_whole_row_demand() {
             &aliases,
             qualifier,
             Some(&prune),
+            None,
         );
         assert!(columns.iter().all(|column| request.includes(column)));
     }
     let prune = BTreeMap::from([("c".into(), SourceProjection::retaining_all())]);
-    let request =
-        crate::query::source_projection::catalog_request(&columns, &aliases, "c", Some(&prune));
+    let request = crate::query::source_projection::catalog_request(
+        &columns,
+        &aliases,
+        "c",
+        Some(&prune),
+        None,
+    );
     assert!(columns.iter().all(|column| request.includes(column)));
     let prune = BTreeMap::from([("c".into(), SourceProjection::default())]);
-    let request =
-        crate::query::source_projection::catalog_request(&columns, &aliases, "c", Some(&prune));
+    let request = crate::query::source_projection::catalog_request(
+        &columns,
+        &aliases,
+        "c",
+        Some(&prune),
+        None,
+    );
     assert!(columns.iter().all(|column| !request.includes(column)));
 }
