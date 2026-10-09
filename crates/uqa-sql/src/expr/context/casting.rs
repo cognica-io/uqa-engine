@@ -196,7 +196,7 @@ fn output_for_cast<'a>(
 }
 
 /// Array output borrows the input and retains both intermediate labels and final text under the caller's production budget.
-fn enum_array_output(
+fn catalog_array_output(
     value: &Value,
     source_ty: Option<&str>,
     target_ty: &str,
@@ -206,10 +206,25 @@ fn enum_array_output(
 ) -> Result<Option<Produced<Value>>> {
     if !matches!(value, Value::Array(_))
         || !is_string_type(target)
-        || !super::super::enums::contains_enum_carrier(value)
+        || !(super::super::enums::contains_enum_carrier(value)
+            || super::super::datums::contains_datum(value))
     {
         return Ok(None);
     }
+    let actual_source;
+    let source_ty = if let Value::Array(array) = value {
+        actual_source = array
+            .element_type_oid()
+            .map(|oid| engine.resolve_type_oid(oid))
+            .transpose()
+            .map_err(SQLError::Internal)?
+            .flatten()
+            .map(|element| control.copy_text(&ColumnType::Array(Box::new(element)).catalog_name()))
+            .transpose()?;
+        actual_source.as_deref().map(String::as_str).or(source_ty)
+    } else {
+        source_ty
+    };
     let text_array = ColumnType::Array(Box::new(ColumnType::Text));
     let labels = cast_catalog_array(value, source_ty, &text_array, engine, control)?;
     cast_value_from_with_control(&labels, target_ty, Some("text[]"), control).map(Some)
@@ -297,7 +312,7 @@ pub fn cast_value_with_type_resolution_with_control(
             return Ok(control.retain_external_value(value)?);
         }
         if let Some(output) =
-            enum_array_output(value, source_ty, target_ty, target, engine, control)?
+            catalog_array_output(value, source_ty, target_ty, target, engine, control)?
         {
             return Ok(output);
         }

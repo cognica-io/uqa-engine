@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE decode_enum AS ENUM ('first','last'); ALTER TYPE decode_enum ADD VALUE 'middle' BEFORE 'last'; CREATE DOMAIN decode_domain AS integer CHECK (VALUE>0); CREATE TYPE decode_record AS (n integer,t text)"
+    },
+    {
+      "id": "enum_source",
+      "sql": "CREATE TYPE decode_enum_source AS (a decode_enum[]); CREATE VIEW decode_enum_bytes AS SELECT '(\"{middle,NULL,last}\")'::decode_enum_source AS v; ALTER TYPE decode_enum_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE decode_enum_target AS (a bytea)"
+    },
+    {
+      "id": "enum_physical",
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM decode_enum_bytes; EXECUTE format('CREATE VIEW decode_enum_value AS SELECT %L::decode_enum_target AS v',r); END $$; ALTER TYPE decode_enum_target ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "enum_shape",
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM decode_enum_value"
+    },
+    {
+      "id": "enum_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_enum_value"
+    },
+    {
+      "id": "enum_direct",
+      "sql": "SELECT (v).a AS value FROM decode_enum_value"
+    },
+    {
+      "id": "enum_equal",
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM decode_enum_value"
+    },
+    {
+      "id": "enum_cardinality",
+      "sql": "SELECT cardinality((v).a) AS n,array_lower((v).a,1) AS lo FROM decode_enum_value"
+    },
+    {
+      "id": "enum_dimensions",
+      "sql": "SELECT array_dims((v).a) AS dims,array_ndims((v).a) AS ndims,array_length((v).a,1) AS n,array_upper((v).a,1) AS hi FROM decode_enum_value"
+    },
+    {
+      "id": "enum_order",
+      "sql": "SELECT ((v).a<(v).a)::text AS lt,((v).a>(v).a)::text AS gt,((v).a<=(v).a)::text AS le FROM decode_enum_value"
+    },
+    {
+      "id": "enum_distinct",
+      "sql": "SELECT count(DISTINCT a) AS n FROM (SELECT (v).a AS a FROM decode_enum_value UNION ALL SELECT (v).a FROM decode_enum_value) s"
+    },
+    {
+      "id": "enum_group",
+      "sql": "SELECT count(*) AS n FROM (SELECT (v).a AS a FROM decode_enum_value UNION ALL SELECT (v).a FROM decode_enum_value) s GROUP BY a"
+    },
+    {
+      "id": "enum_rename",
+      "sql": "ALTER TYPE decode_enum RENAME VALUE 'middle' TO 'center'"
+    },
+    {
+      "id": "enum_renamed_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_enum_value"
+    },
+    {
+      "id": "enum_cleanup",
+      "sql": "DROP VIEW decode_enum_value,decode_enum_bytes; DROP TYPE decode_enum_target,decode_enum_source"
+    },
+    {
+      "id": "domain_source",
+      "sql": "CREATE TYPE decode_domain_source AS (a decode_domain[]); CREATE VIEW decode_domain_bytes AS SELECT '(\"{1,NULL,7}\")'::decode_domain_source AS v; ALTER TYPE decode_domain_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE decode_domain_target AS (a bytea)"
+    },
+    {
+      "id": "domain_physical",
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM decode_domain_bytes; EXECUTE format('CREATE VIEW decode_domain_value AS SELECT %L::decode_domain_target AS v',r); END $$; ALTER TYPE decode_domain_target ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "domain_shape",
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM decode_domain_value"
+    },
+    {
+      "id": "domain_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_domain_value"
+    },
+    {
+      "id": "domain_direct",
+      "sql": "SELECT (v).a AS value FROM decode_domain_value"
+    },
+    {
+      "id": "domain_equal",
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM decode_domain_value"
+    },
+    {
+      "id": "domain_cardinality",
+      "sql": "SELECT cardinality((v).a) AS n,array_lower((v).a,1) AS lo FROM decode_domain_value"
+    },
+    {
+      "id": "domain_dimensions",
+      "sql": "SELECT array_dims((v).a) AS dims,array_ndims((v).a) AS ndims,array_length((v).a,1) AS n,array_upper((v).a,1) AS hi FROM decode_domain_value"
+    },
+    {
+      "id": "domain_order",
+      "sql": "SELECT ((v).a<(v).a)::text AS lt,((v).a>(v).a)::text AS gt,((v).a<=(v).a)::text AS le FROM decode_domain_value"
+    },
+    {
+      "id": "domain_distinct",
+      "sql": "SELECT count(DISTINCT a) AS n FROM (SELECT (v).a AS a FROM decode_domain_value UNION ALL SELECT (v).a FROM decode_domain_value) s"
+    },
+    {
+      "id": "domain_group",
+      "sql": "SELECT count(*) AS n FROM (SELECT (v).a AS a FROM decode_domain_value UNION ALL SELECT (v).a FROM decode_domain_value) s GROUP BY a"
+    },
+    {
+      "id": "domain_constraint",
+      "sql": "ALTER DOMAIN decode_domain ADD CONSTRAINT new_value CHECK (VALUE>10)"
+    },
+    {
+      "id": "domain_admitted_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_domain_value"
+    },
+    {
+      "id": "domain_cleanup",
+      "sql": "DROP VIEW decode_domain_value,decode_domain_bytes; DROP TYPE decode_domain_target,decode_domain_source"
+    },
+    {
+      "id": "record_source",
+      "sql": "CREATE TYPE decode_record_source AS (a decode_record[]); CREATE VIEW decode_record_bytes AS SELECT '(\"{\\\"(1,one)\\\",NULL,\\\"(2,two)\\\"}\")'::decode_record_source AS v; ALTER TYPE decode_record_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE decode_record_target AS (a bytea)"
+    },
+    {
+      "id": "record_physical",
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM decode_record_bytes; EXECUTE format('CREATE VIEW decode_record_value AS SELECT %L::decode_record_target AS v',r); END $$; ALTER TYPE decode_record_target ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "record_shape",
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM decode_record_value"
+    },
+    {
+      "id": "record_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_record_value"
+    },
+    {
+      "id": "record_direct",
+      "sql": "SELECT (v).a AS value FROM decode_record_value"
+    },
+    {
+      "id": "record_equal",
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM decode_record_value"
+    },
+    {
+      "id": "record_cardinality",
+      "sql": "SELECT cardinality((v).a) AS n,array_lower((v).a,1) AS lo FROM decode_record_value"
+    },
+    {
+      "id": "record_dimensions",
+      "sql": "SELECT array_dims((v).a) AS dims,array_ndims((v).a) AS ndims,array_length((v).a,1) AS n,array_upper((v).a,1) AS hi FROM decode_record_value"
+    },
+    {
+      "id": "record_order",
+      "sql": "SELECT ((v).a<(v).a)::text AS lt,((v).a>(v).a)::text AS gt,((v).a<=(v).a)::text AS le FROM decode_record_value"
+    },
+    {
+      "id": "record_distinct",
+      "sql": "SELECT count(DISTINCT a) AS n FROM (SELECT (v).a AS a FROM decode_record_value UNION ALL SELECT (v).a FROM decode_record_value) s"
+    },
+    {
+      "id": "record_group",
+      "sql": "SELECT count(*) AS n FROM (SELECT (v).a AS a FROM decode_record_value UNION ALL SELECT (v).a FROM decode_record_value) s GROUP BY a"
+    },
+    {
+      "id": "record_descriptor_change",
+      "sql": "ALTER TYPE decode_record RENAME ATTRIBUTE t TO word; ALTER TYPE decode_record ADD ATTRIBUTE extra integer"
+    },
+    {
+      "id": "record_current_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_record_value"
+    },
+    {
+      "id": "record_current_direct",
+      "sql": "SELECT (v).a AS value FROM decode_record_value"
+    },
+    {
+      "id": "record_drop_attribute",
+      "sql": "ALTER TYPE decode_record DROP ATTRIBUTE n"
+    },
+    {
+      "id": "record_dropped_output",
+      "sql": "SELECT (v).a::text AS value FROM decode_record_value"
+    },
+    {
+      "id": "record_cleanup",
+      "sql": "DROP VIEW decode_record_value,decode_record_bytes; DROP TYPE decode_record_target,decode_record_source"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP TYPE decode_record; DROP DOMAIN decode_domain; DROP TYPE decode_enum"
+    }
+  ]
+}

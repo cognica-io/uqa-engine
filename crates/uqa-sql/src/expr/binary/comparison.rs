@@ -128,7 +128,7 @@ fn values_equal_nullable_with_catalog(
         (Value::Null, _) | (_, Value::Null) => None,
         (Value::Datum(datum), _) => {
             return values_equal_nullable_with_catalog(
-                &*super::super::datums::read_with_control(datum, control)?,
+                &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
                 b,
                 control,
                 enums,
@@ -137,7 +137,7 @@ fn values_equal_nullable_with_catalog(
         (_, Value::Datum(datum)) => {
             return values_equal_nullable_with_catalog(
                 a,
-                &*super::super::datums::read_with_control(datum, control)?,
+                &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
                 control,
                 enums,
             )
@@ -220,7 +220,7 @@ fn compare_nullable_with_catalog(
     match (a, b) {
         (Value::Null, _) | (_, Value::Null) => Ok(None),
         (Value::Datum(datum), _) => compare_nullable_with_catalog(
-            &*super::super::datums::read_with_control(datum, control)?,
+            &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
             b,
             control,
             enums,
@@ -228,7 +228,7 @@ fn compare_nullable_with_catalog(
         ),
         (_, Value::Datum(datum)) => compare_nullable_with_catalog(
             a,
-            &*super::super::datums::read_with_control(datum, control)?,
+            &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
             control,
             enums,
             state,
@@ -425,7 +425,7 @@ fn compare_typed_values_for_purpose(
     match (left, right) {
         (Value::Datum(datum), _) => {
             return compare_typed_values_for_purpose(
-                &*super::super::datums::read_with_control(datum, control)?,
+                &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
                 right,
                 control,
                 enums,
@@ -435,7 +435,7 @@ fn compare_typed_values_for_purpose(
         (_, Value::Datum(datum)) => {
             return compare_typed_values_for_purpose(
                 left,
-                &*super::super::datums::read_with_control(datum, control)?,
+                &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
                 control,
                 enums,
                 enum_order,
@@ -588,7 +588,7 @@ fn equal_values(
     }
     match (left, right) {
         (Value::Datum(datum), _) => equal_values(
-            &*super::super::datums::read_with_control(datum, control)?,
+            &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
             right,
             control,
             enums,
@@ -596,7 +596,7 @@ fn equal_values(
         ),
         (_, Value::Datum(datum)) => equal_values(
             left,
-            &*super::super::datums::read_with_control(datum, control)?,
+            &*super::super::datums::read_with_value_catalog_and_control(datum, enums, control)?,
             control,
             enums,
             typed,

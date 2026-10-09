@@ -7,6 +7,7 @@
 //! Host-facing results observe deferred physical datums and carry enums as their current labels, through SQL's type-output owners.
 
 use super::SQLResult;
+use crate::expr::datums::contains_datum;
 use crate::expr::enums::{contains_enum_carrier, render_enum_labels, EnumLabelCatalog};
 use crate::SQLError;
 use uqa_core::Value;
@@ -39,27 +40,16 @@ pub fn render_result_enum_labels(
     Ok(())
 }
 
-fn contains_datum(value: &Value) -> bool {
-    match value {
-        Value::Datum(_) => true,
-        Value::Array(array) => array.elements().iter().any(contains_datum),
-        Value::List(values) => values.iter().any(contains_datum),
-        Value::Row(values) => values.iter().any(contains_datum),
-        Value::Record(fields) => fields.iter().any(|(_, value)| contains_datum(value)),
-        Value::Map(values) => values.values().any(contains_datum),
-        _ => false,
-    }
-}
-
 fn read_datums(value: &Value, catalog: Option<&dyn EnumLabelCatalog>) -> Result<Value, SQLError> {
     Ok(match value {
-        Value::Datum(datum) => crate::expr::datums::read_with_enum_catalog_and_control(
-            datum,
+        Value::Datum(datum) => read_datums(
+            &*crate::expr::datums::read_with_value_catalog_and_control(
+                datum,
+                catalog,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?,
             catalog,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?
-        .into_uncontrolled()
-        .expect("ordinary result datum output"),
+        )?,
         Value::Array(array) => Value::Array(
             uqa_core::ArrayValue::with_lower_bounds(
                 array

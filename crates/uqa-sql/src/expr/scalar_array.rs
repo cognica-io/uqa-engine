@@ -121,17 +121,25 @@ fn require_arity(name: &str, args: &[Value], count: usize) -> Result<()> {
 
 fn dimensions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     require_arity("array_dims", args, 1)?;
-    let array = match &args[0] {
+    let physical;
+    let (dimensions, bounds) = match &args[0] {
         Value::Null => return inline(Value::Null, control),
-        Value::Array(array) => array,
-        Value::LegacyVector(vector) => vector.as_array(),
+        Value::Datum(datum) => {
+            physical = super::datums::array_shape(datum, control)?;
+            (physical.dimensions(), physical.lower_bounds())
+        }
+        Value::Array(array) => (array.dimensions(), array.lower_bounds()),
+        Value::LegacyVector(vector) => (
+            vector.as_array().dimensions(),
+            vector.as_array().lower_bounds(),
+        ),
         other => return Err(not_an_array("array_dims", other)),
     };
-    if array.dimensions().is_empty() {
+    if dimensions.is_empty() {
         return inline(Value::Null, control);
     }
     let mut output = ProductionString::new(*control);
-    for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
+    for (lower, length) in bounds.iter().zip(dimensions) {
         let length = i64::try_from(*length).map_err(|_| out_of_range("array dimension"))?;
         output.push_str(
             &control.format(format_args!("[{lower}:{}]", i64::from(*lower) + length - 1))?,

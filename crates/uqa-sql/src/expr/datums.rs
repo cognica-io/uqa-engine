@@ -16,6 +16,29 @@ mod arrays;
 mod compression;
 mod fixed;
 mod malformed;
+mod records;
+
+pub(crate) fn contains_datum(value: &Value) -> bool {
+    match value {
+        Value::Datum(_) => true,
+        Value::Array(array) => array.elements().iter().any(contains_datum),
+        Value::List(values) => values.iter().any(contains_datum),
+        Value::Row(values) => values.iter().any(contains_datum),
+        Value::Record(fields) => fields.iter().any(|(_, value)| contains_datum(value)),
+        Value::Map(values) => values.values().any(contains_datum),
+        _ => false,
+    }
+}
+
+/// Shape functions inspect only the detoasted array header, without resolving or observing its elements.
+pub(in crate::expr) fn array_shape(
+    datum: &DatumValue,
+    control: &ProductionControl<'_>,
+) -> Result<arrays::ArrayShape, SQLError> {
+    control.check()?;
+    let payload = payload(datum, control)?;
+    arrays::ArrayShape::read(payload.bytes())
+}
 
 #[cfg(test)]
 mod tests;
@@ -79,16 +102,20 @@ pub fn read_with_catalog_and_control(
     engine: Option<&dyn super::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    read_with_enum_catalog_and_control(
+    let catalog = engine.map(super::value_catalog::EngineValueCatalog);
+    read_with_value_catalog_and_control(
         datum,
-        engine.and_then(super::EngineHook::enum_labels),
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn super::SQLValueCatalog),
         control,
     )
 }
 
-pub(crate) fn read_with_enum_catalog_and_control(
+/// Decode a reached value through the same borrowed catalog used by SQL comparison, hashing and output.
+pub fn read_with_value_catalog_and_control(
     datum: &DatumValue,
-    enums: Option<&dyn super::enums::EnumLabelCatalog>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
@@ -98,7 +125,7 @@ pub(crate) fn read_with_enum_catalog_and_control(
     if crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()).is_none()
         && crate::catalog::type_metadata::builtin_array_element(datum.type_oid()).is_none()
     {
-        if let Some(enums) = enums {
+        if let Some(enums) = catalog {
             if enums.enum_type_labels(datum.type_oid())?.is_some() {
                 let oid = enum_label_oid(datum)?;
                 return Ok(
@@ -111,7 +138,7 @@ pub(crate) fn read_with_enum_catalog_and_control(
         }
     }
     let payload = payload(datum, control)?;
-    read_payload(datum.type_oid(), payload.bytes(), control)
+    read_payload(datum.type_oid(), payload.bytes(), catalog, control)
 }
 
 /// Read the fixed-width OID after the caller has selected an enum operation.
@@ -158,10 +185,32 @@ pub(super) fn compare_jsonb_with_control(
 fn read_payload(
     oid: u32,
     bytes: &[u8],
+    catalog: Option<&dyn super::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     if crate::catalog::type_metadata::builtin_array_element(oid).is_some() {
-        return arrays::read(bytes, control);
+        return arrays::read(bytes, catalog, control);
+    }
+    if crate::catalog::type_metadata::builtin_scalar_type(oid).is_none() {
+        if let Some(ty) = catalog
+            .map(|catalog| catalog.value_type_by_oid(oid))
+            .transpose()?
+            .flatten()
+        {
+            match ty {
+                crate::ColumnType::Array(_) => return arrays::read(bytes, catalog, control),
+                crate::ColumnType::Composite(_) => return records::read(bytes, catalog, control),
+                crate::ColumnType::Domain { base, .. } => {
+                    return read_payload(
+                        crate::catalog::type_metadata::pg_type_oid(&base) as u32,
+                        bytes,
+                        catalog,
+                        control,
+                    )
+                }
+                _ => {}
+            }
+        }
     }
     match oid {
         17 => {

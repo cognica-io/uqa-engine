@@ -71,35 +71,8 @@ impl EnumTypeLabels {
     }
 }
 
-/// Catalog access for enum label input and output, supplied by the statement's execution context and by catalog-aware binding.
-pub trait EnumLabelCatalog {
-    /// The session's comparison support functions, shared by declared type across nested array and record calls. Pure catalog readers do not own runtime state.
-    fn enum_type_comparison_states(&self) -> Option<&EnumTypeComparisonStates> {
-        None
-    }
-
-    /// The labels of one enum type in the statement's catalog generation, or `None` when the catalog has no such type.
-    fn enum_type_labels(&self, type_oid: u32) -> Result<Option<Arc<EnumTypeLabels>>>;
-
-    /// Resolve an already admitted physical label OID across enum types. Output uses the label's actual identity even if a retained tuple now declares another enum type; it does not repeat input safety checks.
-    fn enum_value_by_oid(&self, _label_oid: u32) -> Result<Option<EnumValue>> {
-        Ok(None)
-    }
-
-    /// The actual enum type and zero-based label position of an admitted physical OID in this generation. Positions have declaration/key order and avoid copying label keys for comparison.
-    fn enum_label_position(&self, _label_oid: u32) -> Result<Option<(u32, usize)>> {
-        Ok(None)
-    }
-
-    /// Whether the current transaction added this label to a type that it did not create. `PostgreSQL` rejects such a label until the transaction commits.
-    fn enum_label_uncommitted(&self, label_oid: u32) -> bool;
-
-    /// `format_type_be` of the type, which qualifies a type hidden by the search path.
-    fn enum_type_name(&self, type_oid: u32) -> Result<Option<String>>;
-
-    /// Whether the statement catalog defines any enum type; binding skips enum literal validation otherwise.
-    fn has_enum_types(&self) -> bool;
-}
+/// The enum-facing name of the shared SQL value catalog.
+pub use super::SQLValueCatalog as EnumLabelCatalog;
 
 pub(crate) fn enum_value_from_oid(
     catalog: Option<&dyn EnumLabelCatalog>,

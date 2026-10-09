@@ -14,29 +14,72 @@ use crate::catalog::type_metadata::{
 };
 use uqa_core::ArrayValue;
 
+pub(crate) struct ArrayShape {
+    dimensions: [usize; 6],
+    bounds: [i32; 6],
+    count: usize,
+}
+
+impl ArrayShape {
+    pub(super) fn read(bytes: &[u8]) -> Result<Self, SQLError> {
+        let count = integer(bytes, 0)?;
+        if !(0..=6).contains(&count) {
+            return Err(corrupt("invalid array dimensions"));
+        }
+        let count = count as usize;
+        let mut shape = Self {
+            dimensions: [0; 6],
+            bounds: [0; 6],
+            count,
+        };
+        for index in 0..count {
+            shape.dimensions[index] = usize::try_from(integer(bytes, 12 + index * 4)?)
+                .map_err(|_| corrupt("invalid array dimensions"))?;
+            shape.bounds[index] = integer(bytes, 12 + count * 4 + index * 4)?;
+        }
+        Ok(shape)
+    }
+
+    pub(crate) fn dimensions(&self) -> &[usize] {
+        &self.dimensions[..self.count]
+    }
+    pub(crate) fn lower_bounds(&self) -> &[i32] {
+        &self.bounds[..self.count]
+    }
+}
+
 pub(super) fn read(
     bytes: &[u8],
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let ndim = integer(bytes, 0)?;
-    if !(0..=6).contains(&ndim) {
-        return Err(corrupt("invalid array dimensions"));
-    }
-    let ndim = ndim as usize;
+    let shape = ArrayShape::read(bytes)?;
+    let dimensions = shape.dimensions();
+    let ndim = dimensions.len();
     let dataoffset = integer(bytes, 4)?;
     let oid = integer(bytes, 8)? as u32;
-    let element = builtin_scalar_type(oid)
-        .ok_or_else(|| SQLError::Internal(format!("cache lookup failed for type {oid}")))?;
-    let mut dimensions = [0_usize; 6];
+    let resolved;
+    let element = if let Some(element) = builtin_scalar_type(oid) {
+        element
+    } else {
+        resolved = catalog
+            .map(|catalog| catalog.value_type_by_oid(oid))
+            .transpose()?
+            .flatten()
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: format!("cache lookup failed for type {oid}"),
+            })?
+            .retain_external_with_control(control)?;
+        &resolved
+    };
     let mut bounds = ProductionVec::new(*control);
     let mut count = usize::from(ndim != 0);
-    for (index, dimension) in dimensions[..ndim].iter_mut().enumerate() {
-        *dimension = usize::try_from(integer(bytes, 12 + index * 4)?)
-            .map_err(|_| corrupt("invalid array dimensions"))?;
+    for (dimension, bound) in dimensions.iter().zip(shape.lower_bounds()) {
         count = count
             .checked_mul(*dimension)
             .ok_or_else(|| corrupt("invalid array dimensions"))?;
-        bounds.push_copy(integer(bytes, 12 + ndim * 4 + index * 4)?)?;
+        bounds.push_copy(*bound)?;
     }
     let bitmap_start = 12 + ndim * 8;
     let bitmap = if dataoffset == 0 {
@@ -66,11 +109,11 @@ pub(super) fn read(
         bitmap,
         index: 0,
         offset,
-        oid,
         element,
+        catalog,
         control: *control,
     };
-    let values = reader.dimension(&dimensions[..ndim])?;
+    let values = reader.dimension(dimensions)?;
     let array = ArrayValue::with_lower_bounds_with_control(values, bounds.finish()?, control)?
         .ok_or_else(|| corrupt("invalid array dimensions"))?;
     let (array, memory) = array.into_parts();
@@ -82,8 +125,8 @@ struct Elements<'a, 'c> {
     bitmap: Option<&'a [u8]>,
     index: usize,
     offset: usize,
-    oid: u32,
-    element: &'static crate::ColumnType,
+    element: &'a crate::ColumnType,
+    catalog: Option<&'a dyn crate::expr::SQLValueCatalog>,
     control: ProductionControl<'c>,
 }
 
@@ -137,7 +180,7 @@ impl Elements<'_, '_> {
                 .filter(|_| header.trailing_zeros() >= 2)
                 .ok_or_else(|| corrupt("invalid array element length"))?;
             self.offset += length;
-            read_payload(self.oid, payload, &self.control)?
+            read_payload(base_oid(self.element), payload, self.catalog, &self.control)?
         } else {
             let length =
                 usize::try_from(length).map_err(|_| corrupt("invalid array element length"))?;
@@ -155,7 +198,7 @@ impl Elements<'_, '_> {
                 .ok_or_else(|| corrupt("invalid array element datum"))?;
                 self.control.copy_value(&value)?
             } else {
-                fixed::read_bytes(self.oid, bytes, &self.control)?
+                fixed::read_bytes(base_oid(self.element), bytes, &self.control)?
             }
         };
         Ok(value)
@@ -168,7 +211,7 @@ fn integer(bytes: &[u8], offset: usize) -> Result<i32, SQLError> {
         .ok_or_else(|| corrupt("invalid array header"))
 }
 
-fn align(offset: usize, alignment: u8) -> Result<usize, SQLError> {
+pub(super) fn align(offset: usize, alignment: u8) -> Result<usize, SQLError> {
     let mask = match alignment {
         b'c' => 0,
         b's' => 1,
@@ -180,4 +223,11 @@ fn align(offset: usize, alignment: u8) -> Result<usize, SQLError> {
         .checked_add(mask)
         .map(|value| value & !mask)
         .ok_or_else(|| corrupt("invalid array length"))
+}
+
+fn base_oid(mut ty: &crate::ColumnType) -> u32 {
+    while let crate::ColumnType::Domain { base, .. } = ty {
+        ty = base;
+    }
+    crate::catalog::type_metadata::pg_type_oid(ty) as u32
 }

@@ -4,15 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! By-reference fixed-width outputs borrow the retained tuple and reuse their SQL codecs.
+//! Fixed-width outputs borrow the retained tuple and reuse their SQL scalar codecs.
 
 use super::{corrupt, DatumValue, Produced, ProductionControl, SQLError, Value};
+use crate::catalog::type_metadata::{builtin_scalar_type, pg_type_by_value, pg_type_len};
 
 pub(super) fn read(
     datum: &DatumValue,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>, SQLError>> {
-    matches!(datum.type_oid(), 19 | 1186 | 1266 | 2950).then(|| decode(datum, control))
+    (matches!(datum.type_oid(), 19 | 1186 | 1266 | 2950)
+        || builtin_scalar_type(datum.type_oid()).is_some_and(pg_type_by_value))
+    .then(|| decode(datum, control))
 }
 
 fn decode(
@@ -31,6 +34,22 @@ pub(super) fn read_bytes(
     bytes: &[u8],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    if let Some(ty) = builtin_scalar_type(oid).filter(|ty| pg_type_by_value(ty)) {
+        let length = usize::try_from(pg_type_len(ty))
+            .ok()
+            .filter(|length| *length <= 8)
+            .ok_or_else(|| corrupt("invalid fixed datum width"))?;
+        let bytes = bytes
+            .get(..length)
+            .ok_or_else(|| corrupt("invalid datum length"))?;
+        let mut bits = [0; 8];
+        bits[..length].copy_from_slice(bytes);
+        let value = crate::expr::composites::datum::decode_bits(u64::from_le_bytes(bits), ty)
+            .ok_or_else(|| {
+                SQLError::Unsupported(format!("physical fixed datum output for type OID {oid}"))
+            })?;
+        return Ok(control.copy_value(&value)?);
+    }
     if oid == 19 {
         let end = bytes
             .iter()

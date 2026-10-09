@@ -67,7 +67,9 @@ mod scalar_temporal;
 mod session_settings;
 mod session_sleep;
 mod temporal_input;
+mod value_catalog;
 pub mod variadic_any;
+pub use value_catalog::SQLValueCatalog;
 
 #[cfg(test)]
 use binary::eval_comparison_op;

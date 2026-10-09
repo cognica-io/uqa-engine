@@ -4,86 +4,67 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    not_an_array, out_of_range, to_i64_with_control, ProductionControl, Result, SQLError, Value,
-};
+use super::{not_an_array, out_of_range, to_i64_with_control, ProductionControl, Result, Value};
 
 pub(super) fn evaluate(
     name: &str,
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
+    let arity = if matches!(name, "array_length" | "array_upper" | "array_lower") {
+        2
+    } else {
+        1
+    };
+    super::require_arity(name, args, arity)?;
+    if args.iter().any(|value| matches!(value, Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let physical;
+    let (dimensions, bounds) = if let Value::Datum(datum) = &args[0] {
+        physical = super::super::datums::array_shape(datum, control)?;
+        (physical.dimensions(), physical.lower_bounds())
+    } else {
+        let array = args[0]
+            .array_view()
+            .ok_or_else(|| not_an_array(name, &args[0]))?;
+        (array.dimensions(), array.lower_bounds())
+    };
     match name {
         "array_length" | "array_upper" | "array_lower" => {
-            if args.len() != 2 {
-                return Err(SQLError::TypeMismatch(format!("{name} takes 2 args")));
-            }
-            let array = match &args[0] {
-                Value::Array(array) => array,
-                Value::LegacyVector(vector) => vector.as_array(),
-                Value::Null => return Ok(Value::Null),
-                other => return Err(not_an_array(name, other)),
-            };
-            if matches!(args[1], Value::Null) {
-                return Ok(Value::Null);
-            }
             let Some(dimension) = dimension_index(&args[1], control)? else {
                 return Ok(Value::Null);
             };
-            let Some(length) = array.dimensions().get(dimension) else {
+            let Some(length) = dimensions.get(dimension) else {
                 return Ok(Value::Null);
             };
-            match name {
-                "array_length" => i64::try_from(*length)
-                    .map(Value::Int)
-                    .map_err(|_| out_of_range("array length")),
-                "array_lower" => array
-                    .lower_bound(dimension)
-                    .map(|bound| Value::Int(i64::from(bound)))
-                    .ok_or_else(|| SQLError::TypeMismatch("invalid array dimensions".into())),
-                "array_upper" => Ok(array
-                    .upper_bound(dimension)
-                    .map(Value::Int)
-                    .unwrap_or(Value::Null)),
-                _ => unreachable!(),
-            }
+            let length = i64::try_from(*length).map_err(|_| out_of_range("array length"))?;
+            let lower = i64::from(bounds[dimension]);
+            Ok(Value::Int(match name {
+                "array_length" => length,
+                "array_lower" => lower,
+                _ => lower
+                    .checked_add(length)
+                    .and_then(|upper| upper.checked_sub(1))
+                    .ok_or_else(|| out_of_range("array upper bound"))?,
+            }))
         }
-        "array_ndims" => {
-            if args.len() != 1 {
-                return Err(SQLError::TypeMismatch("array_ndims takes 1 arg".into()));
-            }
-            match args[0].array_view() {
-                Some(array) if array.dimensions().is_empty() => Ok(Value::Null),
-                Some(array) => i64::try_from(array.dimensions().len())
-                    .map(Value::Int)
-                    .map_err(|_| out_of_range("array dimensions")),
-                None if matches!(args[0], Value::Null) => Ok(Value::Null),
-                None => Err(not_an_array("array_ndims", &args[0])),
-            }
-        }
-        "cardinality" => {
-            if args.len() != 1 {
-                return Err(SQLError::TypeMismatch("cardinality takes 1 arg".into()));
-            }
-            match args[0].array_view() {
-                Some(array) => {
-                    let cardinality = array.dimensions().iter().try_fold(
-                        i64::from(!array.dimensions().is_empty()),
-                        |total, length| {
-                            control.check()?;
-                            let length = i64::try_from(*length)
-                                .map_err(|_| out_of_range("array cardinality"))?;
-                            total
-                                .checked_mul(length)
-                                .ok_or_else(|| out_of_range("array cardinality"))
-                        },
-                    )?;
-                    Ok(Value::Int(cardinality))
-                }
-                None if matches!(args[0], Value::Null) => Ok(Value::Null),
-                None => Err(not_an_array("cardinality", &args[0])),
-            }
-        }
+        "array_ndims" => Ok(if dimensions.is_empty() {
+            Value::Null
+        } else {
+            Value::Int(dimensions.len() as i64)
+        }),
+        "cardinality" => dimensions
+            .iter()
+            .try_fold(i64::from(!dimensions.is_empty()), |total, length| {
+                control.check()?;
+                let length =
+                    i64::try_from(*length).map_err(|_| out_of_range("array cardinality"))?;
+                total
+                    .checked_mul(length)
+                    .ok_or_else(|| out_of_range("array cardinality"))
+            })
+            .map(Value::Int),
         _ => unreachable!("scalar array property"),
     }
 }

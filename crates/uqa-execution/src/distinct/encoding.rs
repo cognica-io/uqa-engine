@@ -326,7 +326,12 @@ fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
     match value {
         Value::Datum(datum) => {
             if output.invokes_sql_hash_operator() {
-                return encode_value(&uqa_sql::expr::datums::read(datum)?, output);
+                let value = uqa_sql::expr::datums::read_with_value_catalog_and_control(
+                    datum,
+                    output.enum_catalog(),
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )?;
+                return encode_value(&value, output);
             }
             output.push_byte(16)?;
             output.extend_bytes(&datum.type_oid().to_be_bytes())?;

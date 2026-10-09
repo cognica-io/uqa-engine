@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod catalog_arrays;
+
 #[test]
 fn constant_field_copy_observes_compression_before_scalar_consumers() {
     let malformed = Value::Datum(DatumValue::new(17, 0, vec![2, 0, 0, 0, 3, 0, 0, 0]));
