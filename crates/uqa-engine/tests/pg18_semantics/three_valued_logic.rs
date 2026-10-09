@@ -134,6 +134,38 @@ fn between_three_valued() {
 }
 
 #[test]
+fn between_keeps_postgresql_volatile_evaluation_and_short_circuiting() {
+    let eng = engine();
+    eng.sql("CREATE SEQUENCE comparison_eval_probe", &[])
+        .unwrap();
+    // Independently observed with PostgreSQL 18.4 in Docker. Each comparison
+    // evaluates the value again; a false lower comparison skips the upper one.
+    // The planner removes a strict comparison with a constant NULL bound.
+    for (bounds, expected, calls) in [
+        ("0 AND 10", Value::Bool(true), 2),
+        ("3 AND 10", Value::Bool(false), 1),
+        ("NULL AND 0", Value::Bool(false), 1),
+        ("0 AND NULL", Value::Null, 1),
+        ("SYMMETRIC 5 AND 1", Value::Bool(true), 3),
+    ] {
+        eng.sql("SELECT setval('comparison_eval_probe', 1, false)", &[])
+            .unwrap();
+        assert_eq!(
+            scalar(
+                &eng,
+                &format!("SELECT nextval('comparison_eval_probe') BETWEEN {bounds}")
+            ),
+            expected,
+            "{bounds}"
+        );
+        assert_eq!(
+            scalar(&eng, "SELECT currval('comparison_eval_probe')"),
+            Value::Int(calls)
+        );
+    }
+}
+
+#[test]
 fn case_when_null_not_taken() {
     let eng = engine();
     assert_eq!(

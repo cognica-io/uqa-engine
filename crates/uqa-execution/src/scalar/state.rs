@@ -12,6 +12,11 @@ use uqa_sql::{
     ScalarExpr,
 };
 
+#[cfg(test)]
+thread_local! {
+    static COMPARISON_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Read-only lookup into the function state owned by a prepared expression set.
 /// The state has one fixed-size entry per logical ordering comparison, never per input row.
 #[derive(Debug, Default)]
@@ -64,6 +69,8 @@ impl FunctionCallStates {
     }
 
     pub(crate) fn enum_binary_comparison(&self, left: &ScalarExpr) -> Option<&EnumComparisonState> {
+        #[cfg(test)]
+        COMPARISON_LOOKUPS.with(|count| count.set(count.get() + 1));
         self.enums
             .binary_search_by_key(&(std::ptr::from_ref(left) as usize, 0), |(key, _)| *key)
             .ok()

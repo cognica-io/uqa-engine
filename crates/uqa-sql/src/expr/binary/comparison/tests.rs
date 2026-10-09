@@ -8,6 +8,120 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue, TemporalValue};
 
 #[test]
+fn primitive_comparisons_preserve_results_without_resolving_call_state() {
+    let operators = [
+        BinaryOp::Equal,
+        BinaryOp::NotEqual,
+        BinaryOp::Less,
+        BinaryOp::LessEqual,
+        BinaryOp::Greater,
+        BinaryOp::GreaterEqual,
+    ];
+    let pairs = [
+        (Value::Int(i64::MIN), Value::Int(i64::MAX)),
+        (Value::Int(0), Value::Int(0)),
+        (Value::Int(2), Value::Int(-1)),
+        (Value::Float(f64::NAN), Value::Float(f64::NAN)),
+        (Value::Float(f64::NAN), Value::Float(f64::INFINITY)),
+        (Value::Float(f64::NEG_INFINITY), Value::Float(1.5)),
+        (Value::Float(-0.0), Value::Float(0.0)),
+        (Value::Bool(false), Value::Bool(true)),
+        (Value::Bool(true), Value::Bool(true)),
+        (Value::Null, Value::Int(1)),
+        (Value::Str("unobserved".into()), Value::Null),
+        (Value::Null, Value::Null),
+    ];
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    for control in [
+        ProductionControl::uncontrolled(),
+        ProductionControl::new(&budget, &token, &token),
+    ] {
+        for (left, right) in &pairs {
+            for op in operators {
+                let expected =
+                    eval_comparison_truth_with_enum_catalog(op, left, right, &control, None, None)
+                        .unwrap();
+                let actual = eval_comparison_truth_with_deferred_state(
+                    op,
+                    left,
+                    right,
+                    &control,
+                    None,
+                    || panic!("primitive comparison requested enum state"),
+                )
+                .unwrap();
+                assert_eq!(actual, expected, "{left:?} {op:?} {right:?}");
+            }
+        }
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn mixed_and_physical_operands_keep_general_comparison_semantics() {
+    let control = ProductionControl::uncontrolled();
+    for (left, right) in [
+        (
+            Value::Float(9_007_199_254_740_992.0),
+            Value::Int(9_007_199_254_740_993),
+        ),
+        (
+            Value::Int(1),
+            Value::Datum(uqa_core::DatumValue::new(
+                23,
+                0,
+                1_i32.to_le_bytes().to_vec(),
+            )),
+        ),
+    ] {
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            eval_comparison_truth_with_deferred_state(
+                BinaryOp::Equal,
+                &left,
+                &right,
+                &control,
+                None,
+                || {
+                    calls.set(calls.get() + 1);
+                    None
+                },
+            )
+            .unwrap(),
+            Some(true)
+        );
+        assert_eq!(calls.get(), 1);
+    }
+}
+
+#[test]
+fn primitive_comparisons_preserve_both_cancellation_scopes() {
+    for cancel_original in [true, false] {
+        let budget = MemoryBudget::new(0);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let error = eval_comparison_truth_with_deferred_state(
+            BinaryOp::Less,
+            &Value::Int(1),
+            &Value::Int(2),
+            &control,
+            None,
+            || panic!("cancelled comparison requested state"),
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn array_element_identity_errors_precede_shape_and_follow_outer_null_short_circuit() {
     let array = |values, oid| {
         Value::Array(
