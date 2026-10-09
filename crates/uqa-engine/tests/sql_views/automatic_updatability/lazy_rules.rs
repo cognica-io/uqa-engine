@@ -153,3 +153,45 @@ fn condition_local_whole_rows_and_columns_shadow_event_rows() {
         );
     }
 }
+
+#[test]
+fn constant_projection_errors_precede_volatile_effects_but_skip_eliminated_conditions() {
+    for volatile in [false, true] {
+        let engine = Engine::new();
+        exec(
+            &engine,
+            "CREATE TABLE rule_constant_base(id int PRIMARY KEY);
+            INSERT INTO rule_constant_base VALUES(1);
+            CREATE TABLE rule_constant_log(id int);
+            CREATE SEQUENCE rule_constant_ticks",
+        );
+        let effect = if volatile {
+            "nextval('rule_constant_ticks') AS tick,"
+        } else {
+            ""
+        };
+        let predicate = if volatile {
+            "NEW.boom>0 OR NEW.tick>0"
+        } else {
+            "NEW.boom>0"
+        };
+        exec(&engine, &format!("CREATE VIEW rule_constant_view AS SELECT id,{effect}1/0 AS boom FROM rule_constant_base;
+            CREATE RULE rule_constant AS ON UPDATE TO rule_constant_view WHERE CASE WHEN NEW.id=1 THEN false ELSE {predicate} END
+            DO ALSO INSERT INTO rule_constant_log VALUES(NEW.id)"));
+        let error = engine
+            .sql("UPDATE rule_constant_view SET id=id", &[])
+            .unwrap_err();
+        assert!(error.to_string().contains("division by zero"), "{error}");
+        assert_eq!(
+            exec(&engine, "SELECT is_called FROM rule_constant_ticks").rows[0]["is_called"],
+            Value::Bool(false)
+        );
+        exec(&engine, &format!("DROP RULE rule_constant ON rule_constant_view;
+            CREATE RULE rule_constant AS ON UPDATE TO rule_constant_view WHERE CASE WHEN true THEN false ELSE {predicate} END
+            DO ALSO INSERT INTO rule_constant_log VALUES(NEW.id)"));
+        assert_eq!(
+            exec(&engine, "UPDATE rule_constant_view SET id=id").affected_rows,
+            1
+        );
+    }
+}

@@ -53,9 +53,16 @@ fn project<S: Clone + 'static>(
         .collect::<Vec<_>>();
     let dependencies = source_dependencies(request, &layer, &selected)?;
     let source = project_source(request, &layer, &dependencies, visited)?;
-    let (output, mut types, volatile) = bind_projection(request, &layer, &selected, &source)?;
+    let (mut output, mut types, volatile) = bind_projection(request, &layer, &selected, &source)?;
     visited.remove(&layer.canonical_name);
     if volatile {
+        for expression in output.values_mut() {
+            request
+                .context
+                .expressions
+                .expressions
+                .optimize_catalog_scalar(&mut expression.scalar)?;
+        }
         let values = selected
             .into_iter()
             .map(|column| {

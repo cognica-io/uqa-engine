@@ -86,32 +86,9 @@ where
             inputs.insert(column, input);
         }
     }
-    for column in required {
-        if inputs.contains_key(&column) {
-            continue;
-        }
-        let name = binding.column_name(column).expect("collected rule input");
-        let metadata = columns
-            .get(name)
-            .ok_or_else(|| SQLError::UnknownColumn(name.into()))?;
-        let (record, doc_id) = if Some(column.relation()) == binding.old_relation() {
-            (row.old.as_ref(), row.old_doc_id)
-        } else {
-            (row.new.as_ref(), row.new_doc_id)
-        };
-        let value = input_value(record, doc_id, name, metadata)?;
-        let mut projected = super::RuleInputProjection::values([(
-            name.to_string(),
-            value,
-            Some(metadata.ty.clone()),
-        )]);
-        super::inputs::append_source(&mut source, &projected.source);
-        inputs.insert(
-            column,
-            projected.expressions.remove(name).expect("single input"),
-        );
-    }
+    append_row_values(binding, &required, row, columns, &mut inputs, &mut source)?;
     uqa_sql::plan::input_projection::substitute_expression_inputs(&mut plan, &inputs)?;
+    context.expressions.prepare_condition(&mut plan)?;
     Ok(uqa_sql::expr::truthy(
         &context.expressions.evaluate_stored(
             &plan,
@@ -120,6 +97,56 @@ where
             privilege_subject,
         )?,
     ))
+}
+
+fn append_row_values(
+    binding: &uqa_sql::catalog::events::RuleConditionBinding,
+    required: &std::collections::BTreeSet<uqa_sql::ast::InternalColumnRef>,
+    row: &RuleRowImage,
+    columns: &BTreeMap<String, RuleColumnMetadata>,
+    inputs: &mut BTreeMap<uqa_sql::ast::InternalColumnRef, uqa_sql::plan::ExpressionPlan>,
+    source: &mut crate::OwnedPhysicalRow,
+) -> Result<(), SQLError> {
+    for (relation, record, doc_id) in [
+        (binding.old_relation(), row.old.as_ref(), row.old_doc_id),
+        (binding.new_relation(), row.new.as_ref(), row.new_doc_id),
+    ] {
+        let remaining = required
+            .iter()
+            .copied()
+            .filter(|column| Some(column.relation()) == relation && !inputs.contains_key(column))
+            .collect::<Vec<_>>();
+        if remaining.is_empty() {
+            continue;
+        }
+        let values = remaining
+            .iter()
+            .map(|column| {
+                let name = binding.column_name(*column).expect("collected rule input");
+                let metadata = columns
+                    .get(name)
+                    .ok_or_else(|| SQLError::UnknownColumn(name.into()))?;
+                Ok((
+                    name.to_string(),
+                    input_value(record, doc_id, name, metadata)?,
+                    Some(metadata.ty.clone()),
+                ))
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?;
+        let mut projected = super::RuleInputProjection::values(values);
+        super::inputs::append_source(source, &projected.source);
+        for column in remaining {
+            let name = binding.column_name(column).expect("collected rule input");
+            inputs.insert(
+                column,
+                projected
+                    .expressions
+                    .remove(name)
+                    .expect("retained row field"),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn input_value(
