@@ -19,7 +19,10 @@ use uqa_sql::{
 
 impl RoutineOverloadCatalog for Engine {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        self.catalog_read_view().domain_snapshot()
+        self.query_catalog_snapshot.as_ref().map_or_else(
+            || self.durable.domains.snapshot(),
+            |snapshot| Arc::clone(&snapshot.domains),
+        )
     }
     fn routine_search_path(&self) -> Vec<String> {
         crate::session::effective_search_path(&self.session.state.read())

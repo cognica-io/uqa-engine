@@ -21,7 +21,7 @@ use crate::{
 };
 use std::collections::BTreeSet;
 
-pub trait ViewRewriteCatalog: SetFunctionCatalog {
+pub trait ViewRewriteCatalog {
     fn view_definition(&self, name: &str) -> Result<Option<ViewRewriteDefinition>, SQLError>;
     fn try_resolve_view_name(&self, name: &str) -> Result<Option<String>, String>;
     fn try_describe_table(&self, name: &str) -> Result<Option<Vec<ColumnDef>>, String>;
@@ -49,6 +49,7 @@ pub trait ViewRewriteCatalog: SetFunctionCatalog {
 #[derive(Clone, Copy)]
 pub struct ViewRewriteContext<'a> {
     pub catalog: &'a dyn ViewRewriteCatalog,
+    pub routines: &'a dyn SetFunctionCatalog,
     pub authorization: &'a dyn super::super::view_privileges::ViewPrivilegeCatalog,
 }
 
@@ -57,7 +58,7 @@ pub fn stored_view_schema(
     definition: &ViewRewriteDefinition,
 ) -> Result<RowSchema, SQLError> {
     let (catalog, resolution) = services.catalog.restored_view_catalog();
-    definition.row_schema(services.catalog, catalog, resolution)
+    definition.row_schema(services.routines, catalog, resolution)
 }
 
 pub(super) fn analyze_source_plan_schema(
@@ -68,7 +69,7 @@ pub(super) fn analyze_source_plan_schema(
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
     crate::binding::analyze_source_plan_schema(
-        services.catalog,
+        services.routines,
         source,
         params,
         &scope.context(),
@@ -83,7 +84,7 @@ pub(super) fn analyze_query_plan_schema(
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
     crate::binding::analyze_query_plan_schema(
-        services.catalog,
+        services.routines,
         query,
         params,
         &scope.context(),

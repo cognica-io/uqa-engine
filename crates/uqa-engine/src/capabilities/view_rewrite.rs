@@ -88,6 +88,7 @@ impl Engine {
     pub(crate) fn view_rewrite_context(&self) -> ViewRewriteContext<'_> {
         ViewRewriteContext {
             catalog: self,
+            routines: self,
             authorization: self,
         }
     }

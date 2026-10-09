@@ -180,7 +180,7 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
         )?;
         let bindings = crate::query::binding::binding_context(&scope)?;
         let source = uqa_sql::binding::analyze_source_plan_schema(
-            rewrite.catalog,
+            rewrite.routines,
             &stmt.source,
             params,
             &bindings,

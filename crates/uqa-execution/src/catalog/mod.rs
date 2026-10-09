@@ -42,6 +42,7 @@ mod snapshot_read;
 #[derive(Clone)]
 pub struct CatalogReadView {
     snapshot: Arc<CatalogReadSnapshot>,
+    relation_descriptors: Arc<composite_type::relations::RelationDescriptorCache>,
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
     /// The owning session's catalog records, read only inside its retained statement transaction.
     prepared_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
@@ -150,6 +151,7 @@ impl CatalogReadView {
     pub fn new(snapshot: CatalogReadSnapshot) -> Self {
         Self {
             snapshot: Arc::new(snapshot),
+            relation_descriptors: Arc::default(),
             graph_reads: None,
             prepared_catalog: None,
             sequence_positions: None,

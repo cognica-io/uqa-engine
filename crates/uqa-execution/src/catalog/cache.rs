@@ -18,6 +18,11 @@ pub struct RegtypeOutputCache {
 }
 
 impl RegtypeOutputCache {
+    /// The session's catalog invalidation generation, including private changes and rollback.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
     pub fn is_populated(&self) -> bool {
         self.entry.lock().is_some()
     }

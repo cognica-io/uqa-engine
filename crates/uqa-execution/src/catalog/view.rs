@@ -42,4 +42,5 @@ pub trait ViewPublication: ViewRegistryState {
     fn save_view_expression_names(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
 }
 
+pub mod metadata;
 pub mod restoration;

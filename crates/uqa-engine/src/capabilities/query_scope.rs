@@ -19,11 +19,13 @@ pub(crate) fn new_for_statement(
     engine: &Engine,
     privilege_subject: Option<&RoleReference>,
 ) -> CteScope {
+    let revision = engine.runtime.regtype_output_cache.revision();
     let mut scope = CteScope::with_catalog(
         engine.catalog_read_view(),
         engine.session_execution_view().relation_name_resolution(),
         privilege_subject.cloned(),
     );
+    scope.set_catalog_revision(engine.session_id, revision);
     scope
         .rows
         .extend(uqa_execution::mutation::triggers::current_transition_relations());
@@ -46,9 +48,12 @@ pub(crate) fn new_for_command(
 }
 
 pub(crate) fn new_for_catalog_binding(engine: &Engine) -> CteScope {
+    let revision = engine.runtime.regtype_output_cache.revision();
     let mut resolution = engine.session_execution_view().relation_name_resolution();
     resolution.set_lookup_mode(RelationLookupMode::Bound);
-    CteScope::with_catalog(engine.restored_catalog_read_view(), resolution, None)
+    let mut scope = CteScope::with_catalog(engine.restored_catalog_read_view(), resolution, None);
+    scope.set_catalog_revision(engine.session_id, revision);
+    scope
 }
 
 impl

@@ -33,16 +33,16 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
     }
 
     fn catalog_input_functions(&self) -> Option<&dyn uqa_sql::expr::CatalogInputFunctions> {
-        self.engine.catalog_input_functions()
+        Some(self)
     }
 
     fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
-        Some(self.engine)
+        Some(self)
     }
 
     fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
         uqa_execution::catalog::security::type_inquiry::require_type_usage(
-            &self.engine.catalog_execution(),
+            &self.catalog_context(),
             ty,
         )
     }

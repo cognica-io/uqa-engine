@@ -166,6 +166,53 @@ impl CatalogExpressionEvaluation for Engine {
     }
 }
 impl ViewCatalogCapabilities for Engine {
+    fn view_updatability_with_catalog(
+        &self,
+        name: &str,
+        catalog: &uqa_execution::catalog::CatalogReadView,
+        resolution: &RelationNameResolution,
+    ) -> Result<ViewCatalogMetadata, SQLError> {
+        let retained = uqa_execution::catalog::view::metadata::RetainedViewCatalog {
+            catalog,
+            resolution,
+            fallback: self,
+            replica: self.session_replication_role_is_replica(),
+        };
+        let metadata = uqa_sql::semantics::view_rewrite::view_updatability(
+            uqa_sql::semantics::view_rewrite::context::ViewRewriteContext {
+                catalog: &retained,
+                ..self.view_rewrite_context()
+            },
+            name,
+        )?;
+        Ok(ViewCatalogMetadata {
+            catalog: metadata.catalog,
+            catalog_columns: metadata.catalog_columns,
+            check_option: metadata.check_option,
+        })
+    }
+    fn has_instead_of_trigger_with_catalog(
+        &self,
+        name: &str,
+        event: TriggerEvent,
+        catalog: &uqa_execution::catalog::CatalogReadView,
+        resolution: &RelationNameResolution,
+    ) -> Result<bool, SQLError> {
+        let retained = uqa_execution::catalog::view::metadata::RetainedViewCatalog {
+            catalog,
+            resolution,
+            fallback: self,
+            replica: self.session_replication_role_is_replica(),
+        };
+        uqa_sql::semantics::view_rewrite::has_instead_of_trigger(
+            uqa_sql::semantics::view_rewrite::context::ViewRewriteContext {
+                catalog: &retained,
+                ..self.view_rewrite_context()
+            },
+            name,
+            event,
+        )
+    }
     fn view_updatability(&self, name: &str) -> Result<ViewCatalogMetadata, SQLError> {
         let metadata =
             uqa_sql::semantics::view_rewrite::view_updatability(self.view_rewrite_context(), name)?;

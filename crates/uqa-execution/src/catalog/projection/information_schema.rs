@@ -110,7 +110,9 @@ pub fn build_info_tables(
             continue;
         }
         let (schema, view) = split_schema_name(&name)?;
-        let updatability = context.views.view_updatability(&name)?;
+        let updatability = context
+            .views
+            .view_updatability_with_catalog(&name, catalog, resolution)?;
         out.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -428,7 +430,9 @@ pub fn build_info_columns(
             continue;
         }
         let (schema, view) = split_schema_name(&view_name)?;
-        let updatability = context.views.view_updatability(&view_name)?;
+        let updatability = context
+            .views
+            .view_updatability_with_catalog(&view_name, catalog, resolution)?;
         let columns = view_columns_for(context, catalog, resolution, &stored)?;
         for (idx, column) in columns.iter().enumerate() {
             if !catalog.view_column_is_visible_to(&stored, &column.name, resolution.current_user())
@@ -691,16 +695,27 @@ pub fn build_info_views(
             continue;
         }
         let (schema, view) = split_schema_name(&name)?;
-        let updatability = context.views.view_updatability(&name)?;
-        let trigger_insertable = context
+        let updatability = context
             .views
-            .has_instead_of_trigger(&name, uqa_sql::ast::TriggerEvent::Insert)?;
-        let trigger_updatable = context
-            .views
-            .has_instead_of_trigger(&name, uqa_sql::ast::TriggerEvent::Update)?;
-        let trigger_deletable = context
-            .views
-            .has_instead_of_trigger(&name, uqa_sql::ast::TriggerEvent::Delete)?;
+            .view_updatability_with_catalog(&name, catalog, resolution)?;
+        let trigger_insertable = context.views.has_instead_of_trigger_with_catalog(
+            &name,
+            uqa_sql::ast::TriggerEvent::Insert,
+            catalog,
+            resolution,
+        )?;
+        let trigger_updatable = context.views.has_instead_of_trigger_with_catalog(
+            &name,
+            uqa_sql::ast::TriggerEvent::Update,
+            catalog,
+            resolution,
+        )?;
+        let trigger_deletable = context.views.has_instead_of_trigger_with_catalog(
+            &name,
+            uqa_sql::ast::TriggerEvent::Delete,
+            catalog,
+            resolution,
+        )?;
         let definition = if catalog
             .role_is_enabled_for(resolution.current_user(), &stored.security.role_owner)
         {
