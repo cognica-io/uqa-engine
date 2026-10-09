@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Avoid discarded catalog captures during DDL and unnecessary snapshot copies during index-name restoration and partition key preparation, while preserving validation, identities, rollback and post-lock freshness.
+
 - Preserve lazy OLD/NEW view expressions in RULE conditions, including CASE, COALESCE and nested scalar subqueries, without discarding required volatile projection effects or live whole-row fields.
 
 - Reuse catalog inputs for scoped builtin permissions, scalar metadata, routine signatures and read-only view analysis; retain relation type descriptors without repeated catalog capture, while preserving private DDL, role changes, rollback and portal generations.

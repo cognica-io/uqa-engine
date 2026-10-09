@@ -116,6 +116,8 @@ pub(in crate::schema::indexes) fn prepare_descendants(
         &RelationIdentity,
     ) -> StorageBackendResult<(Vec<ColumnDef>, TableConstraintSet, [u8; 16])>,
 ) -> StorageBackendResult<Vec<OwnerChange>> {
+    // Naming reads graph definitions without attributing them to an ordinary query participant.
+    let metadata = original.metadata_view();
     let mut pending = std::collections::VecDeque::from([root.clone()]);
     let mut visited = BTreeSet::new();
     let mut changes = Vec::new();
@@ -171,7 +173,7 @@ pub(in crate::schema::indexes) fn prepare_descendants(
                     .map_err(invalid)?;
                 }
                 let names = partitions::CandidateNames {
-                    catalog: original,
+                    catalog: &metadata,
                     snapshot: candidate,
                     rows: &candidate.definitions.catalog_indexes,
                 };

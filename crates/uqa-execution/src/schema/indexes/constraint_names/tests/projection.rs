@@ -109,7 +109,7 @@ fn unchanged_key_names_still_validate_owners_and_skip_temporary_tables() {
         match corruption {
             0 => {
                 Arc::make_mut(&mut snapshot.tables.get_mut(&relation).unwrap().keys)[0]
-                    .catalog_identity = None
+                    .catalog_identity = None;
             }
             1 => names.names.as_mut().unwrap().clear(),
             2 => {
@@ -120,7 +120,7 @@ fn unchanged_key_names_still_validate_owners_and_skip_temporary_tables() {
                     .get_mut(&[3; 16])
                     .unwrap()
                     .table
-                    .name = "other".into()
+                    .name = "other".into();
             }
             _ => {
                 names
@@ -129,7 +129,7 @@ fn unchanged_key_names_still_validate_owners_and_skip_temporary_tables() {
                     .unwrap()
                     .get_mut(&[3; 16])
                     .unwrap()
-                    .table_object_id = [9; 16]
+                    .table_object_id = [9; 16];
             }
         }
         let invalid = CatalogReadView::new(snapshot.clone());

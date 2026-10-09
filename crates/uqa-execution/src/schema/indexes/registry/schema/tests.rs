@@ -9,72 +9,103 @@ use crate::catalog::test_support::{empty_catalog, table_snapshot};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::ast::{PartitionBound, TableHierarchy};
 
+struct Fixture {
+    original: CatalogReadView,
+    candidate: CatalogReadSnapshot,
+    root: RelationIdentity,
+    declarations: BTreeMap<RelationIdentity, (Vec<ColumnDef>, TableConstraintSet, [u8; 16])>,
+}
+
+fn fixture(unrelated: usize) -> Fixture {
+    let uqa_sql::Statement::CreateTable(parsed) =
+        uqa_sql::compile("CREATE TABLE root(v int, PRIMARY KEY(v)) PARTITION BY LIST(v)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("table");
+    };
+    let root = RelationIdentity::new("public", "root");
+    let mut columns = parsed.columns;
+    let mut constraints = TableConstraintSet {
+        key_constraints: parsed.key_constraints,
+        hierarchy: parsed.hierarchy,
+        ..Default::default()
+    };
+    let mut next = 100_u128;
+    let mut allocate = |_: &str| {
+        next += 1;
+        Ok(next.to_le_bytes())
+    };
+    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
+        &root,
+        &mut columns,
+        &mut constraints,
+        &mut allocate,
+    )
+    .unwrap();
+    let mut snapshot = empty_catalog().snapshot().clone();
+    snapshot.tables.insert(
+        root.clone(),
+        table_snapshot(
+            [1; 16],
+            columns.clone(),
+            TableConstraintSet {
+                hierarchy: constraints.hierarchy.clone(),
+                ..Default::default()
+            },
+        ),
+    );
+    let mut declarations = BTreeMap::new();
+    for (index, suffix) in ["a", "b"].into_iter().enumerate() {
+        // The generated index names collide after PostgreSQL's 63-byte identifier limit.
+        let child = RelationIdentity::new("public", format!("{}{suffix}", "p".repeat(60)));
+        let definition = TableConstraintSet {
+            hierarchy: TableHierarchy {
+                parents: vec![root.qualified_name()],
+                partition_bound: Some(PartitionBound::List(vec![uqa_sql::ast::Expr::Literal(
+                    uqa_core::Value::Int(i64::try_from(index + 1).unwrap()),
+                )])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let object_id = (index as u128 + 10).to_le_bytes();
+        snapshot.tables.insert(
+            child.clone(),
+            table_snapshot(object_id, columns.clone(), definition.clone()),
+        );
+        declarations.insert(child, (columns.clone(), definition, object_id));
+    }
+    for index in 0..unrelated {
+        snapshot.tables.insert(
+            RelationIdentity::new("public", format!("unrelated_{index}")),
+            table_snapshot(
+                (index as u128 + 1000).to_le_bytes(),
+                Vec::new(),
+                TableConstraintSet::default(),
+            ),
+        );
+    }
+    let original = CatalogReadView::new(snapshot);
+    let mut candidate = original.snapshot().clone();
+    replace(&mut candidate, &root, &columns, &constraints).unwrap();
+    Fixture {
+        original,
+        candidate,
+        root,
+        declarations,
+    }
+}
+
 #[test]
 fn descendant_names_borrow_the_candidate_without_copying_unrelated_tables() {
     for unrelated in [1, 256] {
-        let uqa_sql::Statement::CreateTable(parsed) =
-            uqa_sql::compile("CREATE TABLE root(v int, PRIMARY KEY(v)) PARTITION BY LIST(v)")
-                .unwrap()
-                .remove(0)
-        else {
-            panic!("table");
-        };
-        let root = RelationIdentity::new("public", "root");
-        let mut columns = parsed.columns;
-        let mut constraints = TableConstraintSet {
-            key_constraints: parsed.key_constraints,
-            hierarchy: parsed.hierarchy,
-            ..Default::default()
-        };
-        let mut next = 100_u128;
-        let mut allocate = |_: &str| {
-            next += 1;
-            Ok(next.to_le_bytes())
-        };
-        uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
-            &root,
-            &mut columns,
-            &mut constraints,
-            &mut allocate,
-        )
-        .unwrap();
-        let mut snapshot = empty_catalog().snapshot().clone();
-        snapshot.tables.insert(
-            root.clone(),
-            table_snapshot([1; 16], columns.clone(), TableConstraintSet::default()),
-        );
-        let mut declarations = BTreeMap::new();
-        for (index, suffix) in ["a", "b"].into_iter().enumerate() {
-            // The generated index names collide after PostgreSQL's 63-byte identifier limit.
-            let child = RelationIdentity::new("public", format!("{}{suffix}", "p".repeat(60)));
-            let definition = TableConstraintSet {
-                hierarchy: TableHierarchy {
-                    parents: vec![root.qualified_name()],
-                    partition_bound: Some(PartitionBound::Default),
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let object_id = (index as u128 + 10).to_le_bytes();
-            snapshot.tables.insert(
-                child.clone(),
-                table_snapshot(object_id, columns.clone(), definition.clone()),
-            );
-            declarations.insert(child, (columns.clone(), definition, object_id));
-        }
-        for index in 0..unrelated {
-            snapshot.tables.insert(
-                RelationIdentity::new("public", format!("unrelated_{index}")),
-                table_snapshot(
-                    (index as u128 + 1000).to_le_bytes(),
-                    Vec::new(),
-                    TableConstraintSet::default(),
-                ),
-            );
-        }
-        let original = CatalogReadView::new(snapshot);
-        let mut candidate = original.snapshot().clone();
-        replace(&mut candidate, &root, &columns, &constraints).unwrap();
+        let Fixture {
+            original,
+            mut candidate,
+            root,
+            declarations,
+        } = fixture(unrelated);
         let observed =
             &original.snapshot().tables[&RelationIdentity::new("public", "unrelated_0")].columns;
         assert_eq!(Arc::strong_count(observed), 2);
