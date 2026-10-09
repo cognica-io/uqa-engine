@@ -18,6 +18,7 @@ use uqa_sql::{
 };
 
 mod lifecycle;
+mod predicate_bounds;
 mod requested_fields;
 
 fn constant(oid: i64, ty: &str) -> Expr {

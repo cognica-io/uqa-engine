@@ -43,6 +43,8 @@ pub fn bound_source_operator<'a>(
 
 use uqa_sql::plan::source_projection::ColumnPrune;
 
+mod catalog_filters;
+
 fn source_column_requested(column: &str, qualifier: &str, prune: Option<&ColumnPrune>) -> bool {
     qualifier.is_empty()
         || prune
@@ -55,8 +57,9 @@ pub(crate) fn catalog_request(
     aliases: &[String],
     qualifier: &str,
     prune: Option<&ColumnPrune>,
+    filters: Option<&uqa_sql::plan::source_projection::QualifierFilters>,
 ) -> crate::catalog::projection::CatalogRequest {
-    crate::catalog::projection::CatalogRequest::columns(
+    let mut request = crate::catalog::projection::CatalogRequest::columns(
         source_columns
             .iter()
             .enumerate()
@@ -65,7 +68,19 @@ pub(crate) fn catalog_request(
                 source_column_requested(column, qualifier, prune)
             })
             .map(|(_, source)| source.clone()),
-    )
+    );
+    if let Some(filters) = filters.and_then(|filters| filters.get(qualifier)) {
+        for filter in filters {
+            catalog_filters::add_name_bounds(
+                &mut request,
+                source_columns,
+                aliases,
+                qualifier,
+                filter,
+            );
+        }
+    }
+    request
 }
 
 pub fn qualify_source_operator_with_columns<'a>(

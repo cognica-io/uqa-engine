@@ -31,20 +31,33 @@ use super::super::helpers::type_metadata::{
     PgTypeRoutineOids,
 };
 
-pub fn build_pg_type(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
-    catalog: &CatalogReadView,
-    resolution: &crate::catalog::RelationNameResolution,
-) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
-    build_pg_type_rows(output, catalog, resolution, true)
-}
-
 /// The `pg_type` rows with `typdefault` left NULL, for the `reg*` output catalog: printing a domain default may print a `reg*` constant, whose output function reads that catalog.
 pub fn build_pg_type_without_defaults(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
-    build_pg_type_rows(None, catalog, resolution, false)
+    build_pg_type_rows(
+        None,
+        catalog,
+        resolution,
+        false,
+        &super::super::CatalogRequest::default(),
+    )
+}
+
+pub(crate) fn build_requested_pg_type(
+    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+    request: &super::super::CatalogRequest,
+) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
+    build_pg_type_rows(
+        output,
+        catalog,
+        resolution,
+        request.includes("typdefault") || request.includes("typdefaultbin"),
+        request,
+    )
 }
 
 #[expect(
@@ -56,6 +69,7 @@ fn build_pg_type_rows(
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
+    request: &super::super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
     #[cfg(test)]
     TYPE_PROJECTION_BUILDS.set(TYPE_PROJECTION_BUILDS.get() + 1);
@@ -176,7 +190,12 @@ fn build_pg_type_rows(
             bool_value(domain.definition.not_null.is_some()),
         );
         // `typdefaultbin` is the stored default, which `pg_get_expr` prints; `typdefault` its text.
-        let default = match domain.definition.default.as_ref().filter(|_| with_defaults) {
+        let default = match domain
+            .definition
+            .default
+            .as_ref()
+            .filter(|_| with_defaults && request.matches_name("typname", &domain.identity.name))
+        {
             Some(default) => str_value(super::super::view_definition::stored_expression_text(
                 output, catalog, resolution, default,
             )?),
@@ -230,6 +249,10 @@ fn build_pg_type_rows(
         array.insert("typowner".into(), owner);
         types.push(array);
     }
+    types.retain(|entry| match entry.get("typname") {
+        Some(Value::Str(name)) => request.matches_name("typname", name),
+        _ => true,
+    });
     types.sort_by_key(|entry| match entry.get("oid") {
         Some(Value::Int(oid)) => *oid,
         _ => i64::MAX,

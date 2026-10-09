@@ -408,13 +408,25 @@ pub fn age_info_table_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, 
 }
 
 /// `information_schema.columns` rows for the label relations.
-pub fn age_info_column_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn age_info_column_rows(
+    catalog: &CatalogReadView,
+    request: &super::CatalogRequest,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for entry in graph_catalog_entries(catalog)? {
         for label in &entry.labels {
+            if !request.matches_relation(&entry.name, &label.name) {
+                continue;
+            }
             for (index, (column, type_name)) in label_columns(label.kind).iter().enumerate() {
+                if !request.matches_name("column_name", column) {
+                    continue;
+                }
                 let ordinal = i64::try_from(index + 1)
                     .map_err(|_| SQLError::Internal("label column ordinal".into()))?;
+                #[cfg(test)]
+                super::information_schema::COLUMN_ROWS
+                    .set(super::information_schema::COLUMN_ROWS.get() + 1);
                 out.push(row([
                     ("table_catalog", catalog_name()),
                     ("table_schema", str_value(entry.name.clone())),
@@ -423,7 +435,7 @@ pub fn age_info_column_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>,
                     ("ordinal_position", int_value(ordinal)),
                     (
                         "column_default",
-                        if *column == "id" {
+                        if *column == "id" && request.includes("column_default") {
                             str_value(format!(
                                 "_graphid((_label_id('{}'::name, '{}'::name))::integer, nextval('{}'::regclass))",
                                 entry.name,
