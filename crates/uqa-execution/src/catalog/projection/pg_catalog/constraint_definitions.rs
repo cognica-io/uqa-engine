@@ -182,8 +182,10 @@ fn foreign_key_definition(
         quote_ident(&foreign_key.schema),
         quote_ident(&foreign_key.table)
     );
+    let mut bound = resolution.clone();
+    bound.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let referenced = catalog
-        .table(resolution, &referenced_name)?
+        .table(&bound, &referenced_name)?
         .ok_or_else(|| SQLError::UnknownTable(referenced_name.clone()))?;
     let mut remote = foreign_key
         .column_ordinals

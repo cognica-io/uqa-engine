@@ -14,6 +14,9 @@ use uqa_sql::{ast::ColumnType, ResultRow};
 #[path = "sql_information_schema/type_metadata.rs"]
 mod type_metadata;
 
+#[path = "sql_information_schema/definition_lookups.rs"]
+mod definition_lookups;
+
 use type_metadata::{domain_layout, pg_type_routine_layout};
 
 fn array(values: Vec<Value>) -> Value {
