@@ -400,8 +400,7 @@ impl Expr {
         }
     }
 
-    /// Upgrade compiler-owned function markers deserialized from catalogs
-    /// written by releases through 0.1.6.
+    /// Upgrade compiler-owned function markers and range predicates in retained catalog syntax, preserving bound identities.
     #[doc(hidden)]
     #[expect(
         clippy::too_many_lines,
@@ -522,7 +521,7 @@ impl Expr {
             | Self::TypedLiteral { .. }
             | Self::Param(_) => {}
         }
-        changed
+        crate::type_resolution::between::restore_ast_node(self) | changed
     }
 
     /// True when this expression tree contains a window function call.

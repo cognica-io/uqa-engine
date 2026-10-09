@@ -123,3 +123,46 @@ fn user_function_identity_cannot_be_rewritten_as_comparison_syntax() {
     assert!(!restore_node(&mut expression, &mut Vec::new()).unwrap());
     assert_eq!(expression, before);
 }
+
+#[test]
+fn restored_syntax_gives_every_subquery_occurrence_an_independent_slot() {
+    use crate::ast::{Expr, Statement};
+    let Statement::Select(query) = crate::compile("SELECT 7").unwrap().remove(0) else {
+        panic!("query")
+    };
+    let operand = Expr::ScalarSubquery(query);
+    let binding = FunctionBinding::dispatched(FunctionDispatch::BetweenSymmetric);
+    let mut expression = Expr::Func {
+        name: binding.name.clone(),
+        binding: Some(binding),
+        args: vec![operand; 3],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+        order_syntax: FunctionOrderSyntax::Ordinary,
+    };
+    assert!(expression.upgrade_legacy_serialized_dispatches());
+    let before = expression.clone();
+    assert!(!expression.upgrade_legacy_serialized_dispatches());
+    assert_eq!(expression, before);
+    let plan = crate::plan::ExpressionPlan::lower(expression);
+    let mut slots = Vec::new();
+    plan.scalar.visit(&mut |node| {
+        if let ScalarExpr::ScalarSubquery(slot) = node {
+            slots.push(*slot);
+        }
+    });
+    assert_eq!(slots, (0..8).collect::<Vec<_>>());
+    assert_eq!(plan.subqueries.len(), 8);
+}
+
+#[test]
+fn syntax_restoration_keeps_a_selected_user_routine_and_its_binding() {
+    let expression = symmetric(vec![ScalarExpr::Literal(Value::Int(4)); 3]);
+    let mut json = serde_json::to_value(expression).unwrap();
+    json["Func"]["binding"]["builtin"] = serde_json::json!(false);
+    let mut expression: crate::ast::Expr = serde_json::from_value(json).unwrap();
+    let before = expression.clone();
+    assert!(!expression.upgrade_legacy_serialized_dispatches());
+    assert_eq!(expression, before);
+}

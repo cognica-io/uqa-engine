@@ -54,6 +54,7 @@ pub fn eval_lowered_expression_with_type<S: Clone + 'static>(
         params,
         hook.as_ref(),
     );
+    factory.optimize_catalog_scalar(&mut expression.scalar)?;
     let context = PhysicalEvalContext::new(row, params)
         .with_function_hook(hook.as_ref())
         .with_subquery_runner(hook.as_ref());
@@ -73,24 +74,38 @@ pub fn eval_lowered_expression_with_schema<S: Clone + 'static>(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    eval_expression_plan_with_schema(
+    eval_catalog_expression_with_schema(
         factory,
         scope,
         ExpressionPlan::lower(expression.clone()),
         row,
         schema,
         params,
+        true,
     )
 }
 
 /// Evaluate an analyzed catalog expression with its original column types, without resolving its written routine names again.
 pub fn eval_expression_plan_with_schema<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
+    scope: CteScope<S>,
+    expression: ExpressionPlan,
+    row: &ResultRow,
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    // Planner-proven constant routines enter here: planning again would recurse into the same constant evaluator.
+    eval_catalog_expression_with_schema(factory, scope, expression, row, schema, params, false)
+}
+
+fn eval_catalog_expression_with_schema<S: Clone + 'static>(
+    factory: &dyn QueryExpressionFactory<S>,
     mut scope: CteScope<S>,
     mut expression: ExpressionPlan,
     row: &ResultRow,
     schema: &RowSchema,
     params: &[SQLParam],
+    optimize: bool,
 ) -> Result<Value, SQLError> {
     scope.scalar_subqueries.clone_from(&expression.subqueries);
     let hook = factory.bind_scope(scope);
@@ -101,6 +116,9 @@ pub fn eval_expression_plan_with_schema<S: Clone + 'static>(
         params,
         hook.as_ref(),
     );
+    if optimize {
+        factory.optimize_catalog_scalar(&mut expression.scalar)?;
+    }
     let row = CatalogRowView { schema, row };
     let context = PhysicalEvalContext::from_row_lookup(&row, params)
         .with_row_schema(schema)

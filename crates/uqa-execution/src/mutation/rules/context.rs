@@ -10,7 +10,7 @@ use uqa_core::Value;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     assignment::AssignmentContext,
-    ast::{Expr, Statement},
+    ast::Statement,
     plan::ExpressionPlan,
     semantics::{returning::ReturningAnalysisContext, rules::analysis::RuleAnalysisContext},
     SQLError, SQLResult,
@@ -26,7 +26,7 @@ pub trait RuleStatements {
     ) -> Result<SQLResult, SQLError>;
 }
 pub trait RuleExpressions {
-    fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError>;
+    fn prepare_condition(&self, expression: &mut ExpressionPlan) -> Result<(), SQLError>;
     fn evaluate_stored(
         &self,
         expression: &ExpressionPlan,

@@ -13,9 +13,7 @@ use uqa_execution::{
 };
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    ast::{Expr, Statement},
-    plan::ExpressionPlan,
-    semantics::rules::analysis::RuleAnalysisContext,
+    ast::Statement, plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext,
     SQLError, SQLResult,
 };
 impl Engine {
@@ -57,8 +55,11 @@ impl RuleStatements for Engine {
     }
 }
 impl RuleExpressions for Engine {
-    fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError> {
-        crate::capabilities::query_expressions::eval_lowered_expression(self, expression, None, &[])
+    fn prepare_condition(&self, expression: &mut ExpressionPlan) -> Result<(), SQLError> {
+        uqa_planner::statement_planning::schema_expressions::optimize_rule_condition(
+            &self.statement_planning_context(),
+            expression,
+        )
     }
     fn evaluate_stored(
         &self,

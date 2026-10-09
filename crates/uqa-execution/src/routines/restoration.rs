@@ -105,7 +105,7 @@ pub fn install_sql_function_restore_placeholders(
     let migrated = format_migrated || identities_migrated;
     if migrated && !allows_migration {
         return Err(StorageBackendError::Other(
-            "routine catalog requires an initial-open object-identity migration or ACL format migration".into(),
+            "routine catalog requires an initial-open expression, object-identity or ACL format migration".into(),
         ));
     }
 

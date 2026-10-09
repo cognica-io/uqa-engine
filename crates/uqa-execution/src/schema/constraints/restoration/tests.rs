@@ -44,6 +44,40 @@ fn table(name: &str) -> TableSchema {
 }
 
 #[test]
+fn load_only_validation_refuses_predecessor_expressions_without_saving_them() {
+    use uqa_core::Value;
+    use uqa_sql::ast::Expr;
+    let catalog = catalog();
+    catalog.save_table(&table("ordinary")).unwrap();
+    migrate_constraint_catalog(&catalog).unwrap();
+    let mut row = catalog.load_tables().unwrap().remove(0);
+    let mut columns: Vec<uqa_sql::ast::ColumnDef> =
+        serde_json::from_str(&row.columns_json).unwrap();
+    columns[0].default = Some(Expr::Cast {
+        expr: Box::new(Expr::Between {
+            expr: Box::new(Expr::Literal(Value::Int(1))),
+            low: Box::new(Expr::Literal(Value::Int(0))),
+            high: Box::new(Expr::Literal(Value::Int(2))),
+        }),
+        ty: "integer".into(),
+        implicit: false,
+    });
+    row.columns_json = serde_json::to_string(&columns).unwrap();
+    catalog.save_table(&row).unwrap();
+    let before = row.columns_json;
+    assert!(validate_constraint_catalog(&catalog)
+        .unwrap_err()
+        .to_string()
+        .contains("initial-open migration"));
+    assert_eq!(catalog.load_tables().unwrap()[0].columns_json, before);
+    migrate_constraint_catalog(&catalog).unwrap();
+    validate_constraint_catalog(&catalog).unwrap();
+    assert!(!catalog.load_tables().unwrap()[0]
+        .columns_json
+        .contains("\"Between\""));
+}
+
+#[test]
 fn migration_preserves_legacy_oids_for_tables_and_foreign_tables_and_then_is_read_only() {
     let catalog = catalog();
     catalog.save_table(&table("ordinary")).unwrap();

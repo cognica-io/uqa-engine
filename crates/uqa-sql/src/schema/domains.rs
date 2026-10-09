@@ -104,13 +104,14 @@ pub fn prepare_added_not_null(
     Ok(named.not_null.expect("new domain NOT NULL"))
 }
 
-/// Bind only predecessor composite constructors; retain every other stored default, constraint and catalog identity.
+/// Restore predecessor range syntax and composite constructors while retaining stored catalog identities.
 pub fn restore_composite_constructors(
     context: &SchemaBindingContext<'_, '_>,
     definition: &mut CreateDomain,
 ) -> Result<bool, SQLError> {
     let mut changed = false;
     if let Some(default) = &mut definition.default {
+        changed |= default.upgrade_legacy_serialized_dispatches();
         if crate::type_resolution::composite_rows::expression_requires_binding(
             default,
             context.catalog,
@@ -120,6 +121,7 @@ pub fn restore_composite_constructors(
         }
     }
     for check in &mut definition.checks {
+        changed |= check.expression.upgrade_legacy_serialized_dispatches();
         if crate::type_resolution::composite_rows::expression_requires_binding(
             &check.expression,
             context.catalog,

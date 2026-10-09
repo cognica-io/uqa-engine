@@ -9,12 +9,12 @@
 use crate::{ast::BinaryOp, SQLError, ScalarExpr};
 
 /// Construct comparisons in `PostgreSQL` analysis order. The boolean constructor's flag selects conjunction, and the comparison constructor's flag selects the upper written bound.
-pub(crate) fn expand<T>(
+pub(crate) fn expand<T, E>(
     symmetric: bool,
     negated: bool,
-    mut comparison: impl FnMut(BinaryOp, bool) -> Result<T, SQLError>,
+    mut comparison: impl FnMut(BinaryOp, bool) -> Result<T, E>,
     boolean: impl Fn(bool, Vec<T>) -> T,
-) -> Result<T, SQLError> {
+) -> Result<T, E> {
     let low = if negated {
         BinaryOp::Less
     } else {
@@ -38,6 +38,70 @@ pub(crate) fn expand<T>(
     } else {
         Ok(forward)
     }
+}
+
+/// Normalize already visited syntax without resolving names or changing stored bindings. Lowering each copied subtree subsequently allocates independent subquery slots.
+pub(crate) fn restore_ast_node(node: &mut crate::ast::Expr) -> bool {
+    use crate::ast::Expr;
+    let (value, low, high, symmetric) = match &*node {
+        Expr::Between { expr, low, high } => (expr.as_ref(), low.as_ref(), high.as_ref(), false),
+        Expr::Func {
+            binding: Some(binding),
+            args,
+            distinct,
+            order_by,
+            filter,
+            ..
+        } if binding.builtin
+            && binding.dispatch == Some(crate::ast::FunctionDispatch::BetweenSymmetric)
+            && binding.resolution_error.is_none()
+            && !distinct
+            && order_by.is_empty()
+            && filter.is_none() =>
+        {
+            let [value, low, high] = args.as_slice() else {
+                return false;
+            };
+            (value, low, high, true)
+        }
+        _ => return false,
+    };
+    *node = expand(
+        symmetric,
+        false,
+        |op, upper| {
+            Ok::<_, std::convert::Infallible>(Expr::Binary {
+                op,
+                lhs: Box::new(value.clone()),
+                rhs: Box::new(if upper { high } else { low }.clone()),
+            })
+        },
+        |and, items| {
+            if and {
+                Expr::And(items)
+            } else {
+                Expr::Or(items)
+            }
+        },
+    )
+    .unwrap_or_else(|never| match never {});
+    true
+}
+
+/// Restore retained scalar plans and their independent nested query arenas without rebinding catalog identities.
+pub(crate) fn restore_expression(
+    expression: &mut crate::plan::ExpressionPlan,
+) -> Result<bool, SQLError> {
+    let mut changed = false;
+    crate::plan::subqueries::rewrite_expression_with_arena(
+        &mut expression.scalar,
+        &mut expression.subqueries,
+        &mut |node, arena| {
+            changed |= restore_node(node, arena)?;
+            Ok(())
+        },
+    )?;
+    Ok(changed)
 }
 
 /// Retained plans predate the compiler expansion. Each copied operand keeps its original bindings and receives independent scalar-subquery initialization slots.

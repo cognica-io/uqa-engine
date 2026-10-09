@@ -86,7 +86,7 @@ pub fn restore_partition_identity(
     constraints.hierarchy.partition_identity_overrides.clear();
 }
 
-/// Freeze predecessor constructors in partition keys, including keys retained by detached partition constraints. Partition bounds already contain evaluated datums.
+/// Restore predecessor expressions in partition keys, including keys retained by detached partition constraints. Partition bounds already contain evaluated datums.
 pub fn restore_composite_constructors(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
     columns: &[ColumnDef],
@@ -105,6 +105,7 @@ pub fn restore_composite_constructors(
         }))
     {
         for expression in &mut spec.keys {
+            changed |= expression.upgrade_legacy_serialized_dispatches();
             if crate::type_resolution::composite_rows::expression_requires_binding(
                 expression, catalog,
             )? {

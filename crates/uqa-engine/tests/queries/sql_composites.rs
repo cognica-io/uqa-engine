@@ -17,6 +17,8 @@ mod range_restoration;
 mod removal;
 #[path = "sql_composites/renaming.rs"]
 mod renaming;
+#[path = "sql_composites/schema_range_restoration.rs"]
+mod schema_range_restoration;
 #[path = "sql_composites/type_changes.rs"]
 mod type_changes;
 

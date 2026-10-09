@@ -619,6 +619,11 @@ impl OrderPlan {
 }
 
 impl ExpressionPlan {
+    /// Normalize predecessor range nodes while retaining bindings and assigning independent subquery slots to repeated operands.
+    pub fn upgrade_legacy_range_predicates(&mut self) -> Result<bool, crate::SQLError> {
+        crate::type_resolution::between::restore_expression(self)
+    }
+
     #[must_use]
     pub fn lower(expression: Expr) -> Self {
         Self::lower_with(expression, &NoRegisteredAggregates)
