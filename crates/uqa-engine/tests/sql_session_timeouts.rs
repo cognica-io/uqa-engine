@@ -28,14 +28,20 @@ fn error(engine: &Engine, statement: &str) -> SQLError {
     }
 }
 
-/// Wait until `engine` reports a termination, or fail once `LATE` has passed.
+/// Wait for the permanent timeout and transaction rollback, or fail once `LATE` has passed. The cancellation signal precedes the idle rollback worker.
 fn await_termination(engine: &Engine) -> SQLError {
     let started = Instant::now();
     loop {
-        if let Some(termination) = engine.session_termination() {
+        if let Some(termination) = engine
+            .session_termination()
+            .filter(|_| engine.transaction_depth() == 0)
+        {
             return termination;
         }
-        assert!(started.elapsed() < LATE, "the session was not terminated");
+        assert!(
+            started.elapsed() < LATE,
+            "session timeout and transaction rollback did not finish"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
