@@ -32,7 +32,15 @@ pub fn type_name(datum: &DatumValue) -> &'static str {
 }
 
 pub fn read(datum: &DatumValue) -> Result<Value, SQLError> {
-    read_with_control(datum, &ProductionControl::uncontrolled())
+    read_with_catalog(datum, None)
+}
+
+/// Read an admitted physical value through the current statement's catalog, without invoking type input or domain checks.
+pub fn read_with_catalog(
+    datum: &DatumValue,
+    engine: Option<&dyn super::EngineHook>,
+) -> Result<Value, SQLError> {
+    read_with_catalog_and_control(datum, engine, &ProductionControl::uncontrolled())
         .map(|value| value.into_uncontrolled().expect("ordinary datum read"))
 }
 
@@ -62,9 +70,51 @@ pub fn read_with_control(
     datum: &DatumValue,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    read_with_catalog_and_control(datum, None, control)
+}
+
+/// Preserve the caller's output allowance and cancellation boundary during catalog-dependent physical reads.
+pub fn read_with_catalog_and_control(
+    datum: &DatumValue,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    read_with_enum_catalog_and_control(
+        datum,
+        engine.and_then(super::EngineHook::enum_labels),
+        control,
+    )
+}
+
+pub(crate) fn read_with_enum_catalog_and_control(
+    datum: &DatumValue,
+    enums: Option<&dyn super::enums::EnumLabelCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     control.check()?;
     if let Some(value) = fixed::read(datum, control) {
         return value;
+    }
+    if crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()).is_none()
+        && crate::catalog::type_metadata::builtin_array_element(datum.type_oid()).is_none()
+    {
+        if let Some(enums) = enums {
+            if enums.enum_type_labels(datum.type_oid())?.is_some() {
+                let oid = word(
+                    datum
+                        .bytes()
+                        .get(datum.offset() as usize..)
+                        .unwrap_or_default(),
+                )
+                .ok_or_else(|| corrupt("invalid datum length"))?;
+                return Ok(
+                    control.retain_external_value(super::enums::enum_value_from_oid(
+                        Some(enums),
+                        oid,
+                    )?)?,
+                );
+            }
+        }
     }
     let payload = payload(datum, control)?;
     read_payload(datum.type_oid(), payload.bytes(), control)

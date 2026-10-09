@@ -203,6 +203,22 @@ pub struct CatalogEnumLabels<'a> {
 }
 
 impl uqa_sql::expr::enums::EnumLabelCatalog for CatalogEnumLabels<'_> {
+    fn enum_value_by_oid(
+        &self,
+        label_oid: u32,
+    ) -> Result<Option<uqa_core::EnumValue>, uqa_sql::SQLError> {
+        Ok(self.catalog.enums().find_map(|definition| {
+            definition
+                .labels
+                .iter()
+                .find(|label| label.oid == label_oid)
+                .map(|label| {
+                    uqa_core::EnumValue::new(definition.oid, label.key.clone())
+                        .with_label_oid(Some(label_oid))
+                })
+        }))
+    }
+
     fn enum_type_labels(
         &self,
         type_oid: u32,

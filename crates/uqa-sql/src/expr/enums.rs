@@ -59,6 +59,11 @@ pub trait EnumLabelCatalog {
     /// The labels of one enum type in the statement's catalog generation, or `None` when the catalog has no such type.
     fn enum_type_labels(&self, type_oid: u32) -> Result<Option<Arc<EnumTypeLabels>>>;
 
+    /// Resolve an already admitted physical label OID across enum types. Output uses the label's actual identity even if a retained tuple now declares another enum type; it does not repeat input safety checks.
+    fn enum_value_by_oid(&self, _label_oid: u32) -> Result<Option<EnumValue>> {
+        Ok(None)
+    }
+
     /// Whether the current transaction added this label to a type that it did not create. `PostgreSQL` rejects such a label until the transaction commits.
     fn enum_label_uncommitted(&self, label_oid: u32) -> bool;
 
@@ -67,6 +72,21 @@ pub trait EnumLabelCatalog {
 
     /// Whether the statement catalog defines any enum type; binding skips enum literal validation otherwise.
     fn has_enum_types(&self) -> bool;
+}
+
+pub(crate) fn enum_value_from_oid(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    label_oid: u32,
+) -> Result<Value> {
+    catalog
+        .map(|catalog| catalog.enum_value_by_oid(label_oid))
+        .transpose()?
+        .flatten()
+        .map(Value::Enum)
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "22P03".into(),
+            message: format!("invalid internal value for enum: {label_oid}"),
+        })
 }
 
 fn catalog_unavailable(type_oid: u32) -> SQLError {

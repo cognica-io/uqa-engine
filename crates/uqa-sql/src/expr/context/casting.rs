@@ -215,6 +215,32 @@ fn enum_array_output(
     cast_value_from_with_control(&labels, target_ty, Some("text[]"), control).map(Some)
 }
 
+fn physical_output_cast(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    let Value::Datum(datum) = value else {
+        return Ok(None);
+    };
+    if !is_string_type(target) {
+        return Ok(None);
+    }
+    let decoded =
+        super::super::datums::read_with_catalog_and_control(datum, Some(engine), control)?;
+    cast_value_with_type_resolution_with_control(
+        &decoded,
+        source_ty,
+        target_ty,
+        Some(engine),
+        control,
+    )
+    .map(Some)
+}
+
 /// Resolve catalog inputs at their external handoff, then admit SQL-owned names, element conversions and output before constructing them.
 pub fn cast_value_with_type_resolution_with_control(
     value: &Value,
@@ -246,6 +272,11 @@ pub fn cast_value_with_type_resolution_with_control(
     let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
+        if let Some(output) =
+            physical_output_cast(value, source_ty, target_ty, target, engine, control)?
+        {
+            return Ok(output);
+        }
         if let Some(value) = engine.cast_domain(value, source_ty, target)? {
             return Ok(control.retain_external_value(value)?);
         }
@@ -296,17 +327,12 @@ pub fn cast_value_with_type_resolution_with_control(
             return cast_catalog_array(value, source_ty, target, engine, control);
         }
     }
-    let resolved_source = match (engine, source_ty) {
-        (Some(engine), Some(source_ty)) => engine
-            .resolve_type_name(source_ty)
-            .map_err(SQLError::Internal)?
-            .map(|ty| {
-                let ty = ty.retain_external_with_control(control)?;
-                coercion_type_name_with_control(&ty, control)
-            })
-            .transpose()?,
-        _ => None,
-    };
+    let resolved_source = resolved_source_type
+        .map(|ty| {
+            let ty = ty.retain_external_with_control(control)?;
+            coercion_type_name_with_control(&ty, control)
+        })
+        .transpose()?;
     let source_ty = resolved_source.as_deref().map(String::as_str).or(source_ty);
     let target_name = resolved_target
         .as_ref()

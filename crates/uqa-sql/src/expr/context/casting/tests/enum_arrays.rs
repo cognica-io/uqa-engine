@@ -62,8 +62,15 @@ fn retained_enum_oids_fill_legacy_carriers_and_preserve_unread_values() {
 }
 
 impl EnumLabelCatalog for EnumCatalog {
+    fn enum_value_by_oid(&self, oid: u32) -> Result<Option<EnumValue>> {
+        Ok((oid == 16_386).then(|| {
+            EnumValue::new(16_384, EnumLabelKey::from_bytes(vec![0x80]).unwrap())
+                .with_label_oid(Some(oid))
+        }))
+    }
+
     fn enum_type_labels(&self, oid: u32) -> Result<Option<Arc<EnumTypeLabels>>> {
-        Ok((oid == 16_384).then(|| {
+        Ok(matches!(oid, 16_384 | 16_400).then(|| {
             Arc::new(EnumTypeLabels {
                 type_oid: oid,
                 labels: vec![EnumTypeLabel {
@@ -127,6 +134,85 @@ impl EngineHook for EnumCatalog {
     ) -> Result<Option<Value>> {
         crate::assignment::domain::cast_domain_value(self, value, source, target)
     }
+}
+
+#[test]
+fn physical_enum_reads_resolve_global_oids_and_obey_production_control() {
+    use crate::expr::datums::read_with_catalog_and_control as read;
+    let datum = uqa_core::DatumValue::new(16_400, 1, vec![0, 2, 64, 0, 0]);
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let value = read(&datum, Some(&EnumCatalog), &control).unwrap();
+    let Value::Enum(label) = &*value else {
+        panic!("physical enum")
+    };
+    assert_eq!(label.type_oid(), 16_384);
+    assert_eq!(label.label_oid(), Some(16_386));
+    assert!(budget.used() > 0);
+    drop(value);
+    assert_eq!(budget.used(), 0);
+    let empty = MemoryBudget::new(0);
+    assert_eq!(
+        read(
+            &datum,
+            Some(&EnumCatalog),
+            &ProductionControl::new(&empty, &token, &token)
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("53200")
+    );
+    for bytes in [vec![], vec![1, 0, 0]] {
+        assert_eq!(
+            read(
+                &uqa_core::DatumValue::new(16_400, 0, bytes),
+                Some(&EnumCatalog),
+                &control
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("XX001")
+        );
+    }
+    let invalid = uqa_core::DatumValue::new(16_400, 0, 1_u32.to_le_bytes().to_vec());
+    let error = read(&invalid, Some(&EnumCatalog), &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22P03"));
+    assert_eq!(error.to_string(), "invalid internal value for enum: 1");
+    token.cancel();
+    assert_eq!(
+        read(&datum, Some(&EnumCatalog), &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn host_result_output_reads_physical_enums_inside_named_and_positional_values() {
+    let value = Value::Datum(uqa_core::DatumValue::new(
+        16_400,
+        0,
+        16_386_u32.to_le_bytes().to_vec(),
+    ));
+    let record = Value::Record(vec![("label".into(), value.clone())]);
+    let mut result = crate::SQLResult::from_rows_with_positions(
+        vec!["v".into(), "v".into()],
+        vec![crate::ResultRow::new()],
+        Some(vec![vec![value, record]]),
+    );
+    crate::result::render_result_enum_labels(Some(&EnumCatalog), &mut result).unwrap();
+    assert_eq!(
+        result.positional_rows.unwrap(),
+        vec![vec![
+            Value::Str("renamed".into()),
+            Value::Record(vec![("label".into(), Value::Str("renamed".into()))])
+        ]]
+    );
+    assert!(result.rows[0]
+        .values()
+        .all(|value| !crate::expr::enums::contains_enum_carrier(value)));
 }
 
 fn hidden_enum_domain() -> crate::catalog::domain::StoredDomain {

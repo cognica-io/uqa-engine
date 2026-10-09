@@ -19,7 +19,7 @@ pub fn render_result_enum_labels(
     for row in &mut result.rows {
         for value in row.values_mut() {
             if contains_datum(value) {
-                *value = read_datums(value)?;
+                *value = read_datums(value, catalog)?;
             }
             if contains_enum_carrier(value) {
                 *value = render_enum_labels(catalog, value)?;
@@ -29,7 +29,7 @@ pub fn render_result_enum_labels(
     for row in result.positional_rows.iter_mut().flatten() {
         for value in row {
             if contains_datum(value) {
-                *value = read_datums(value)?;
+                *value = read_datums(value, catalog)?;
             }
             if contains_enum_carrier(value) {
                 *value = render_enum_labels(catalog, value)?;
@@ -51,39 +51,51 @@ fn contains_datum(value: &Value) -> bool {
     }
 }
 
-fn read_datums(value: &Value) -> Result<Value, SQLError> {
+fn read_datums(value: &Value, catalog: Option<&dyn EnumLabelCatalog>) -> Result<Value, SQLError> {
     Ok(match value {
-        Value::Datum(datum) => crate::expr::datums::read(datum)?,
+        Value::Datum(datum) => crate::expr::datums::read_with_enum_catalog_and_control(
+            datum,
+            catalog,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("ordinary result datum output"),
         Value::Array(array) => Value::Array(
             uqa_core::ArrayValue::with_lower_bounds(
                 array
                     .elements()
                     .iter()
-                    .map(read_datums)
+                    .map(|value| read_datums(value, catalog))
                     .collect::<Result<_, _>>()?,
                 array.lower_bounds().to_vec(),
             )
             .ok_or_else(|| SQLError::Internal("datum output changed array shape".into()))?
             .with_element_type_oid(array.element_type_oid()),
         ),
-        Value::List(values) => {
-            Value::List(values.iter().map(read_datums).collect::<Result<_, _>>()?)
-        }
-        Value::Row(values) => Value::Row(
+        Value::List(values) => Value::List(
             values
-                .clone()
-                .with_values(values.iter().map(read_datums).collect::<Result<_, _>>()?)?,
+                .iter()
+                .map(|value| read_datums(value, catalog))
+                .collect::<Result<_, _>>()?,
+        ),
+        Value::Row(values) => Value::Row(
+            values.clone().with_values(
+                values
+                    .iter()
+                    .map(|value| read_datums(value, catalog))
+                    .collect::<Result<_, _>>()?,
+            )?,
         ),
         Value::Record(fields) => Value::Record(
             fields
                 .iter()
-                .map(|(name, value)| Ok((name.clone(), read_datums(value)?)))
+                .map(|(name, value)| Ok((name.clone(), read_datums(value, catalog)?)))
                 .collect::<Result<_, SQLError>>()?,
         ),
         Value::Map(values) => Value::Map(
             values
                 .iter()
-                .map(|(name, value)| Ok((name.clone(), read_datums(value)?)))
+                .map(|(name, value)| Ok((name.clone(), read_datums(value, catalog)?)))
                 .collect::<Result<_, SQLError>>()?,
         ),
         other => other.clone(),

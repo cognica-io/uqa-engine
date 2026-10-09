@@ -48,6 +48,11 @@ pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
 
 pub(crate) fn decode_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
     match base(ty) {
+        ColumnType::Enum(reference) => Some(Value::Datum(uqa_core::DatumValue::new(
+            reference.oid,
+            0,
+            (bits as u32).to_le_bytes().to_vec(),
+        ))),
         ColumnType::Boolean => Some(Value::Bool(bits as u8 != 0)),
         ColumnType::InternalChar => Some(Value::Str(if bits == 0 {
             String::new()

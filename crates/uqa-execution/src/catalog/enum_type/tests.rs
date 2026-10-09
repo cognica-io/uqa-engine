@@ -39,6 +39,55 @@ struct Publication<'a> {
     registry: RefCell<EnumRegistry>,
 }
 
+#[test]
+fn physical_label_lookup_tracks_the_pinned_registry_generation() {
+    let cache = EnumLabelCache::default();
+    let first = Arc::new(EnumRegistry::from([
+        (
+            "public.mood".into(),
+            definition("mood", 20_000, &["sad", "happy"]),
+        ),
+        (
+            "public.color".into(),
+            definition("color", 21_000, &["blue"]),
+        ),
+    ]));
+    let value = cache.value(&first, 20_003).unwrap();
+    assert_eq!(value.type_oid(), 20_000);
+    assert_eq!(value.label_oid(), Some(20_003));
+    assert_eq!(cache.value(&first, 21_002).unwrap().type_oid(), 21_000);
+    assert!(cache.value(&first, 1).is_none());
+    let mut changed = first.as_ref().clone();
+    changed
+        .get_mut("public.mood")
+        .unwrap()
+        .rename_label("happy", "renamed")
+        .unwrap();
+    changed.remove("public.color");
+    let changed = Arc::new(changed);
+    assert_eq!(cache.value(&changed, 20_003), Some(value.clone()));
+    assert_eq!(
+        cache
+            .labels(&changed, 20_000)
+            .unwrap()
+            .by_key(value.key())
+            .unwrap()
+            .label,
+        "renamed"
+    );
+    assert!(cache.value(&changed, 21_002).is_none());
+    assert_eq!(
+        cache
+            .labels(&first, 20_000)
+            .unwrap()
+            .by_key(value.key())
+            .unwrap()
+            .label,
+        "happy"
+    );
+    assert!(cache.value(&first, 21_002).is_some());
+}
+
 impl EnumRegistryPublication for Publication<'_> {
     fn enum_registry(&self) -> EnumRegistryRead<'_> {
         Box::new(self.registry.borrow())

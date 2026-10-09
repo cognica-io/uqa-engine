@@ -20,7 +20,11 @@ pub fn format_postgres_text(
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
     if let Value::Datum(datum) = value {
-        return format_postgres_text(&crate::expr::datums::read(datum)?, ty, engine);
+        return format_postgres_text(
+            &crate::expr::datums::read_with_catalog(datum, engine)?,
+            ty,
+            engine,
+        );
     }
     if let ColumnType::Domain { base, .. } = ty {
         return format_postgres_text(value, base, engine);
