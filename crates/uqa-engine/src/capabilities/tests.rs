@@ -7,6 +7,7 @@
 use super::*;
 use crate::StoredViewKind;
 use uqa_core::Value;
+use uqa_execution::catalog::services::CatalogSnapshotSource;
 use uqa_sql::{expr::EngineHook, ColumnType, SQLParam};
 
 thread_local! {
@@ -476,4 +477,52 @@ fn domain_validation_casts_have_a_retained_catalog() {
     assert_eq!(result.rows.len(), 2);
     assert_eq!(result.rows[0]["id"], Value::Int(1));
     assert_eq!(result.rows[1]["id"], Value::Int(2));
+}
+
+#[test]
+fn definition_refresh_captures_only_the_requested_current_catalog() {
+    for unrelated in [0, 32] {
+        let engine = Engine::new();
+        engine.sql("CREATE TABLE target(id int)", &[]).unwrap();
+        for index in 0..unrelated {
+            engine
+                .sql(&format!("CREATE TABLE unrelated_{index}(id int)"), &[])
+                .unwrap();
+        }
+        CATALOG_CAPTURES.set(0);
+        engine.refresh_catalog().unwrap();
+        assert_eq!(CATALOG_CAPTURES.get(), 0);
+        let dependencies =
+            uqa_execution::schema::deletion::catalog_dependencies(&engine.catalog_execution())
+                .unwrap();
+        assert_eq!(CATALOG_CAPTURES.get(), 1);
+        assert!(dependencies
+            .relation_address(&crate::RelationIdentity::new("public", "target"), None)
+            .is_some());
+    }
+}
+
+#[test]
+fn definition_refresh_preserves_query_retention_and_current_definitions() {
+    let mut engine = Engine::new();
+    engine.sql("CREATE TABLE target(id int)", &[]).unwrap();
+    let retained = Arc::new(crate::session::RetainedCatalogSnapshot {
+        durable: engine.durable.snapshot(),
+        read_view: engine.catalog_read_view(),
+    });
+    engine
+        .sql("ALTER TABLE target ADD COLUMN later text", &[])
+        .unwrap();
+    engine.query_catalog_snapshot = Some(retained);
+    let relation = crate::RelationIdentity::new("public", "target");
+    CATALOG_CAPTURES.set(0);
+    engine.refresh_catalog().unwrap();
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
+    let query = engine.refreshed_catalog_snapshot().unwrap();
+    assert_eq!(query.snapshot().tables[&relation].columns.len(), 1);
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
+    let current = engine.current_catalog_snapshot();
+    assert_eq!(current.snapshot().tables[&relation].columns.len(), 2);
+    assert_eq!(CATALOG_CAPTURES.get(), 1);
+    assert_eq!(query.snapshot().tables[&relation].columns.len(), 1);
 }

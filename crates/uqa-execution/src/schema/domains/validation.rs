@@ -180,11 +180,7 @@ fn locked_relations<S: Clone + 'static>(
     let mut locked = BTreeSet::new();
     loop {
         context.inputs.cancellation.check()?;
-        context
-            .inputs
-            .catalog
-            .catalog
-            .refreshed_catalog_snapshot()?;
+        context.inputs.catalog.catalog.refresh_catalog()?;
         let catalog = context.inputs.catalog.catalog.current_catalog_snapshot();
         let relations = dependent_relations(context, &catalog, domain)?;
         let mut acquired = false;
