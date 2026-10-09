@@ -6,6 +6,16 @@
 
 use super::*;
 use crate::StoredViewKind;
+use uqa_core::Value;
+use uqa_sql::{expr::EngineHook, ColumnType, SQLParam};
+
+thread_local! {
+    static CATALOG_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(super) fn record_catalog_capture() {
+    CATALOG_CAPTURES.set(CATALOG_CAPTURES.get() + 1);
+}
 
 #[test]
 fn privilege_readers_retain_registry_guards_and_table_generations() {
@@ -305,4 +315,163 @@ fn relation_resolution_preserves_the_missing_namespace_outcome() {
             .unwrap(),
         RelationResolution::MissingRelation
     );
+}
+
+#[rstest::rstest]
+#[case(false)]
+#[case(true)]
+fn information_schema_filter_catalog_captures_do_not_scale_with_rows(#[case] persistent: bool) {
+    let captures = [1, 32].map(|table_count| {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = if persistent {
+            Engine::open(&directory.path().join("catalog.db")).unwrap()
+        } else {
+            Engine::new()
+        };
+        for index in 0..table_count {
+            engine
+                .sql(
+                    &format!("CREATE TABLE item_{index} (id integer, title text, active boolean)"),
+                    &[],
+                )
+                .unwrap();
+        }
+        CATALOG_CAPTURES.set(0);
+        let result = engine
+            .sql(
+                "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1 ORDER BY ordinal_position",
+                &[SQLParam::scalar(Value::Str("item_0".into()))],
+            )
+            .unwrap();
+        let count = CATALOG_CAPTURES.get();
+        assert_eq!(result.rows.len(), 3);
+        for (row, (name, ty)) in result.rows.iter().zip([
+            ("id", "integer"),
+            ("title", "text"),
+            ("active", "boolean"),
+        ]) {
+            assert_eq!(row["column_name"], Value::Str(name.into()));
+            assert_eq!(row["data_type"], Value::Str(ty.into()));
+        }
+        count
+    });
+    assert!(captures[0] > 0, "the query must capture its catalog inputs");
+    assert!(
+        captures[1] <= captures[0],
+        "catalog captures grew with unrelated rows: {captures:?}"
+    );
+}
+
+#[test]
+fn scoped_type_resolution_reuses_retained_catalog() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE DOMAIN positive AS integer CHECK (VALUE > 0); CREATE TYPE mood AS ENUM ('calm', 'busy'); CREATE TABLE items (id integer)",
+            &[],
+        )
+        .unwrap();
+    let scope = query_scope::new_for_current_routine(&engine);
+    let hook = ScopedEngineHook::new(&engine, &scope);
+    let names = [
+        "information_schema.sql_identifier",
+        "information_schema.character_data",
+        "positive",
+        "positive[]",
+        "mood",
+        "items",
+        "integer",
+    ];
+    CATALOG_CAPTURES.set(0);
+    for _ in 0..32 {
+        for name in names {
+            assert!(EngineHook::resolve_type_name(&hook, name)
+                .unwrap()
+                .is_some());
+            assert!(
+                uqa_execution::FunctionTypeResolver::resolve_type_name(&hook, name)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
+}
+
+#[test]
+fn scoped_type_resolution_keeps_domain_identity_until_next_scope() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SCHEMA first_path; CREATE SCHEMA second_path; CREATE DOMAIN first_path.item AS integer; CREATE DOMAIN second_path.item AS text; SET search_path = first_path, second_path",
+            &[],
+        )
+        .unwrap();
+    // PostgreSQL 18.4 independently returns 2 and 'value' for these domain casts.
+    let values = engine
+        .sql("SELECT (2::item)::integer AS numeric_value, ('value'::second_path.item)::text AS text_value", &[])
+        .unwrap();
+    assert_eq!(values.rows[0]["numeric_value"], Value::Int(2));
+    assert_eq!(values.rows[0]["text_value"], Value::Str("value".into()));
+    let scope = query_scope::new_for_current_routine(&engine);
+    let hook = ScopedEngineHook::new(&engine, &scope);
+    let original = EngineHook::resolve_type_name(&hook, "item")
+        .unwrap()
+        .unwrap();
+    let qualified = EngineHook::resolve_type_name(&hook, "second_path.item")
+        .unwrap()
+        .unwrap();
+    assert_ne!(original, qualified);
+    engine
+        .sql(
+            "DROP DOMAIN first_path.item; CREATE DOMAIN first_path.item AS boolean",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        EngineHook::resolve_type_name(&hook, "item").unwrap(),
+        Some(original.clone())
+    );
+    assert_eq!(
+        EngineHook::resolve_type_name(&hook, "item[]").unwrap(),
+        Some(ColumnType::Array(Box::new(original.clone())))
+    );
+    assert_eq!(
+        uqa_execution::FunctionTypeResolver::resolve_type_name(&hook, "item").unwrap(),
+        Some(original.clone())
+    );
+    let current_scope = query_scope::new_for_current_routine(&engine);
+    let current_hook = ScopedEngineHook::new(&engine, &current_scope);
+    assert_ne!(
+        EngineHook::resolve_type_name(&current_hook, "item").unwrap(),
+        Some(original)
+    );
+    engine
+        .sql("SET search_path = second_path, first_path", &[])
+        .unwrap();
+    let reordered_scope = query_scope::new_for_current_routine(&engine);
+    let reordered_hook = ScopedEngineHook::new(&engine, &reordered_scope);
+    assert_eq!(
+        EngineHook::resolve_type_name(&reordered_hook, "item").unwrap(),
+        Some(qualified)
+    );
+}
+
+#[test]
+fn domain_validation_casts_have_a_retained_catalog() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE DOMAIN positive AS integer; CREATE TABLE items (id positive); INSERT INTO items VALUES (1), (2); ALTER DOMAIN positive ADD CONSTRAINT valid CHECK ((VALUE::text)::integer > 0)",
+            &[],
+        )
+        .unwrap();
+    let error = engine
+        .sql("INSERT INTO items VALUES (-1)", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("23514"));
+    let result = engine.sql("SELECT id FROM items ORDER BY id", &[]).unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[1]["id"], Value::Int(2));
 }

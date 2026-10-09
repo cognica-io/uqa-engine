@@ -32,7 +32,11 @@ impl<'a> PreparedCheck<'a> {
         check: &DomainCheck,
     ) -> Result<Self, SQLError> {
         let mut expression = ExpressionPlan::lower(check.expression.clone());
-        let mut scope = CteScope::default();
+        let mut scope = CteScope::with_catalog(
+            inputs.catalog.catalog.current_catalog_snapshot(),
+            inputs.catalog.session.relation_name_resolution(),
+            None,
+        );
         scope.scalar_subqueries.clone_from(&expression.subqueries);
         let hook = inputs.expressions.bind_scope(scope);
         let schema = RowSchema::with_types(

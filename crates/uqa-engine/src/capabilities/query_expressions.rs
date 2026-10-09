@@ -131,9 +131,16 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         &self,
         name: &str,
     ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
+        let catalog = self
+            .ctes
+            .catalog_read_view()
+            .map_err(|error| error.to_string())?;
         Ok(
             uqa_execution::catalog::projection::resolve_catalog_column_type(
-                &self.engine.catalog_execution(),
+                &uqa_execution::catalog::context::CatalogContext {
+                    catalog: &catalog,
+                    ..self.engine.catalog_execution()
+                },
                 name,
             ),
         )
