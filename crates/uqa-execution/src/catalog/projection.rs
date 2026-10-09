@@ -99,10 +99,10 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgCursors => cursors::rows(session),
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgDepend => {
-            CatalogDependencies::build(context, catalog, resolution)?.depend_rows()
+            dependencies::retained_dependencies(context, catalog, resolution)?.depend_rows()
         }
         VirtualRelation::PgShdepend => {
-            CatalogDependencies::build(context, catalog, resolution)?.shared_depend_rows()
+            dependencies::retained_dependencies(context, catalog, resolution)?.shared_depend_rows()
         }
         VirtualRelation::PgMatviews => build_pg_matviews(output, catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
@@ -122,6 +122,7 @@ pub use builtin_routines::{
 pub use regtypes::catalog_routine_type_oid;
 mod cursors;
 mod dependencies;
+pub(super) use dependencies::DependencyCatalogCache;
 pub use dependencies::{
     pg_describe_object_value, role_dependency_detail, CatalogDependencies, CatalogObject,
     RelationKind,
