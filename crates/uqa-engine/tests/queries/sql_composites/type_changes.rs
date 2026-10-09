@@ -168,3 +168,103 @@ fn nested_composite_layouts_match_postgresql(#[case] provider: usize) {
         ),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_enum_layouts_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("enum-layouts.db");
+    let engine = super::addition::open(provider, &path);
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_enum_layout_oracle.expected.json"
+    ))
+    .unwrap();
+    let mut initial = reference.clone();
+    initial["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] != true);
+    crate::pg18_oracle::verify(&engine, &initial.to_string());
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        super::addition::open(provider, &path)
+    };
+    let mut durable = reference;
+    durable["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] == true);
+    crate::pg18_oracle::verify(&engine, &durable.to_string());
+}
+
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn legacy_enum_constants_fill_physical_oids_before_type_changes(#[case] provider: usize) {
+    fn remove_oids(value: &mut serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Array(values) => values.iter_mut().map(remove_oids).sum(),
+            serde_json::Value::Object(fields) => {
+                let removed = usize::from(
+                    fields.get("$uqa_type").is_some_and(|kind| kind == "enum")
+                        && fields.remove("label_oid").is_some(),
+                );
+                removed + fields.values_mut().map(remove_oids).sum::<usize>()
+            }
+            _ => 0,
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-enum-layouts.db");
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_enum_layout_oracle.expected.json"
+    ))
+    .unwrap();
+    let statement = |id| {
+        reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap()["sql"]
+            .as_str()
+            .unwrap()
+    };
+    let engine = super::addition::open(provider, &path);
+    engine.sql(statement("setup"), &[]).unwrap();
+    // Exercise both an already retained source and a constant captured by its first TYPE change.
+    engine
+        .sql("ALTER TYPE enum_slots ADD ATTRIBUTE extra integer", &[])
+        .unwrap();
+    drop(engine);
+    super::addition::restoration::catalog(provider, &path, |catalog| {
+        let mut count = 0;
+        for mut view in catalog.load_views().unwrap() {
+            let mut value = serde_json::from_str(&view.definition_json).unwrap();
+            count += remove_oids(&mut value);
+            view.definition_json = serde_json::to_string(&value).unwrap();
+            catalog.save_view(&view).unwrap();
+        }
+        assert!(
+            count >= 3,
+            "legacy scalar, retained source and array carriers"
+        );
+    });
+    let engine = super::addition::open(provider, &path);
+    engine.sql(statement("commit_changes"), &[]).unwrap();
+    let mut observations = reference;
+    observations["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| matches!(case["id"].as_str(), Some("scalar_oid" | "array_label_oids")));
+    crate::pg18_oracle::verify(&engine, &observations.to_string());
+    drop(engine);
+    let reopened = super::addition::open(provider, &path);
+    crate::pg18_oracle::verify(&reopened, &observations.to_string());
+}

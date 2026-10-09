@@ -11,6 +11,56 @@ use uqa_core::{EnumLabelKey, EnumValue};
 
 struct EnumCatalog;
 
+#[test]
+fn retained_enum_oids_fill_legacy_carriers_and_preserve_unread_values() {
+    let catalog = Some(&EnumCatalog as &dyn EnumLabelCatalog);
+    let fresh = crate::expr::enums::enum_value_from_text(catalog, 16_384, "renamed").unwrap();
+    let Value::Enum(label) = &fresh else {
+        panic!("enum input")
+    };
+    assert_eq!(label.label_oid(), Some(16_386));
+    let legacy = Value::Enum(label.clone().with_label_oid(None));
+    let original = Value::Record(vec![
+        ("label".into(), legacy.clone()),
+        (
+            "labels".into(),
+            Value::Array(
+                uqa_core::ArrayValue::with_lower_bounds(vec![legacy, Value::Null], vec![-2])
+                    .unwrap()
+                    .with_element_type_oid(Some(16_384)),
+            ),
+        ),
+        (
+            "unread".into(),
+            Value::Datum(uqa_core::DatumValue::new(1700, 0, Vec::new())),
+        ),
+    ]);
+    let mut source = crate::expr::composites::CompositeConstantSource {
+        value: original.clone(),
+        descriptors: Vec::new(),
+    };
+    source.retain_enum_oids(catalog).unwrap();
+    assert_eq!(source.value, original);
+    assert!(!source.value.has_same_representation(&original));
+    assert!(!crate::expr::enums::has_missing_enum_oid(&source.value));
+    let Value::Record(fields) = &source.value else {
+        panic!("retained record")
+    };
+    assert!(fields[0].1.has_same_representation(&fresh));
+    let ty = EnumCatalog.resolve_type_name("color").unwrap().unwrap();
+    assert_eq!(
+        crate::expr::composites::datum::encode_bits(&fields[0].1, &ty),
+        Some(16_386)
+    );
+    let retained = source.clone();
+    source.retain_enum_oids(None).unwrap();
+    assert_eq!(source, retained);
+    let restored: crate::expr::composites::CompositeConstantSource =
+        serde_json::from_str(&serde_json::to_string(&source).unwrap()).unwrap();
+    assert_eq!(restored, source);
+    assert!(crate::expr::enums::retain_enum_oids(None, &original).is_err());
+}
+
 impl EnumLabelCatalog for EnumCatalog {
     fn enum_type_labels(&self, oid: u32) -> Result<Option<Arc<EnumTypeLabels>>> {
         Ok((oid == 16_384).then(|| {

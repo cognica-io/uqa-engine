@@ -27,6 +27,7 @@ pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType
 
 pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
     Some(match (base(ty), value) {
+        (ColumnType::Enum(_), Value::Enum(value)) => u64::from(value.label_oid()?),
         (ColumnType::Boolean, Value::Bool(value)) => u64::from(*value),
         (ColumnType::InternalChar, Value::Str(value)) => {
             u64::from(value.as_bytes().first().copied().unwrap_or(0))

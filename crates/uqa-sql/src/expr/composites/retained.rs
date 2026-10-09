@@ -36,16 +36,27 @@ impl CompositeConstantSource {
         value: &Value,
         ty: &ColumnType,
         catalog: Option<&dyn super::CompositeTypeCatalog>,
+        enums: Option<&dyn crate::expr::enums::EnumLabelCatalog>,
     ) -> Result<Self, SQLError> {
         let mut descriptors = Descriptors::new();
         capture_type(ty, catalog, &mut descriptors)?;
         Ok(Self {
-            value: value.clone(),
+            value: crate::expr::enums::retain_enum_oids(enums, value)?,
             descriptors: descriptors
                 .into_values()
                 .map(|value| value.as_ref().clone())
                 .collect(),
         })
+    }
+
+    pub(crate) fn retain_enum_oids(
+        &mut self,
+        catalog: Option<&dyn crate::expr::enums::EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
+        if crate::expr::enums::has_missing_enum_oid(&self.value) {
+            self.value = crate::expr::enums::retain_enum_oids(catalog, &self.value)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn project_type_change(

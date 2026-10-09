@@ -1,0 +1,537 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE physical_mood AS ENUM ('low','high'); CREATE TYPE enum_slots AS (a physical_mood,b integer); CREATE VIEW enum_value AS SELECT '(low,17)'::enum_slots AS v; CREATE TYPE enum_array_slots AS (a physical_mood[],b integer); CREATE VIEW enum_array_value AS SELECT '(\"{low,NULL,high}\",23)'::enum_array_slots AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "SELECT v FROM enum_value; SELECT v FROM enum_array_value",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19139
+          ],
+          "rows": [
+            [
+              "(low,17)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19146
+          ],
+          "rows": [
+            [
+              "(\"{low,NULL,high}\",23)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE oid",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "to_oid"
+    },
+    {
+      "sql": "SELECT (v).a=(SELECT oid FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(v).b FROM enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "t",
+              "17"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "scalar_oid"
+    },
+    {
+      "sql": "ALTER TYPE physical_mood RENAME VALUE 'low' TO 'renamed'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rename_label"
+    },
+    {
+      "sql": "SELECT (v).a=(SELECT oid FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='renamed'),(v).b FROM enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "t",
+              "17"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oid_after_rename"
+    },
+    {
+      "sql": "ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE physical_mood",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "restore_decl"
+    },
+    {
+      "sql": "SELECT v FROM enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19139
+          ],
+          "rows": [
+            [
+              "(renamed,17)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "renamed_output"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rollback"
+    },
+    {
+      "sql": "SELECT v FROM enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19139
+          ],
+          "rows": [
+            [
+              "(low,17)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "restored_output"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE enum_array_slots ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_bytes"
+    },
+    {
+      "sql": "SELECT length((v).a),encode(substr((v).a,1,8),'hex'),(get_byte((v).a,8)+256*get_byte((v).a,9)+65536*get_byte((v).a,10)+16777216::bigint*get_byte((v).a,11))='physical_mood'::regtype::oid::bigint,(get_byte((v).a,28)+256*get_byte((v).a,29)+65536*get_byte((v).a,30)+16777216::bigint*get_byte((v).a,31))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(get_byte((v).a,32)+256*get_byte((v).a,33)+65536*get_byte((v).a,34)+16777216::bigint*get_byte((v).a,35))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='high'),(v).b FROM enum_array_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length",
+            "encode",
+            "?column?",
+            "?column?",
+            "?column?",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25,
+            16,
+            16,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "36",
+              "0100000020000000",
+              "t",
+              "t",
+              "t",
+              "23"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_label_oids"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_rollback"
+    },
+    {
+      "sql": "ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE oid; ALTER TYPE enum_array_slots ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "ALTER TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "commit_changes"
+    },
+    {
+      "sql": "SELECT (v).a=(SELECT oid FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(v).b FROM enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "t",
+              "17"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopened_scalar",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT length((v).a),encode(substr((v).a,1,8),'hex'),(get_byte((v).a,8)+256*get_byte((v).a,9)+65536*get_byte((v).a,10)+16777216::bigint*get_byte((v).a,11))='physical_mood'::regtype::oid::bigint,(get_byte((v).a,28)+256*get_byte((v).a,29)+65536*get_byte((v).a,30)+16777216::bigint*get_byte((v).a,31))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(get_byte((v).a,32)+256*get_byte((v).a,33)+65536*get_byte((v).a,34)+16777216::bigint*get_byte((v).a,35))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='high'),(v).b FROM enum_array_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length",
+            "encode",
+            "?column?",
+            "?column?",
+            "?column?",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            25,
+            16,
+            16,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "36",
+              "0100000020000000",
+              "t",
+              "t",
+              "t",
+              "23"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopened_array",
+      "reopen": true
+    },
+    {
+      "sql": "ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE physical_mood; ALTER TYPE enum_array_slots ALTER ATTRIBUTE a TYPE physical_mood[]",
+      "command_tags": [
+        "ALTER TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "reopened_restore",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT v FROM enum_value; SELECT v FROM enum_array_value",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19139
+          ],
+          "rows": [
+            [
+              "(low,17)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19146
+          ],
+          "rows": [
+            [
+              "(\"{low,NULL,high}\",23)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopened_labels",
+      "reopen": true
+    },
+    {
+      "sql": "DROP VIEW enum_value,enum_array_value; DROP TYPE enum_slots,enum_array_slots; DROP TYPE physical_mood",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ]
+}

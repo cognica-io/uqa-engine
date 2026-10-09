@@ -289,15 +289,17 @@ fn project_literal(
     if !crate::expr::composites::literal::contains_records(value) {
         return Ok(value.clone());
     }
-    let source = source.get_or_insert_with(|| {
-        Box::new(crate::expr::composites::CompositeConstantSource {
-            value: value.clone(),
+    if source.is_none() {
+        *source = Some(Box::new(crate::expr::composites::CompositeConstantSource {
+            value: crate::expr::enums::retain_enum_oids(types.enum_labels(), value)?,
             descriptors: original
                 .values()
                 .map(|value| value.as_ref().clone())
                 .collect(),
-        })
-    });
+        }));
+    }
+    let source = source.as_mut().expect("captured composite source");
+    source.retain_enum_oids(types.enum_labels())?;
     let source_descriptors = source
         .descriptors
         .iter()

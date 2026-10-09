@@ -258,6 +258,8 @@ A retained array field keeps its original element type OID, dimensions, lower bo
 
 Stored nested composite constants retain their own tuple headers, type OIDs, NULL slots and aligned fields, including when they are array elements. Changing an outer attribute to bytea exposes that original storage. Changing an inner attribute instead interprets the nested value through its current descriptor; it does not replace the original source used by a later change or rollback.
 
+Retained enum fields keep the label OID originally admitted by the catalog. Changing an enum attribute to oid therefore reads that identifier, and changing an enum array attribute to bytea exposes its original element OIDs. Renaming a label changes text output without changing its stored identity. Original enum values and their physical identities survive commit and reopen, so restoring the descriptor restores label output without repeating enum input checks.
+
 A named `ROW(...)` constructor whose arguments are constants can be folded when its plan is built; later descriptor changes read that retained datum. Constructors that still need evaluation keep the originally admitted argument types and report `42804` when a surviving attribute now has a different type OID. The check precedes argument evaluation; removed arguments remain unevaluated.
 
 ```sql execute

@@ -1,0 +1,89 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE physical_mood AS ENUM ('low','high'); CREATE TYPE enum_slots AS (a physical_mood,b integer); CREATE VIEW enum_value AS SELECT '(low,17)'::enum_slots AS v; CREATE TYPE enum_array_slots AS (a physical_mood[],b integer); CREATE VIEW enum_array_value AS SELECT '(\"{low,NULL,high}\",23)'::enum_array_slots AS v"
+    },
+    {
+      "id": "before",
+      "sql": "SELECT v FROM enum_value; SELECT v FROM enum_array_value"
+    },
+    {
+      "id": "to_oid",
+      "sql": "BEGIN; ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE oid"
+    },
+    {
+      "id": "scalar_oid",
+      "sql": "SELECT (v).a=(SELECT oid FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(v).b FROM enum_value"
+    },
+    {
+      "id": "rename_label",
+      "sql": "ALTER TYPE physical_mood RENAME VALUE 'low' TO 'renamed'"
+    },
+    {
+      "id": "oid_after_rename",
+      "sql": "SELECT (v).a=(SELECT oid FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='renamed'),(v).b FROM enum_value"
+    },
+    {
+      "id": "restore_decl",
+      "sql": "ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE physical_mood"
+    },
+    {
+      "id": "renamed_output",
+      "sql": "SELECT v FROM enum_value"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "restored_output",
+      "sql": "SELECT v FROM enum_value"
+    },
+    {
+      "id": "array_bytes",
+      "sql": "BEGIN; ALTER TYPE enum_array_slots ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "array_label_oids",
+      "sql": "SELECT length((v).a),encode(substr((v).a,1,8),'hex'),(get_byte((v).a,8)+256*get_byte((v).a,9)+65536*get_byte((v).a,10)+16777216::bigint*get_byte((v).a,11))='physical_mood'::regtype::oid::bigint,(get_byte((v).a,28)+256*get_byte((v).a,29)+65536*get_byte((v).a,30)+16777216::bigint*get_byte((v).a,31))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(get_byte((v).a,32)+256*get_byte((v).a,33)+65536*get_byte((v).a,34)+16777216::bigint*get_byte((v).a,35))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='high'),(v).b FROM enum_array_value"
+    },
+    {
+      "id": "array_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "commit_changes",
+      "sql": "ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE oid; ALTER TYPE enum_array_slots ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "reopened_scalar",
+      "sql": "SELECT (v).a=(SELECT oid FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(v).b FROM enum_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_array",
+      "sql": "SELECT length((v).a),encode(substr((v).a,1,8),'hex'),(get_byte((v).a,8)+256*get_byte((v).a,9)+65536*get_byte((v).a,10)+16777216::bigint*get_byte((v).a,11))='physical_mood'::regtype::oid::bigint,(get_byte((v).a,28)+256*get_byte((v).a,29)+65536*get_byte((v).a,30)+16777216::bigint*get_byte((v).a,31))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='low'),(get_byte((v).a,32)+256*get_byte((v).a,33)+65536*get_byte((v).a,34)+16777216::bigint*get_byte((v).a,35))=(SELECT oid::bigint FROM pg_enum WHERE enumtypid='physical_mood'::regtype AND enumlabel='high'),(v).b FROM enum_array_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_restore",
+      "sql": "ALTER TYPE enum_slots ALTER ATTRIBUTE a TYPE physical_mood; ALTER TYPE enum_array_slots ALTER ATTRIBUTE a TYPE physical_mood[]",
+      "reopen": true
+    },
+    {
+      "id": "reopened_labels",
+      "sql": "SELECT v FROM enum_value; SELECT v FROM enum_array_value",
+      "reopen": true
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW enum_value,enum_array_value; DROP TYPE enum_slots,enum_array_slots; DROP TYPE physical_mood",
+      "reopen": true
+    }
+  ]
+}

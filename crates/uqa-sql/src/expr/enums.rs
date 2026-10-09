@@ -48,7 +48,9 @@ impl EnumTypeLabels {
     }
 
     fn value(&self, label: &EnumTypeLabel) -> Value {
-        Value::Enum(EnumValue::new(self.type_oid, label.key.clone()))
+        Value::Enum(
+            EnumValue::new(self.type_oid, label.key.clone()).with_label_oid(Some(label.oid)),
+        )
     }
 }
 
@@ -211,35 +213,58 @@ pub fn enum_range(
 
 /// Replace every enum carrier inside a value by its label text, as the output functions of containers do.
 pub fn render_enum_labels(catalog: Option<&dyn EnumLabelCatalog>, value: &Value) -> Result<Value> {
+    map_enum_values(value, &mut |label| {
+        enum_label_text(catalog, label).map(Value::Str)
+    })
+}
+
+/// Retain physical identities without repeating enum input checks or changing admitted values. Legacy carriers resolve their missing OID once; existing identities remain usable after catalog changes.
+pub(crate) fn retain_enum_oids(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+) -> Result<Value> {
+    map_enum_values(value, &mut |label| {
+        let oid = match label.label_oid() {
+            Some(oid) => oid,
+            None => enum_label_oid(catalog, label)?,
+        };
+        Ok(Value::Enum(label.clone().with_label_oid(Some(oid))))
+    })
+}
+
+fn map_enum_values(
+    value: &Value,
+    convert: &mut dyn FnMut(&EnumValue) -> Result<Value>,
+) -> Result<Value> {
     Ok(match value {
-        Value::Enum(label) => Value::Str(enum_label_text(catalog, label)?),
+        Value::Enum(label) => convert(label)?,
         Value::Array(array) => Value::Array(map_array(array, |element| {
-            render_enum_labels(catalog, element)
+            map_enum_values(element, convert)
         })?),
         Value::List(values) => Value::List(
             values
                 .iter()
-                .map(|element| render_enum_labels(catalog, element))
+                .map(|element| map_enum_values(element, convert))
                 .collect::<Result<_>>()?,
         ),
         Value::Row(values) => Value::Row(
             values.clone().with_values(
                 values
                     .iter()
-                    .map(|element| render_enum_labels(catalog, element))
+                    .map(|element| map_enum_values(element, convert))
                     .collect::<Result<_>>()?,
             )?,
         ),
         Value::Record(fields) => Value::Record(
             fields
                 .iter()
-                .map(|(name, element)| Ok((name.clone(), render_enum_labels(catalog, element)?)))
+                .map(|(name, element)| Ok((name.clone(), map_enum_values(element, convert)?)))
                 .collect::<Result<_>>()?,
         ),
         Value::Map(fields) => Value::Map(
             fields
                 .iter()
-                .map(|(name, element)| Ok((name.clone(), render_enum_labels(catalog, element)?)))
+                .map(|(name, element)| Ok((name.clone(), map_enum_values(element, convert)?)))
                 .collect::<Result<_>>()?,
         ),
         other => other.clone(),
@@ -272,13 +297,32 @@ fn map_array(
 
 /// Whether a value contains an enum carrier anywhere.
 pub fn contains_enum_carrier(value: &Value) -> bool {
+    enum_carrier_matches(value, &|_| true)
+}
+
+pub(crate) fn has_missing_enum_oid(value: &Value) -> bool {
+    enum_carrier_matches(value, &|label| label.label_oid().is_none())
+}
+
+fn enum_carrier_matches(value: &Value, predicate: &dyn Fn(&EnumValue) -> bool) -> bool {
     match value {
-        Value::Enum(_) => true,
-        Value::Array(array) => array.elements().iter().any(contains_enum_carrier),
-        Value::List(values) => values.iter().any(contains_enum_carrier),
-        Value::Row(values) => values.iter().any(contains_enum_carrier),
-        Value::Record(fields) => fields.iter().any(|(_, value)| contains_enum_carrier(value)),
-        Value::Map(fields) => fields.values().any(contains_enum_carrier),
+        Value::Enum(label) => predicate(label),
+        Value::Array(array) => array
+            .elements()
+            .iter()
+            .any(|value| enum_carrier_matches(value, predicate)),
+        Value::List(values) => values
+            .iter()
+            .any(|value| enum_carrier_matches(value, predicate)),
+        Value::Row(values) => values
+            .iter()
+            .any(|value| enum_carrier_matches(value, predicate)),
+        Value::Record(fields) => fields
+            .iter()
+            .any(|(_, value)| enum_carrier_matches(value, predicate)),
+        Value::Map(fields) => fields
+            .values()
+            .any(|value| enum_carrier_matches(value, predicate)),
         _ => false,
     }
 }

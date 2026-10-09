@@ -66,8 +66,13 @@ impl CompositeConstantChange<'_> {
                     value,
                     &ty,
                     Some(self.catalog),
+                    self.types.enum_labels(),
                 )?));
             }
+            source
+                .as_mut()
+                .expect("captured composite source")
+                .retain_enum_oids(self.types.enum_labels())?;
             if let AttributeChange::Type { name, to, .. } = self.change {
                 *value = source
                     .as_ref()
