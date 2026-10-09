@@ -127,6 +127,7 @@ pub use dependencies::{
     pg_describe_object_value, role_dependency_detail, CatalogDependencies, CatalogObject,
     RelationKind,
 };
+pub(super) use pg_catalog::IndexRelations;
 mod events;
 use uqa_sql::catalog::expression_text;
 mod index_definition;

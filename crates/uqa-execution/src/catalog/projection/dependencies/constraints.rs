@@ -71,8 +71,7 @@ impl DependencyBuilder<'_> {
                         }
                     }
                 }
-                if let Ok(index @ 1..) = u32::try_from(constraint_index_oid(&constraint, &indexes))
-                {
+                if let Ok(index @ 1..) = u32::try_from(constraint_index_oid(&constraint, indexes)) {
                     referenced.add_relation(index);
                 }
                 self.recorder
@@ -106,7 +105,7 @@ impl DependencyBuilder<'_> {
                     );
                 }
             } else if let Ok(parent @ 1..) =
-                u32::try_from(constraint_parent_oid(self.catalog, &constraint, &indexes))
+                u32::try_from(constraint_parent_oid(self.catalog, &constraint, indexes))
             {
                 // `index_constraint_create`: a partition's key constraint belongs to its parent's and to the partition.
                 self.recorder.record(

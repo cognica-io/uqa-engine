@@ -90,16 +90,25 @@ impl CatalogIndexRelation {
     }
 }
 
+mod cache;
 pub(crate) mod legacy;
+pub(in crate::catalog) use cache::IndexRelations;
+pub(crate) use cache::{catalog_index_by_name, catalog_index_by_oid};
 
-pub fn catalog_index_relations(
-    catalog: &CatalogReadView,
+pub fn catalog_index_relations<'a>(
+    catalog: &'a CatalogReadView,
     _resolution: &RelationNameResolution,
-) -> Result<Vec<CatalogIndexRelation>, SQLError> {
+) -> Result<&'a [CatalogIndexRelation], SQLError> {
+    cache::catalog_index_relations(catalog)
+}
+
+fn build_index_relations(catalog: &CatalogReadView) -> Result<Vec<CatalogIndexRelation>, SQLError> {
     let mut rows = Vec::new();
     let mut addresses = std::collections::BTreeMap::new();
     let mut parents = std::collections::BTreeSet::new();
     for row in catalog.catalog_indexes() {
+        #[cfg(test)]
+        cache::record_decode();
         let definition =
             index_definition(row).map_err(|error| SQLError::Internal(error.to_string()))?;
         let identity = definition.catalog.as_ref().ok_or_else(|| {
@@ -229,7 +238,7 @@ pub fn build_pg_index(
             .table(resolution, &index.table_name)?
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?
             .columns;
-        let keys = index_key_ordinals(&index, table_cols)?;
+        let keys = index_key_ordinals(index, table_cols)?;
         let expressions = index
             .columns
             .iter()
@@ -283,7 +292,7 @@ pub fn build_pg_index(
             ),
             ("indcollation", Value::Null),
             ("indclass", Value::Null),
-            ("indoption", index_options(&index)?),
+            ("indoption", index_options(index)?),
             (
                 "indexprs",
                 if expressions.is_empty() {
@@ -361,7 +370,7 @@ pub fn build_pg_indexes(
                     output,
                     catalog,
                     resolution,
-                    &index,
+                    index,
                     &index_target,
                     false,
                 )?),

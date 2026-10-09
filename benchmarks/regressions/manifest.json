@@ -1073,6 +1073,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "index_inquiries_borrow_one_validated_collection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/indexes/cache/tests.rs",
+      "capability": "Catalog index inquiries",
+      "workload": "Repeated full, OID and name inquiries with zero, one and 128 unrelated indexes.",
+      "invariant": "Exactly one complete validation decodes each index once; later inquiries borrow the retained collection without copying or decoding it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_index_readers_decode_the_catalog_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/indexes/cache/tests.rs",
+      "capability": "Catalog index inquiries",
+      "workload": "Eight cold readers selecting one index from a 129-index catalog.",
+      "invariant": "All readers borrow the same definition and together decode exactly 129 indexes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
