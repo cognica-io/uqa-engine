@@ -87,6 +87,7 @@ class ResourceEvidenceTest(unittest.TestCase):
                 host.unit('measured', ['/program', '--verify'], root, measurement=True, writable=root)
                 self.assertEqual(run.call_args.args[0][-4:], ['/usr/bin/setarch', '--addr-no-randomize', '/program', '--verify'])
                 self.assertEqual(capture.call_args.kwargs['executable'], Path('/program'))
+                self.assertEqual(capture.call_args.kwargs['benchmark_log'], root / 'measured.stderr')
                 host.unit('build', ['/compiler'], root)
                 self.assertNotIn('/usr/bin/setarch', run.call_args.args[0])
                 self.assertEqual(capture.call_count, 1)
@@ -190,6 +191,44 @@ class ResourceEvidenceTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'start failure'):
                 with monitor:
                     self.fail('failed observer must not start the workload')
+
+    def test_benchmark_markers_follow_complete_log_lines_and_keep_observation_times(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            log = root / 'workload.stderr'
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8', benchmark_log=log)
+            monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers, [])
+            log.write_text('Benchmarking q1: Warming up\nBenchmarking q1: Collec')
+            with patch.object(resources.time, 'monotonic', return_value=12.5):
+                monitor.sample_benchmark_marker()
+                monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers, [
+                {'observed_monotonic_seconds': 12.5, 'message': 'Benchmarking q1: Warming up'}])
+            with log.open('a') as stream:
+                stream.write('ting 20 samples\nWarning: an unrelated line\n')
+            with patch.object(resources.time, 'monotonic', return_value=13.0):
+                monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers[-1], {
+                'observed_monotonic_seconds': 13.0, 'message': 'Benchmarking q1: Collecting 20 samples'})
+            log.write_text('discarded prefix\n' * 2000 + 'Benchmarking q1: Analyzing\n')
+            monitor.sample_benchmark_marker()
+            self.assertEqual(monitor.benchmark_markers[-1]['message'], 'Benchmarking q1: Analyzing')
+
+    def test_benchmark_marker_size_and_inventory_are_bounded(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            log = root / 'workload.stderr'
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8', benchmark_log=log)
+            log.write_text('Benchmarking ' + 'x' * 1024 + '\n')
+            with self.assertRaisesRegex(QualificationError, 'marker exceeded'):
+                monitor.sample_benchmark_marker()
+            for index in range(64):
+                log.write_text(f'Benchmarking q{index}: Analyzing\n')
+                monitor.sample_benchmark_marker()
+            log.write_text('Benchmarking q65: Analyzing\n')
+            with self.assertRaisesRegex(QualificationError, 'inventory exceeded'):
+                monitor.sample_benchmark_marker()
 
 
 if __name__ == '__main__':

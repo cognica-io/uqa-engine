@@ -116,7 +116,7 @@ class ControlledHost:
         args += [f"--setenv={name}={value}" for name, value in (environment or {}).items()]
         group = Path("/sys/fs/cgroup") / MEASUREMENT_SLICE / f"uqa-perf-{self.run_id}-{self.counter}.service"
         resources = (MeasurementResources(group, self.output / (label + ".resources.json"), measurement_cpus,
-                                         executable=Path(argv[0]))
+                                         executable=Path(argv[0]), benchmark_log=stderr)
                      if measurement else nullcontext())
         workload = ["/usr/bin/setarch", "--addr-no-randomize", *argv] if measurement else argv
         with resources, stdout.open("wb") as out, stderr.open("wb") as err:
