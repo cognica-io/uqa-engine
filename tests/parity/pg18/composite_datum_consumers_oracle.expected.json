@@ -7440,6 +7440,618 @@
       ],
       "notices": [],
       "id": "jsonb_compare_bad_key_cleanup"
+    },
+    {
+      "sql": "CREATE DOMAIN array_domain_integer AS integer; CREATE TYPE domain_carrier_integer AS(a array_domain_integer[],b integer); CREATE VIEW domain_retained_integer AS SELECT '(\"{1,NULL,3}\",7)'::domain_carrier_integer AS v",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE domain_carrier_integer ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_alter"
+    },
+    {
+      "sql": "SELECT encode(substr((v).a,1,8),'hex') AS header, encode(substr((v).a,13),'hex') AS data, get_byte((v).a,8)+get_byte((v).a,9)*256+get_byte((v).a,10)*65536+get_byte((v).a,11)::bigint*16777216 = 'array_domain_integer'::regtype::oid::bigint AS original_element FROM domain_retained_integer",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "header",
+            "data",
+            "original_element"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "0100000020000000",
+              "030000000100000005000000000000000100000003000000",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_bytes"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_integer",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19013
+          ],
+          "rows": [
+            [
+              "(\"{1,NULL,3}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_rollback"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE domain_carrier_integer ALTER ATTRIBUTE a TYPE text[]; SELECT * FROM domain_retained_integer",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19013
+          ],
+          "rows": [
+            [
+              "(\"{1,NULL,3}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_text_array"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_integer",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19013
+          ],
+          "rows": [
+            [
+              "(\"{1,NULL,3}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_text_rollback"
+    },
+    {
+      "sql": "DROP VIEW domain_retained_integer; DROP TYPE domain_carrier_integer; DROP DOMAIN array_domain_integer",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_integer_cleanup"
+    },
+    {
+      "sql": "CREATE DOMAIN array_domain_real AS real; CREATE TYPE domain_carrier_real AS(a array_domain_real[],b integer); CREATE VIEW domain_retained_real AS SELECT '(\"{0.1,-0,1.25}\",7)'::domain_carrier_real AS v",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE domain_carrier_real ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_alter"
+    },
+    {
+      "sql": "SELECT encode(substr((v).a,1,8),'hex') AS header, encode(substr((v).a,13),'hex') AS data, get_byte((v).a,8)+get_byte((v).a,9)*256+get_byte((v).a,10)*65536+get_byte((v).a,11)::bigint*16777216 = 'array_domain_real'::regtype::oid::bigint AS original_element FROM domain_retained_real",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "header",
+            "data",
+            "original_element"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "0100000000000000",
+              "0300000001000000cdcccc3d000000800000a03f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_bytes"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_real",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19022
+          ],
+          "rows": [
+            [
+              "(\"{0.1,-0,1.25}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_rollback"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE domain_carrier_real ALTER ATTRIBUTE a TYPE text[]; SELECT * FROM domain_retained_real",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19022
+          ],
+          "rows": [
+            [
+              "(\"{0.1,-0,1.25}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_text_array"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_real",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19022
+          ],
+          "rows": [
+            [
+              "(\"{0.1,-0,1.25}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_text_rollback"
+    },
+    {
+      "sql": "DROP VIEW domain_retained_real; DROP TYPE domain_carrier_real; DROP DOMAIN array_domain_real",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_real_cleanup"
+    },
+    {
+      "sql": "CREATE DOMAIN array_domain_text AS text; CREATE TYPE domain_carrier_text AS(a array_domain_text[],b integer); CREATE VIEW domain_retained_text AS SELECT '(\"{a,NULL,bc}\",7)'::domain_carrier_text AS v",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE domain_carrier_text ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_alter"
+    },
+    {
+      "sql": "SELECT encode(substr((v).a,1,8),'hex') AS header, encode(substr((v).a,13),'hex') AS data, get_byte((v).a,8)+get_byte((v).a,9)*256+get_byte((v).a,10)*65536+get_byte((v).a,11)::bigint*16777216 = 'array_domain_text'::regtype::oid::bigint AS original_element FROM domain_retained_text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "header",
+            "data",
+            "original_element"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "0100000020000000",
+              "0300000001000000050000000000000014000000610000001800000062630000",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_bytes"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_text",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19031
+          ],
+          "rows": [
+            [
+              "(\"{a,NULL,bc}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_rollback"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE domain_carrier_text ALTER ATTRIBUTE a TYPE text[]; SELECT * FROM domain_retained_text",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19031
+          ],
+          "rows": [
+            [
+              "(\"{a,NULL,bc}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_text_array"
+    },
+    {
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_text",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19031
+          ],
+          "rows": [
+            [
+              "(\"{a,NULL,bc}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_text_rollback"
+    },
+    {
+      "sql": "DROP VIEW domain_retained_text; DROP TYPE domain_carrier_text; DROP DOMAIN array_domain_text",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_array_text_cleanup"
     }
   ]
 }

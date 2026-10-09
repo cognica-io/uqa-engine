@@ -139,6 +139,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         )
     }
 
+    fn resolve_type_oid(&self, oid: u32) -> Result<Option<uqa_sql::ast::ColumnType>, String> {
+        uqa_sql::expr::EngineHook::resolve_type_oid(self.engine, oid)
+    }
+
     fn resolve_regclass_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
         uqa_execution::catalog::projection::resolve_regclass_oid(
             &self.engine.catalog_execution(),

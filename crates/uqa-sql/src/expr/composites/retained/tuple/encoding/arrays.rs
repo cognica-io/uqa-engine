@@ -17,7 +17,8 @@ pub(super) fn payload(array: &ArrayValue, mut element: &ColumnType) -> Option<Ve
     let oid = array
         .element_type_oid()
         .unwrap_or(pg_type_oid(element) as u32);
-    let element = builtin_scalar_type(oid)?;
+    let element = builtin_scalar_type(oid)
+        .or_else(|| (pg_type_oid(element) == i64::from(oid)).then_some(element))?;
     let dimensions = array.dimensions();
     if dimensions.len() > 6 {
         return None;
@@ -77,4 +78,47 @@ pub(super) fn payload(array: &ArrayValue, mut element: &ColumnType) -> Option<Ve
         index += 1;
     }
     Some(bytes.split_off(4))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_elements_keep_catalog_identity_and_base_type_layout() {
+        for (base, values, reference) in [
+            (
+                ColumnType::Integer,
+                vec![Value::Int(1), Value::Null, Value::Int(3)],
+                "010000002000000074400000030000000100000005000000000000000100000003000000",
+            ),
+            (
+                ColumnType::Real,
+                vec![Value::Float(f64::from(0.1_f32)), Value::Float(-0.0), Value::Float(1.25)],
+                "0100000000000000744000000300000001000000cdcccc3d000000800000a03f",
+            ),
+            (
+                ColumnType::Text,
+                vec![Value::Str("a".into()), Value::Null, Value::Str("bc".into())],
+                "0100000020000000744000000300000001000000050000000000000014000000610000001800000062630000",
+            ),
+        ] {
+            let ty = ColumnType::Domain {
+                schema: "public".into(),
+                name: "array_element".into(),
+                oid: 16_500,
+                array_oid: Some(16_501),
+                base: Box::new(base),
+            };
+            let array = ArrayValue::try_new(values)
+                .unwrap()
+                .with_element_type_oid(Some(16_500));
+            // PostgreSQL's captured payload, with only the database-local OID replaced.
+            let expected = (0..reference.len())
+                .step_by(2)
+                .map(|index| u8::from_str_radix(&reference[index..index + 2], 16).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(payload(&array, &ty).unwrap(), expected);
+        }
+    }
 }

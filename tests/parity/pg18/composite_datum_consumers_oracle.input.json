@@ -1235,6 +1235,90 @@
     {
       "id": "jsonb_compare_bad_key_cleanup",
       "sql": "DEALLOCATE jsonb_compare_bad_key_p; DROP TYPE jsonb_compare_bad_key"
+    },
+    {
+      "id": "domain_array_integer_setup",
+      "sql": "CREATE DOMAIN array_domain_integer AS integer; CREATE TYPE domain_carrier_integer AS(a array_domain_integer[],b integer); CREATE VIEW domain_retained_integer AS SELECT '(\"{1,NULL,3}\",7)'::domain_carrier_integer AS v"
+    },
+    {
+      "id": "domain_array_integer_alter",
+      "sql": "BEGIN; ALTER TYPE domain_carrier_integer ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "domain_array_integer_bytes",
+      "sql": "SELECT encode(substr((v).a,1,8),'hex') AS header, encode(substr((v).a,13),'hex') AS data, get_byte((v).a,8)+get_byte((v).a,9)*256+get_byte((v).a,10)*65536+get_byte((v).a,11)::bigint*16777216 = 'array_domain_integer'::regtype::oid::bigint AS original_element FROM domain_retained_integer"
+    },
+    {
+      "id": "domain_array_integer_rollback",
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_integer"
+    },
+    {
+      "id": "domain_array_integer_text_array",
+      "sql": "BEGIN; ALTER TYPE domain_carrier_integer ALTER ATTRIBUTE a TYPE text[]; SELECT * FROM domain_retained_integer"
+    },
+    {
+      "id": "domain_array_integer_text_rollback",
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_integer"
+    },
+    {
+      "id": "domain_array_integer_cleanup",
+      "sql": "DROP VIEW domain_retained_integer; DROP TYPE domain_carrier_integer; DROP DOMAIN array_domain_integer"
+    },
+    {
+      "id": "domain_array_real_setup",
+      "sql": "CREATE DOMAIN array_domain_real AS real; CREATE TYPE domain_carrier_real AS(a array_domain_real[],b integer); CREATE VIEW domain_retained_real AS SELECT '(\"{0.1,-0,1.25}\",7)'::domain_carrier_real AS v"
+    },
+    {
+      "id": "domain_array_real_alter",
+      "sql": "BEGIN; ALTER TYPE domain_carrier_real ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "domain_array_real_bytes",
+      "sql": "SELECT encode(substr((v).a,1,8),'hex') AS header, encode(substr((v).a,13),'hex') AS data, get_byte((v).a,8)+get_byte((v).a,9)*256+get_byte((v).a,10)*65536+get_byte((v).a,11)::bigint*16777216 = 'array_domain_real'::regtype::oid::bigint AS original_element FROM domain_retained_real"
+    },
+    {
+      "id": "domain_array_real_rollback",
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_real"
+    },
+    {
+      "id": "domain_array_real_text_array",
+      "sql": "BEGIN; ALTER TYPE domain_carrier_real ALTER ATTRIBUTE a TYPE text[]; SELECT * FROM domain_retained_real"
+    },
+    {
+      "id": "domain_array_real_text_rollback",
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_real"
+    },
+    {
+      "id": "domain_array_real_cleanup",
+      "sql": "DROP VIEW domain_retained_real; DROP TYPE domain_carrier_real; DROP DOMAIN array_domain_real"
+    },
+    {
+      "id": "domain_array_text_setup",
+      "sql": "CREATE DOMAIN array_domain_text AS text; CREATE TYPE domain_carrier_text AS(a array_domain_text[],b integer); CREATE VIEW domain_retained_text AS SELECT '(\"{a,NULL,bc}\",7)'::domain_carrier_text AS v"
+    },
+    {
+      "id": "domain_array_text_alter",
+      "sql": "BEGIN; ALTER TYPE domain_carrier_text ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "domain_array_text_bytes",
+      "sql": "SELECT encode(substr((v).a,1,8),'hex') AS header, encode(substr((v).a,13),'hex') AS data, get_byte((v).a,8)+get_byte((v).a,9)*256+get_byte((v).a,10)*65536+get_byte((v).a,11)::bigint*16777216 = 'array_domain_text'::regtype::oid::bigint AS original_element FROM domain_retained_text"
+    },
+    {
+      "id": "domain_array_text_rollback",
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_text"
+    },
+    {
+      "id": "domain_array_text_text_array",
+      "sql": "BEGIN; ALTER TYPE domain_carrier_text ALTER ATTRIBUTE a TYPE text[]; SELECT * FROM domain_retained_text"
+    },
+    {
+      "id": "domain_array_text_text_rollback",
+      "sql": "ROLLBACK; SELECT * FROM domain_retained_text"
+    },
+    {
+      "id": "domain_array_text_cleanup",
+      "sql": "DROP VIEW domain_retained_text; DROP TYPE domain_carrier_text; DROP DOMAIN array_domain_text"
     }
   ]
 }

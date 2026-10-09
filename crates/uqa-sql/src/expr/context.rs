@@ -91,6 +91,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve an already admitted catalog type identity without name lookup or input privileges.
+    fn resolve_type_oid(&self, _oid: u32) -> std::result::Result<Option<ColumnType>, String> {
+        Ok(None)
+    }
+
     /// Apply catalog-owned domain conversion and constraints. A missing implementation leaves built-in catalog domains on their base-type conversion path.
     fn cast_domain(
         &self,
