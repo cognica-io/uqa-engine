@@ -247,8 +247,10 @@ impl ArrayValue {
                 control,
             )?
         };
-        Self::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
-            .ok_or(ArrayAssignmentError::ElementShape)
+        let value = Self::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
+            .ok_or(ArrayAssignmentError::ElementShape)?;
+        let (value, memory) = value.into_parts();
+        Ok(control.finish(value.with_element_type_oid(self.element_type_oid()), memory)?)
     }
 }
 

@@ -8,6 +8,37 @@ use super::*;
 use crate::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn array_element_identity_survives_retention_without_changing_native_equality() {
+    let untyped = ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![-3]).unwrap();
+    let typed = untyped.clone().with_element_type_oid(Some(23));
+    assert_eq!(typed, untyped);
+    assert!(!Value::Array(typed.clone()).has_same_representation(&Value::Array(untyped)));
+    let encoded = serde_json::to_vec(&typed).unwrap();
+    let decoded: ArrayValue = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded.element_type_oid(), Some(23));
+    let value = Value::Array(typed.clone());
+    let encoded = serde_json::to_vec(&value).unwrap();
+    let decoded: Value = serde_json::from_slice(&encoded).unwrap();
+    assert!(value.has_same_representation(&decoded));
+
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let copied = value.clone_budgeted(&memory, &token).unwrap();
+    assert!(value.has_same_representation(&copied));
+    drop(copied);
+    assert_eq!(memory.used(), 0);
+    let control = ProductionControl::new(&memory, &token, &token);
+    let changed = typed
+        .assign_element_with_control(&[-2], &Value::Int(2), &control)
+        .unwrap();
+    assert_eq!(changed.element_type_oid(), Some(23));
+    assert_eq!(changed.elements(), &[Value::Int(1), Value::Int(2)]);
+    assert_eq!(changed.lower_bounds(), &[-3]);
+    drop(changed);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn produced_arrays_preserve_bounds_and_release_nested_headers() {
     let source = Value::List(vec![Value::Array(
         ArrayValue::with_lower_bounds(vec![Value::Str("owned".into())], vec![-5]).unwrap(),

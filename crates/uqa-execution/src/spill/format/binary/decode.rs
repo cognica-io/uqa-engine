@@ -440,7 +440,14 @@ impl<'a> BinaryReader<'a> {
                 }
                 Ok(Value::Record(fields))
             }
-            15 => {
+            tag @ (15 | 21) => {
+                let element_type_oid = if tag == 21 {
+                    Some(u32::from_le_bytes(
+                        self.read_i32("array element type OID")?.to_le_bytes(),
+                    ))
+                } else {
+                    None
+                };
                 let bound_count = self.read_count("array lower-bound count", 4)?;
                 let mut lower_bounds = Vec::new();
                 lower_bounds
@@ -460,6 +467,7 @@ impl<'a> BinaryReader<'a> {
                     elements.push(self.read_value(depth + 1)?);
                 }
                 ArrayValue::with_lower_bounds(elements, lower_bounds)
+                    .map(|array| array.with_element_type_oid(element_type_oid))
                     .map(Value::Array)
                     .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
             }

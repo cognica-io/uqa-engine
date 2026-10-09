@@ -258,6 +258,9 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             Ok(())
         }
         Value::Array(array) => {
+            if array.element_type_oid().is_some() {
+                add_size(total, 4, "array element type OID")?;
+            }
             add_size(total, 8, "array lower-bound count")?;
             add_size(
                 total,
@@ -549,7 +552,12 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             write_bytes(writer, value.as_bytes())
         }
         Value::Array(array) => {
-            write_tag(writer, 15)?;
+            if let Some(oid) = array.element_type_oid() {
+                write_tag(writer, 21)?;
+                write_raw(writer, &oid.to_le_bytes(), "array element type OID")?;
+            } else {
+                write_tag(writer, 15)?;
+            }
             write_u64(writer, array.lower_bounds().len())?;
             for lower_bound in array.lower_bounds() {
                 write_raw(writer, &lower_bound.to_le_bytes(), "array lower bound")?;

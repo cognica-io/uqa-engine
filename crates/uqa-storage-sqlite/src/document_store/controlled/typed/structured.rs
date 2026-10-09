@@ -74,10 +74,11 @@ pub(super) fn sql_array(
     buffered: bool,
 ) -> Result<Budgeted<Value>, JsonReadError> {
     let mut container = Container::new(input, control, depth)?;
-    let (mut elements, mut bounds) = (None, None);
+    let (mut elements, mut bounds, mut element_type_oid) = (None, None, None);
     if container.kind == Kind::Array {
         elements = Some(container.next()?.ok_or(JsonReadError::InvalidJson)?.value);
         bounds = Some(container.next()?.ok_or(JsonReadError::InvalidJson)?.value);
+        element_type_oid = container.next()?.map(|item| item.value);
         if container.next()?.is_some() {
             return Err(JsonReadError::InvalidJson);
         }
@@ -87,6 +88,7 @@ pub(super) fn sql_array(
             let slot = match name.as_str() {
                 "elements" => &mut elements,
                 "lower_bounds" => &mut bounds,
+                "element_type_oid" => &mut element_type_oid,
                 _ => continue,
             };
             if slot.replace(item.value).is_some() {
@@ -129,6 +131,14 @@ pub(super) fn sql_array(
         literal("lower_bounds", control)?,
         bounds,
     )?;
+    if let Some(oid) = element_type_oid {
+        insert(
+            &mut fields,
+            &mut memory,
+            literal("element_type_oid", control)?,
+            modern(oid, control, depth - 1)?,
+        )?;
+    }
     let result =
         Value::from_json_fields_budgeted(Budgeted::new(fields, memory), control.cancellation())?;
     if !matches!(&*result, Value::Array(_)) {

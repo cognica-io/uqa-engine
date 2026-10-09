@@ -16,7 +16,7 @@ mod shape;
 pub use assignment::ArrayAssignmentError;
 pub use elements::{ArrayTraversalError, BudgetedArrayElements, ControlledArrayElements};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct ArrayValue {
     storage: Box<ArrayStorage>,
 }
@@ -26,6 +26,15 @@ struct ArrayStorage {
     elements: Vec<Value>,
     dimensions: Vec<usize>,
     lower_bounds: Vec<i32>,
+    element_type_oid: Option<u32>,
+}
+
+impl PartialEq for ArrayValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.storage.elements == other.storage.elements
+            && self.storage.dimensions == other.storage.dimensions
+            && self.storage.lower_bounds == other.storage.lower_bounds
+    }
 }
 
 impl ArrayValue {
@@ -82,12 +91,24 @@ impl ArrayValue {
                 elements,
                 dimensions,
                 lower_bounds,
+                element_type_oid: None,
             }),
         }
     }
 
     pub fn elements(&self) -> &[Value] {
         &self.storage.elements
+    }
+
+    /// Optional SQL element identity retained independently of native element equality. SQL owns admission and interpretation; Core copies this metadata without resolving a catalog.
+    pub fn element_type_oid(&self) -> Option<u32> {
+        self.storage.element_type_oid
+    }
+
+    /// Attach the already admitted SQL identity without changing elements, dimensions or bounds.
+    pub fn with_element_type_oid(mut self, oid: Option<u32>) -> Self {
+        self.storage.element_type_oid = oid;
+        self
     }
 
     /// Preserve the validated shape and already normalized elements of an existing array. The copying owner reserves these buffers and the boxed header before transferring them here.
@@ -102,6 +123,7 @@ impl ArrayValue {
                 elements,
                 dimensions,
                 lower_bounds,
+                element_type_oid: None,
             }),
         }
     }
@@ -193,11 +215,14 @@ impl serde::Serialize for ArrayValue {
         struct EncodedArray<'a> {
             elements: &'a [Value],
             lower_bounds: &'a [i32],
+            #[serde(skip_serializing_if = "Option::is_none")]
+            element_type_oid: Option<u32>,
         }
 
         EncodedArray {
             elements: &self.storage.elements,
             lower_bounds: &self.storage.lower_bounds,
+            element_type_oid: self.element_type_oid(),
         }
         .serialize(serializer)
     }
@@ -212,10 +237,13 @@ impl<'de> serde::Deserialize<'de> for ArrayValue {
         struct EncodedArray {
             elements: Vec<Value>,
             lower_bounds: Vec<i32>,
+            #[serde(default)]
+            element_type_oid: Option<u32>,
         }
 
         let encoded = EncodedArray::deserialize(deserializer)?;
         Self::with_lower_bounds(encoded.elements, encoded.lower_bounds)
+            .map(|value| value.with_element_type_oid(encoded.element_type_oid))
             .ok_or_else(|| serde::de::Error::custom("invalid PostgreSQL array dimensions"))
     }
 }

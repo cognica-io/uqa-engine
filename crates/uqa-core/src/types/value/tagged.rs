@@ -117,7 +117,7 @@ fn convert(
         "datum" if map.len() == 4 => {
             return decoded_datum(&map, workspace).map(Value::Datum);
         }
-        "array" if map.len() == 3 => {
+        "array" if map.len() == 3 || (map.len() == 4 && map.contains_key("element_type_oid")) => {
             if let Some(array) = decoded_array(&mut map, workspace)? {
                 return Ok(Value::Array(array));
             }
@@ -254,6 +254,14 @@ fn decoded_array(
     map: &mut BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
 ) -> Result<Option<ArrayValue>, ValueRetentionError> {
+    let element_type_oid = match map.get("element_type_oid") {
+        None | Some(Value::Null) => None,
+        Some(Value::Int(oid)) => match u32::try_from(*oid) {
+            Ok(oid) => Some(oid),
+            Err(_) => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
     let (Some(Value::List(bounds)), Some(Value::List(values))) =
         (map.get("lower_bounds"), map.get("values"))
     else {
@@ -281,11 +289,10 @@ fn decoded_array(
     }
     workspace.reserve(ArrayValue::decoded_header_bytes())?;
     let values = take_list(map, "values");
-    Ok(Some(ArrayValue::from_decoded_parts(
-        values,
-        dimensions,
-        decoded_bounds,
-    )))
+    Ok(Some(
+        ArrayValue::from_decoded_parts(values, dimensions, decoded_bounds)
+            .with_element_type_oid(element_type_oid),
+    ))
 }
 
 fn take_list(map: &mut BTreeMap<String, Value>, key: &str) -> Vec<Value> {

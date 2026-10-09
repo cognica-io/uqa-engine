@@ -61,6 +61,7 @@ fn same_elements(left: &[Value], right: &[Value]) -> bool {
 fn same_array(left: &ArrayValue, right: &ArrayValue) -> bool {
     left.dimensions() == right.dimensions()
         && left.lower_bounds() == right.lower_bounds()
+        && left.element_type_oid() == right.element_type_oid()
         && same_elements(left.elements(), right.elements())
 }
 

@@ -242,7 +242,8 @@ impl<'a> Frame<'a> {
                         self.memory.absorb(dimensions_memory);
                         self.memory.absorb(lower_memory);
                         (copier.check)()?;
-                        let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds);
+                        let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds)
+                            .with_element_type_oid(source.element_type_oid());
                         match legacy_kind {
                             Some(kind) => Value::LegacyVector(
                                 LegacyVectorValue::from_validated_array(kind, array),

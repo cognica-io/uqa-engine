@@ -106,6 +106,8 @@ struct TaggedArray<'a> {
     kind: &'static str,
     lower_bounds: &'a [i32],
     values: &'a [Value],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    element_type_oid: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -169,6 +171,7 @@ impl Serialize for Value {
                 kind: "array",
                 lower_bounds: value.lower_bounds(),
                 values: value.elements(),
+                element_type_oid: value.element_type_oid(),
             }
             .serialize(serializer),
             Self::LegacyVector(value) => value.serialize(serializer),

@@ -73,6 +73,11 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Int(2)], vec![-2]).unwrap(),
         ),
         Value::Array(ArrayValue::with_lower_bounds(Vec::new(), Vec::new()).unwrap()),
+        Value::Array(
+            ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![-3])
+                .unwrap()
+                .with_element_type_oid(Some(23)),
+        ),
         Value::LegacyVector(
             LegacyVectorValue::try_new(LegacyVectorKind::SmallInteger, Vec::new()).unwrap(),
         ),
@@ -148,6 +153,12 @@ fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
         r#"{"kind":"decimal","value":["decimal","1e-10"]}"#,
         r#"{"kind":"decimal","value":{"$uqa_type":"decimal","value":"0","extra":"\uD800"}}"#,
         r#"{"kind":"array","value":[[1,2],[-1]]}"#,
+        r#"{"kind":"array","value":[[1,2],[-1],23]}"#,
+        r#"{"kind":"array","value":[[1,2],[-1],null]}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":23}}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":-1}}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":4294967296}}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":23,"element_type_oid":25}}"#,
         r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"unknown":"\uD800"}}"#,
         r#"{"kind":"temporal","value":["date",1]}"#,
         r#"{"kind":"temporal","value":{"$uqa_type":"date","days":1,"micros":2}}"#,

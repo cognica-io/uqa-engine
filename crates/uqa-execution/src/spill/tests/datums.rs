@@ -8,6 +8,21 @@ use super::*;
 use crate::spill::format::{decode_physical_row_record, encode_physical_row_record};
 
 #[test]
+fn retained_array_element_identity_survives_binary_spill() {
+    let array = uqa_core::ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![-2])
+        .unwrap()
+        .with_element_type_oid(Some(23));
+    let value = Value::Array(array);
+    let row = PhysicalRow::from_values(vec![value.clone()]);
+    let encoded = encode_physical_row_record(&row, 1).unwrap();
+    for length in 0..encoded.len() {
+        assert!(decode_physical_row_record(&encoded[..length], 1).is_err());
+    }
+    let decoded = decode_physical_row_record(&encoded, 1).unwrap();
+    assert!(decoded.value(0).unwrap().has_same_representation(&value));
+}
+
+#[test]
 fn retained_datums_spill_without_reading_corrupt_physical_fields() {
     let datum = uqa_core::DatumValue::new(1700, 0, vec![2, 0, 0, 0, 3, b'x']);
     let value = Value::Record(vec![
