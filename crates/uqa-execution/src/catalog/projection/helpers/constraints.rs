@@ -207,6 +207,10 @@ pub fn constraint_catalog_rows(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ConstraintCatalogRow>, SQLError> {
+    // Stored relation identities are catalog data; schema USAGE governs user name lookup.
+    let mut resolution = resolution.clone();
+    resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+    let resolution = &resolution;
     let mut out = Vec::new();
     for table_name in catalog.table_names() {
         let (schema, table) = split_schema_name(&table_name)?;

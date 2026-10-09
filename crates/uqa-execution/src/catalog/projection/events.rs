@@ -7,6 +7,8 @@
 //! `pg_trigger`, `pg_rewrite`, and their definition helpers.
 
 mod rules;
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeMap;
 
@@ -147,6 +149,10 @@ pub fn catalog_triggers(
     catalog_view: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<(StoredTrigger, i64)>, SQLError> {
+    // Catalog metadata names its relations canonically, independently of invoking-role visibility.
+    let mut resolution = resolution.clone();
+    resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+    let resolution = &resolution;
     let originals = catalog_view.triggers();
     let mut catalog = originals
         .iter()
@@ -547,9 +553,11 @@ pub fn pg_get_triggerdef_value(
     };
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
+    let mut lookup = resolution.clone();
+    lookup.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let mut found = None;
-    for (trigger, _) in catalog_triggers(&catalog, &resolution)? {
-        if trigger_catalog_oid(&catalog, &resolution, &trigger)? == oid {
+    for (trigger, _) in catalog_triggers(&catalog, &lookup)? {
+        if trigger_catalog_oid(&catalog, &lookup, &trigger)? == oid {
             found = Some(trigger);
             break;
         }
