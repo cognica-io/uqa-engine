@@ -28,6 +28,17 @@ pub trait ExpressionEvaluator: Send + Sync {
         self.evaluate(expression, &schema.view(row))
     }
 
+    /// Evaluate a prepared physical expression with its execution-owned function state.
+    fn evaluate_physical_with_function_states(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        row: &PhysicalRow,
+        _states: &crate::scalar::FunctionCallStates,
+    ) -> ExecResult<Value> {
+        self.evaluate_physical(expression, schema, row)
+    }
+
     /// Bound SQL parameters used by static type resolution. Implementations
     /// that do not evaluate parameters may keep the empty default.
     fn parameters(&self) -> &[SQLParam] {
@@ -110,5 +121,19 @@ impl ExpressionEvaluator for DefaultExpressionEvaluator {
 
     fn parameters(&self) -> &[SQLParam] {
         &self.params
+    }
+
+    fn evaluate_physical_with_function_states(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        row: &PhysicalRow,
+        states: &crate::scalar::FunctionCallStates,
+    ) -> ExecResult<Value> {
+        let view = schema.view(row);
+        let context = ScalarEvalContext::from_row_lookup(&view, &self.params)
+            .with_row_schema(schema)
+            .with_function_states(states);
+        Ok(eval_scalar(expression, &context)?)
     }
 }

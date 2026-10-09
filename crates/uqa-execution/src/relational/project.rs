@@ -21,7 +21,7 @@ pub use uqa_sql::plan::ProjectionTarget;
 /// child schema is replaced with the output aliases.
 pub struct Project<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
-    computed: Vec<ScalarExpr>,
+    computed: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     evaluator: SharedExpressionEvaluator<'a>,
     schema: RowSchema,
     ordering: Vec<crate::PhysicalOrder>,
@@ -194,7 +194,7 @@ impl<'a> Project<'a> {
             projection_layout(child.row_schema(), projections, &evaluator, false);
         Self {
             child,
-            computed,
+            computed: crate::scalar::PreparedExpressions::scalars(computed),
             evaluator,
             schema,
             ordering: Vec::new(),
@@ -255,7 +255,7 @@ impl<'a> Project<'a> {
             projection_layout(child.row_schema(), projections, &evaluator, true);
         Self {
             child,
-            computed,
+            computed: crate::scalar::PreparedExpressions::scalars(computed),
             evaluator,
             schema,
             ordering,
@@ -272,8 +272,12 @@ impl<'a> Project<'a> {
                 .computed
                 .iter()
                 .map(|expression| {
-                    self.evaluator
-                        .evaluate_physical(expression, &batch.schema, &row)
+                    self.evaluator.evaluate_physical_with_function_states(
+                        expression,
+                        &batch.schema,
+                        &row,
+                        self.computed.calls(),
+                    )
                 })
                 .collect::<ExecResult<Vec<Value>>>()?;
             out.push(row.append_values(values));

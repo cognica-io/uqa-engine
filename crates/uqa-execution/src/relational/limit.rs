@@ -13,7 +13,7 @@ use super::{
 use crate::PhysicalRow;
 
 struct WithTies<'a> {
-    keys: Vec<SortKey>,
+    keys: crate::scalar::PreparedExpressions<Vec<SortKey>>,
     evaluator: SharedExpressionEvaluator<'a>,
     boundary: Option<Vec<Value>>,
     finished: bool,
@@ -82,7 +82,7 @@ impl<'a> Limit<'a> {
             emitted: 0,
             schema,
             with_ties: Some(WithTies {
-                keys,
+                keys: crate::scalar::PreparedExpressions::sort_keys(keys),
                 evaluator,
                 boundary: None,
                 finished: false,
@@ -132,9 +132,12 @@ impl<'a> Limit<'a> {
                 .keys
                 .iter()
                 .map(|key| {
-                    with_ties
-                        .evaluator
-                        .evaluate_physical(&key.expr, &self.schema, row)
+                    with_ties.evaluator.evaluate_physical_with_function_states(
+                        &key.expr,
+                        &self.schema,
+                        row,
+                        with_ties.keys.calls(),
+                    )
                 })
                 .collect::<ExecResult<Vec<_>>>()?,
         );
@@ -150,9 +153,12 @@ impl<'a> Limit<'a> {
             .keys
             .iter()
             .map(|key| {
-                with_ties
-                    .evaluator
-                    .evaluate_physical(&key.expr, &self.schema, row)
+                with_ties.evaluator.evaluate_physical_with_function_states(
+                    &key.expr,
+                    &self.schema,
+                    row,
+                    with_ties.keys.calls(),
+                )
             })
             .collect::<ExecResult<Vec<_>>>()?;
         let boundary = with_ties
@@ -398,9 +404,12 @@ impl PhysicalOperator for Limit<'_> {
                             .keys
                             .iter()
                             .map(|key| {
-                                with_ties
-                                    .evaluator
-                                    .evaluate_physical(&key.expr, &self.schema, &row)
+                                with_ties.evaluator.evaluate_physical_with_function_states(
+                                    &key.expr,
+                                    &self.schema,
+                                    &row,
+                                    with_ties.keys.calls(),
+                                )
                             })
                             .collect::<ExecResult<Vec<_>>>()?;
                         let boundary = with_ties.boundary.as_ref().ok_or_else(|| {
@@ -425,10 +434,11 @@ impl PhysicalOperator for Limit<'_> {
                                 .keys
                                 .iter()
                                 .map(|key| {
-                                    with_ties.evaluator.evaluate_physical(
+                                    with_ties.evaluator.evaluate_physical_with_function_states(
                                         &key.expr,
                                         &self.schema,
                                         &row,
+                                        with_ties.keys.calls(),
                                     )
                                 })
                                 .collect::<ExecResult<Vec<_>>>()?,

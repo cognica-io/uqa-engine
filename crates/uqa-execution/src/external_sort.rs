@@ -41,7 +41,7 @@ fn run_schema(source_width: usize, key_count: usize) -> RowSchema {
 /// Physical external sort with stable SQL ordering and optional global top-K.
 pub struct ExternalSort<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
-    keys: Vec<SortKey>,
+    keys: crate::scalar::PreparedExpressions<Vec<SortKey>>,
     evaluator: SharedExpressionEvaluator<'a>,
     keep: Option<usize>,
     work_mem_bytes: usize,
@@ -85,7 +85,7 @@ impl<'a> ExternalSort<'a> {
             .unwrap_or_default();
         Self {
             child,
-            keys,
+            keys: crate::scalar::PreparedExpressions::sort_keys(keys),
             evaluator,
             keep,
             work_mem_bytes,
@@ -131,11 +131,12 @@ impl<'a> ExternalSort<'a> {
         while let Some(batch) = self.child.next()? {
             for row in batch.rows {
                 let mut key_values = Vec::with_capacity(self.keys.len());
-                for key in &self.keys {
-                    key_values.push(self.evaluator.evaluate_physical(
+                for key in self.keys.iter() {
+                    key_values.push(self.evaluator.evaluate_physical_with_function_states(
                         &key.expr,
                         &batch.schema,
                         &row,
+                        self.keys.calls(),
                     )?);
                 }
                 let record_sequence = sequence;

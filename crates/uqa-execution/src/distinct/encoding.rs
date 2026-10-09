@@ -33,10 +33,20 @@ pub fn hash_canonical_row<'a, S: BuildHasher>(
     build_hasher: &S,
     values: impl ExactSizeIterator<Item = Option<&'a Value>>,
 ) -> ExecResult<u64> {
+    hash_canonical_row_with_enum_catalog(build_hasher, values, None)
+}
+
+/// Hash SQL keys with the statement's enum identity catalog. Raw enum OIDs and
+/// admitted labels share one encoding without calling their output function.
+pub fn hash_canonical_row_with_enum_catalog<'a, S: BuildHasher>(
+    build_hasher: &S,
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+) -> ExecResult<u64> {
     let count = values.len();
     let mut hasher = build_hasher.build_hasher();
     {
-        let mut output = HasherOutput(&mut hasher);
+        let mut output = HasherOutput(&mut hasher, enums);
         encode_len(count, &mut output)?;
         for value in values {
             if let Some(value) = value {
@@ -174,9 +184,15 @@ impl<A: Array<Item = u8>> KeyOutput for SmallVec<A> {
     }
 }
 
-struct HasherOutput<'a, H: Hasher>(&'a mut H);
+struct HasherOutput<'a, H: Hasher>(
+    &'a mut H,
+    Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+);
 
 impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
+    fn enum_catalog(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        self.1
+    }
     fn invokes_sql_hash_operator(&self) -> bool {
         true
     }
@@ -274,6 +290,12 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
 
 /// Encode a value without nested values; containers are framed by [`encode_value`].
 fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
+    if let Some(catalog) = output.enum_catalog() {
+        if let Some(oid) = uqa_sql::expr::enums::comparison_identity(catalog, value)? {
+            output.push_byte(17)?;
+            return output.extend_bytes(&oid.to_be_bytes());
+        }
+    }
     match value {
         Value::Datum(datum) => {
             if output.invokes_sql_hash_operator() {

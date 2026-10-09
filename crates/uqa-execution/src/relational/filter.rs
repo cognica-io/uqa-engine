@@ -22,7 +22,7 @@ pub struct Filter<'a> {
 
 enum FilterCondition<'a> {
     Expression {
-        predicate: ScalarExpr,
+        predicate: crate::scalar::PreparedExpressions<ScalarExpr>,
         evaluator: SharedExpressionEvaluator<'a>,
     },
     Row(SharedRowPredicate<'a>),
@@ -49,7 +49,7 @@ impl<'a> Filter<'a> {
         Self {
             child,
             condition: FilterCondition::Expression {
-                predicate,
+                predicate: crate::scalar::PreparedExpressions::scalar(predicate),
                 evaluator,
             },
             schema,
@@ -75,7 +75,12 @@ impl<'a> Filter<'a> {
                 FilterCondition::Expression {
                     predicate,
                     evaluator,
-                } => truthy(&evaluator.evaluate_physical(predicate, &batch.schema, &row)?),
+                } => truthy(&evaluator.evaluate_physical_with_function_states(
+                    predicate,
+                    &batch.schema,
+                    &row,
+                    predicate.calls(),
+                )?),
                 FilterCondition::Row(predicate) => predicate.keep_physical(&batch.schema, &row)?,
             };
             if keep {

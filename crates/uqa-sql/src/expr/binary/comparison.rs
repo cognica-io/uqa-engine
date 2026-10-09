@@ -354,27 +354,91 @@ pub fn value_comparison_can_fail(value: &Value) -> bool {
 }
 
 fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>) -> Result<bool> {
+    equal_values(left, right, control, None, false)
+}
+
+/// Compare already-bound group/hash keys without enum output. Physical enum
+/// identities use the same equality as `enum_eq`, including inside containers.
+pub fn equal_typed_values_with_enum_catalog(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
+) -> Result<bool> {
+    equal_values(left, right, control, enums, true)
+}
+
+fn equal_values(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
+    typed: bool,
+) -> Result<bool> {
     control.check()?;
+    if let Some(order) = super::super::datums::compare_jsonb_with_control(left, right, control)? {
+        return Ok(order.is_eq());
+    }
+    if matches!(left, Value::Null) || matches!(right, Value::Null) {
+        return Ok(matches!((left, right), (Value::Null, Value::Null)));
+    }
+    if let Some(enums) = enums {
+        if let (Some(left), Some(right)) = (
+            super::super::enums::comparison_identity(enums, left)?,
+            super::super::enums::comparison_identity(enums, right)?,
+        ) {
+            return Ok(left == right);
+        }
+    }
     match (left, right) {
+        (Value::Datum(datum), _) => equal_values(
+            &*super::super::datums::read_with_control(datum, control)?,
+            right,
+            control,
+            enums,
+            typed,
+        ),
+        (_, Value::Datum(datum)) => equal_values(
+            left,
+            &*super::super::datums::read_with_control(datum, control)?,
+            control,
+            enums,
+            typed,
+        ),
         (Value::Array(left), Value::Array(right)) => {
             validate_array_element_types(left, right)?;
-            left.eq_by_with_control(right, control, equal_sql_values)
+            left.eq_by_with_control(right, control, |left, right, control| {
+                equal_values(left, right, control, enums, typed)
+            })
         }
         (Value::Record(left), Value::Record(right)) => equal_sequence(
             left.iter().map(|(_, v)| v),
             right.iter().map(|(_, v)| v),
             control,
+            enums,
+            typed,
         ),
-        (Value::Record(left), Value::Row(right)) => {
-            equal_sequence(left.iter().map(|(_, v)| v), right.iter(), control)
+        (Value::Record(left), Value::Row(right)) => equal_sequence(
+            left.iter().map(|(_, v)| v),
+            right.iter(),
+            control,
+            enums,
+            typed,
+        ),
+        (Value::Row(left), Value::Record(right)) => equal_sequence(
+            left.iter(),
+            right.iter().map(|(_, v)| v),
+            control,
+            enums,
+            typed,
+        ),
+        (Value::Row(left), Value::Row(right)) => {
+            equal_sequence(left.iter(), right.iter(), control, enums, typed)
         }
-        (Value::Row(left), Value::Record(right)) => {
-            equal_sequence(left.iter(), right.iter().map(|(_, v)| v), control)
-        }
-        (Value::Row(left), Value::Row(right)) => equal_sequence(left.iter(), right.iter(), control),
         (Value::List(left), Value::List(right)) => {
-            equal_sequence(left.iter(), right.iter(), control)
+            equal_sequence(left.iter(), right.iter(), control, enums, typed)
         }
+        _ if typed => Ok(compare_typed_values_with_control(left, right, control)?.is_eq()),
         _ => Ok(compare_sql_values(left, right, control)?.is_eq()),
     }
 }
@@ -397,11 +461,13 @@ fn equal_sequence<'a>(
     mut left: impl Iterator<Item = &'a Value>,
     mut right: impl Iterator<Item = &'a Value>,
     control: &ProductionControl<'_>,
+    enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
+    typed: bool,
 ) -> Result<bool> {
     loop {
         control.check()?;
         match (left.next(), right.next()) {
-            (Some(left), Some(right)) if equal_sql_values(left, right, control)? => {}
+            (Some(left), Some(right)) if equal_values(left, right, control, enums, typed)? => {}
             (None, None) => return Ok(true),
             _ => return Ok(false),
         }

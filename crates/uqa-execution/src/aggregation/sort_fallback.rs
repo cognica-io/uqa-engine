@@ -62,6 +62,21 @@ pub(super) fn aggregate_sorted_input(
             )
         })
         .collect::<Vec<_>>();
+    let aggregate_targets = crate::scalar::PreparedExpressions::scalars(aggregate_targets);
+    let group_expressions = crate::scalar::PreparedExpressions::scalars(
+        statement
+            .group_by
+            .iter()
+            .map(|expression| {
+                crate::bind_type_introspection_with_resolver(
+                    expression.clone(),
+                    input_schema,
+                    params,
+                    context,
+                )
+            })
+            .collect(),
+    );
     let output_plan = super::output::AggregateOutputPlan::compile(
         context,
         statement,
@@ -85,10 +100,14 @@ pub(super) fn aggregate_sorted_input(
                     .with_function_hook(hook)
                     .with_subquery_runner(&subquery_arena)
                     .with_physical_outer_row(&batch.schema, &row);
-                let key = statement
-                    .group_by
+                let key = group_expressions
                     .iter()
-                    .map(|expr| eval_scalar(expr, &scalar_context))
+                    .map(|expr| {
+                        eval_scalar(
+                            expr,
+                            &scalar_context.with_function_states(group_expressions.calls()),
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
 
                 if current_key.as_ref().is_some_and(|current| current != &key) {
@@ -125,7 +144,7 @@ pub(super) fn aggregate_sorted_input(
                 observe_targets(
                     &mut current_accumulators,
                     &aggregate_targets,
-                    &scalar_context,
+                    &scalar_context.with_function_states(aggregate_targets.calls()),
                 )?;
             }
         }

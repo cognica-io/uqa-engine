@@ -122,18 +122,15 @@ impl<'a> PartitionRows<'a> {
     /// Evaluate an expression on the row at `position`.
     pub(super) fn evaluate(
         &mut self,
-        expression: &ScalarExpr,
+        expression: &crate::scalar::PreparedExpressions<ScalarExpr>,
         position: i64,
     ) -> Result<Value, SQLError> {
-        let row = self.row(position)?;
-        super::evaluate_on_row(
-            expression,
-            &self.schema,
-            &row,
-            self.params,
-            self.hook,
-            self.subqueries,
-        )
+        self.with_context(position, |context| {
+            crate::eval_scalar(
+                expression,
+                &(*context).with_function_states(expression.calls()),
+            )
+        })
     }
 
     fn order_key(&mut self, position: i64) -> Result<Vec<Value>, SQLError> {

@@ -212,13 +212,19 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
             for (index, column) in &resjunk.order_by {
                 ordering.order_by[*index].expr = ScalarExpr::InternalColumn(*column);
             }
-            let keys = resolved_sort_keys(&ordering, &output, Some(operator.row_schema()))?;
+            let evaluator = context.evaluator(params, ctes);
+            let keys = resolved_sort_keys(
+                &ordering,
+                &output,
+                Some(operator.row_schema()),
+                evaluator.as_ref(),
+            )?;
             operator = Box::new(Limit::with_ties(
                 operator,
                 offset.unwrap_or(0),
                 limit,
                 keys,
-                context.evaluator(params, ctes),
+                evaluator,
             ));
         } else {
             let limit = resolve_limit_offset_with_ctes(

@@ -20,7 +20,7 @@ use crate::ast::ColumnType;
 mod functions;
 mod physical;
 pub use functions::{enum_function_value, enum_function_value_with_state};
-pub use physical::EnumComparisonState;
+pub use physical::{comparison_identity, EnumComparisonState};
 
 /// One label of an enum type.
 #[derive(Debug, Clone, PartialEq, Eq)]

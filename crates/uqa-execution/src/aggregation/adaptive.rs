@@ -21,7 +21,9 @@ use super::{
     AggregateStatePlan, DecimalValue, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext,
     SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
 };
-use crate::{hash_canonical_row, try_pack_compact_text_pair, Batch, RowSchema};
+#[cfg(test)]
+use crate::hash_canonical_row;
+use crate::{try_pack_compact_text_pair, Batch, RowSchema};
 
 const GROUP_ENTRY_OVERHEAD_BYTES: usize = 256;
 
@@ -47,7 +49,8 @@ type CompactTextGroupIndex = HashMap<u64, usize, ahash::RandomState>;
 
 pub(super) struct AdaptiveAggregateSet {
     statement: Box<QueryBlockPlan>,
-    aggregate_targets: Vec<ScalarExpr>,
+    group_expressions: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+    aggregate_targets: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     accumulator_templates: Vec<AggregateAccumulatorTemplate>,
     output_plan: super::output::AggregateOutputPlan,
     state_budget: usize,
@@ -128,8 +131,22 @@ impl AdaptiveAggregateSet {
             input_schema,
         );
         Ok(Self {
+            group_expressions: crate::scalar::PreparedExpressions::scalars(
+                statement
+                    .group_by
+                    .iter()
+                    .map(|expression| {
+                        crate::bind_type_introspection_with_resolver(
+                            expression.clone(),
+                            input_schema,
+                            params,
+                            context,
+                        )
+                    })
+                    .collect(),
+            ),
             statement: Box::new(statement),
-            aggregate_targets,
+            aggregate_targets: crate::scalar::PreparedExpressions::scalars(aggregate_targets),
             accumulator_templates,
             output_plan,
             state_budget,
@@ -222,11 +239,11 @@ impl AdaptiveAggregateSet {
     }
 
     fn consume_context(&mut self, context: &ScalarEvalContext<'_>) -> Result<(), SQLError> {
+        let group_context = (*context).with_function_states(self.group_expressions.calls());
         let key = self
-            .statement
-            .group_by
+            .group_expressions
             .iter()
-            .map(|expression| eval_scalar(expression, context))
+            .map(|expression| eval_scalar(expression, &group_context))
             .collect::<Result<Vec<_>, _>>()?;
         self.consume_key_context(&key, context)
     }
@@ -236,7 +253,12 @@ impl AdaptiveAggregateSet {
         key: &[Value],
         context: &ScalarEvalContext<'_>,
     ) -> Result<(), SQLError> {
-        let hash = self.group_hash(key)?;
+        let hash = self.group_hash(
+            key,
+            context
+                .function_hook()
+                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+        )?;
         if self.observe_key_context(hash, key, context)? {
             return self.handle_state_overflow();
         }
@@ -257,7 +279,16 @@ impl AdaptiveAggregateSet {
         key: &[Value],
         context: &ScalarEvalContext<'_>,
     ) -> Result<bool, SQLError> {
-        let Some(index) = matching_group_index(&self.group_index, &self.groups, hash, key)? else {
+        let Some(index) = matching_group_index(
+            &self.group_index,
+            &self.groups,
+            hash,
+            key,
+            context
+                .function_hook()
+                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+        )?
+        else {
             return Ok(false);
         };
         let entry = &mut self.groups[index];
@@ -266,7 +297,7 @@ impl AdaptiveAggregateSet {
         super::sort_fallback::observe_targets(
             &mut state.accumulators,
             &self.aggregate_targets,
-            context,
+            &(*context).with_function_states(self.aggregate_targets.calls()),
         )?;
         if self.variable_state {
             state.retained_bytes = estimate_group_bytes(&entry.key, &state.accumulators);
@@ -279,12 +310,20 @@ impl AdaptiveAggregateSet {
         Ok(true)
     }
 
-    fn group_hash(&self, key: &[Value]) -> Result<u64, SQLError> {
+    fn group_hash(
+        &self,
+        key: &[Value],
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+    ) -> Result<u64, SQLError> {
         if let Some(key) = self.compact_text_group_key(key) {
             return Ok(key);
         }
-        hash_canonical_row(self.group_index.hasher(), key.iter().map(Some))
-            .map_err(super::sort_fallback::exec_to_sql_error)
+        crate::distinct::hash_canonical_row_with_enum_catalog(
+            self.group_index.hasher(),
+            key.iter().map(Some),
+            enums,
+        )
+        .map_err(super::sort_fallback::exec_to_sql_error)
     }
 
     fn compact_text_group_key(&self, key: &[Value]) -> Option<u64> {
@@ -348,8 +387,9 @@ impl AdaptiveAggregateSet {
     }
 
     fn ensure_active_group(&mut self, key: &[Value]) -> Result<u64, SQLError> {
-        let hash = self.group_hash(key)?;
-        let exists = matching_group_index(&self.group_index, &self.groups, hash, key)?.is_some();
+        let hash = self.group_hash(key, None)?;
+        let exists =
+            matching_group_index(&self.group_index, &self.groups, hash, key, None)?.is_some();
         if !exists && !self.insert_group(key, hash)? {
             Err(SQLError::Internal(
                 "abandoned aggregate state cannot accept projected rows".into(),
@@ -431,6 +471,7 @@ fn matching_group_index(
     groups: &[GroupEntry],
     hash: u64,
     key: &[Value],
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> Result<Option<usize>, SQLError> {
     let Some(bucket) = index.get(&hash) else {
         return Ok(None);
@@ -443,7 +484,7 @@ fn matching_group_index(
         }
         let mut equal = true;
         for (left, right) in candidate.iter().zip(key) {
-            if !uqa_sql::expr::compare_typed_values_with_control(left, right, &control)?.is_eq() {
+            if !uqa_sql::expr::equal_typed_values_with_enum_catalog(left, right, &control, enums)? {
                 equal = false;
                 break;
             }
@@ -714,7 +755,7 @@ mod tests {
             },
         }];
         assert_eq!(
-            matching_group_index(&index, &groups, hash, &[fresh]).unwrap(),
+            matching_group_index(&index, &groups, hash, &[fresh], None).unwrap(),
             Some(0)
         );
     }

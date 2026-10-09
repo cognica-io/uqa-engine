@@ -29,7 +29,7 @@ pub(crate) fn operator<'a>(
         child,
         schema: record_schema,
         slots,
-        keys,
+        keys: crate::scalar::PreparedExpressions::scalars(keys),
         evaluator,
         ordinal: 0,
     });
@@ -76,7 +76,7 @@ struct Decorate<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     schema: RowSchema,
     slots: Vec<usize>,
-    keys: Vec<ScalarExpr>,
+    keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     evaluator: SharedExpressionEvaluator<'a>,
     ordinal: u64,
 }
@@ -98,7 +98,14 @@ impl PhysicalOperator for Decorate<'_> {
             let mut keys = self
                 .keys
                 .iter()
-                .map(|key| self.evaluator.evaluate_physical(key, &batch.schema, &row))
+                .map(|key| {
+                    self.evaluator.evaluate_physical_with_function_states(
+                        key,
+                        &batch.schema,
+                        &row,
+                        self.keys.calls(),
+                    )
+                })
                 .collect::<ExecResult<Vec<_>>>()?;
             keys.push(Value::Bytes(self.ordinal.to_be_bytes().to_vec()));
             self.ordinal = self

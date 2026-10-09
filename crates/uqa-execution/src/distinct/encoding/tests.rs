@@ -7,6 +7,80 @@
 use super::*;
 use uqa_core::{ArrayValue, EnumLabelKey, EnumValue};
 
+struct EnumIdentityCatalog;
+
+impl uqa_sql::expr::enums::EnumLabelCatalog for EnumIdentityCatalog {
+    fn enum_type_labels(
+        &self,
+        oid: u32,
+    ) -> Result<Option<std::sync::Arc<uqa_sql::expr::enums::EnumTypeLabels>>, uqa_sql::SQLError>
+    {
+        Ok((oid == 16_384).then(|| {
+            std::sync::Arc::new(uqa_sql::expr::enums::EnumTypeLabels {
+                type_oid: oid,
+                labels: Vec::new(),
+            })
+        }))
+    }
+
+    fn enum_label_uncommitted(&self, _: u32) -> bool {
+        false
+    }
+
+    fn enum_type_name(&self, _: u32) -> Result<Option<String>, uqa_sql::SQLError> {
+        unreachable!("hashing must not format an enum label")
+    }
+
+    fn has_enum_types(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn sql_enum_hash_matches_raw_and_admitted_identities_without_label_output() {
+    let build = std::collections::hash_map::RandomState::new();
+    let physical = |oid: u32| {
+        Value::Datum(uqa_core::DatumValue::new(
+            16_384,
+            0,
+            oid.to_le_bytes().to_vec(),
+        ))
+    };
+    let native = Value::Enum(
+        EnumValue::new(16_384, EnumLabelKey::initial(1).unwrap().remove(0)).with_label_oid(Some(5)),
+    );
+    let hash = |value: &Value| {
+        hash_canonical_row_with_enum_catalog(
+            &build,
+            std::iter::once(Some(value)),
+            Some(&EnumIdentityCatalog),
+        )
+        .unwrap()
+    };
+    let equal = |left: &Value, right: &Value| {
+        uqa_sql::expr::equal_typed_values_with_enum_catalog(
+            left,
+            right,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            Some(&EnumIdentityCatalog),
+        )
+        .unwrap()
+    };
+    for (left, right) in [(physical(5), native), (physical(1), physical(1))] {
+        assert!(equal(&left, &right));
+        assert_eq!(hash(&left), hash(&right));
+        let left = Value::Array(ArrayValue::try_new(vec![left]).unwrap());
+        let right = Value::Array(ArrayValue::try_new(vec![right]).unwrap());
+        assert!(equal(&left, &right));
+        assert_eq!(hash(&left), hash(&right));
+        let left = Value::Record(vec![("value".into(), left)]);
+        let right = Value::Record(vec![("value".into(), right)]);
+        assert!(equal(&left, &right));
+        assert_eq!(hash(&left), hash(&right));
+    }
+    assert!(!equal(&physical(1), &physical(5)));
+}
+
 #[test]
 fn controlled_keys_keep_all_canonical_domains_and_only_retain_the_output_buffer() {
     let control = StorageReadControl::with_limit(8 * 1024 * 1024);

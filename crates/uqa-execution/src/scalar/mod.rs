@@ -10,6 +10,7 @@ mod call_arguments;
 mod context;
 mod evaluator;
 pub mod plan;
+mod state;
 mod subquery;
 
 pub use uqa_sql::ir::{
@@ -24,6 +25,8 @@ pub(crate) use context::RetrievalPredicate;
 pub use context::ScalarEvalContext;
 pub(crate) use evaluator::scalar_integer_binary_width;
 pub use evaluator::{eval_generated_scalar_with_control, eval_scalar};
+pub use state::FunctionCallStates;
+pub(crate) use state::PreparedExpressions;
 pub(crate) use subquery::single_row_cardinality_error;
 pub use subquery::{ScalarSubqueryRunner, SubqueryResult};
 

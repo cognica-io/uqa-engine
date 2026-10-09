@@ -81,7 +81,9 @@ pub(super) fn evaluate_function(
             uqa_sql::expr::eval_bound_builtin_function_call(
                 binding,
                 arguments,
-                &context.sql_context(),
+                &context
+                    .sql_context()
+                    .with_enum_comparison_state(context.enum_comparison_state(args)),
             )
         } else {
             let sql_context = context.sql_context();

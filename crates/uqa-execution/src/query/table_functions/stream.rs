@@ -120,24 +120,28 @@ fn build_table_function_value_row_stream_with_row(
                 .with_physical_outer_row(&row.schema, &row.row),
             None => ScalarEvalContext::new(None, context.params),
         };
-        let scalar_context = scalar_context
+        let mut scalar_context = scalar_context
             .with_function_hook(context.eval_hook)
             .with_subquery_runner(&subquery_arena);
+        if let Some(states) = call.function_states {
+            scalar_context = scalar_context.with_function_states(states);
+        }
         // Arguments bind like any other expression: catalog-typed calls such as `enum_range(NULL::mood)` select their operation from declared types.
         let empty = crate::RowSchema::default();
         let schema = row.map_or(&empty, |row| &row.schema);
-        let bound = args
-            .iter()
-            .map(|argument| {
-                uqa_sql::bind_type_introspection_with_resolver(
-                    argument.clone(),
-                    schema,
-                    context.params,
-                    context.resolver,
-                )
-            })
-            .collect::<Vec<_>>();
-        let call_args = eval_call_arguments(&bound, &scalar_context)?;
+        let bound = call.function_states.is_none().then(|| {
+            args.iter()
+                .map(|argument| {
+                    uqa_sql::bind_type_introspection_with_resolver(
+                        argument.clone(),
+                        schema,
+                        context.params,
+                        context.resolver,
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        let call_args = eval_call_arguments(bound.as_deref().unwrap_or(args), &scalar_context)?;
         if call_args.iter().any(|(name, _)| name.is_some()) {
             return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
         }

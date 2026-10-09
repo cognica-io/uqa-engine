@@ -16,6 +16,7 @@ use super::subquery::ScalarSubqueryRunner;
 pub(crate) type RetrievalPredicate<'a> =
     dyn Fn(&str, &[crate::ScalarExpr]) -> Result<bool, uqa_sql::SQLError> + 'a;
 
+#[derive(Clone, Copy)]
 pub struct ScalarEvalContext<'a> {
     row: Option<&'a ResultRow>,
     row_lookup: Option<&'a dyn RowLookup>,
@@ -25,6 +26,7 @@ pub struct ScalarEvalContext<'a> {
     subquery_runner: Option<&'a dyn ScalarSubqueryRunner>,
     physical_outer_row: Option<(&'a RowSchema, &'a PhysicalRow)>,
     retrieval_predicate: Option<&'a RetrievalPredicate<'a>>,
+    function_states: Option<&'a super::FunctionCallStates>,
 }
 
 impl<'a> ScalarEvalContext<'a> {
@@ -39,6 +41,7 @@ impl<'a> ScalarEvalContext<'a> {
             subquery_runner: None,
             physical_outer_row: None,
             retrieval_predicate: None,
+            function_states: None,
         }
     }
 
@@ -53,6 +56,7 @@ impl<'a> ScalarEvalContext<'a> {
             subquery_runner: None,
             physical_outer_row: None,
             retrieval_predicate: None,
+            function_states: None,
         }
     }
 
@@ -60,6 +64,20 @@ impl<'a> ScalarEvalContext<'a> {
     pub fn with_function_hook(mut self, hook: &'a dyn EngineHook) -> Self {
         self.function_hook = Some(hook);
         self
+    }
+
+    /// Retain the prepared expression's function state across its input rows.
+    pub fn with_function_states(mut self, states: &'a super::FunctionCallStates) -> Self {
+        self.function_states = Some(states);
+        self
+    }
+
+    pub(super) fn enum_comparison_state(
+        &self,
+        arguments: &[super::ScalarExpr],
+    ) -> Option<&uqa_sql::expr::enums::EnumComparisonState> {
+        self.function_states
+            .and_then(|states| states.enum_comparison(arguments))
     }
 
     pub(crate) fn with_retrieval_predicate(

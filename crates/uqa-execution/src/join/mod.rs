@@ -90,11 +90,11 @@ pub struct HashJoin<'a> {
     left: Box<dyn PhysicalOperator + 'a>,
     right: Box<dyn PhysicalOperator + 'a>,
     kind: JoinKind,
-    left_keys: Vec<ScalarExpr>,
-    right_keys: Vec<ScalarExpr>,
+    left_keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+    right_keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     left_key_positions: Option<Vec<usize>>,
     right_key_positions: Option<Vec<usize>>,
-    predicate: Option<ScalarExpr>,
+    predicate: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
     prepared_predicate: Option<ProjectedPredicate>,
     evaluator: SharedExpressionEvaluator<'a>,
     left_nulls: PhysicalRow,
@@ -257,11 +257,11 @@ impl<'a> HashJoin<'a> {
             left,
             right,
             kind,
-            left_keys,
-            right_keys,
+            left_keys: crate::scalar::PreparedExpressions::scalars(left_keys),
+            right_keys: crate::scalar::PreparedExpressions::scalars(right_keys),
             left_key_positions,
             right_key_positions,
-            predicate,
+            predicate: predicate.map(crate::scalar::PreparedExpressions::scalar),
             prepared_predicate,
             evaluator,
             left_nulls,
@@ -340,7 +340,7 @@ impl<'a> HashJoin<'a> {
     fn rebuild_encoded_index(
         &self,
         rows: &mut HybridRowStore,
-        expressions: &[ScalarExpr],
+        expressions: &crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
         positions: &[usize],
         budget_bytes: usize,
     ) -> ExecResult<HybridHashIndex> {
@@ -498,7 +498,7 @@ impl<'a> HashJoin<'a> {
 
     fn key(
         &self,
-        expressions: &[ScalarExpr],
+        expressions: &crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
         positions: Option<&[usize]>,
         row: &PhysicalRow,
         schema: &RowSchema,
@@ -508,8 +508,13 @@ impl<'a> HashJoin<'a> {
             return encode_non_null_key(positions.iter().map(|position| view.value_at(*position)));
         }
         let mut values = SmallVec::<[Value; 4]>::with_capacity(expressions.len());
-        for expression in expressions {
-            let value = self.evaluator.evaluate_physical(expression, schema, row)?;
+        for expression in expressions.iter() {
+            let value = self.evaluator.evaluate_physical_with_function_states(
+                expression,
+                schema,
+                row,
+                expressions.calls(),
+            )?;
             if matches!(value, Value::Null) {
                 return Ok(None);
             }
@@ -523,11 +528,14 @@ impl<'a> HashJoin<'a> {
             return Ok(predicate.keep_row(&self.schema.view(row))?);
         }
         self.predicate.as_ref().map_or(Ok(true), |predicate| {
-            Ok(truthy(&self.evaluator.evaluate_physical(
-                predicate,
-                &self.schema,
-                row,
-            )?))
+            Ok(truthy(
+                &self.evaluator.evaluate_physical_with_function_states(
+                    predicate,
+                    &self.schema,
+                    row,
+                    predicate.calls(),
+                )?,
+            ))
         })
     }
 

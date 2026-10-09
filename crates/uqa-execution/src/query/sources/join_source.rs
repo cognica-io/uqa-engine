@@ -120,7 +120,34 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let source = QueryLateralSource {
                     context: *context,
                     right: (**right).clone(),
-                    on: effective_on,
+                    on: effective_on.map(|expression| {
+                        let joined = crate::RowSchema::join(
+                            &left_schema,
+                            &right_schema,
+                            left_nulls.keys().chain(right_nulls.keys()).cloned(),
+                        );
+                        crate::scalar::PreparedExpressions::scalar(
+                            context
+                                .relational
+                                .evaluator(params, ctes)
+                                .bind_type_introspection(expression, &joined),
+                        )
+                    }),
+                    function_arguments: match right.as_ref() {
+                        SourcePlan::Function { args, .. } => {
+                            Some(crate::scalar::PreparedExpressions::scalars(
+                                args.iter()
+                                    .map(|argument| {
+                                        context
+                                            .relational
+                                            .evaluator(params, ctes)
+                                            .bind_type_introspection(argument.clone(), &left_schema)
+                                    })
+                                    .collect(),
+                            ))
+                        }
+                        _ => None,
+                    },
                     params,
                     ctes: ctes.clone(),
                     right_schema: right_schema.clone(),

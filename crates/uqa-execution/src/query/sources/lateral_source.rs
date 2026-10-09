@@ -16,7 +16,8 @@ use super::{
 pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
-    pub(super) on: Option<ScalarExpr>,
+    pub(super) on: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
+    pub(super) function_arguments: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope<S>,
     pub(super) right_schema: crate::RowSchema,
@@ -96,7 +97,14 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
                     .or(binding.as_ref()),
                 output_name,
                 relations: relations.as_ref(),
-                args,
+                args: self
+                    .function_arguments
+                    .as_deref()
+                    .expect("lateral function arguments are prepared"),
+                function_states: self
+                    .function_arguments
+                    .as_ref()
+                    .map(crate::scalar::PreparedExpressions::calls),
                 alias: alias.as_deref(),
                 column_aliases,
                 ordinality: *ordinality,
@@ -171,6 +179,7 @@ impl<S: Clone + Send + Sync + 'static> crate::LateralSource for QueryLateralSour
             PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(scoped_hook.as_ref()));
         let context = ScalarEvalContext::from_row_lookup(joined, self.params)
             .with_function_hook(scoped_hook.as_ref())
+            .with_function_states(filter.calls())
             .with_subquery_runner(&subquery_arena)
             .with_physical_outer_row(&joined.schema, &joined.row);
         Ok(uqa_sql::expr::truthy(&eval_scalar(filter, &context)?))

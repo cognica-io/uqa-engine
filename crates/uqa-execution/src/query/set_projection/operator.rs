@@ -20,7 +20,7 @@ pub struct SetProjection<'a> {
     runtime: Arc<dyn SetFunctionRuntime + 'a>,
     params: &'a [SQLParam],
     evaluator: SharedExpressionEvaluator<'a>,
-    plan: SetProjectionPlan,
+    plan: crate::scalar::PreparedExpressions<SetProjectionPlan>,
     schema: RowSchema,
     evaluation_schema: RowSchema,
     pass_through: bool,
@@ -56,10 +56,15 @@ impl<'a> SetProjection<'a> {
         runtime: Arc<dyn SetFunctionRuntime + 'a>,
         params: &'a [SQLParam],
         evaluator: SharedExpressionEvaluator<'a>,
-        plan: SetProjectionPlan,
+        mut plan: SetProjectionPlan,
         pass_through: bool,
         output_batch_size: usize,
     ) -> Self {
+        for call in &mut plan.calls {
+            for argument in &mut call.args {
+                *argument = evaluator.bind_type_introspection(argument.clone(), child.row_schema());
+            }
+        }
         let projections = &plan.projections;
         let resolver = runtime.as_ref();
         let call_types = plan
@@ -97,7 +102,16 @@ impl<'a> SetProjection<'a> {
             runtime,
             params,
             evaluator,
-            plan,
+            plan: crate::scalar::PreparedExpressions::new(plan, |plan, visit| {
+                for call in &plan.calls {
+                    for argument in &call.args {
+                        visit(argument);
+                    }
+                }
+                for (_, expression) in &plan.projections {
+                    visit(expression);
+                }
+            }),
             schema,
             evaluation_schema,
             pass_through,
@@ -142,6 +156,7 @@ impl<'a> SetProjection<'a> {
             let subqueries = PlanSubqueryArena::new(runtime.subquery_plans(), Some(runtime));
             let context = ScalarEvalContext::from_row_lookup(row, self.params)
                 .with_function_hook(runtime)
+                .with_function_states(self.plan.calls())
                 .with_subquery_runner(&subqueries)
                 .with_physical_outer_row(&row.schema, &row.row);
             let arguments = eval_call_arguments(&call.args, &context)?;
@@ -185,6 +200,7 @@ impl<'a> SetProjection<'a> {
             output_name: &call.name,
             relations: None,
             args: &call.args,
+            function_states: Some(self.plan.calls()),
             alias: None,
             column_aliases: &[],
             ordinality: false,
@@ -243,10 +259,11 @@ impl<'a> SetProjection<'a> {
                     ));
                 } else {
                     output.push(RowProjectionValue::Owned(
-                        self.evaluator.evaluate_physical(
+                        self.evaluator.evaluate_physical_with_function_states(
                             expression,
                             &self.evaluation_schema,
                             &evaluation_row,
+                            self.plan.calls(),
                         )?,
                     ));
                 }
@@ -277,10 +294,11 @@ impl<'a> SetProjection<'a> {
                 ));
             } else {
                 output.push(RowProjectionValue::Owned(
-                    self.evaluator.evaluate_physical(
+                    self.evaluator.evaluate_physical_with_function_states(
                         expression,
                         &self.evaluation_schema,
                         &evaluation_row,
+                        self.plan.calls(),
                     )?,
                 ));
             }

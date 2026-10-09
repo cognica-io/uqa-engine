@@ -26,7 +26,7 @@ pub struct NestedLoopJoin<'a> {
     left: Box<dyn PhysicalOperator + 'a>,
     right: Box<dyn PhysicalOperator + 'a>,
     kind: JoinKind,
-    predicate: Option<ScalarExpr>,
+    predicate: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
     evaluator: SharedExpressionEvaluator<'a>,
     left_nulls: PhysicalRow,
     right_nulls: PhysicalRow,
@@ -85,7 +85,7 @@ impl<'a> NestedLoopJoin<'a> {
             left,
             right,
             kind,
-            predicate,
+            predicate: predicate.map(crate::scalar::PreparedExpressions::scalar),
             evaluator,
             left_nulls,
             right_nulls,
@@ -110,11 +110,14 @@ impl<'a> NestedLoopJoin<'a> {
     fn matches(&self, row: &PhysicalRow) -> ExecResult<bool> {
         match self.predicate.as_ref() {
             None => Ok(true),
-            Some(predicate) => Ok(truthy(&self.evaluator.evaluate_physical(
-                predicate,
-                &self.schema,
-                row,
-            )?)),
+            Some(predicate) => Ok(truthy(
+                &self.evaluator.evaluate_physical_with_function_states(
+                    predicate,
+                    &self.schema,
+                    row,
+                    predicate.calls(),
+                )?,
+            )),
         }
     }
 }

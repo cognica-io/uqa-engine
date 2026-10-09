@@ -227,7 +227,9 @@ fn peers_share_the_default_frame_and_ranks() {
         WindowFunction::DenseRank,
         WindowFunction::RowNumber,
         WindowFunction::CumeDist,
-        WindowFunction::LastValue(ScalarExpr::Column("v".into())),
+        WindowFunction::LastValue(crate::scalar::PreparedExpressions::scalar(
+            ScalarExpr::Column("v".into()),
+        )),
     ];
     let (output, columns) = evaluate(&rows, by_k(), functions, 1 << 20);
     let results = results(output, &columns);

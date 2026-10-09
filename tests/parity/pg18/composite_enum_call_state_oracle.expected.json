@@ -1222,6 +1222,78 @@
       "id": "scalar_group_having"
     },
     {
+      "sql": "SELECT count(*) AS n FROM enum_call_source CROSS JOIN generate_series(1,2) AS g(n) GROUP BY (v).a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "group_physical_enum"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM enum_call_raw_source CROSS JOIN generate_series(1,2) AS g(n) GROUP BY (v).a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "group_invalid_enum"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM enum_call_raw_source CROSS JOIN generate_series(1,2) AS g(n) GROUP BY v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "group_invalid_record"
+    },
+    {
       "sql": "SET plan_cache_mode=force_generic_plan; PREPARE enum_call_repeated(boolean) AS SELECT enum_cmp(CASE WHEN $1 THEN (v).a ELSE 'before'::enum_call_b END,CASE WHEN $1 THEN (v).b ELSE 'other'::enum_call_b END) AS cmp FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source",
       "command_tags": [
         "SET",

@@ -137,6 +137,18 @@
       "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM count(*) FROM generate_series(1,2) AS g(n) GROUP BY n HAVING enum_cmp(CASE n WHEN 1 THEN (SELECT (v).a FROM enum_call_source) ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (SELECT (v).b FROM enum_call_source) ELSE 'other'::enum_call_b END)<0; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()"
     },
     {
+      "id": "group_physical_enum",
+      "sql": "SELECT count(*) AS n FROM enum_call_source CROSS JOIN generate_series(1,2) AS g(n) GROUP BY (v).a"
+    },
+    {
+      "id": "group_invalid_enum",
+      "sql": "SELECT count(*) AS n FROM enum_call_raw_source CROSS JOIN generate_series(1,2) AS g(n) GROUP BY (v).a"
+    },
+    {
+      "id": "group_invalid_record",
+      "sql": "SELECT count(*) AS n FROM enum_call_raw_source CROSS JOIN generate_series(1,2) AS g(n) GROUP BY v"
+    },
+    {
       "id": "prepare",
       "sql": "SET plan_cache_mode=force_generic_plan; PREPARE enum_call_repeated(boolean) AS SELECT enum_cmp(CASE WHEN $1 THEN (v).a ELSE 'before'::enum_call_b END,CASE WHEN $1 THEN (v).b ELSE 'other'::enum_call_b END) AS cmp FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source"
     },

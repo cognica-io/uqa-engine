@@ -180,6 +180,34 @@ fn admitted_native_values_use_the_call_sites_existing_actual_type() {
 }
 
 #[test]
+fn bound_key_equality_uses_raw_enum_identities_inside_containers() {
+    let catalog = Catalog::new();
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let native = Value::Enum(
+        EnumValue::new(16_384, catalog.0.labels[1].key.clone()).with_label_oid(Some(5)),
+    );
+    let equal = |left: &Value, right: &Value| {
+        crate::expr::equal_typed_values_with_enum_catalog(left, right, &control, Some(&catalog))
+    };
+    for (left, right) in [(physical(5), native), (physical(1), physical(1))] {
+        assert!(equal(&left, &right).unwrap());
+        let left = Value::Array(uqa_core::ArrayValue::try_new(vec![left, Value::Null]).unwrap());
+        let right = Value::Array(uqa_core::ArrayValue::try_new(vec![right, Value::Null]).unwrap());
+        assert!(equal(&left, &right).unwrap());
+        assert!(equal(
+            &Value::Record(vec![("a".into(), left)]),
+            &Value::Record(vec![("a".into(), right)])
+        )
+        .unwrap());
+    }
+    assert!(!equal(&physical(1), &physical(5)).unwrap());
+    assert!(!equal(&physical(1), &Value::Null).unwrap());
+    let corrupt = Value::Datum(DatumValue::new(16_384, 0, Vec::new()));
+    assert!(!equal(&corrupt, &Value::Null).unwrap());
+    assert!(equal(&corrupt, &physical(1)).is_err());
+}
+
+#[test]
 fn odd_order_reads_actual_label_order_and_preserves_both_error_boundaries() {
     let catalog = Catalog::new();
     assert_eq!(

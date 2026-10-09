@@ -10,7 +10,9 @@ use super::aggregates::WindowAggregate;
 use super::frame::{CurrentRow, FrameCursor, FrameSpec};
 use super::partition::PartitionRows;
 use uqa_core::Value;
-use uqa_sql::{SQLError, ScalarExpr};
+use uqa_sql::SQLError;
+
+type PreparedExpression = crate::scalar::PreparedExpressions<uqa_sql::ScalarExpr>;
 
 pub(super) enum WindowFunction {
     RowNumber,
@@ -18,13 +20,13 @@ pub(super) enum WindowFunction {
     DenseRank,
     PercentRank,
     CumeDist,
-    Ntile(ScalarExpr),
+    Ntile(PreparedExpression),
     Shift(Box<Shift>),
-    FirstValue(ScalarExpr),
-    LastValue(ScalarExpr),
+    FirstValue(PreparedExpression),
+    LastValue(PreparedExpression),
     NthValue {
-        target: ScalarExpr,
-        position: ScalarExpr,
+        target: PreparedExpression,
+        position: PreparedExpression,
     },
     Aggregate(Box<WindowAggregate>),
 }
@@ -32,9 +34,9 @@ pub(super) enum WindowFunction {
 /// `lag` (`forward` false) or `lead`: the target expression on the row `offset` rows away within the partition, or `default` on the current row when that row does not exist.
 pub(super) struct Shift {
     pub(super) forward: bool,
-    pub(super) target: ScalarExpr,
-    pub(super) offset: Option<ScalarExpr>,
-    pub(super) default: Option<ScalarExpr>,
+    pub(super) target: PreparedExpression,
+    pub(super) offset: Option<PreparedExpression>,
+    pub(super) default: Option<PreparedExpression>,
 }
 
 /// `ntile`'s partition state: the current bucket, the rows it holds so far, the row count that closes it, and how many leading buckets take one extra row.
@@ -218,7 +220,7 @@ fn shift_value(
 fn frame_value(
     frame: &FrameSpec,
     cursor: &mut FrameCursor,
-    target: &ScalarExpr,
+    target: &PreparedExpression,
     (from_head, offset): (bool, i64),
     current: &mut CurrentRow,
     rows: &mut PartitionRows<'_>,
@@ -244,7 +246,7 @@ fn rank_up(
 /// `window_ntile`: the bucket count is read from the first row whose argument is not NULL; until then every row's result is NULL.
 fn ntile(
     state: &mut NtileState,
-    argument: &ScalarExpr,
+    argument: &PreparedExpression,
     current: &CurrentRow,
     rows: &mut PartitionRows<'_>,
 ) -> Result<Value, SQLError> {

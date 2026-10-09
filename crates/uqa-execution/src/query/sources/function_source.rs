@@ -185,6 +185,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         output_name: source.output_name,
         relations: source.relations,
         args: source.args,
+        function_states: None,
         alias: source.alias,
         column_aliases: source.column_aliases,
         ordinality: source.ordinality,

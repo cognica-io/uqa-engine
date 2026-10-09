@@ -132,11 +132,18 @@ fn ordered_window_rows(
     )
     .unwrap();
     let statement = prepared.as_ref().unwrap_or(statement);
+    let evaluator = crate::relational::DefaultExpressionEvaluator::shared(Vec::new());
     let ordered: Box<dyn PhysicalOperator> = if deferred {
         let (sort_statement, sort_projections, projections) =
             prepare_deferred_order_projection(statement, &output, projections).unwrap();
         let projection = Project::appending_targets(Box::new(window), sort_projections, Vec::new());
-        let keys = resolved_sort_keys(&sort_statement, &[], Some(projection.row_schema())).unwrap();
+        let keys = resolved_sort_keys(
+            &sort_statement,
+            &[],
+            Some(projection.row_schema()),
+            evaluator.as_ref(),
+        )
+        .unwrap();
         let sorted = Sort::with_work_mem(Box::new(projection), keys, Vec::new(), 1);
         let limited = Limit::new(Box::new(sorted), 0, Some(limit));
         Box::new(Project::with_targets(
@@ -146,7 +153,13 @@ fn ordered_window_rows(
         ))
     } else {
         let projection = Project::with_targets(Box::new(window), projections, Vec::new());
-        let keys = resolved_sort_keys(statement, &output, Some(projection.row_schema())).unwrap();
+        let keys = resolved_sort_keys(
+            statement,
+            &output,
+            Some(projection.row_schema()),
+            evaluator.as_ref(),
+        )
+        .unwrap();
         let sorted = Sort::with_work_mem(Box::new(projection), keys, Vec::new(), 1);
         Box::new(Limit::new(Box::new(sorted), 0, Some(limit)))
     };

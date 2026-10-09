@@ -44,8 +44,10 @@ fn bounded_top_k_matches_complete_sort_with_nulls_ties_and_variable_payloads() {
                         })
                         .collect::<Vec<_>>();
                     let mut full = sort(rows.clone(), budget, None);
-                    full.keys[0].descending = descending;
-                    full.keys[0].nulls_first = Some(nulls_first);
+                    let mut keys = full.keys.to_vec();
+                    keys[0].descending = descending;
+                    keys[0].nulls_first = Some(nulls_first);
+                    full.keys = crate::scalar::PreparedExpressions::sort_keys(keys);
                     let mut expected = run_to_rows(&mut full).unwrap().1;
                     expected.truncate(keep);
                     let mut bounded = sort(rows, budget, Some(keep));

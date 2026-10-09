@@ -39,6 +39,18 @@ impl EnumComparisonState {
     }
 }
 
+/// Classify an already-bound enum value and read its physical equality/hash
+/// identity. A retained label need not exist: these operators never call enum output.
+pub fn comparison_identity(catalog: &dyn EnumLabelCatalog, value: &Value) -> Result<Option<u32>> {
+    match value {
+        Value::Enum(_) => oid(Some(catalog), value),
+        Value::Datum(datum) if catalog.enum_type_labels(datum.type_oid())?.is_some() => {
+            super::super::datums::enum_label_oid(datum).map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
 pub(super) fn oid(catalog: Option<&dyn EnumLabelCatalog>, value: &Value) -> Result<Option<u32>> {
     match value {
         Value::Null => Ok(None),
