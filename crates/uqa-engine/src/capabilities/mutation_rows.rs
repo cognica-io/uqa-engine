@@ -63,6 +63,7 @@ impl Engine {
     }
     pub(crate) fn view_row_context(&self) -> ViewRowContext<'_, StatementReadSnapshot> {
         ViewRowContext {
+            volatility: self,
             rewrite: self.view_rewrite_context(),
             rows: self.mutation_row_context(),
             expressions: self.mutation_expression_context(),

@@ -38,6 +38,7 @@ pub trait RuleExpressions {
 #[derive(Clone, Copy)]
 pub struct RuleContext<'a> {
     pub analysis: RuleAnalysisContext<'a>,
+    pub binding: uqa_sql::binding::stored_routines::analysis::CatalogRoutineAnalysisContext<'a>,
     pub security: &'a dyn RuleSecurity,
     pub statements: &'a dyn RuleStatements,
     pub expressions: &'a dyn RuleExpressions,
