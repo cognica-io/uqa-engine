@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 use uqa_core::Value;
 
 use super::{enum_label_oid, type_name, EnumLabelCatalog};
+use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
 
 #[cfg(test)]
@@ -49,6 +50,50 @@ pub fn comparison_identity(catalog: &dyn EnumLabelCatalog, value: &Value) -> Res
         }
         _ => Ok(None),
     }
+}
+
+/// Evaluate a scalar enum operator against physical identities. Other operand
+/// types remain with the ordinary SQL comparison owner; no label output occurs.
+pub fn eval_comparison(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    catalog: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Option<Value>> {
+    if matches!(
+        op,
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+    ) {
+        return Ok(None);
+    }
+    if matches!(left, Value::Null) || matches!(right, Value::Null) {
+        return Ok(Some(Value::Null));
+    }
+    let Some(catalog) = catalog else {
+        return Ok(None);
+    };
+    let (Some(left), Some(right)) = (
+        comparison_identity(catalog, left)?,
+        comparison_identity(catalog, right)?,
+    ) else {
+        return Ok(None);
+    };
+    let value = match op {
+        BinaryOp::Equal => left == right,
+        BinaryOp::NotEqual => left != right,
+        _ => {
+            let order = compare_oids(Some(catalog), left, right, state)?;
+            match op {
+                BinaryOp::Less => order.is_lt(),
+                BinaryOp::LessEqual => order.is_le(),
+                BinaryOp::Greater => order.is_gt(),
+                BinaryOp::GreaterEqual => order.is_ge(),
+                _ => unreachable!("arithmetic has no enum comparison"),
+            }
+        }
+    };
+    Ok(Some(Value::Bool(value)))
 }
 
 pub(super) fn oid(catalog: Option<&dyn EnumLabelCatalog>, value: &Value) -> Result<Option<u32>> {

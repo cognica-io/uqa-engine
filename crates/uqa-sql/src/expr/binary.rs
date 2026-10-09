@@ -34,6 +34,15 @@ pub(super) fn eval_binary(
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
+    if let Some(value) = super::enums::eval_comparison(
+        op,
+        &l,
+        &r,
+        ctx.engine.and_then(super::EngineHook::enum_labels),
+        None,
+    )? {
+        return Ok(value);
+    }
     if is_arithmetic(op) && real_expr(lhs, ctx.params) && real_expr(rhs, ctx.params) {
         return super::eval_float_arithmetic(op, &l, &r, super::FloatWidth::Real);
     }
@@ -286,6 +295,15 @@ pub(super) fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
+    if let Some(value) = super::enums::eval_comparison(
+        op,
+        l,
+        r,
+        ctx.engine.and_then(super::EngineHook::enum_labels),
+        None,
+    )? {
+        return Ok(Some(value));
+    }
     Ok(Some(eval_comparison_op(op, l, r)?))
 }
 

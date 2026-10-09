@@ -6,10 +6,14 @@
 
 //! Function state belongs to immutable expressions prepared for one execution.
 
-use uqa_sql::{ast::FunctionDispatch, expr::enums::EnumComparisonState, ScalarExpr};
+use uqa_sql::{
+    ast::{BinaryOp, FunctionDispatch},
+    expr::enums::EnumComparisonState,
+    ScalarExpr,
+};
 
 /// Read-only lookup into the function state owned by a prepared expression set.
-/// The state has one fixed-size entry per enum ordering call, never per input row.
+/// The state has one fixed-size entry per ordering call, never per input row.
 #[derive(Debug, Default)]
 pub struct FunctionCallStates {
     enums: Vec<(usize, EnumComparisonState)>,
@@ -18,27 +22,39 @@ pub struct FunctionCallStates {
 impl FunctionCallStates {
     fn register(&mut self, expression: &ScalarExpr) {
         expression.visit(&mut |expression| {
-            let ScalarExpr::Func {
-                binding: Some(binding),
-                args,
-                ..
-            } = expression
-            else {
-                return;
+            let address = match expression {
+                ScalarExpr::Func {
+                    binding: Some(binding),
+                    args,
+                    ..
+                } if binding.builtin
+                    && args.len() == 2
+                    && matches!(binding.dispatch, Some(FunctionDispatch::Enum { operation, .. }) if operation.uses_comparison_state()) =>
+                {
+                    args.as_ptr() as usize
+                }
+                ScalarExpr::Binary {
+                    op: BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual,
+                    lhs,
+                    ..
+                } => std::ptr::from_ref(lhs.as_ref()) as usize,
+                _ => return,
             };
-            if binding.builtin
-                && args.len() == 2
-                && matches!(binding.dispatch, Some(FunctionDispatch::Enum { operation, .. }) if operation.uses_comparison_state())
-            {
-                self.enums
-                    .push((args.as_ptr() as usize, EnumComparisonState::default()));
-            }
+            self.enums.push((address, EnumComparisonState::default()));
         });
     }
 
     pub(crate) fn enum_comparison(&self, arguments: &[ScalarExpr]) -> Option<&EnumComparisonState> {
+        self.at(arguments.as_ptr() as usize)
+    }
+
+    pub(crate) fn enum_binary_comparison(&self, left: &ScalarExpr) -> Option<&EnumComparisonState> {
+        self.at(std::ptr::from_ref(left) as usize)
+    }
+
+    fn at(&self, address: usize) -> Option<&EnumComparisonState> {
         self.enums
-            .binary_search_by_key(&(arguments.as_ptr() as usize), |(address, _)| *address)
+            .binary_search_by_key(&address, |(address, _)| *address)
             .ok()
             .map(|index| &self.enums[index].1)
     }
@@ -46,8 +62,8 @@ impl FunctionCallStates {
 
 type VisitRoots<T> = fn(&T, &mut dyn FnMut(&ScalarExpr));
 
-/// Retains both the immutable source and its call state. Argument vectors are
-/// heap allocations, so their identity survives moves of this owner. They cannot
+/// Retains both the immutable source and its call state. Argument vectors and
+/// binary operands are heap allocations, so their identity survives moves. They cannot
 /// be changed or freed while the state is usable; addresses are only lookup keys
 /// and are never dereferenced. Cloning prepares independent, initially empty state.
 pub(crate) struct PreparedExpressions<T> {

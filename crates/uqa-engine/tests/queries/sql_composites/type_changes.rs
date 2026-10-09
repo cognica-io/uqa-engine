@@ -309,6 +309,20 @@ fn composite_enum_call_state_matches_postgresql(#[case] provider: usize) {
     );
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_enum_operators_match_postgresql(#[case] provider: usize) {
+    verify_enum_oracle(
+        provider,
+        include_str!(
+            "../../../../../tests/parity/pg18/composite_enum_operator_oracle.expected.json"
+        ),
+    );
+}
+
 fn verify_enum_oracle(provider: usize, reference: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("enum-reads.db");

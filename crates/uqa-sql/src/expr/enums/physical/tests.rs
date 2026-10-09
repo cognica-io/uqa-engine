@@ -16,6 +16,105 @@ fn physical(oid: u32) -> Value {
 }
 
 #[test]
+fn scalar_operators_use_oid_identity_and_the_same_order_cache() {
+    let catalog = Catalog::new();
+    let state = EnumComparisonState::default();
+    let apply = |op, left, right| eval_comparison(op, &left, &right, Some(&catalog), Some(&state));
+    assert_eq!(
+        apply(BinaryOp::Equal, physical(1), physical(1)).unwrap(),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        apply(BinaryOp::NotEqual, physical(1), physical(3)).unwrap(),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        apply(BinaryOp::Less, physical(2), physical(4)).unwrap(),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        apply(BinaryOp::GreaterEqual, physical(1), physical(1)).unwrap(),
+        Some(Value::Bool(true))
+    );
+    assert!(state.cached_type().is_none());
+    assert_eq!(
+        apply(BinaryOp::Less, physical(5), physical(4)).unwrap(),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(state.cached_type(), Some(16_384));
+    let error = apply(BinaryOp::Less, physical(11), physical(8)).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error.to_string().contains("enum_probe"));
+    assert_eq!(
+        apply(BinaryOp::Equal, physical(11), physical(11)).unwrap(),
+        Some(Value::Bool(true))
+    );
+}
+
+#[test]
+fn scalar_enum_dispatch_preserves_nulls_bounds_and_other_operators() {
+    let catalog = Catalog::new();
+    let malformed = Value::Datum(DatumValue::new(16_384, 0, vec![1]));
+    assert_eq!(
+        eval_comparison(
+            BinaryOp::Less,
+            &malformed,
+            &Value::Null,
+            Some(&catalog),
+            None
+        )
+        .unwrap(),
+        Some(Value::Null)
+    );
+    assert_eq!(
+        eval_comparison(
+            BinaryOp::Equal,
+            &malformed,
+            &physical(1),
+            Some(&catalog),
+            None
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("XX001")
+    );
+    assert_eq!(
+        eval_comparison(
+            BinaryOp::Less,
+            &physical(1),
+            &physical(3),
+            Some(&catalog),
+            None
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("22P03")
+    );
+    assert_eq!(
+        eval_comparison(
+            BinaryOp::Less,
+            &Value::Int(1),
+            &Value::Int(3),
+            Some(&catalog),
+            None
+        )
+        .unwrap(),
+        None
+    );
+    assert_eq!(
+        eval_comparison(
+            BinaryOp::Add,
+            &malformed,
+            &physical(1),
+            Some(&catalog),
+            None
+        )
+        .unwrap(),
+        None
+    );
+}
+
+#[test]
 fn invalid_label_identity_still_supports_equality_even_order_and_hashes() {
     let apply = |operation, arguments: &[Value]| {
         enum_function_value(None, operation, 16_384, arguments).unwrap()
@@ -120,6 +219,40 @@ impl EnumLabelCatalog for Catalog {
     fn has_enum_types(&self) -> bool {
         true
     }
+}
+
+impl crate::expr::EngineHook for Catalog {
+    fn nextval(&self, _: &str) -> Result<i64> {
+        unreachable!()
+    }
+    fn currval(&self, _: &str) -> Result<i64> {
+        unreachable!()
+    }
+    fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64> {
+        unreachable!()
+    }
+    fn enum_labels(&self) -> Option<&dyn EnumLabelCatalog> {
+        Some(self)
+    }
+}
+
+#[test]
+fn syntax_evaluation_compares_physical_enum_operands_without_output() {
+    let catalog = Catalog::new();
+    let context = crate::expr::EvalContext::new(None, &[]).with_engine(&catalog);
+    let expression = |op, left, right| crate::ast::Expr::Binary {
+        op,
+        lhs: Box::new(crate::ast::Expr::Literal(physical(left))),
+        rhs: Box::new(crate::ast::Expr::Literal(physical(right))),
+    };
+    assert_eq!(
+        crate::expr::eval(&expression(BinaryOp::Less, 5, 4), &context).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        crate::expr::eval(&expression(BinaryOp::Equal, 1, 1), &context).unwrap(),
+        Value::Bool(true)
+    );
 }
 
 #[test]

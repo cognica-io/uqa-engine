@@ -80,6 +80,14 @@ impl<'a> ScalarEvalContext<'a> {
             .and_then(|states| states.enum_comparison(arguments))
     }
 
+    pub(super) fn enum_binary_comparison_state(
+        &self,
+        left: &super::ScalarExpr,
+    ) -> Option<&uqa_sql::expr::enums::EnumComparisonState> {
+        self.function_states
+            .and_then(|states| states.enum_binary_comparison(left))
+    }
+
     pub(crate) fn with_retrieval_predicate(
         mut self,
         predicate: &'a RetrievalPredicate<'a>,

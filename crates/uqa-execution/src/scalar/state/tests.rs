@@ -17,8 +17,13 @@ use uqa_sql::{
 struct Catalog;
 
 impl EnumLabelCatalog for Catalog {
-    fn enum_type_labels(&self, _: u32) -> Result<Option<Arc<EnumTypeLabels>>, SQLError> {
-        unreachable!("comparison requests fixed-size identity metadata")
+    fn enum_type_labels(&self, oid: u32) -> Result<Option<Arc<EnumTypeLabels>>, SQLError> {
+        Ok(matches!(oid, 16_384 | 16_400).then(|| {
+            Arc::new(EnumTypeLabels {
+                type_oid: oid,
+                labels: Vec::new(),
+            })
+        }))
     }
 
     fn enum_label_position(&self, oid: u32) -> Result<Option<(u32, usize)>, SQLError> {
@@ -135,4 +140,26 @@ fn other_enum_operations_and_plain_expressions_allocate_no_call_state() {
     assert_eq!(prepared.calls().enums.capacity(), 0);
     assert_eq!(evaluate(&prepared, 0, 5, 4).unwrap(), Value::Bool(false));
     assert_eq!(evaluate(&prepared, 1, 11, 8).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn binary_operators_keep_independent_state_after_owner_moves() {
+    let binary = || ScalarExpr::Binary {
+        op: BinaryOp::Less,
+        lhs: Box::new(ScalarExpr::Column("left".into())),
+        rhs: Box::new(ScalarExpr::Column("right".into())),
+    };
+    let prepared = PreparedExpressions::scalars(vec![binary(), binary()]);
+    assert_eq!(evaluate(&prepared, 0, 5, 4).unwrap(), Value::Bool(true));
+    let prepared = Box::new(prepared);
+    assert_eq!(evaluate(&prepared, 1, 11, 8).unwrap(), Value::Bool(true));
+    assert_eq!(
+        evaluate(&prepared, 0, 11, 8).unwrap_err().sqlstate(),
+        Some("XX000")
+    );
+    assert_eq!(
+        evaluate(&prepared.clone(), 0, 11, 8).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(prepared.calls().enums.len(), 2);
 }
