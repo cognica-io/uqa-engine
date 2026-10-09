@@ -491,10 +491,7 @@ pub fn age_info_column_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>,
 /// domains by the `pg_type` builder.
 pub fn age_pg_type_rows() -> Vec<ResultRow> {
     let namespace = schema_oid(AG_CATALOG_SCHEMA);
-    let agtype = i64::from(ag_catalog_type_oid("agtype"));
-    let agtype_array = i64::from(ag_catalog_type_oid("_agtype"));
-    let graphid = i64::from(ag_catalog_type_oid("graphid"));
-    let graphid_array = i64::from(ag_catalog_type_oid("_graphid"));
+    let [agtype, agtype_array, graphid, graphid_array] = age_type_oids();
     vec![
         age_pg_type_row(AgeTypeRow {
             oid: agtype,
@@ -606,4 +603,8 @@ fn age_pg_type_row(ty: AgeTypeRow) -> ResultRow {
         ("typdefault", Value::Null),
         ("typacl", Value::Null),
     ])
+}
+
+pub(super) fn age_type_oids() -> [i64; 4] {
+    ["agtype", "_agtype", "graphid", "_graphid"].map(|name| i64::from(ag_catalog_type_oid(name)))
 }

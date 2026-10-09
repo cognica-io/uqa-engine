@@ -83,6 +83,10 @@ pub(super) fn language_attribute_rows() -> Result<Vec<ResultRow>, SQLError> {
         .collect()
 }
 
+pub(super) fn type_oids() -> [i64; 2] {
+    [i64::from(LANGUAGE_ROW_TYPE), i64::from(LANGUAGE_ARRAY_TYPE)]
+}
+
 pub(super) fn language_type_rows(catalog: &CatalogReadView) -> Vec<ResultRow> {
     let relation = VirtualRelation::PgLanguage;
     let mut rows = Vec::new();

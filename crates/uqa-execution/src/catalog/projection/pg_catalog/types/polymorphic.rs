@@ -6,11 +6,9 @@
 
 //! `PostgreSQL` 18 polymorphic pseudo types shared by routine catalog output.
 
-use super::{
-    schema_oid, special_pg_type_catalog_row, PgTypeCatalogMetadata, PgTypeRoutineOids, ResultRow,
-};
+use super::{schema_oid, PgTypeCatalogMetadata, PgTypeRoutineOids};
 
-pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
+pub(super) fn metadata() -> impl Iterator<Item = PgTypeCatalogMetadata<'static>> {
     [
         ("anyelement", 4, true, 2312, 2313, 0, 0, "i", "p"),
         ("anynonarray", 4, true, 2777, 2778, 0, 0, "i", "p"),
@@ -46,7 +44,7 @@ pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
     .into_iter()
     .map(
         |(name, len, by_value, input, output, receive, send, align, storage)| {
-            special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            PgTypeCatalogMetadata {
                 oid: uqa_sql::catalog::type_metadata::routine_type_oid(name),
                 name: name.into(),
                 namespace_oid: schema_oid("pg_catalog"),
@@ -73,7 +71,7 @@ pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
                 base_oid: 0,
                 type_modifier: -1,
                 collation_oid: 0,
-            })
+            }
         },
     )
 }

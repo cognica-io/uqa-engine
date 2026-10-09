@@ -39,4 +39,8 @@ pub use relations::{
 };
 pub use roles::{build_pg_auth_members, build_pg_authid, build_pg_roles, build_pg_user};
 pub use sequences::build_pg_sequences;
+pub(super) use types::builtin_type_oid_in_use;
 pub use types::{build_pg_enum, build_pg_range, build_pg_type, build_pg_type_without_defaults};
+
+#[cfg(test)]
+pub(crate) use types::TYPE_PROJECTION_BUILDS;
