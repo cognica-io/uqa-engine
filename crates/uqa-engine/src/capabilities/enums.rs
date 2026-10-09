@@ -75,6 +75,12 @@ impl Engine {
 }
 
 impl EnumLabelCatalog for Engine {
+    fn enum_type_comparison_states(
+        &self,
+    ) -> Option<&uqa_sql::expr::enums::EnumTypeComparisonStates> {
+        Some(&self.session.enum_type_comparison_states)
+    }
+
     fn enum_label_position(&self, label_oid: u32) -> Result<Option<(u32, usize)>, SQLError> {
         Ok(self
             .runtime

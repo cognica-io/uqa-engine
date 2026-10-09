@@ -20,7 +20,10 @@ use crate::ast::ColumnType;
 mod functions;
 mod physical;
 pub use functions::{enum_function_value, enum_function_value_with_state};
-pub use physical::{comparison_identity, eval_comparison, EnumComparisonState};
+pub(in crate::expr) use physical::comparison_order;
+pub use physical::{
+    comparison_identity, eval_comparison, EnumComparisonState, EnumTypeComparisonStates,
+};
 
 /// One label of an enum type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +61,11 @@ impl EnumTypeLabels {
 
 /// Catalog access for enum label input and output, supplied by the statement's execution context and by catalog-aware binding.
 pub trait EnumLabelCatalog {
+    /// The session's comparison support functions, shared by declared type across nested array and record calls. Pure catalog readers do not own runtime state.
+    fn enum_type_comparison_states(&self) -> Option<&EnumTypeComparisonStates> {
+        None
+    }
+
     /// The labels of one enum type in the statement's catalog generation, or `None` when the catalog has no such type.
     fn enum_type_labels(&self, type_oid: u32) -> Result<Option<Arc<EnumTypeLabels>>>;
 

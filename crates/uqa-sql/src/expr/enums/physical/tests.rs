@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 
 use super::*;
@@ -61,6 +62,31 @@ fn nested_enum_equality_preserves_raw_identity_nulls_and_lazy_fields() {
         );
         assert_eq!(budget.used(), 0);
     }
+    let record_field = nested(2, nested(2, physical(1), Value::Null), Value::Int(0));
+    assert_eq!(
+        compare(
+            BinaryOp::Equal,
+            &record_field,
+            &record_field,
+            &control,
+            Some(&catalog),
+            None
+        )
+        .unwrap(),
+        Some(true)
+    );
+    assert_eq!(
+        compare(
+            BinaryOp::Less,
+            &record_field,
+            &nested(2, nested(2, physical(1), Value::Int(1)), Value::Int(0)),
+            &control,
+            Some(&catalog),
+            None
+        )
+        .unwrap(),
+        Some(false)
+    );
     token.cancel();
     assert_eq!(
         compare(
@@ -260,7 +286,11 @@ fn legacy_native_keys_keep_catalog_free_equality_and_order() {
     );
 }
 
-struct Catalog(Arc<EnumTypeLabels>, std::sync::atomic::AtomicI64);
+struct Catalog(
+    Arc<EnumTypeLabels>,
+    std::sync::atomic::AtomicI64,
+    EnumTypeComparisonStates,
+);
 
 impl Catalog {
     fn new() -> Self {
@@ -279,11 +309,16 @@ impl Catalog {
                     .collect(),
             }),
             std::sync::atomic::AtomicI64::new(0),
+            EnumTypeComparisonStates::default(),
         )
     }
 }
 
 impl EnumLabelCatalog for Catalog {
+    fn enum_type_comparison_states(&self) -> Option<&EnumTypeComparisonStates> {
+        Some(&self.2)
+    }
+
     fn enum_type_labels(&self, oid: u32) -> Result<Option<Arc<EnumTypeLabels>>> {
         Ok((oid == self.0.type_oid).then(|| Arc::clone(&self.0)))
     }
@@ -314,6 +349,123 @@ impl EnumLabelCatalog for Catalog {
     fn has_enum_types(&self) -> bool {
         true
     }
+}
+
+#[test]
+fn nested_enum_order_shares_type_support_but_keeps_row_fields_private() {
+    use crate::expr::binary::eval_comparison_truth_with_enum_catalog as compare;
+    use uqa_core::memory::ProductionControl;
+
+    let catalog = Catalog::new();
+    let control = ProductionControl::uncontrolled();
+    let state = EnumComparisonState::default();
+    let less = |left: Value, right: Value| {
+        compare(
+            BinaryOp::Less,
+            &left,
+            &right,
+            &control,
+            Some(&catalog),
+            Some(&state),
+        )
+    };
+    assert_eq!(
+        less(
+            nested(0, physical(5), Value::Null),
+            nested(0, physical(4), Value::Null)
+        )
+        .unwrap(),
+        Some(true)
+    );
+    let error = less(
+        nested(1, physical(11), Value::Null),
+        nested(1, physical(8), Value::Null),
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error.to_string().contains("enum_probe"));
+    assert_eq!(
+        less(
+            nested(0, physical(4), Value::Null),
+            nested(0, physical(8), Value::Null)
+        )
+        .unwrap(),
+        Some(true)
+    );
+    assert_eq!(
+        less(
+            nested(2, physical(5), physical(11)),
+            nested(2, physical(5), physical(8))
+        )
+        .unwrap(),
+        Some(true)
+    );
+    assert_eq!(
+        less(
+            nested(2, physical(5), physical(11)),
+            nested(2, physical(4), physical(8))
+        )
+        .unwrap(),
+        Some(true)
+    );
+    assert_eq!(state.cached_type(), None);
+    assert_eq!(state.field(0).cached_type(), Some(16_384));
+    assert_eq!(state.field(1).cached_type(), Some(16_400));
+    let retained = catalog.2.get(16_384);
+    assert_eq!(retained.cached_type(), Some(16_384));
+    for _ in 0..10 {
+        assert!(Arc::ptr_eq(&retained, &catalog.2.get(16_384)));
+    }
+    let fresh = Catalog::new();
+    assert_eq!(fresh.2.get(16_384).cached_type(), None);
+}
+
+#[test]
+fn nested_enum_order_preserves_lazy_null_and_error_observations() {
+    use crate::expr::binary::eval_comparison_truth_with_enum_catalog as compare;
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+
+    let catalog = Catalog::new();
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let bad = Value::Datum(DatumValue::new(16_384, 0, vec![1]));
+    let less = |left: Value, right: Value| {
+        compare(
+            BinaryOp::Less,
+            &left,
+            &right,
+            &control,
+            Some(&catalog),
+            None,
+        )
+    };
+    for kind in 0..3 {
+        let left = nested(kind, physical(2), bad.clone());
+        let right = nested(kind, physical(4), bad.clone());
+        assert_eq!(less(left.clone(), right).unwrap(), Some(true));
+        assert_eq!(
+            less(left.clone(), left).unwrap_err().sqlstate(),
+            Some("XX001")
+        );
+        assert_eq!(
+            less(
+                nested(kind, Value::Null, bad.clone()),
+                nested(kind, physical(4), bad.clone())
+            )
+            .unwrap(),
+            (kind != 2).then_some(false)
+        );
+    }
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    assert_eq!(
+        less(physical(1), physical(1)).unwrap_err().sqlstate(),
+        Some("57014")
+    );
 }
 
 impl crate::expr::EngineHook for Catalog {

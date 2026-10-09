@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "fresh_array",
+      "sql": "SELECT ARRAY['before'::enum_order_b] < ARRAY['other'::enum_order_b] AS ordered"
+    },
+    {
+      "id": "fresh_record",
+      "sql": "SELECT ROW('before'::enum_order_b,0)::enum_order_record < ROW('other'::enum_order_b,0)::enum_order_record AS ordered"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW enum_order_source,enum_order_invalid,enum_order_even; DROP TYPE enum_order_record,enum_order_holder,enum_order_raw,enum_order_a,enum_order_b"
+    }
+  ]
+}

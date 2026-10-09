@@ -6,10 +6,12 @@
 
 //! SQL NULL and row comparison rules share the native controlled value owners.
 
+use super::super::enums::{EnumComparisonState, EnumLabelCatalog};
 use super::{BinaryOp, Result, SQLError, Value};
 use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
+#[cfg(test)]
 pub(in crate::expr) fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
     Ok(eval_comparison_truth(op, l, r)?
         .map(Value::Bool)
@@ -46,7 +48,7 @@ pub fn eval_comparison_truth_with_control(
     Ok(out)
 }
 
-/// Observe scalar and nested enum equality with the caller's catalog, and scalar enum ordering with its comparison state, preserving ordinary three-valued rules.
+/// Observe scalar and nested enums through the caller's catalog, preserving private scalar/row call state, shared type support state and ordinary three-valued rules.
 pub fn eval_comparison_truth_with_enum_catalog(
     op: BinaryOp,
     left: &Value,
@@ -60,12 +62,22 @@ pub fn eval_comparison_truth_with_enum_catalog(
         return values_equal_nullable_with_catalog(left, right, control, enums)
             .map(|equal| equal.map(|equal| if op == BinaryOp::Equal { equal } else { !equal }));
     }
-    match super::super::enums::eval_comparison(op, left, right, enums, state)? {
-        Some(Value::Bool(value)) => Ok(Some(value)),
-        Some(Value::Null) => Ok(None),
-        None => eval_comparison_truth_with_control(op, left, right, control),
-        Some(_) => unreachable!("comparison produces only boolean or NULL"),
+    if !matches!(
+        op,
+        BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual
+    ) {
+        return Err(SQLError::Internal(format!(
+            "non-comparison operator {op:?} reached comparison evaluation"
+        )));
     }
+    let order = compare_nullable_with_catalog(left, right, control, enums, state)?;
+    Ok(order.map(|order| match op {
+        BinaryOp::Less => order.is_lt(),
+        BinaryOp::LessEqual => order.is_le(),
+        BinaryOp::Greater => order.is_gt(),
+        BinaryOp::GreaterEqual => order.is_ge(),
+        _ => unreachable!("only comparison operators reach comparison evaluation"),
+    }))
 }
 
 /// Two-valued equality treats SQL UNKNOWN as no match for CASE, NULLIF and membership probes.
@@ -149,7 +161,12 @@ fn values_equal_nullable_with_catalog(
             }
             let mut unknown = false;
             for (x, y) in xs.iter().zip(ys) {
-                match values_equal_nullable_with_catalog(x, y, control, enums)? {
+                let equal = if matches!((x, y), (Value::Row(_), Value::Row(_))) {
+                    Some(equal_values(x, y, control, enums, false)?)
+                } else {
+                    values_equal_nullable_with_catalog(x, y, control, enums)?
+                };
+                match equal {
                     Some(false) => return Ok(Some(false)),
                     Some(true) => {}
                     None => unknown = true,
@@ -180,21 +197,41 @@ pub fn compare_nullable_with_control(
     b: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Ordering>> {
+    compare_nullable_with_catalog(a, b, control, None, None)
+}
+
+fn compare_nullable_with_catalog(
+    a: &Value,
+    b: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Option<Ordering>> {
     control.check()?;
+    if matches!(a, Value::Null) || matches!(b, Value::Null) {
+        return Ok(None);
+    }
+    if let Some(order) = super::super::enums::comparison_order(a, b, enums, state, false)? {
+        return Ok(Some(order));
+    }
     if let Some(order) = super::super::datums::compare_jsonb_with_control(a, b, control)? {
         return Ok(Some(order));
     }
     match (a, b) {
         (Value::Null, _) | (_, Value::Null) => Ok(None),
-        (Value::Datum(datum), _) => compare_nullable_with_control(
+        (Value::Datum(datum), _) => compare_nullable_with_catalog(
             &*super::super::datums::read_with_control(datum, control)?,
             b,
             control,
+            enums,
+            state,
         ),
-        (_, Value::Datum(datum)) => compare_nullable_with_control(
+        (_, Value::Datum(datum)) => compare_nullable_with_catalog(
             a,
             &*super::super::datums::read_with_control(datum, control)?,
             control,
+            enums,
+            state,
         ),
         (
             Value::Int(_) | Value::Float(_) | Value::Decimal(_),
@@ -212,7 +249,7 @@ pub fn compare_nullable_with_control(
         | (Value::List(_), Value::List(_))
         | (Value::Record(_), Value::Record(_) | Value::Row(_))
         | (Value::Row(_), Value::Record(_))
-        | (Value::Enum(_), Value::Enum(_)) => Ok(Some(compare_sql_values(a, b, control)?)),
+        | (Value::Enum(_), Value::Enum(_)) => Ok(Some(compare_sql_values(a, b, control, enums)?)),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(x), Value::FixedChar(y)) => {
             Ok(Some(compare_fixed_text(x, y, control)?))
         }
@@ -235,26 +272,47 @@ pub fn compare_nullable_with_control(
             .map(|parsed| Some(parsed.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         // Ordering is lexicographic; reaching NULL before a definite comparison leaves it unknown.
-        (Value::Row(xs), Value::Row(ys)) => {
-            for (x, y) in xs.iter().zip(ys) {
-                match compare_nullable_with_control(x, y, control)? {
-                    Some(Ordering::Equal) => {}
-                    Some(other) => return Ok(Some(other)),
-                    None => return Ok(None),
-                }
-            }
-            Ok(Some(xs.len().cmp(&ys.len())))
-        }
+        (Value::Row(xs), Value::Row(ys)) => compare_anonymous_row(xs, ys, control, enums, state),
         (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
             "cannot compare {lhs:?} with {rhs:?}"
         ))),
     }
 }
 
+fn compare_anonymous_row(
+    left: &[Value],
+    right: &[Value],
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Option<Ordering>> {
+    for (index, (left, right)) in left.iter().zip(right).enumerate() {
+        let field =
+            if matches!(left, Value::Enum(_) | Value::Datum(_)) && !matches!(right, Value::Null) {
+                state.map(|state| state.field(index))
+            } else {
+                None
+            };
+        let order = if matches!((left, right), (Value::Row(_), Value::Row(_))) {
+            Some(compare_typed_values_with_catalog(
+                left, right, control, enums,
+            )?)
+        } else {
+            compare_nullable_with_catalog(left, right, control, enums, field.as_deref())?
+        };
+        match order {
+            Some(Ordering::Equal) => {}
+            other => return Ok(other),
+        }
+    }
+    Ok(Some(left.len().cmp(&right.len())))
+}
+
 fn compare_sql_values(
     left: &Value,
     right: &Value,
     control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Ordering> {
     // Primitive mixed float/integer and float/numeric operators select float8 inputs. Physical keys and already-bound container elements keep their exact carrier order.
     if matches!(
@@ -268,7 +326,7 @@ fn compare_sql_values(
             super::super::cast_value_from_with_control(right, "double precision", None, control)?;
         return Ok(left.cmp(&right));
     }
-    compare_typed_values_with_control(left, right, control)
+    compare_typed_values_with_catalog(left, right, control, enums)
 }
 
 /// Compare already-bound values, preserving type operator failures and total container NULL semantics. Callers supply top-level NULL placement and must apply operator-selected casts first.
@@ -276,6 +334,15 @@ pub fn compare_typed_values_with_control(
     left: &Value,
     right: &Value,
     control: &ProductionControl<'_>,
+) -> Result<Ordering> {
+    compare_typed_values_with_catalog(left, right, control, None)
+}
+
+fn compare_typed_values_with_catalog(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Ordering> {
     control.check()?;
     if let Some(order) = super::super::datums::compare_jsonb_with_control(left, right, control)? {
@@ -285,43 +352,54 @@ pub fn compare_typed_values_with_control(
         (Value::Null, Value::Null) => return Ok(Ordering::Equal),
         (Value::Null, _) => return Ok(Ordering::Greater),
         (_, Value::Null) => return Ok(Ordering::Less),
+        _ => {}
+    }
+    if let Some(order) = super::super::enums::comparison_order(left, right, enums, None, true)? {
+        return Ok(order);
+    }
+    match (left, right) {
         (Value::Datum(datum), _) => {
-            return compare_typed_values_with_control(
+            return compare_typed_values_with_catalog(
                 &*super::super::datums::read_with_control(datum, control)?,
                 right,
                 control,
+                enums,
             )
         }
         (_, Value::Datum(datum)) => {
-            return compare_typed_values_with_control(
+            return compare_typed_values_with_catalog(
                 left,
                 &*super::super::datums::read_with_control(datum, control)?,
                 control,
+                enums,
             )
         }
         (Value::Array(left), Value::Array(right)) => {
             validate_array_element_types(left, right)?;
-            return left.cmp_by_with_control(right, control, compare_typed_values_with_control);
+            return left.cmp_by_with_control(right, control, |left, right, control| {
+                compare_typed_values_with_catalog(left, right, control, enums)
+            });
         }
         (Value::Record(left), Value::Record(right)) => {
             return compare_sequence(
                 left.iter().map(|(_, v)| v),
                 right.iter().map(|(_, v)| v),
                 control,
+                enums,
             );
         }
         // A composite value compared with an anonymous row uses the record operators, which order NULL fields after all others.
         (Value::Record(left), Value::Row(right)) => {
-            return compare_sequence(left.iter().map(|(_, v)| v), right.iter(), control);
+            return compare_sequence(left.iter().map(|(_, v)| v), right.iter(), control, enums);
         }
         (Value::Row(left), Value::Record(right)) => {
-            return compare_sequence(left.iter(), right.iter().map(|(_, v)| v), control);
+            return compare_sequence(left.iter(), right.iter().map(|(_, v)| v), control, enums);
         }
         (Value::Row(left), Value::Row(right)) => {
-            return compare_sequence(left.iter(), right.iter(), control);
+            return compare_sequence(left.iter(), right.iter(), control, enums);
         }
         (Value::List(left), Value::List(right)) => {
-            return compare_sequence(left.iter(), right.iter(), control);
+            return compare_sequence(left.iter(), right.iter(), control, enums);
         }
         // Enum operators are declared on one enum type; binding coerces every other operand to it.
         (Value::Enum(left), Value::Enum(right)) if left.type_oid() == right.type_oid() => {
@@ -477,7 +555,7 @@ fn equal_values(
             equal_sequence(left.iter(), right.iter(), control, enums, typed)
         }
         _ if typed => Ok(compare_typed_values_with_control(left, right, control)?.is_eq()),
-        _ => Ok(compare_sql_values(left, right, control)?.is_eq()),
+        _ => Ok(compare_sql_values(left, right, control, enums)?.is_eq()),
     }
 }
 
@@ -516,11 +594,14 @@ fn compare_sequence<'a>(
     mut left: impl Iterator<Item = &'a Value>,
     mut right: impl Iterator<Item = &'a Value>,
     control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Ordering> {
     loop {
         control.check()?;
         let ordering = match (left.next(), right.next()) {
-            (Some(left), Some(right)) => compare_typed_values_with_control(left, right, control)?,
+            (Some(left), Some(right)) => {
+                compare_typed_values_with_catalog(left, right, control, enums)?
+            }
             (Some(_), None) => Ordering::Greater,
             (None, Some(_)) => Ordering::Less,
             (None, None) => return Ok(Ordering::Equal),

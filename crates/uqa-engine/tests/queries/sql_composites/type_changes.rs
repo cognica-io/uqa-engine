@@ -351,6 +351,51 @@ fn composite_nested_enum_equality_matches_postgresql(#[case] provider: usize) {
     );
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_nested_enum_order_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("enum-order.db");
+    let engine = super::addition::open(provider, &path);
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!(
+            "../../../../../tests/parity/pg18/composite_enum_nested_order_oracle.expected.json"
+        ),
+    );
+    let cold = include_str!(
+        "../../../../../tests/parity/pg18/composite_enum_nested_order_session_oracle.expected.json"
+    );
+    let mut retained: serde_json::Value = serde_json::from_str(cold).unwrap();
+    retained["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["id"] != "cleanup");
+    if provider == 0 {
+        let fresh = super::addition::open(provider, &path);
+        let mut setup: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../tests/parity/pg18/composite_enum_nested_order_oracle.expected.json"
+        ))
+        .unwrap();
+        setup["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| case["id"] == "setup");
+        crate::pg18_oracle::verify(&fresh, &setup.to_string());
+        crate::pg18_oracle::verify(&fresh, cold);
+        return;
+    }
+    let fresh = engine.new_session().unwrap();
+    crate::pg18_oracle::verify(&fresh, &retained.to_string());
+    drop(fresh);
+    drop(engine);
+    let engine = super::addition::open(provider, &path);
+    crate::pg18_oracle::verify(&engine, cold);
+}
+
 fn verify_enum_oracle(provider: usize, reference: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("enum-reads.db");

@@ -7,7 +7,6 @@
 //! Physical enum operations read admitted OIDs without repeating enum input or output.
 
 use std::cmp::Ordering;
-use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 
 use uqa_core::Value;
 
@@ -15,29 +14,46 @@ use super::{enum_label_oid, type_name, EnumLabelCatalog};
 use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
 
+mod state;
 #[cfg(test)]
 mod tests;
+pub use state::{EnumComparisonState, EnumTypeComparisonStates};
 
-/// The type cache of one prepared enum comparison call. The execution owner
-/// creates a fresh state for each call site, retaining it across that site's rows.
-#[derive(Debug, Default)]
-pub struct EnumComparisonState {
-    type_oid: AtomicU32,
-}
-
-impl EnumComparisonState {
-    fn cached_type(&self) -> Option<u32> {
-        match self.type_oid.load(AtomicOrdering::Relaxed) {
-            0 => None,
-            oid => Some(oid),
-        }
-    }
-
-    fn remember_type(&self, oid: u32) -> u32 {
-        self.type_oid
-            .compare_exchange(0, oid, AtomicOrdering::Relaxed, AtomicOrdering::Relaxed)
-            .map_or_else(|existing| existing, |_| oid)
-    }
+pub(in crate::expr) fn comparison_order(
+    left: &Value,
+    right: &Value,
+    catalog: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+    container: bool,
+) -> Result<Option<Ordering>> {
+    let Some(catalog) = catalog else {
+        return Ok(None);
+    };
+    let (Some(left_oid), Some(right_oid)) = (
+        comparison_identity(catalog, left)?,
+        comparison_identity(catalog, right)?,
+    ) else {
+        return Ok(None);
+    };
+    let shared = if container {
+        let type_oid = match left {
+            Value::Enum(label) => label.type_oid(),
+            Value::Datum(datum) => datum.type_oid(),
+            _ => unreachable!("enum identity has a declared type"),
+        };
+        catalog
+            .enum_type_comparison_states()
+            .map(|states| states.get(type_oid))
+    } else {
+        None
+    };
+    compare_oids(
+        Some(catalog),
+        left_oid,
+        right_oid,
+        shared.as_deref().or(state),
+    )
+    .map(Some)
 }
 
 /// Classify an already-bound enum value and read its physical equality/hash

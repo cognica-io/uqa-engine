@@ -166,7 +166,15 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar_inner(lhs, context, control)?;
             let right = eval_scalar_inner(rhs, context, control)?;
-            if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+            if matches!(
+                op,
+                BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+            ) {
                 let value = uqa_sql::expr::eval_comparison_truth_with_enum_catalog(
                     *op,
                     &left,
@@ -175,24 +183,9 @@ pub(super) fn eval_scalar_inner(
                     context
                         .function_hook()
                         .and_then(uqa_sql::expr::EngineHook::enum_labels),
-                    None,
+                    context.enum_binary_comparison_state(lhs),
                 )?;
                 return plain(value.map_or(Value::Null, Value::Bool), control);
-            }
-            if matches!(*left, Value::Enum(_) | Value::Datum(_))
-                || matches!(*right, Value::Enum(_) | Value::Datum(_))
-            {
-                if let Some(value) = uqa_sql::expr::enums::eval_comparison(
-                    *op,
-                    &left,
-                    &right,
-                    context
-                        .function_hook()
-                        .and_then(uqa_sql::expr::EngineHook::enum_labels),
-                    context.enum_binary_comparison_state(lhs),
-                )? {
-                    return plain(value, control);
-                }
             }
             if (matches!(*left, Value::Float(_)) || matches!(*right, Value::Float(_)))
                 && matches!(

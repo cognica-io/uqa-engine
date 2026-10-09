@@ -14,6 +14,7 @@ mod comparison;
 #[cfg(test)]
 mod production_tests;
 
+#[cfg(test)]
 pub(super) use comparison::eval_comparison_op;
 pub use comparison::{
     compare_nullable_with_control, compare_typed_values_with_control, compare_with_control,
@@ -34,7 +35,15 @@ pub(super) fn eval_binary(
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
-    if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+    if matches!(
+        op,
+        BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::Less
+            | BinaryOp::LessEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEqual
+    ) {
         return eval_comparison_truth_with_enum_catalog(
             op,
             &l,
@@ -306,27 +315,15 @@ pub(super) fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
-    if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-        return eval_comparison_truth_with_enum_catalog(
-            op,
-            l,
-            r,
-            &ProductionControl::uncontrolled(),
-            ctx.engine.and_then(super::EngineHook::enum_labels),
-            None,
-        )
-        .map(|value| Some(value.map_or(Value::Null, Value::Bool)));
-    }
-    if let Some(value) = super::enums::eval_comparison(
+    eval_comparison_truth_with_enum_catalog(
         op,
         l,
         r,
+        &ProductionControl::uncontrolled(),
         ctx.engine.and_then(super::EngineHook::enum_labels),
         None,
-    )? {
-        return Ok(Some(value));
-    }
-    Ok(Some(eval_comparison_op(op, l, r)?))
+    )
+    .map(|value| Some(value.map_or(Value::Null, Value::Bool)))
 }
 
 pub(super) fn eval_operand_borrowed<'a>(
