@@ -72,7 +72,8 @@ pub mod variadic_any;
 #[cfg(test)]
 use binary::eval_comparison_op;
 pub use binary::{
-    compare_nullable_with_control, compare_typed_values_with_control, compare_with_control,
+    compare_nullable_with_control, compare_typed_values_with_control,
+    compare_typed_values_with_enum_catalog, compare_with_control,
     equal_typed_values_with_enum_catalog, eval_binary_values, eval_binary_values_with_control,
     eval_binary_values_with_integer_width, eval_binary_values_with_integer_width_with_control,
     eval_comparison_truth, eval_comparison_truth_with_control,

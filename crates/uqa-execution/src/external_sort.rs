@@ -18,15 +18,19 @@ use std::cmp::Ordering;
 use std::path::PathBuf;
 
 use uqa_core::Value;
+use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
 
 use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::{
     order_expression_position, ExecError, ExecResult, PhysicalOperator, PhysicalOrder,
 };
-use crate::relational::{compare_sort_key_values_by, SharedExpressionEvaluator, SortKey};
+use crate::relational::SortComparison;
+use crate::relational::{SharedExpressionEvaluator, SortKey};
 use crate::spill::{EncodedBatchSizer, SpillBuffer, SpillDrain};
 
+mod comparison;
 mod top_k;
+use comparison::compare_records;
 
 /// Maximum number of input runs opened by one merge operation.
 pub const EXTERNAL_SORT_MERGE_FAN_IN: usize = 16;
@@ -43,6 +47,7 @@ pub struct ExternalSort<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     keys: crate::scalar::PreparedExpressions<Vec<SortKey>>,
     evaluator: SharedExpressionEvaluator<'a>,
+    comparison_states: Vec<EnumComparisonState>,
     keep: Option<usize>,
     work_mem_bytes: usize,
     spill_directory: Option<PathBuf>,
@@ -85,6 +90,16 @@ impl<'a> ExternalSort<'a> {
             .unwrap_or_default();
         Self {
             child,
+            comparison_states: if evaluator
+                .enum_labels()
+                .is_some_and(EnumLabelCatalog::has_enum_types)
+            {
+                (0..keys.len())
+                    .map(|_| EnumComparisonState::default())
+                    .collect()
+            } else {
+                Vec::new()
+            },
             keys: crate::scalar::PreparedExpressions::sort_keys(keys),
             evaluator,
             keep,
@@ -97,6 +112,14 @@ impl<'a> ExternalSort<'a> {
             output: None,
             initial_run_count: 0,
             merge_pass_count: 0,
+        }
+    }
+
+    fn comparison(&self) -> SortComparison<'_> {
+        SortComparison {
+            keys: &self.keys,
+            enums: self.evaluator.enum_labels(),
+            states: &self.comparison_states,
         }
     }
 
@@ -155,12 +178,7 @@ impl<'a> ExternalSort<'a> {
                         .keep
                         .is_some_and(|keep| keep > 0 && pending.len() == keep)
                 {
-                    top_k::heapify(
-                        &mut pending,
-                        &self.keys,
-                        &self.run_schema,
-                        self.input_slots.len(),
-                    )?;
+                    top_k::heapify(&mut pending, &self.comparison(), self.input_slots.len())?;
                     top_k_heap = true;
                 }
                 if self.retain_top_candidate(&mut pending, &mut pending_size, &record)? {
@@ -212,13 +230,7 @@ impl<'a> ExternalSort<'a> {
             &mut records,
             &mut || Ok(()),
             |left, right, _| {
-                compare_records(
-                    &self.keys,
-                    &self.run_schema,
-                    self.input_slots.len(),
-                    left,
-                    right,
-                )
+                compare_records(&self.comparison(), self.input_slots.len(), left, right)
             },
         )?;
         if let Some(keep) = self.keep {
@@ -254,7 +266,7 @@ impl<'a> ExternalSort<'a> {
                 }
                 merged.push(merge_group(
                     group,
-                    &self.keys,
+                    &self.comparison(),
                     self.keep,
                     self.create_run_buffer(),
                     &self.run_schema,
@@ -282,6 +294,9 @@ impl PhysicalOperator for ExternalSort<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
+        for state in &mut self.comparison_states {
+            *state = EnumComparisonState::default();
+        }
         self.initial_run_count = 0;
         self.merge_pass_count = 0;
         self.child.open()?;
@@ -382,27 +397,6 @@ fn validate_run_batch(batch: &Batch, expected: &RowSchema) -> ExecResult<()> {
     }
 }
 
-fn compare_records(
-    keys: &[SortKey],
-    _schema: &RowSchema,
-    source_width: usize,
-    left: &DecoratedRow,
-    right: &DecoratedRow,
-) -> ExecResult<Ordering> {
-    Ok(compare_sort_key_values_by(keys, |index| {
-        (
-            left.row
-                .value(source_width + index)
-                .expect("validated external sort run key"),
-            right
-                .row
-                .value(source_width + index)
-                .expect("validated external sort run key"),
-        )
-    })?
-    .then_with(|| left.sequence.cmp(&right.sequence)))
-}
-
 struct RunBatchWriter {
     schema: RowSchema,
     pending: Vec<PhysicalRow>,
@@ -499,7 +493,7 @@ struct HeapItem {
 
 fn merge_group(
     runs: Vec<SortedRun>,
-    keys: &[SortKey],
+    keys: &SortComparison<'_>,
     keep: Option<usize>,
     mut output: SpillBuffer,
     run_schema: &RowSchema,
@@ -515,24 +509,18 @@ fn merge_group(
             run.buffer,
             run_schema.clone(),
             source_width,
-            keys.len(),
+            keys.keys.len(),
         )?);
         let cursor = cursors.len() - 1;
         if let Some(record) = cursors[cursor].next_record()? {
-            heap_push(
-                &mut heap,
-                HeapItem { record, cursor },
-                keys,
-                run_schema,
-                source_width,
-            )?;
+            heap_push(&mut heap, HeapItem { record, cursor }, keys, source_width)?;
         }
     }
 
     let mut writer = RunBatchWriter::new(run_schema.clone())?;
     let mut emitted = 0_usize;
     while !heap.is_empty() && keep.is_none_or(|keep| emitted < keep) {
-        let item = heap_pop(&mut heap, keys, run_schema, source_width)?
+        let item = heap_pop(&mut heap, keys, source_width)?
             .ok_or_else(|| ExecError::Other("external sort merge heap became empty".into()))?;
         let cursor = item.cursor;
         writer.push(&mut output, item.record.row)?;
@@ -540,13 +528,7 @@ fn merge_group(
             .checked_add(1)
             .ok_or_else(|| ExecError::Other("external sort emitted-row count overflow".into()))?;
         if let Some(record) = cursors[cursor].next_record()? {
-            heap_push(
-                &mut heap,
-                HeapItem { record, cursor },
-                keys,
-                run_schema,
-                source_width,
-            )?;
+            heap_push(&mut heap, HeapItem { record, cursor }, keys, source_width)?;
         }
     }
     writer.finish(&mut output)?;
@@ -555,29 +537,25 @@ fn merge_group(
 }
 
 fn compare_heap_items(
-    keys: &[SortKey],
-    schema: &RowSchema,
+    keys: &SortComparison<'_>,
     source_width: usize,
     left: &HeapItem,
     right: &HeapItem,
 ) -> ExecResult<Ordering> {
-    compare_records(keys, schema, source_width, &left.record, &right.record)
+    compare_records(keys, source_width, &left.record, &right.record)
 }
 
 fn heap_push(
     heap: &mut Vec<HeapItem>,
     item: HeapItem,
-    keys: &[SortKey],
-    schema: &RowSchema,
+    keys: &SortComparison<'_>,
     source_width: usize,
 ) -> ExecResult<()> {
     heap.push(item);
     let mut child = heap.len() - 1;
     while child > 0 {
         let parent = (child - 1) / 2;
-        if compare_heap_items(keys, schema, source_width, &heap[child], &heap[parent])?
-            != Ordering::Less
-        {
+        if compare_heap_items(keys, source_width, &heap[child], &heap[parent])? != Ordering::Less {
             break;
         }
         heap.swap(child, parent);
@@ -588,8 +566,7 @@ fn heap_push(
 
 fn heap_pop(
     heap: &mut Vec<HeapItem>,
-    keys: &[SortKey],
-    schema: &RowSchema,
+    keys: &SortComparison<'_>,
     source_width: usize,
 ) -> ExecResult<Option<HeapItem>> {
     if heap.is_empty() {
@@ -604,16 +581,13 @@ fn heap_pop(
         }
         let right = left + 1;
         let child = if right < heap.len()
-            && compare_heap_items(keys, schema, source_width, &heap[right], &heap[left])?
-                == Ordering::Less
+            && compare_heap_items(keys, source_width, &heap[right], &heap[left])? == Ordering::Less
         {
             right
         } else {
             left
         };
-        if compare_heap_items(keys, schema, source_width, &heap[child], &heap[parent])?
-            != Ordering::Less
-        {
+        if compare_heap_items(keys, source_width, &heap[child], &heap[parent])? != Ordering::Less {
             break;
         }
         heap.swap(parent, child);
@@ -624,6 +598,7 @@ fn heap_pop(
 
 #[cfg(test)]
 mod tests {
+    mod enums;
     mod legacy_vectors;
     mod top_k;
     use crate::RowSchemaExecution;
@@ -832,7 +807,11 @@ mod tests {
 
         let result = merge_group(
             vec![SortedRun { buffer }],
-            &keys,
+            &SortComparison {
+                keys: &keys,
+                enums: None,
+                states: &[],
+            },
             None,
             SpillBuffer::new(0),
             &schema,

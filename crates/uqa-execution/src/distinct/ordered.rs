@@ -30,7 +30,7 @@ pub(crate) fn operator<'a>(
         schema: record_schema,
         slots,
         keys: crate::scalar::PreparedExpressions::scalars(keys),
-        evaluator,
+        evaluator: std::sync::Arc::clone(&evaluator),
         ordinal: 0,
     });
     let keys = (width..width + key_count)
@@ -39,14 +39,15 @@ pub(crate) fn operator<'a>(
     let budget = (work_mem / 3).max(1);
     let sorted = Box::new(ExternalSort::new(
         child,
-        keys.clone(),
-        DefaultExpressionEvaluator::shared(Vec::new()),
+        keys,
+        std::sync::Arc::clone(&evaluator),
         None,
         budget,
     ));
     let unique = Box::new(Adjacent {
         sorted,
-        keys,
+        key_count,
+        evaluator,
         width,
         previous: None,
     });
@@ -127,7 +128,8 @@ impl PhysicalOperator for Decorate<'_> {
 
 struct Adjacent<'a> {
     sorted: Box<dyn PhysicalOperator + 'a>,
-    keys: Vec<SortKey>,
+    key_count: usize,
+    evaluator: SharedExpressionEvaluator<'a>,
     width: usize,
     previous: Option<Vec<Value>>,
 }
@@ -145,13 +147,15 @@ impl PhysicalOperator for Adjacent<'_> {
             let mut rows = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
                 // The private relation enumerates every original physical slot before its keys.
-                let values = (self.width..self.width + self.keys.len())
+                let values = (self.width..self.width + self.key_count)
                     .map(|position| row.value(position).unwrap_or(&Value::Null).clone())
                     .collect::<Vec<_>>();
                 if let Some(previous) = &self.previous {
-                    if crate::relational::compare_sort_key_values(&self.keys, previous, &values)?
-                        .is_eq()
-                    {
+                    if crate::relational::equal_sort_key_values(
+                        previous,
+                        &values,
+                        self.evaluator.enum_labels(),
+                    )? {
                         continue;
                     }
                 }

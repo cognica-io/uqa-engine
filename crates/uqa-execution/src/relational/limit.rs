@@ -7,7 +7,7 @@
 //! Streaming LIMIT/OFFSET, including ordered `FETCH ... WITH TIES`.
 
 use super::{
-    compare_sort_key_values, BackwardScanSupport, Batch, ExecError, ExecResult, PhysicalOperator,
+    equal_sort_key_values, BackwardScanSupport, Batch, ExecError, ExecResult, PhysicalOperator,
     PhysicalScanDirection, RowSchema, ScalarExpr, SharedExpressionEvaluator, SortKey, Value,
 };
 use crate::PhysicalRow;
@@ -165,8 +165,7 @@ impl<'a> Limit<'a> {
             .boundary
             .as_ref()
             .ok_or_else(|| ExecError::Other("LIMIT tie boundary is absent".into()))?;
-        Ok(compare_sort_key_values(&with_ties.keys, boundary, &values)?
-            == std::cmp::Ordering::Equal)
+        equal_sort_key_values(boundary, &values, with_ties.evaluator.enum_labels())
     }
 
     fn directional_batch(&self, row: PhysicalRow) -> Batch {
@@ -417,9 +416,11 @@ impl PhysicalOperator for Limit<'_> {
                                 "WITH TIES boundary was not captured".to_string(),
                             )
                         })?;
-                        if compare_sort_key_values(&with_ties.keys, boundary, &values)?
-                            != std::cmp::Ordering::Equal
-                        {
+                        if !equal_sort_key_values(
+                            boundary,
+                            &values,
+                            with_ties.evaluator.enum_labels(),
+                        )? {
                             with_ties.finished = true;
                             return if buf.is_empty() {
                                 Ok(None)

@@ -93,6 +93,10 @@ impl<'a> ScopedExpressionEvaluator<'a> {
 }
 
 impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        uqa_sql::expr::EngineHook::enum_labels(self.context.as_ref())
+    }
+
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value> {
         self.cancellation.check().map_err(SQLError::from)?;
         let hook = self.context.as_ref();

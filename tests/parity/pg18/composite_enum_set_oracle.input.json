@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE enum_sort_a AS ENUM ('first','last'); ALTER TYPE enum_sort_a ADD VALUE 'middle' BEFORE 'last'; CREATE TYPE enum_sort_b AS ENUM ('other'); ALTER TYPE enum_sort_b ADD VALUE 'before' BEFORE 'other'; CREATE TYPE enum_sort_holder AS (a enum_sort_a,b enum_sort_a); CREATE VIEW enum_sort_source AS SELECT '(middle,last)'::enum_sort_holder AS v; CREATE TYPE enum_sort_raw AS (a integer,b integer); CREATE VIEW enum_sort_invalid AS SELECT '(1,3)'::enum_sort_raw AS v; CREATE VIEW enum_sort_even AS SELECT '(2,4)'::enum_sort_raw AS v; CREATE TYPE enum_sort_record AS (e enum_sort_b,n integer); ALTER TYPE enum_sort_holder ALTER ATTRIBUTE a TYPE enum_sort_b,ALTER ATTRIBUTE b TYPE enum_sort_b; ALTER TYPE enum_sort_raw ALTER ATTRIBUTE a TYPE enum_sort_b,ALTER ATTRIBUTE b TYPE enum_sort_b"
+    },
+    {
+      "id": "source_union",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS b UNION SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS b) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_union",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS b UNION SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS b) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_union",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS b UNION SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS b) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW enum_sort_source,enum_sort_invalid,enum_sort_even; DROP TYPE enum_sort_holder,enum_sort_raw,enum_sort_record,enum_sort_a,enum_sort_b"
+    }
+  ]
+}

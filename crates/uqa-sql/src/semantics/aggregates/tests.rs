@@ -9,6 +9,34 @@
 use super::*;
 
 #[test]
+fn array_and_row_ordering_expressions_keep_structural_group_identity() {
+    for (left, right, expected) in [
+        ("ARRAY[n]", "ARRAY[n]", true),
+        ("ROW(n, 0)", "ROW(n, 0)", true),
+        ("ROW(ARRAY[n], 0)", "ROW(ARRAY[n], 0)", true),
+        ("ARRAY[n, 0]", "ARRAY[0, n]", false),
+        ("ARRAY[n]", "ARRAY[n, 0]", false),
+        ("ROW(n, 0)", "ROW(n, 1)", false),
+        ("ROW(n, 0)", "ROW(n, 0.0)", false),
+        ("ARRAY[n]", "ROW(n)", false),
+    ] {
+        let sql = format!("SELECT DISTINCT ON ({left}) n FROM t ORDER BY {right},n");
+        let plan = crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        let crate::plan::UnifiedPlan::Query(query) = plan else {
+            unreachable!()
+        };
+        let crate::plan::RelationalPlan::QueryBlock(block) = query.root else {
+            unreachable!()
+        };
+        assert_eq!(
+            exprs_match(&block.distinct_on[0], &block.order_by[0].expr),
+            expected,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn builtin_aggregate_identity_distinguishes_qualification_and_scalar_overloads() {
     let call = |name: &str, binding| ScalarExpr::Func {
         order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,

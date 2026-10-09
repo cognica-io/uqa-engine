@@ -116,8 +116,18 @@ pub(crate) fn encode_key(values: &[Value]) -> ExecResult<Vec<u8>> {
 pub(super) fn encode_key_borrowed<'a>(
     values: impl ExactSizeIterator<Item = Option<&'a Value>>,
 ) -> ExecResult<Vec<u8>> {
+    encode_key_with_enum_catalog(values, None)
+}
+
+pub(super) fn encode_key_with_enum_catalog<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+) -> ExecResult<Vec<u8>> {
     let estimated_capacity = encoded_key_capacity(values.len())?;
-    let mut output = Vec::with_capacity(estimated_capacity);
+    let mut output = CatalogKeyOutput {
+        values: Vec::with_capacity(estimated_capacity),
+        enums,
+    };
     encode_len(values.len(), &mut output)?;
     for value in values {
         match value {
@@ -125,7 +135,24 @@ pub(super) fn encode_key_borrowed<'a>(
             None => encode_value(&Value::Null, &mut output)?,
         }
     }
-    Ok(output)
+    Ok(output.values)
+}
+
+struct CatalogKeyOutput<'a> {
+    values: Vec<u8>,
+    enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+}
+
+impl KeyOutput for CatalogKeyOutput<'_> {
+    fn enum_catalog(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        self.enums
+    }
+    fn push_byte(&mut self, value: u8) -> ExecResult<()> {
+        self.values.push_byte(value)
+    }
+    fn extend_bytes(&mut self, values: &[u8]) -> ExecResult<()> {
+        self.values.extend_bytes(values)
+    }
 }
 
 /// Encode a join probe key directly from physical slots. Single- and

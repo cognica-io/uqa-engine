@@ -338,6 +338,25 @@ pub fn compare_typed_values_with_control(
     compare_typed_values_with_catalog(left, right, control, None)
 }
 
+/// Compare one physical ordering key with its private scalar enum call state. Nested array/record fields use the catalog's shared type comparison state.
+pub fn compare_typed_values_with_enum_catalog(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Ordering> {
+    control.check()?;
+    if !matches!(left, Value::Null) && !matches!(right, Value::Null) {
+        if let Some(order) =
+            super::super::enums::comparison_order(left, right, enums, state, false)?
+        {
+            return Ok(order);
+        }
+    }
+    compare_typed_values_with_catalog(left, right, control, enums)
+}
+
 fn compare_typed_values_with_catalog(
     left: &Value,
     right: &Value,

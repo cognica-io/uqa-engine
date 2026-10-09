@@ -19,6 +19,11 @@ use crate::PhysicalRow;
 pub trait ExpressionEvaluator: Send + Sync {
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value>;
 
+    /// Borrow the same retained enum catalog used while evaluating expressions.
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        None
+    }
+
     fn evaluate_physical(
         &self,
         expression: &ScalarExpr,

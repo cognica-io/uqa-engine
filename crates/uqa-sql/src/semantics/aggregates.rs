@@ -88,7 +88,10 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
                 rhs: br,
             },
         ) => ao == bo && exprs_match(al, bl) && exprs_match(ar, br),
-        (ScalarExpr::And(a), ScalarExpr::And(b)) | (ScalarExpr::Or(a), ScalarExpr::Or(b)) => {
+        (ScalarExpr::And(a), ScalarExpr::And(b))
+        | (ScalarExpr::Or(a), ScalarExpr::Or(b))
+        | (ScalarExpr::Array(a), ScalarExpr::Array(b))
+        | (ScalarExpr::Row(a), ScalarExpr::Row(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
         }
         (ScalarExpr::Not(a), ScalarExpr::Not(b))

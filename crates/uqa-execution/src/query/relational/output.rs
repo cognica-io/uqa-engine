@@ -147,7 +147,10 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
                     work_mem_bytes,
                 )
             } else {
-                Box::new(Distinct::all_with_work_mem(operator, work_mem_bytes))
+                Box::new(
+                    Distinct::all_with_work_mem(operator, work_mem_bytes)
+                        .with_evaluator(context.evaluator(params, ctes)),
+                )
             }
         } else {
             let output = identity_order_columns(&columns);

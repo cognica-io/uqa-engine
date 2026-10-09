@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve retained enum comparison semantics through external sorting, Top-K, DISTINCT and FETCH WITH TIES, including disk-spilled keys. Recognize matching array and row constructors in DISTINCT ON ordering.
+
 - Preserve enum catalog and comparison state in budgeted built-in calls, admitting selected values and enum ranges before allocation and releasing partial results on quota failure or cancellation.
 
 - Preserve PostgreSQL BETWEEN operand coercions, strict-NULL folding and volatile/subquery evaluation counts, while keeping simple inclusive ranges on their existing access path. Normalize predecessor view and stored schema expressions during initial restoration and optimize executable copies so NULL simplification and independent subquery initialization also apply after reopening. Plan rule WHERE conditions before evaluation, while preserving scalar and CHECK NULL semantics. Eligible volatile views and derived tables now stop evaluating rows when a parent LIMIT has enough results.

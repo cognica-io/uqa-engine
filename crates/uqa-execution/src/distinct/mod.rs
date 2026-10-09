@@ -25,7 +25,7 @@ use crate::{
 };
 
 pub(crate) use encoding::canonical_row_lock_keys;
-use encoding::encode_key_borrowed;
+use encoding::encode_key_with_enum_catalog;
 pub use encoding::{
     canonical_row_key, canonical_row_key_budgeted, hash_canonical_row,
     hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
@@ -75,6 +75,12 @@ impl<'a> Distinct<'a> {
             spill_directory: None,
             seen: SeenKeySet::new(work_mem_bytes, None),
         }
+    }
+
+    /// Retain expression/catalog services for full-row equality as well as explicit keys.
+    pub fn with_evaluator(mut self, evaluator: SharedExpressionEvaluator<'a>) -> Self {
+        self.evaluator = Some(evaluator);
+        self
     }
 
     /// Construct a bounded `DISTINCT ON` with the compatibility default
@@ -150,10 +156,15 @@ impl<'a> Distinct<'a> {
                     )
                 })
                 .collect::<ExecResult<Vec<_>>>()?;
-            return encode_key(&values);
+            return encode_key_with_enum_catalog(values.iter().map(Some), evaluator.enum_labels());
         }
         let row = schema.view(row);
-        encode_key_borrowed((0..self.schema.len()).map(|index| row.value_at(index)))
+        encode_key_with_enum_catalog(
+            (0..self.schema.len()).map(|index| row.value_at(index)),
+            self.evaluator
+                .as_ref()
+                .and_then(|evaluator| evaluator.enum_labels()),
+        )
     }
 }
 
