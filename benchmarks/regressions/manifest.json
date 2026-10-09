@@ -1279,7 +1279,7 @@
       "workload": "20,000 deterministic analytical rows, two BETWEEN predicates and one ordinary inequality, with a catalog and prepared per-comparison state.",
       "invariant": "All row decisions match independent integer predicates and numeric comparisons perform zero private enum call-state lookups.",
       "case_names": [
-        "analytical_numeric_predicates_do_not_probe_enum_call_state"
+        ""
       ]
     }
   ]
