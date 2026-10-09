@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Avoid unnecessary maintenance-thread wakeups when opening sessions, committing statistics changes or updating DiskANN policy, and skip idle statistics table passes until committed state changes or pending statistics reach their refresh deadline.
+
 - Reuse the retained query catalog for scalar type resolution instead of recapturing all table metadata for each row, preserving the selected domain identity across later catalog changes.
 
 - Resolve PostgreSQL `regcollation` names, numeric OIDs and arrays with the correct input diagnostics, lookup behavior, catalog type metadata and durable stored values.

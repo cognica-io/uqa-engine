@@ -169,6 +169,29 @@ fn refresh_due_tables(
     engine: &Engine,
     maintenance: &mut cache::MaintenanceCache,
 ) -> StorageBackendResult<()> {
+    refresh_due_tables_at(engine, maintenance, now_ms())
+}
+
+fn change_version(engine: &Engine) -> StorageBackendResult<Option<u64>> {
+    engine
+        .storage
+        .backend
+        .as_ref()
+        .map(|backend| backend.change_version())
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn refresh_due_tables_at(
+    engine: &Engine,
+    maintenance: &mut cache::MaintenanceCache,
+    now: u64,
+) -> StorageBackendResult<()> {
+    let before = change_version(engine)?;
+    if maintenance.unchanged(before, now) {
+        return Ok(());
+    }
+    maintenance.begin_pass();
     engine.synchronize_table_catalog()?;
     engine.synchronize_table_data()?;
     let tables = engine
@@ -180,21 +203,15 @@ fn refresh_due_tables(
         .collect::<Vec<_>>();
     maintenance.retain(tables.iter().map(|(name, _)| name.as_str()));
     let revisions = engine.epochs.storage_cache_revisions.lock().clone();
-    let version = engine
-        .storage
-        .backend
-        .as_ref()
-        .map(|backend| backend.change_version())
-        .transpose()?
-        .flatten()
-        .filter(|version| {
-            *version
-                == engine
-                    .epochs
-                    .seen_storage_change_version
-                    .load(Ordering::Acquire)
-        });
+    let version = change_version(engine)?.filter(|version| {
+        *version
+            == engine
+                .epochs
+                .seen_storage_change_version
+                .load(Ordering::Acquire)
+    });
     let mut failure = None;
+    let mut next_due_at = None;
     for (name, table) in tables {
         engine
             .runtime
@@ -215,23 +232,16 @@ fn refresh_due_tables(
             let state = maintenance.load(&name, table.object_id(), revision, || {
                 let state = MaintenanceState::load_for(catalog, &name, table.object_id())?;
                 // A commit racing the metadata read leaves this entry uncached until the next synchronized pass.
-                let stable = version.is_some()
-                    && engine
-                        .storage
-                        .backend
-                        .as_ref()
-                        .map(|backend| backend.change_version())
-                        .transpose()?
-                        .flatten()
-                        == version;
+                let stable = version.is_some() && change_version(engine)? == version;
                 Ok((state, stable))
             })?;
             let missing = state.missing(table.column_stats.read().is_empty());
-            if !state.due(
-                missing,
-                now_ms(),
-                crate::statistics::value_size::FORMAT_VERSION,
-            ) {
+            let deadline =
+                state.next_due_at(missing, now, crate::statistics::value_size::FORMAT_VERSION);
+            if let Some(deadline) = deadline {
+                next_due_at = Some(next_due_at.map_or(deadline, |next: u64| next.min(deadline)));
+            }
+            if deadline.is_none_or(|deadline| now < deadline) {
                 return Ok(false);
             }
             engine.run_automatic_analyze(&name)
@@ -250,5 +260,15 @@ fn refresh_due_tables(
             }
         }
     }
-    failure.map_or(Ok(()), Err)
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    // Bracket the whole pass, including its table list and metadata reads.
+    // An analysis that committed or a racing writer requires another pass.
+    if let Some(version) = version.filter(|version| Some(*version) == before) {
+        if change_version(engine)? == before {
+            maintenance.complete_pass(version, next_due_at);
+        }
+    }
+    Ok(())
 }
