@@ -11,7 +11,7 @@ use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
 #[test]
 fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
-    for predecessor in 29_u64..=56 {
+    for predecessor in 29_u64..RECORD_FORMAT {
         let database = Arc::new(
             Database::builder()
                 .create_with_backend(InMemoryBackend::new())
@@ -233,4 +233,106 @@ fn verify_metadata_rejection(field: &str, replacement: &[u8]) {
     assert!(retained.get(b"b", &control).unwrap().is_none());
     assert_eq!(store.commit(first, &initial, &control).unwrap(), receipt);
     store.commit(pending, &next, &control).unwrap();
+}
+
+#[test]
+fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
+    use crate::RedbStorage;
+
+    let control = StorageReadControl::with_limit(1 << 20);
+    let batch = PreparedRecordCommit::new(
+        &[RecordWrite {
+            key: b"migration",
+            expected: None,
+            value: Some(b"preserved"),
+        }],
+        &control,
+    )
+    .unwrap();
+    for format in 1_u64..RECORD_FORMAT {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("old-record-format.redb");
+        let (identity, receipt, pending) = {
+            let storage = RedbStorage::open(&path).unwrap();
+            let records = storage.record_store().unwrap();
+            let id = records.allocate_transaction(&control).unwrap();
+            let receipt = records.commit(id, &batch, &control).unwrap();
+            let pending = records.allocate_transaction(&control).unwrap();
+            (records.database_id(), receipt, pending)
+        };
+        {
+            let database = redb::Database::open(&path).unwrap();
+            let transaction = database.begin_write().unwrap();
+            {
+                let mut metadata = transaction.open_table(METADATA).unwrap();
+                assert_eq!(
+                    metadata.get("format").unwrap().unwrap().value(),
+                    RECORD_FORMAT.to_be_bytes()
+                );
+                metadata
+                    .insert("format", format.to_be_bytes().as_slice())
+                    .unwrap();
+            }
+            if format < 5 {
+                transaction
+                    .delete_table(TableDefinition::<&[u8], &[u8]>::new("uqa_mvcc_identifiers"))
+                    .unwrap();
+            } else {
+                transaction
+                    .open_table(TableDefinition::<&[u8], &[u8]>::new("uqa_mvcc_identifiers"))
+                    .unwrap()
+                    .insert(
+                        b"migration-identities".as_slice(),
+                        999_u64.to_be_bytes().as_slice(),
+                    )
+                    .unwrap();
+            }
+            transaction.commit().unwrap();
+        }
+        {
+            let storage = RedbStorage::open(&path).unwrap();
+            let records = storage.record_store().unwrap();
+            assert_eq!(records.database_id(), identity);
+            if format >= 5 {
+                assert_eq!(
+                    records
+                        .allocate_identifiers(
+                            b"migration-identities",
+                            uqa_storage::mvcc::IdentifierRequest::Observe(0),
+                            &control
+                        )
+                        .unwrap()
+                        .watermark(),
+                    999
+                );
+            }
+            assert_eq!(
+                records
+                    .commit_status(receipt.transaction, &control)
+                    .unwrap(),
+                CommitStatus::Committed(receipt)
+            );
+            assert_eq!(
+                records.commit_status(pending, &control).unwrap(),
+                CommitStatus::Pending
+            );
+            let snapshot = records.snapshot(&control).unwrap();
+            assert_eq!(snapshot.sequence(), receipt.sequence);
+            let record = snapshot.get(b"migration", &control).unwrap().unwrap();
+            assert_eq!(
+                record.value().map(|value| value.to_vec()),
+                Some(b"preserved".to_vec())
+            );
+            assert!(
+                records.allocate_transaction(&control).unwrap().allocation() > pending.allocation()
+            );
+        }
+        let database = redb::Database::open(&path).unwrap();
+        let transaction = database.begin_read().unwrap();
+        let metadata = transaction.open_table(METADATA).unwrap();
+        assert_eq!(
+            metadata.get("format").unwrap().unwrap().value(),
+            RECORD_FORMAT.to_be_bytes()
+        );
+    }
 }

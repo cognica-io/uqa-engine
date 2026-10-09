@@ -70,7 +70,15 @@ impl Preparation<'_> {
                 let output = self.set_output(left, right, *kind, *all)?;
                 let schema = output.schema();
                 for order in order_by {
-                    self.expression(&order.expr, &schema, subqueries)?;
+                    if let Some(ty) = self.alias_expression(
+                        &order.expr,
+                        &schema,
+                        &schema,
+                        subqueries,
+                        "ORDER BY",
+                    )? {
+                        crate::require_ordering_operator(&ty)?;
+                    }
                 }
                 let input = overlay_outer_schema(&RowSchema::default(), outer);
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
@@ -146,7 +154,15 @@ impl Preparation<'_> {
         }
         let projected = output.schema();
         for order in &block.order_by {
-            self.alias_expression(&order.expr, &projected, &input, &block.subqueries)?;
+            if let Some(ty) = self.alias_expression(
+                &order.expr,
+                &projected,
+                &input,
+                &block.subqueries,
+                "ORDER BY",
+            )? {
+                crate::require_ordering_operator(&ty)?;
+            }
         }
         for expression in block
             .group_by
@@ -165,9 +181,25 @@ impl Preparation<'_> {
             let mut value = self.expression(expression, &input, &block.subqueries)?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
+            if let Some(ty) = &value.ty {
+                crate::require_equality_operator(ty)?;
+            }
         }
         for expression in &block.distinct_on {
-            self.alias_expression(expression, &projected, &input, &block.subqueries)?;
+            if let Some(ty) = self.alias_expression(
+                expression,
+                &projected,
+                &input,
+                &block.subqueries,
+                "DISTINCT ON",
+            )? {
+                crate::require_equality_operator(&ty)?;
+            }
+        }
+        if block.distinct && block.distinct_on.is_empty() {
+            for ty in output.types.iter().filter_map(|value| value.ty.as_ref()) {
+                crate::require_equality_operator(ty)?;
+            }
         }
         self.slice(
             block.limit.as_ref(),
@@ -334,7 +366,12 @@ impl Preparation<'_> {
         primary: &RowSchema,
         fallback: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<(), SQLError> {
+        clause: &str,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        if let ScalarExpr::Literal(uqa_core::Value::Int(position)) = expression {
+            let index = crate::semantics::query_output_position(*position, primary.len(), clause)?;
+            return Ok(primary.column_type(index).cloned());
+        }
         let mut value = if matches!(expression, ScalarExpr::Column(_) | ScalarExpr::Position(_)) {
             let input = overlay_outer_schema(primary, Some(fallback));
             self.expression(expression, &input, subqueries)?
@@ -343,7 +380,7 @@ impl Preparation<'_> {
         };
         self.parameters
             .coerce_unknown(&mut value, &ColumnType::Text)?;
-        Ok(())
+        Ok(value.ty)
     }
 
     fn slice(

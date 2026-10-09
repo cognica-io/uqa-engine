@@ -15,6 +15,22 @@ pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     projections.iter().map(projection_label_at).collect()
 }
 
+/// Resolve an SQL92 output ordinal against the expanded SELECT list before using its type or physical expression.
+pub fn query_output_position(position: i64, width: usize, clause: &str) -> Result<usize, SQLError> {
+    usize::try_from(position)
+        .ok()
+        .and_then(|position| position.checked_sub(1))
+        .filter(|position| *position < width)
+        .ok_or_else(|| output_position_error(clause, position))
+}
+
+pub fn output_position_error(clause: &str, position: i64) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P10".into(),
+        message: format!("{clause} position {position} is not in the select list"),
+    }
+}
+
 /// Compute a projection's `PostgreSQL` output column name. Standalone expressions use `?column?`; repeated labels remain repeated until the final named-map compatibility boundary.
 pub fn projection_label_at(proj: &ProjectionPlan) -> String {
     if let Some(a) = &proj.alias {

@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject DISTINCT, grouping, ordering and window keys whose declared types lack the required PostgreSQL comparison operators before optimization or execution, including output-column ordinals, empty inputs and unused window definitions. Preserve ordinary `void`/JSON outputs and UNION ALL, and include PostgreSQL's ordering-error hint.
+
 - Reduce scalar filter overhead for same-type integer, floating-point and Boolean comparisons by resolving enum call state only when needed, preserving PostgreSQL coercions, NULLs, evaluation order, retained enum state and cancellation. Restore adjacent inclusive ranges in compiled projected predicates after PostgreSQL BETWEEN expansion, reading each needed range field once.
 
 - Avoid discarded catalog captures during DDL and unnecessary snapshot copies during index-name restoration and partition key preparation, while preserving validation, identities, rollback and post-lock freshness.

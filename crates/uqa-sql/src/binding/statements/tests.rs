@@ -8,6 +8,8 @@ use super::*;
 use crate::{ast::FunctionBinding, ColumnType, FunctionTypeResolver};
 use std::{cell::RefCell, collections::BTreeMap};
 
+mod comparison_keys;
+
 struct NoRoutines;
 impl FunctionTypeResolver for NoRoutines {
     fn resolve_function_type(
