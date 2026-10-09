@@ -4,12 +4,34 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Catalog-only argument types used by builtin input, output and support routines.
+//! Catalog-only argument and result types used by routines and handlers.
 
 use super::{schema_oid, PgTypeCatalogMetadata, PgTypeRoutineOids};
 
 pub(super) fn metadata() -> impl Iterator<Item = PgTypeCatalogMetadata<'static>> {
     [
+        (
+            2276, "any", 4, true, "p", "P", 0, 0, 2294, 2295, 0, 0, "i", "p",
+        ),
+        (
+            2279, "trigger", 4, true, "p", "P", 0, 0, 2300, 2301, 0, 0, "i", "p",
+        ),
+        (
+            3838,
+            "event_trigger",
+            4,
+            true,
+            "p",
+            "P",
+            0,
+            0,
+            3594,
+            3595,
+            0,
+            0,
+            "i",
+            "p",
+        ),
         (
             3115,
             "fdw_handler",

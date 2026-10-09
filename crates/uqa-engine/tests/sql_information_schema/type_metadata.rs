@@ -385,51 +385,7 @@ pub(super) fn domain_layout(
 fn postgresql_18_type_catalog_preserves_io_routines_and_pseudo_types() {
     let eng = Engine::new();
 
-    let pseudo_types = eng
-        .sql(
-            "SELECT oid, typname, typnamespace, typowner, typlen, typbyval, typtype,
-                    typcategory, typispreferred, typisdefined, typdelim, typrelid,
-                    typsubscript::text AS typsubscript, typelem, typarray, typinput, typoutput, typreceive,
-                    typsend, typmodin, typmodout, typanalyze, typalign, typstorage,
-                    typnotnull, typbasetype, typtypmod, typndims, typcollation
-             FROM pg_catalog.pg_type
-             WHERE oid IN (2249, 2278, 2287)
-             ORDER BY oid",
-            &[],
-        )
-        .unwrap();
-    assert_eq!(
-        pseudo_types
-            .rows
-            .iter()
-            .map(pg_type_full_layout)
-            .collect::<Vec<_>>(),
-        vec![
-            pseudo_type_layout(
-                2249, "record", -1, false, 0, "-", 0, 2287, 2290, 2291, 2402, 2403, 0, "d", "x",
-            ),
-            pseudo_type_layout(
-                2278, "void", 4, true, 0, "-", 0, 0, 2298, 2299, 3120, 3121, 0, "i", "p",
-            ),
-            pseudo_type_layout(
-                2287,
-                "_record",
-                -1,
-                false,
-                0,
-                "array_subscript_handler",
-                2249,
-                0,
-                750,
-                751,
-                2400,
-                2401,
-                3816,
-                "d",
-                "x",
-            ),
-        ]
-    );
+    assert_pseudo_type_catalog(&eng);
 
     let routine_types = eng
         .sql(
@@ -471,6 +427,75 @@ fn postgresql_18_type_catalog_preserves_io_routines_and_pseudo_types() {
             .unwrap_or_else(|| panic!("missing PostgreSQL 18 type {name}"));
         assert_eq!(pg_type_routine_layout(row), expected, "type {name}");
     }
+}
+
+fn assert_pseudo_type_catalog(eng: &Engine) {
+    let pseudo_types = eng
+        .sql(
+            "SELECT oid, typname, typnamespace, typowner, typlen, typbyval, typtype,
+                    typcategory, typispreferred, typisdefined, typdelim, typrelid,
+                    typsubscript::text AS typsubscript, typelem, typarray, typinput, typoutput, typreceive,
+                    typsend, typmodin, typmodout, typanalyze, typalign, typstorage,
+                    typnotnull, typbasetype, typtypmod, typndims, typcollation
+             FROM pg_catalog.pg_type
+             WHERE oid IN (2249, 2276, 2278, 2279, 2287, 3838)
+             ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        pseudo_types
+            .rows
+            .iter()
+            .map(pg_type_full_layout)
+            .collect::<Vec<_>>(),
+        vec![
+            pseudo_type_layout(
+                2249, "record", -1, false, 0, "-", 0, 2287, 2290, 2291, 2402, 2403, 0, "d", "x",
+            ),
+            pseudo_type_layout(2276, "any", 4, true, 0, "-", 0, 0, 2294, 2295, 0, 0, 0, "i", "p",),
+            pseudo_type_layout(
+                2278, "void", 4, true, 0, "-", 0, 0, 2298, 2299, 3120, 3121, 0, "i", "p",
+            ),
+            pseudo_type_layout(
+                2279, "trigger", 4, true, 0, "-", 0, 0, 2300, 2301, 0, 0, 0, "i", "p",
+            ),
+            pseudo_type_layout(
+                2287,
+                "_record",
+                -1,
+                false,
+                0,
+                "array_subscript_handler",
+                2249,
+                0,
+                750,
+                751,
+                2400,
+                2401,
+                3816,
+                "d",
+                "x",
+            ),
+            pseudo_type_layout(
+                3838,
+                "event_trigger",
+                4,
+                true,
+                0,
+                "-",
+                0,
+                0,
+                3594,
+                3595,
+                0,
+                0,
+                0,
+                "i",
+                "p",
+            ),
+        ]
+    );
 }
 
 fn pg_type_full_layout(row: &ResultRow) -> Vec<Value> {

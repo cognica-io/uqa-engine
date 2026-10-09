@@ -9,6 +9,37 @@ use super::*;
 mod output_cache;
 
 #[test]
+fn routine_pseudo_types_have_catalog_backed_names_and_reserved_identities() {
+    use crate::catalog::{
+        cache::RegtypeOutputCache,
+        test_support::{empty_catalog, CatalogServices},
+    };
+    let mut snapshot = empty_catalog().snapshot().clone();
+    snapshot.definitions.schemas =
+        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
+    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
+        "uqa".into(),
+        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+    )]));
+    let catalog = CatalogReadView::new(snapshot);
+    let services = CatalogServices::default();
+    let cache = RegtypeOutputCache::default();
+    let context = services.context(&catalog, &cache);
+    // PostgreSQL 18.4 quotes the reserved name `any` and leaves both handler types bare.
+    for (oid, name) in [
+        (2276, "\"any\""),
+        (2279, "trigger"),
+        (3838, "event_trigger"),
+    ] {
+        assert_eq!(
+            format_type_value(&context, &[Value::Int(oid), Value::Null]).unwrap(),
+            Value::Str(name.into())
+        );
+        assert!(super::super::pg_catalog::builtin_type_oid_in_use(oid));
+    }
+}
+
+#[test]
 fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
     use crate::catalog::{security::BoundTableSecurity, test_support, CatalogTableSnapshot};
     use uqa_core::RelationIdentity;
