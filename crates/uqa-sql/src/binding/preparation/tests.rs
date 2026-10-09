@@ -14,6 +14,7 @@ mod defaults;
 mod dependencies;
 mod operator_joins;
 mod ordered_calls;
+mod stored_inputs;
 
 struct NoRoutines;
 impl FunctionTypeResolver for NoRoutines {

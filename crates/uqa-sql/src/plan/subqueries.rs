@@ -53,6 +53,14 @@ pub fn prune_query(query: &mut QueryPlan) {
     *query_arena(&mut query.root) = arena;
 }
 
+/// Retain only query children actually referenced by one scalar expression.
+pub fn prune_expression(plan: &mut super::ExpressionPlan) {
+    let arena = std::mem::take(&mut plan.subqueries);
+    plan.subqueries = compact(arena, |visitor| {
+        super::rewrite_scalar_expression(&mut plan.scalar, visitor);
+    });
+}
+
 fn query_arena(root: &mut RelationalPlan) -> &mut Vec<QueryPlan> {
     match root {
         RelationalPlan::QueryBlock(block) => &mut block.subqueries,

@@ -52,28 +52,7 @@ impl SchemaScope {
             if slot < outer_start {
                 return;
             }
-            let public_qualifier = match node {
-                ScalarExpr::QualifiedColumn { qualifier, .. } => Some(qualifier.as_str()),
-                ScalarExpr::Column(column) => {
-                    let mut qualifiers = outer
-                        .identities()
-                        .iter()
-                        .filter(|identity| identity.column() == column)
-                        .filter_map(ColumnIdentity::qualifier);
-                    let qualifier = qualifiers.next();
-                    (qualifiers.next().is_none()).then_some(qualifier).flatten()
-                }
-                _ => None,
-            };
-            let Some(public_qualifier) = public_qualifier.filter(|qualifier| {
-                qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new")
-            }) else {
-                return;
-            };
-            let outer_lookup = ColumnIdentity::qualified(public_qualifier, lookup.column());
-            let Some(outer_slot) = outer.physical_slot_for_identity(&outer_lookup) else {
-                return;
-            };
+            let outer_slot = slot - outer_start;
             let Some(column) = outer.unique_internal_column_for_slot(outer_slot) else {
                 return;
             };
@@ -618,6 +597,7 @@ impl SchemaScope {
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
         self.canonicalize_stored_outer_columns(expression, schema);
+        self.expand_stored_whole_rows(expression, schema);
         self.canonicalize_routine_parameters(expression, schema);
         self.resolve_variable_sites(expression, schema);
         match self.scalar_binding {
