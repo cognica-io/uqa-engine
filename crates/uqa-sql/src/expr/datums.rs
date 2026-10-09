@@ -82,6 +82,11 @@ fn read_payload(
             };
             Ok(control.finish(value, memory)?)
         }
+        3802 => {
+            let (text, memory) =
+                super::json::decode_jsonb_datum_with_control(bytes, control)?.into_parts();
+            Ok(control.finish(Value::JsonB(text), memory)?)
+        }
         1700 => {
             let text =
                 crate::catalog::node_tree::decode_numeric_datum_with_control(bytes, control)?;

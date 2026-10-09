@@ -17,9 +17,10 @@ mod production;
 #[cfg(test)]
 pub(super) use production::json_delete_with_control;
 pub(super) use production::{
-    cast_json_value_with_control, evaluate, format_core_value_as_json_with_control,
-    format_value_as_json_with_control, json_concat_with_control, json_delete_values_with_control,
-    json_extract_operator_with_control, quote_with_control, utf8_lossy_with_control,
+    cast_json_value_with_control, decode_jsonb_datum_with_control, encode_jsonb_datum, evaluate,
+    format_core_value_as_json_with_control, format_value_as_json_with_control,
+    json_concat_with_control, json_delete_values_with_control, json_extract_operator_with_control,
+    quote_with_control, utf8_lossy_with_control,
 };
 
 pub(super) use path::{jsonpath_candidate, jsonpath_match};

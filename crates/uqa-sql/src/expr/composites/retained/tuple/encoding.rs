@@ -129,6 +129,7 @@ fn payload(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
             | ColumnType::PgNodeTree,
         ) => Some(text.as_bytes().to_vec()),
         (Value::Json(text), ColumnType::Json) => Some(text.as_bytes().to_vec()),
+        (Value::JsonB(text), ColumnType::JsonB) => crate::expr::json::encode_jsonb_datum(text).ok(),
         (Value::Bytes(bytes), ColumnType::Bytea) => Some(bytes.clone()),
         (Value::Decimal(number), ColumnType::Numeric { .. }) => {
             crate::catalog::node_tree::encode_numeric_datum(number).ok()

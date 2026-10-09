@@ -13,6 +13,7 @@ use uqa_core::{
 };
 
 mod access;
+mod binary;
 mod functions;
 mod jsonpath;
 mod mutation;
@@ -20,6 +21,7 @@ mod parsed;
 mod pretty;
 mod values;
 mod writer;
+pub(in crate::expr) use binary::{decode_jsonb_datum_with_control, encode_jsonb_datum};
 use values::Values;
 
 /// Container capacities and their elements own separate leases. Dropping a replaced or temporary node releases all of its payloads without a process-wide cache.

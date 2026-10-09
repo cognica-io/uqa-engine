@@ -643,6 +643,422 @@
     {
       "id": "array_json_cleanup",
       "sql": "DEALLOCATE array_json_real_p; DROP TYPE array_json_real"
+    },
+    {
+      "id": "jsonb_object_setup",
+      "sql": "CREATE TYPE jsonb_bytes_object AS(a jsonb,b integer); PREPARE jsonb_bytes_object_p AS SELECT '(\"{\"\"long\"\": [null, true, false, 12.3400, \"\"é\"\"], \"\"a\"\": {\"\"b\"\": -3}}\",7)'::jsonb_bytes_object"
+    },
+    {
+      "id": "jsonb_object_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_object ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_object_output",
+      "sql": "EXECUTE jsonb_bytes_object_p"
+    },
+    {
+      "id": "jsonb_object_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_object_p"
+    },
+    {
+      "id": "jsonb_object_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_object_p; DROP TYPE jsonb_bytes_object"
+    },
+    {
+      "id": "jsonb_numeric_setup",
+      "sql": "CREATE TYPE jsonb_bytes_numeric AS(a jsonb,b integer); PREPARE jsonb_bytes_numeric_p AS SELECT '(\"123.4500\",7)'::jsonb_bytes_numeric"
+    },
+    {
+      "id": "jsonb_numeric_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_numeric ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_numeric_output",
+      "sql": "EXECUTE jsonb_bytes_numeric_p"
+    },
+    {
+      "id": "jsonb_numeric_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_numeric_p"
+    },
+    {
+      "id": "jsonb_numeric_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_numeric_p; DROP TYPE jsonb_bytes_numeric"
+    },
+    {
+      "id": "jsonb_string_setup",
+      "sql": "CREATE TYPE jsonb_bytes_string AS(a jsonb,b integer); PREPARE jsonb_bytes_string_p AS SELECT '(\"\"\"aé\"\"\",7)'::jsonb_bytes_string"
+    },
+    {
+      "id": "jsonb_string_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_string ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_string_output",
+      "sql": "EXECUTE jsonb_bytes_string_p"
+    },
+    {
+      "id": "jsonb_string_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_string_p"
+    },
+    {
+      "id": "jsonb_string_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_string_p; DROP TYPE jsonb_bytes_string"
+    },
+    {
+      "id": "jsonb_true_setup",
+      "sql": "CREATE TYPE jsonb_bytes_true AS(a jsonb,b integer); PREPARE jsonb_bytes_true_p AS SELECT '(\"true\",7)'::jsonb_bytes_true"
+    },
+    {
+      "id": "jsonb_true_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_true ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_true_output",
+      "sql": "EXECUTE jsonb_bytes_true_p"
+    },
+    {
+      "id": "jsonb_true_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_true_p"
+    },
+    {
+      "id": "jsonb_true_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_true_p; DROP TYPE jsonb_bytes_true"
+    },
+    {
+      "id": "jsonb_null_setup",
+      "sql": "CREATE TYPE jsonb_bytes_null AS(a jsonb,b integer); PREPARE jsonb_bytes_null_p AS SELECT '(\"null\",7)'::jsonb_bytes_null"
+    },
+    {
+      "id": "jsonb_null_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_null ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_null_output",
+      "sql": "EXECUTE jsonb_bytes_null_p"
+    },
+    {
+      "id": "jsonb_null_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_null_p"
+    },
+    {
+      "id": "jsonb_null_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_null_p; DROP TYPE jsonb_bytes_null"
+    },
+    {
+      "id": "jsonb_empty_object_setup",
+      "sql": "CREATE TYPE jsonb_bytes_empty_object AS(a jsonb,b integer); PREPARE jsonb_bytes_empty_object_p AS SELECT '(\"{}\",7)'::jsonb_bytes_empty_object"
+    },
+    {
+      "id": "jsonb_empty_object_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_empty_object ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_empty_object_output",
+      "sql": "EXECUTE jsonb_bytes_empty_object_p"
+    },
+    {
+      "id": "jsonb_empty_object_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_empty_object_p"
+    },
+    {
+      "id": "jsonb_empty_object_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_empty_object_p; DROP TYPE jsonb_bytes_empty_object"
+    },
+    {
+      "id": "jsonb_empty_array_setup",
+      "sql": "CREATE TYPE jsonb_bytes_empty_array AS(a jsonb,b integer); PREPARE jsonb_bytes_empty_array_p AS SELECT '(\"[]\",7)'::jsonb_bytes_empty_array"
+    },
+    {
+      "id": "jsonb_empty_array_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_empty_array ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_empty_array_output",
+      "sql": "EXECUTE jsonb_bytes_empty_array_p"
+    },
+    {
+      "id": "jsonb_empty_array_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_empty_array_p"
+    },
+    {
+      "id": "jsonb_empty_array_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_empty_array_p; DROP TYPE jsonb_bytes_empty_array"
+    },
+    {
+      "id": "jsonb_stride_setup",
+      "sql": "CREATE TYPE jsonb_bytes_stride AS(a jsonb,b integer); PREPARE jsonb_bytes_stride_p AS SELECT '(\"[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35]\",7)'::jsonb_bytes_stride"
+    },
+    {
+      "id": "jsonb_stride_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_bytes_stride ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "jsonb_stride_output",
+      "sql": "EXECUTE jsonb_bytes_stride_p"
+    },
+    {
+      "id": "jsonb_stride_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_bytes_stride_p"
+    },
+    {
+      "id": "jsonb_stride_cleanup",
+      "sql": "DEALLOCATE jsonb_bytes_stride_p; DROP TYPE jsonb_bytes_stride"
+    },
+    {
+      "id": "jsonb_read_object_setup",
+      "sql": "CREATE TYPE jsonb_read_object AS(a bytea,b integer); PREPARE jsonb_read_object_p AS SELECT '(\"\\\\x0200002001000080040000001b00005024000050616c6f6e6700000001000020010000800b000010620000002000000000a0030005000040000000c000000030000000200a000010020000002800000000820c00480dc3a9\",7)'::jsonb_read_object"
+    },
+    {
+      "id": "jsonb_read_object_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_object ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_object_output",
+      "sql": "EXECUTE jsonb_read_object_p"
+    },
+    {
+      "id": "jsonb_read_object_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_object_p"
+    },
+    {
+      "id": "jsonb_read_object_cleanup",
+      "sql": "DEALLOCATE jsonb_read_object_p; DROP TYPE jsonb_read_object"
+    },
+    {
+      "id": "jsonb_read_numeric_setup",
+      "sql": "CREATE TYPE jsonb_read_numeric AS(a bytea,b integer); PREPARE jsonb_read_numeric_p AS SELECT '(\"\\\\x010000500a0000902800000000827b009411\",7)'::jsonb_read_numeric"
+    },
+    {
+      "id": "jsonb_read_numeric_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_numeric ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_numeric_output",
+      "sql": "EXECUTE jsonb_read_numeric_p"
+    },
+    {
+      "id": "jsonb_read_numeric_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_numeric_p"
+    },
+    {
+      "id": "jsonb_read_numeric_cleanup",
+      "sql": "DEALLOCATE jsonb_read_numeric_p; DROP TYPE jsonb_read_numeric"
+    },
+    {
+      "id": "jsonb_read_string_setup",
+      "sql": "CREATE TYPE jsonb_read_string AS(a bytea,b integer); PREPARE jsonb_read_string_p AS SELECT '(\"\\\\x010000500300008061c3a9\",7)'::jsonb_read_string"
+    },
+    {
+      "id": "jsonb_read_string_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_string ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_string_output",
+      "sql": "EXECUTE jsonb_read_string_p"
+    },
+    {
+      "id": "jsonb_read_string_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_string_p"
+    },
+    {
+      "id": "jsonb_read_string_cleanup",
+      "sql": "DEALLOCATE jsonb_read_string_p; DROP TYPE jsonb_read_string"
+    },
+    {
+      "id": "jsonb_read_true_setup",
+      "sql": "CREATE TYPE jsonb_read_true AS(a bytea,b integer); PREPARE jsonb_read_true_p AS SELECT '(\"\\\\x01000050000000b0\",7)'::jsonb_read_true"
+    },
+    {
+      "id": "jsonb_read_true_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_true ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_true_output",
+      "sql": "EXECUTE jsonb_read_true_p"
+    },
+    {
+      "id": "jsonb_read_true_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_true_p"
+    },
+    {
+      "id": "jsonb_read_true_cleanup",
+      "sql": "DEALLOCATE jsonb_read_true_p; DROP TYPE jsonb_read_true"
+    },
+    {
+      "id": "jsonb_read_null_setup",
+      "sql": "CREATE TYPE jsonb_read_null AS(a bytea,b integer); PREPARE jsonb_read_null_p AS SELECT '(\"\\\\x01000050000000c0\",7)'::jsonb_read_null"
+    },
+    {
+      "id": "jsonb_read_null_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_null ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_null_output",
+      "sql": "EXECUTE jsonb_read_null_p"
+    },
+    {
+      "id": "jsonb_read_null_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_null_p"
+    },
+    {
+      "id": "jsonb_read_null_cleanup",
+      "sql": "DEALLOCATE jsonb_read_null_p; DROP TYPE jsonb_read_null"
+    },
+    {
+      "id": "jsonb_read_empty_object_setup",
+      "sql": "CREATE TYPE jsonb_read_empty_object AS(a bytea,b integer); PREPARE jsonb_read_empty_object_p AS SELECT '(\"\\\\x00000020\",7)'::jsonb_read_empty_object"
+    },
+    {
+      "id": "jsonb_read_empty_object_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_empty_object ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_empty_object_output",
+      "sql": "EXECUTE jsonb_read_empty_object_p"
+    },
+    {
+      "id": "jsonb_read_empty_object_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_empty_object_p"
+    },
+    {
+      "id": "jsonb_read_empty_object_cleanup",
+      "sql": "DEALLOCATE jsonb_read_empty_object_p; DROP TYPE jsonb_read_empty_object"
+    },
+    {
+      "id": "jsonb_read_empty_array_setup",
+      "sql": "CREATE TYPE jsonb_read_empty_array AS(a bytea,b integer); PREPARE jsonb_read_empty_array_p AS SELECT '(\"\\\\x00000040\",7)'::jsonb_read_empty_array"
+    },
+    {
+      "id": "jsonb_read_empty_array_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_empty_array ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_empty_array_output",
+      "sql": "EXECUTE jsonb_read_empty_array_p"
+    },
+    {
+      "id": "jsonb_read_empty_array_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_empty_array_p"
+    },
+    {
+      "id": "jsonb_read_empty_array_cleanup",
+      "sql": "DEALLOCATE jsonb_read_empty_array_p; DROP TYPE jsonb_read_empty_array"
+    },
+    {
+      "id": "jsonb_read_stride_setup",
+      "sql": "CREATE TYPE jsonb_read_stride AS(a bytea,b integer); PREPARE jsonb_read_stride_p AS SELECT '(\"\\\\x24000040060000900a0000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100800001008000010080000100801009008000010080000100800001018000000008000002000000000800100200000000080020020000000008003002000000000800400200000000080050020000000008006002000000000800700200000000080080020000000008009002000000000800a002000000000800b002000000000800c002000000000800d002000000000800e002000000000800f0020000000008010002000000000801100200000000080120020000000008013002000000000801400200000000080150020000000008016002000000000801700200000000080180020000000008019002000000000801a002000000000801b002000000000801c002000000000801d002000000000801e002000000000801f002000000000802000200000000080210020000000008022002000000000802300\",7)'::jsonb_read_stride"
+    },
+    {
+      "id": "jsonb_read_stride_alter",
+      "sql": "BEGIN; ALTER TYPE jsonb_read_stride ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_stride_output",
+      "sql": "EXECUTE jsonb_read_stride_p"
+    },
+    {
+      "id": "jsonb_read_stride_rollback",
+      "sql": "ROLLBACK; EXECUTE jsonb_read_stride_p"
+    },
+    {
+      "id": "jsonb_read_stride_cleanup",
+      "sql": "DEALLOCATE jsonb_read_stride_p; DROP TYPE jsonb_read_stride"
+    },
+    {
+      "id": "jsonb_read_unordered_setup",
+      "sql": "CREATE TYPE jsonb_read_unordered AS(a bytea,b integer); PREPARE jsonb_read_unordered_p AS SELECT '(\"\\\\x02000020010000000200008000000030000000207a61\",7)'::jsonb_read_unordered; PREPARE jsonb_read_unordered_null AS SELECT ('(\"\\\\x02000020010000000200008000000030000000207a61\",7)'::jsonb_read_unordered).a IS NULL; PREPARE jsonb_read_unordered_false AS SELECT '(\"\\\\x02000020010000000200008000000030000000207a61\",7)'::jsonb_read_unordered WHERE false"
+    },
+    {
+      "id": "jsonb_read_unordered_alter",
+      "sql": "ALTER TYPE jsonb_read_unordered ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_unordered_null",
+      "sql": "EXECUTE jsonb_read_unordered_null"
+    },
+    {
+      "id": "jsonb_read_unordered_false",
+      "sql": "EXECUTE jsonb_read_unordered_false"
+    },
+    {
+      "id": "jsonb_read_unordered_output",
+      "sql": "EXECUTE jsonb_read_unordered_p"
+    },
+    {
+      "id": "jsonb_read_unordered_cleanup",
+      "sql": "DEALLOCATE jsonb_read_unordered_p; DEALLOCATE jsonb_read_unordered_null; DEALLOCATE jsonb_read_unordered_false; DROP TYPE jsonb_read_unordered"
+    },
+    {
+      "id": "jsonb_read_unknown_setup",
+      "sql": "CREATE TYPE jsonb_read_unknown AS(a bytea,b integer); PREPARE jsonb_read_unknown_p AS SELECT '(\"\\\\x00000000\",7)'::jsonb_read_unknown; PREPARE jsonb_read_unknown_null AS SELECT ('(\"\\\\x00000000\",7)'::jsonb_read_unknown).a IS NULL; PREPARE jsonb_read_unknown_false AS SELECT '(\"\\\\x00000000\",7)'::jsonb_read_unknown WHERE false"
+    },
+    {
+      "id": "jsonb_read_unknown_alter",
+      "sql": "ALTER TYPE jsonb_read_unknown ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_unknown_null",
+      "sql": "EXECUTE jsonb_read_unknown_null"
+    },
+    {
+      "id": "jsonb_read_unknown_false",
+      "sql": "EXECUTE jsonb_read_unknown_false"
+    },
+    {
+      "id": "jsonb_read_unknown_output",
+      "sql": "EXECUTE jsonb_read_unknown_p"
+    },
+    {
+      "id": "jsonb_read_unknown_cleanup",
+      "sql": "DEALLOCATE jsonb_read_unknown_p; DEALLOCATE jsonb_read_unknown_null; DEALLOCATE jsonb_read_unknown_false; DROP TYPE jsonb_read_unknown"
+    },
+    {
+      "id": "jsonb_read_both_flags_setup",
+      "sql": "CREATE TYPE jsonb_read_both_flags AS(a bytea,b integer); PREPARE jsonb_read_both_flags_p AS SELECT '(\"\\\\x00000060\",7)'::jsonb_read_both_flags; PREPARE jsonb_read_both_flags_null AS SELECT ('(\"\\\\x00000060\",7)'::jsonb_read_both_flags).a IS NULL; PREPARE jsonb_read_both_flags_false AS SELECT '(\"\\\\x00000060\",7)'::jsonb_read_both_flags WHERE false"
+    },
+    {
+      "id": "jsonb_read_both_flags_alter",
+      "sql": "ALTER TYPE jsonb_read_both_flags ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_both_flags_null",
+      "sql": "EXECUTE jsonb_read_both_flags_null"
+    },
+    {
+      "id": "jsonb_read_both_flags_false",
+      "sql": "EXECUTE jsonb_read_both_flags_false"
+    },
+    {
+      "id": "jsonb_read_both_flags_output",
+      "sql": "EXECUTE jsonb_read_both_flags_p"
+    },
+    {
+      "id": "jsonb_read_both_flags_cleanup",
+      "sql": "DEALLOCATE jsonb_read_both_flags_p; DEALLOCATE jsonb_read_both_flags_null; DEALLOCATE jsonb_read_both_flags_false; DROP TYPE jsonb_read_both_flags"
+    },
+    {
+      "id": "jsonb_read_numeric_nan_setup",
+      "sql": "CREATE TYPE jsonb_read_numeric_nan AS(a bytea,b integer); PREPARE jsonb_read_numeric_nan_p AS SELECT '(\"\\\\x01000050060000901800000000c0\",7)'::jsonb_read_numeric_nan; PREPARE jsonb_read_numeric_nan_null AS SELECT ('(\"\\\\x01000050060000901800000000c0\",7)'::jsonb_read_numeric_nan).a IS NULL; PREPARE jsonb_read_numeric_nan_false AS SELECT '(\"\\\\x01000050060000901800000000c0\",7)'::jsonb_read_numeric_nan WHERE false"
+    },
+    {
+      "id": "jsonb_read_numeric_nan_alter",
+      "sql": "ALTER TYPE jsonb_read_numeric_nan ALTER ATTRIBUTE a TYPE jsonb"
+    },
+    {
+      "id": "jsonb_read_numeric_nan_null",
+      "sql": "EXECUTE jsonb_read_numeric_nan_null"
+    },
+    {
+      "id": "jsonb_read_numeric_nan_false",
+      "sql": "EXECUTE jsonb_read_numeric_nan_false"
+    },
+    {
+      "id": "jsonb_read_numeric_nan_output",
+      "sql": "EXECUTE jsonb_read_numeric_nan_p"
+    },
+    {
+      "id": "jsonb_read_numeric_nan_cleanup",
+      "sql": "DEALLOCATE jsonb_read_numeric_nan_p; DEALLOCATE jsonb_read_numeric_nan_null; DEALLOCATE jsonb_read_numeric_nan_false; DROP TYPE jsonb_read_numeric_nan"
     }
   ]
 }
