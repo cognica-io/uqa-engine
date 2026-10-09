@@ -11,6 +11,8 @@ use super::{BinaryOp, Result, SQLError, Value};
 use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
+mod records;
+
 #[cfg(test)]
 pub(in crate::expr) fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
     Ok(eval_comparison_truth(op, l, r)?
@@ -46,6 +48,28 @@ pub fn eval_comparison_truth_with_control(
         }
     };
     Ok(out)
+}
+
+/// Borrow physical type metadata from scalar hooks even when the embedder provides no enum capability.
+pub fn eval_comparison_truth_with_engine(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Option<bool>> {
+    let catalog = engine.map(crate::expr::value_catalog::EngineValueCatalog);
+    eval_comparison_truth_with_enum_catalog(
+        op,
+        left,
+        right,
+        control,
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn crate::expr::SQLValueCatalog),
+        state,
+    )
 }
 
 /// Observe scalar and nested enums through the caller's catalog, preserving private scalar/row call state, shared type support state and ordinary three-valued rules.
@@ -447,36 +471,19 @@ fn compare_typed_values_for_purpose(
                 compare_typed_values_for_purpose(left, right, control, enums, enum_order)
             });
         }
-        (Value::Record(left), Value::Record(right)) => {
-            return compare_sequence(
-                left.iter().map(|(_, v)| v),
-                right.iter().map(|(_, v)| v),
-                control,
+        (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => {
+            return records::compare(
+                left,
+                right,
                 enums,
-                enum_order,
-            );
-        }
-        // A composite value compared with an anonymous row uses the record operators, which order NULL fields after all others.
-        (Value::Record(left), Value::Row(right)) => {
-            return compare_sequence(
-                left.iter().map(|(_, v)| v),
-                right.iter(),
                 control,
-                enums,
-                enum_order,
+                Ordering::Equal,
+                |left, right| {
+                    let order =
+                        compare_typed_values_for_purpose(left, right, control, enums, enum_order)?;
+                    Ok((!order.is_eq()).then_some(order))
+                },
             );
-        }
-        (Value::Row(left), Value::Record(right)) => {
-            return compare_sequence(
-                left.iter(),
-                right.iter().map(|(_, v)| v),
-                control,
-                enums,
-                enum_order,
-            );
-        }
-        (Value::Row(left), Value::Row(right)) => {
-            return compare_sequence(left.iter(), right.iter(), control, enums, enum_order);
         }
         (Value::List(left), Value::List(right)) => {
             return compare_sequence(left.iter(), right.iter(), control, enums, enum_order);
@@ -546,9 +553,12 @@ pub fn value_comparison_can_fail(value: &Value) -> bool {
         }
         Value::Row(values) => values.iter().any(value_comparison_can_fail),
         Value::List(values) => values.iter().any(value_comparison_can_fail),
-        Value::Record(fields) => fields
-            .iter()
-            .any(|(_, value)| value_comparison_can_fail(value)),
+        Value::Record(fields) => {
+            fields.type_oid().is_some()
+                || fields
+                    .iter()
+                    .any(|(_, value)| value_comparison_can_fail(value))
+        }
         _ => false,
     }
 }
@@ -607,29 +617,10 @@ fn equal_values(
                 equal_values(left, right, control, enums, typed)
             })
         }
-        (Value::Record(left), Value::Record(right)) => equal_sequence(
-            left.iter().map(|(_, v)| v),
-            right.iter().map(|(_, v)| v),
-            control,
-            enums,
-            typed,
-        ),
-        (Value::Record(left), Value::Row(right)) => equal_sequence(
-            left.iter().map(|(_, v)| v),
-            right.iter(),
-            control,
-            enums,
-            typed,
-        ),
-        (Value::Row(left), Value::Record(right)) => equal_sequence(
-            left.iter(),
-            right.iter().map(|(_, v)| v),
-            control,
-            enums,
-            typed,
-        ),
-        (Value::Row(left), Value::Row(right)) => {
-            equal_sequence(left.iter(), right.iter(), control, enums, typed)
+        (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => {
+            records::compare(left, right, enums, control, true, |left, right| {
+                Ok((!equal_values(left, right, control, enums, typed)?).then_some(false))
+            })
         }
         (Value::List(left), Value::List(right)) => {
             equal_sequence(left.iter(), right.iter(), control, enums, typed)

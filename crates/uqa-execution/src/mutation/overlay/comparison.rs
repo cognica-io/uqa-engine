@@ -16,6 +16,7 @@ pub(super) fn find_match(
     values: &[Value],
     presence: FieldPresence,
     control: &StorageReadControl,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> Result<Option<DocId>, SQLError> {
     let mut found = None;
     let production = uqa_core::memory::ProductionControl::new(
@@ -43,6 +44,7 @@ pub(super) fn find_match(
                     values,
                     presence,
                     &production,
+                    catalog,
                 )? {
                     found = Some(id);
                     break;
@@ -60,6 +62,7 @@ pub(super) fn matches(
     values: &[Value],
     kind: super::KeyKind,
     control: &StorageReadControl,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> Result<uqa_core::memory::BudgetedVec<DocId>, SQLError> {
     let mut found = uqa_core::memory::BudgetedVec::new(control.memory());
     let production = uqa_core::memory::ProductionControl::new(
@@ -86,6 +89,7 @@ pub(super) fn matches(
                 values,
                 FieldPresence::MissingIsNull,
                 &production,
+                catalog,
             )? {
                 found.push(id).map_err(super::resource_error)?;
             }

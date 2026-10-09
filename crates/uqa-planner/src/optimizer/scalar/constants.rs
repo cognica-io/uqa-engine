@@ -75,7 +75,10 @@ pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
 
 fn is_constant(expression: &ScalarExpr) -> bool {
     match expression {
-        ScalarExpr::Literal(_) => true,
+        ScalarExpr::Literal(value) => {
+            !uqa_sql::expr::composites::literal::contains_records(value)
+                && !uqa_sql::expr::datums::contains_datum(value)
+        }
         ScalarExpr::TypedLiteral {
             value,
             ty,
@@ -83,6 +86,7 @@ fn is_constant(expression: &ScalarExpr) -> bool {
             ..
         } => {
             !uqa_sql::expr::composites::literal::contains_records(value)
+                && !uqa_sql::expr::datums::contains_datum(value)
                 && (bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok())
         }
         ScalarExpr::Array(items)
@@ -317,6 +321,9 @@ fn composite_constant_field(
     let value = match value {
         Value::Null => Value::Null,
         Value::Record(fields) => {
+            if fields.type_oid().is_some_and(|oid| oid != reference.oid) {
+                return None;
+            }
             if field.dropped {
                 Value::Null
             } else {

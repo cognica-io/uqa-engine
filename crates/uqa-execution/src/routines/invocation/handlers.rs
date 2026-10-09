@@ -186,7 +186,8 @@ fn execute_resolved_scalar_function(
             output_column_names(&function.def)
                 .into_iter()
                 .zip(outcome.out_values)
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
         ),
     };
     Ok(value)

@@ -71,7 +71,7 @@ fn change(change: &AttributeChange) -> CompositeConstantChange<'_> {
 }
 
 fn value() -> Value {
-    Value::Record(vec![("a".into(), Value::Int(4))])
+    Value::Record(vec![("a".into(), Value::Int(4))].into())
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn stored_input_datums_reinterpret_bits_without_rebinding_or_reapplying_input() 
     let mut value = Value::Array(
         ArrayValue::with_lower_bounds(
             vec![
-                Value::Record(vec![("a".into(), Value::Int(1_065_353_216))]),
+                Value::Record(vec![("a".into(), Value::Int(1_065_353_216))].into()),
                 Value::Null,
             ],
             vec![-2],
@@ -100,7 +100,7 @@ fn stored_input_datums_reinterpret_bits_without_rebinding_or_reapplying_input() 
     assert_eq!(
         value.elements(),
         &[
-            Value::Record(vec![("a".into(), Value::Float(1.0))]),
+            Value::Record(vec![("a".into(), Value::Float(1.0))].into()),
             Value::Null,
         ]
     );
@@ -138,7 +138,7 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
             assert_eq!(*ty, pair_type().catalog_name());
             assert_eq!(
                 *value,
-                Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)])
+                Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)].into())
             );
         }
     });
@@ -166,7 +166,7 @@ fn removing_a_field_preserves_its_original_datum_and_descriptor_through_serializ
     else {
         panic!("retained composite datum")
     };
-    assert_eq!(projected, Value::Record(Vec::new()));
+    assert_eq!(projected, Value::Record(Vec::new().into()));
     assert_eq!(source.value, value());
     assert_eq!(source.descriptors.len(), 1);
     assert_eq!(source.descriptors[0].attributes[0].number, 1);
@@ -197,7 +197,7 @@ fn array_constants_keep_bounds_nulls_and_existing_fields() {
     assert_eq!(
         array.elements(),
         [
-            Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)]),
+            Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)].into()),
             Value::Null
         ]
     );

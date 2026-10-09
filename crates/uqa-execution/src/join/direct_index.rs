@@ -193,23 +193,28 @@ mod tests {
     #[test]
     fn positional_join_datum_keys_use_sql_equality_and_preserve_errors() {
         let schema = RowSchema::new(vec!["key".into()]);
-        let old = PhysicalRow::from_values(vec![Value::Record(vec![(
-            "a".into(),
-            Value::Datum(uqa_core::DatumValue::new(17, 0, vec![5, b'x'])),
-        )])]);
-        let fresh = PhysicalRow::from_values(vec![Value::Record(vec![(
-            "a".into(),
-            Value::Bytes(b"x".to_vec()),
-        )])]);
+        let old = PhysicalRow::from_values(vec![Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(17, 0, vec![5, b'x'])),
+            )]
+            .into(),
+        )]);
+        let fresh = PhysicalRow::from_values(vec![Value::Record(
+            vec![("a".into(), Value::Bytes(b"x".to_vec()))].into(),
+        )]);
         assert!(positional_keys_equal(&schema, &old, &[0], &schema, &fresh, &[0]).unwrap());
-        let bad = PhysicalRow::from_values(vec![Value::Record(vec![(
-            "a".into(),
-            Value::Datum(uqa_core::DatumValue::new(
-                1700,
-                0,
-                vec![2, 0, 0, 0, 3, b'x'],
-            )),
-        )])]);
+        let bad = PhysicalRow::from_values(vec![Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(
+                    1700,
+                    0,
+                    vec![2, 0, 0, 0, 3, b'x'],
+                )),
+            )]
+            .into(),
+        )]);
         assert!(
             positional_keys_equal(&schema, &bad, &[0], &schema, &bad, &[0])
                 .unwrap_err()

@@ -11,7 +11,7 @@ use uqa_core::{ArrayValue, Value};
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
 
-use super::binary::{eval_binary, eval_comparison_truth_with_enum_catalog, truthy};
+use super::binary::{eval_binary, eval_comparison_truth_with_engine, truthy};
 use super::builtin::eval_bound_builtin_function_call;
 use super::call_arguments::evaluate_call_args;
 use super::call_dispatch::eval_function_call;
@@ -370,12 +370,12 @@ fn compare(
     context: &EvalContext<'_>,
     slot: usize,
 ) -> Result<Option<bool>> {
-    eval_comparison_truth_with_enum_catalog(
+    eval_comparison_truth_with_engine(
         op,
         left,
         right,
         &uqa_core::memory::ProductionControl::uncontrolled(),
-        context.engine.and_then(super::EngineHook::enum_labels),
+        context.engine,
         context.enum_comparison_state_at(slot),
     )
 }

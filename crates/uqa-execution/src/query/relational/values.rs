@@ -81,7 +81,7 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
             consumer.begin(&columns, &schema)?;
             Some(consumer)
         }
-        QueryOutputMode::Rows | QueryOutputMode::SharedSpill | QueryOutputMode::ExistsKeySet => {
+        QueryOutputMode::Rows | QueryOutputMode::SharedSpill | QueryOutputMode::ExistsKeySet(_) => {
             None
         }
     };

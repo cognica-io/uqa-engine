@@ -106,7 +106,8 @@ pub fn apply_attribute_change(
                 })
         }
         (ColumnType::Composite(reference), Value::Record(fields)) => {
-            let descriptor = descriptor(Some(catalog), reference.oid)?;
+            let type_oid = fields.type_oid().unwrap_or(reference.oid);
+            let descriptor = descriptor(Some(catalog), type_oid)?;
             let mut fields = fields
                 .into_iter()
                 .map(|(name, value)| {
@@ -119,10 +120,13 @@ pub fn apply_attribute_change(
                     Ok((name, value))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            if reference.oid == target {
+            if type_oid == target {
                 change.apply(&mut fields);
             }
-            Ok(Value::Record(fields))
+            Ok(Value::Record(uqa_core::RecordValue::from_parts(
+                fields,
+                Some(type_oid),
+            )))
         }
         (_, value) => Ok(value),
     }
@@ -219,20 +223,26 @@ mod tests {
     }
 
     fn pair(x: i64, y: &str) -> Value {
-        Value::Record(vec![
-            ("x".into(), Value::Int(x)),
-            ("y".into(), Value::Str(y.into())),
-        ])
+        Value::Record(
+            vec![
+                ("x".into(), Value::Int(x)),
+                ("y".into(), Value::Str(y.into())),
+            ]
+            .into(),
+        )
     }
 
     fn nested_value() -> Value {
-        Value::Record(vec![
-            ("p".into(), pair(1, "a")),
-            (
-                "ps".into(),
-                Value::Array(ArrayValue::try_new(vec![pair(2, "b"), Value::Null]).unwrap()),
-            ),
-        ])
+        Value::Record(
+            vec![
+                ("p".into(), pair(1, "a")),
+                (
+                    "ps".into(),
+                    Value::Array(ArrayValue::try_new(vec![pair(2, "b"), Value::Null]).unwrap()),
+                ),
+            ]
+            .into(),
+        )
     }
 
     #[test]
@@ -260,22 +270,28 @@ mod tests {
         )
         .unwrap();
         let expected_pair = |x: i64, label: &str| {
-            Value::Record(vec![
-                ("x".into(), Value::Int(x)),
-                ("label".into(), Value::Str(label.into())),
-            ])
+            Value::Record(
+                vec![
+                    ("x".into(), Value::Int(x)),
+                    ("label".into(), Value::Str(label.into())),
+                ]
+                .into(),
+            )
         };
         assert_eq!(
             renamed,
-            Value::Record(vec![
-                ("p".into(), expected_pair(1, "a")),
-                (
-                    "ps".into(),
-                    Value::Array(
-                        ArrayValue::try_new(vec![expected_pair(2, "b"), Value::Null]).unwrap()
+            Value::Record(
+                vec![
+                    ("p".into(), expected_pair(1, "a")),
+                    (
+                        "ps".into(),
+                        Value::Array(
+                            ArrayValue::try_new(vec![expected_pair(2, "b"), Value::Null]).unwrap()
+                        ),
                     ),
-                ),
-            ])
+                ]
+                .into()
+            )
         );
     }
 
@@ -296,7 +312,7 @@ mod tests {
         };
         assert_eq!(
             fields[0].1,
-            Value::Record(vec![("y".into(), Value::Str("a".into()))])
+            Value::Record(vec![("y".into(), Value::Str("a".into()))].into())
         );
         let added = apply_attribute_change(
             pair(3, "c"),
@@ -308,11 +324,14 @@ mod tests {
         .unwrap();
         assert_eq!(
             added,
-            Value::Record(vec![
-                ("x".into(), Value::Int(3)),
-                ("y".into(), Value::Str("c".into())),
-                ("z".into(), Value::Null),
-            ])
+            Value::Record(
+                vec![
+                    ("x".into(), Value::Int(3)),
+                    ("y".into(), Value::Str("c".into())),
+                    ("z".into(), Value::Null),
+                ]
+                .into()
+            )
         );
         // The outer type's own change leaves nested values of other types alone.
         let outer_change = apply_attribute_change(
@@ -325,7 +344,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             outer_change,
-            Value::Record(vec![("p".into(), pair(1, "a"))])
+            Value::Record(vec![("p".into(), pair(1, "a"))].into())
         );
         assert_eq!(
             apply_attribute_change(

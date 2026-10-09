@@ -8,7 +8,8 @@
 
 use super::{
     jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DatumValue, DecimalValue, Deserialize,
-    Deserializer, EnumValue, LegacyVectorValue, RowValue, Serialize, Serializer, TemporalValue,
+    Deserializer, EnumValue, LegacyVectorValue, RecordValue, RowValue, Serialize, Serializer,
+    TemporalValue,
 };
 
 pub(super) mod comparison_control;
@@ -59,7 +60,7 @@ pub enum Value {
     /// row comparisons retain SQL three-valued NULL semantics.
     Row(RowValue),
     /// Named composite/record value in physical field order.
-    Record(Vec<(String, Value)>),
+    Record(RecordValue),
     /// JSON/document object value. This is not a SQL composite record.
     Map(BTreeMap<String, Value>),
     /// Label of a user-defined enum type. The immutable label key orders
@@ -121,13 +122,6 @@ struct TaggedEnum<'a> {
 }
 
 #[derive(Serialize)]
-struct TaggedRecord<'a> {
-    #[serde(rename = "$uqa_type")]
-    kind: &'static str,
-    fields: &'a [(String, Value)],
-}
-
-#[derive(Serialize)]
 struct TaggedDatum<'a> {
     #[serde(rename = "$uqa_type")]
     kind: &'static str,
@@ -179,11 +173,7 @@ impl Serialize for Value {
             Self::LegacyVector(value) => value.serialize(serializer),
             Self::List(value) => value.serialize(serializer),
             Self::Row(values) => values.serialize(serializer),
-            Self::Record(fields) => TaggedRecord {
-                kind: "record",
-                fields,
-            }
-            .serialize(serializer),
+            Self::Record(fields) => fields.serialize(serializer),
             Self::Datum(value) => TaggedDatum {
                 kind: "datum",
                 type_oid: value.type_oid(),

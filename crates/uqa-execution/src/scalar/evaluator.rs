@@ -175,14 +175,12 @@ pub(super) fn eval_scalar_inner(
                     | BinaryOp::Greater
                     | BinaryOp::GreaterEqual
             ) {
-                let value = uqa_sql::expr::eval_comparison_truth_with_enum_catalog(
+                let value = uqa_sql::expr::eval_comparison_truth_with_engine(
                     *op,
                     &left,
                     &right,
                     control,
-                    context
-                        .function_hook()
-                        .and_then(uqa_sql::expr::EngineHook::enum_labels),
+                    context.function_hook(),
                     context.enum_binary_comparison_state(lhs),
                 )?;
                 return plain(value.map_or(Value::Null, Value::Bool), control);
@@ -390,7 +388,7 @@ fn materialize_qualified_whole_row(
             Ok((column, value))
         })
         .collect::<Result<Vec<_>, _>>()
-        .map(Value::Record)
+        .map(|fields| Value::Record(fields.into()))
 }
 
 fn eval_parameter(
@@ -543,14 +541,12 @@ fn compare_values(
     control: &ProductionControl<'_>,
     state: Option<&uqa_sql::expr::enums::EnumComparisonState>,
 ) -> Result<Option<bool>, SQLError> {
-    uqa_sql::expr::eval_comparison_truth_with_enum_catalog(
+    uqa_sql::expr::eval_comparison_truth_with_engine(
         op,
         left,
         right,
         control,
-        context
-            .function_hook()
-            .and_then(uqa_sql::expr::EngineHook::enum_labels),
+        context.function_hook(),
         state,
     )
 }

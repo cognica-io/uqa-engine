@@ -61,7 +61,11 @@ pub fn validate_key_constraint_rows(
             }
             keys.push(values)?;
         }
-        if let Some(values) = keys.first_duplicate(true, constraint.nulls_not_distinct)? {
+        if let Some(values) = keys.first_duplicate(
+            true,
+            constraint.nulls_not_distinct,
+            Some(context.constraints.values),
+        )? {
             return Err(duplicated_key(context, table, &constraint, &values)?);
         }
     }

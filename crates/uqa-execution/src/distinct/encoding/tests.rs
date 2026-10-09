@@ -73,8 +73,8 @@ fn sql_enum_hash_matches_raw_and_admitted_identities_without_label_output() {
         let right = Value::Array(ArrayValue::try_new(vec![right]).unwrap());
         assert!(equal(&left, &right));
         assert_eq!(hash(&left), hash(&right));
-        let left = Value::Record(vec![("value".into(), left)]);
-        let right = Value::Record(vec![("value".into(), right)]);
+        let left = Value::Record(vec![("value".into(), left)].into());
+        let right = Value::Record(vec![("value".into(), right)].into());
         assert!(equal(&left, &right));
         assert_eq!(hash(&left), hash(&right));
     }
@@ -111,7 +111,7 @@ fn controlled_keys_keep_all_canonical_domains_and_only_retain_the_output_buffer(
         ),
         Value::List(vec![Value::Bool(true)]),
         Value::Row(vec![Value::Int(2)].into()),
-        Value::Record(vec![("ignored name".into(), Value::Int(3))]),
+        Value::Record(vec![("ignored name".into(), Value::Int(3))].into()),
         Value::Map(std::collections::BTreeMap::from([(
             "name".into(),
             Value::Int(4),
@@ -286,7 +286,7 @@ fn enum_keys_are_injective_and_congruent_with_value_equality() {
         label(0x0100_0000, &[64]),
         Value::Bytes(vec![64]),
         Value::Array(ArrayValue::try_new(vec![label(7, &[64])]).unwrap()),
-        Value::Record(vec![("field".into(), label(7, &[64]))]),
+        Value::Record(vec![("field".into(), label(7, &[64]))].into()),
     ];
     for left in &values {
         for right in &values {

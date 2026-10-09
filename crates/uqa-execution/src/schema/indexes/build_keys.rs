@@ -13,6 +13,8 @@ use crate::{
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
+mod evaluator;
+
 pub(crate) struct IndexBuildKeys {
     rows: SpillBuffer,
     schema: RowSchema,
@@ -53,6 +55,7 @@ impl IndexBuildKeys {
         self,
         unique: bool,
         nulls_not_distinct: bool,
+        catalog: Option<&(dyn uqa_sql::expr::SQLValueCatalog + Send + Sync)>,
     ) -> Result<Option<Vec<Value>>, SQLError> {
         let width = self.width;
         let column = |index| SortKey {
@@ -63,10 +66,10 @@ impl IndexBuildKeys {
         let keys = (0..width).map(column).collect::<Vec<_>>();
         // Rows with equal keys follow one another in the order they were pushed.
         let order = (0..=width).map(column).collect::<Vec<_>>();
-        let mut sorted = Sort::with_work_mem(
+        let mut sorted = Sort::with_evaluator_and_work_mem(
             Box::new(SpillScan::new(self.schema, self.rows)),
             order,
-            vec![],
+            std::sync::Arc::new(evaluator::IndexKeyEvaluator(catalog)),
             self.budget,
         );
         sorted.open().map_err(physical_exec_error)?;
@@ -76,7 +79,14 @@ impl IndexBuildKeys {
         while let Some(batch) = sorted.next().map_err(physical_exec_error)? {
             for row in batch.rows {
                 if let Some(previous) = &previous {
-                    let ordering = crate::relational::compare_sort_key_values_by(&keys, |index| {
+                    let ordering = crate::relational::SortComparison {
+                        keys: &keys,
+                        enums: catalog
+                            .map(|catalog| catalog as &dyn uqa_sql::expr::SQLValueCatalog),
+                        states: &[],
+                        equality_keys: false,
+                    }
+                    .compare_by(|index| {
                         (
                             previous.value(index).expect("retained index key"),
                             row.value(index).expect("sorted index key"),
@@ -140,7 +150,8 @@ mod tests {
                 }
                 let first = values.first().cloned();
                 assert_eq!(
-                    keys.first_duplicate(unique, nulls_not_distinct).unwrap(),
+                    keys.first_duplicate(unique, nulls_not_distinct, None)
+                        .unwrap(),
                     expected.then(|| vec![first.expect("duplicated key")])
                 );
             }
@@ -159,7 +170,7 @@ mod tests {
         for budget in [1, 1 << 20] {
             let mut single = IndexBuildKeys::new(1, budget);
             single.push(vec![invalid.clone()]).unwrap();
-            assert_eq!(single.first_duplicate(true, false).unwrap(), None);
+            assert_eq!(single.first_duplicate(true, false, None).unwrap(), None);
             for unique in [false, true] {
                 for null_prefix in [false, true] {
                     let key = if null_prefix {
@@ -170,7 +181,7 @@ mod tests {
                     let mut duplicate = IndexBuildKeys::new(key.len(), budget);
                     duplicate.push(key.clone()).unwrap();
                     duplicate.push(key).unwrap();
-                    let error = duplicate.first_duplicate(unique, false).unwrap_err();
+                    let error = duplicate.first_duplicate(unique, false, None).unwrap_err();
                     assert_eq!(error.sqlstate(), Some("42804"));
                     assert_eq!(error.to_string(), "array is not a valid oidvector");
                 }
@@ -181,7 +192,10 @@ mod tests {
                     .push(vec![Value::Int(prefix), invalid.clone()])
                     .unwrap();
             }
-            assert_eq!(distinct_prefix.first_duplicate(true, false).unwrap(), None);
+            assert_eq!(
+                distinct_prefix.first_duplicate(true, false, None).unwrap(),
+                None
+            );
         }
     }
 
@@ -205,7 +219,8 @@ mod tests {
                         .unwrap();
                 }
                 assert_eq!(
-                    keys.first_duplicate(true, nulls_not_distinct).unwrap(),
+                    keys.first_duplicate(true, nulls_not_distinct, None)
+                        .unwrap(),
                     expected.map(|value| vec![Value::Int(value)])
                 );
             }
@@ -214,7 +229,7 @@ mod tests {
                 keys.push(vec![value]).unwrap();
             }
             assert_eq!(
-                keys.first_duplicate(true, true).unwrap(),
+                keys.first_duplicate(true, true, None).unwrap(),
                 Some(vec![Value::Null])
             );
         }

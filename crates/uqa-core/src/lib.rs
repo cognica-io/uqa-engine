@@ -45,7 +45,7 @@ pub use types::{
     DiskANNQueryStats, DocId, Edge, EdgeId, EnumLabelKey, EnumLabelKeyError,
     EnumLabelKeyParseError, EnumValue, FieldName, GeneralizedPayload, GeneralizedPostingEntry,
     IndexStats, JsonValueDecoder, JsonbKeyError, LegacyVectorKind, LegacyVectorValue, PathExpr,
-    PathSegment, Payload, PostingEntry, RecordFieldType, RowValue, TemporalDateOrder,
+    PathSegment, Payload, PostingEntry, RecordFieldType, RecordValue, RowValue, TemporalDateOrder,
     TemporalInputError, TemporalTimeZone, TemporalValue, TokenOccurrence, TokenOccurrenceError,
     TokenOffsets, Value, ValueRetentionError, VectorGeneration, VectorPopulationStats,
     VectorQueryRoute, VectorReadStats, Vertex, VertexId, MAX_ENUM_LABEL_KEY_BYTES,

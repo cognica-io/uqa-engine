@@ -212,7 +212,7 @@ fn retained_json_payload_is_not_revalidated_by_type_output() {
         0,
         vec![13, b'h', b'e', b'l', b'l', b'o'],
     ));
-    let record = Value::Record(vec![("a".into(), retained), ("b".into(), Value::Int(7))]);
+    let record = Value::Record(vec![("a".into(), retained), ("b".into(), Value::Int(7))].into());
     assert_eq!(
         crate::expr::eval_scalar_function("to_json", &[record]).unwrap(),
         Value::Json("{\"a\":hello,\"b\":7}".into())
@@ -357,8 +357,8 @@ fn physical_scalar_reads_defer_corruption_until_a_consuming_comparison() {
         crate::expr::values_equal_nullable_with_control(&bad, &Value::Null, &control).unwrap(),
         None
     );
-    let left = Value::Record(vec![("a".into(), Value::Int(1)), ("b".into(), bad.clone())]);
-    let right = Value::Record(vec![("a".into(), Value::Int(2)), ("b".into(), bad.clone())]);
+    let left = Value::Record(vec![("a".into(), Value::Int(1)), ("b".into(), bad.clone())].into());
+    let right = Value::Record(vec![("a".into(), Value::Int(2)), ("b".into(), bad.clone())].into());
     assert!(
         crate::expr::compare_typed_values_with_control(&left, &right, &control)
             .unwrap()

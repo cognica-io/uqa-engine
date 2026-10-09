@@ -42,7 +42,7 @@ pub use limit::Limit;
 pub use project::{Project, ProjectionTarget};
 pub use set_operation::SetOperation;
 pub use sort::{compare_sort_key_values, Sort, SortKey};
-pub(crate) use sort::{compare_sort_key_values_by, equal_sort_key_values, SortComparison};
+pub(crate) use sort::{equal_sort_key_values, SortComparison};
 pub use window::{Window, WindowExecutor, WindowKind, WindowSpec};
 
 use aggregate::value_to_f64;

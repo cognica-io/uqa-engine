@@ -10,7 +10,7 @@ use super::table_read::TableRead;
 use crate::{serializable::SerializableRelationRead, storage_errors::storage_error};
 use std::collections::BTreeMap;
 use uqa_core::{DocId, PostingList, Predicate, Value};
-use uqa_sql::{ast::ColumnDef, SQLError};
+use uqa_sql::{ast::ColumnDef, expr::SQLValueCatalog, SQLError};
 use uqa_storage::{document_store::Document, DocumentStore, StoredDocument};
 
 #[derive(Clone, Copy)]
@@ -29,6 +29,15 @@ pub trait ExactLookupOverlay {
         values: &[Value],
         presence: FieldPresence,
     ) -> Result<Option<DocId>, SQLError>;
+    fn find_match_with_catalog(
+        &self,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+        _catalog: Option<&dyn SQLValueCatalog>,
+    ) -> Result<Option<DocId>, SQLError> {
+        self.find_match(columns, values, presence)
+    }
 }
 
 pub fn matches_fields(
@@ -43,6 +52,7 @@ pub fn matches_fields(
         values,
         presence,
         &uqa_core::memory::ProductionControl::uncontrolled(),
+        None,
     )
 }
 
@@ -52,16 +62,19 @@ pub(crate) fn matches_fields_with_control(
     values: &[Value],
     presence: FieldPresence,
     control: &uqa_core::memory::ProductionControl<'_>,
+    catalog: Option<&dyn SQLValueCatalog>,
 ) -> Result<bool, SQLError> {
     for (column, expected) in columns.iter().zip(values) {
         let actual = document.get(column);
         if matches!(presence, FieldPresence::Required) && actual.is_none() {
             return Ok(false);
         }
-        if !uqa_sql::expr::compare_typed_values_with_control(
+        if !uqa_sql::expr::compare_typed_values_with_enum_catalog(
             actual.unwrap_or(&Value::Null),
             expected,
             control,
+            catalog,
+            None,
         )?
         .is_eq()
         {
@@ -75,14 +88,17 @@ fn matches_value(
     actual: Option<&Value>,
     expected: &Value,
     presence: FieldPresence,
+    catalog: Option<&dyn SQLValueCatalog>,
 ) -> Result<bool, SQLError> {
     if matches!(presence, FieldPresence::Required) && actual.is_none() {
         return Ok(false);
     }
-    uqa_sql::expr::compare_typed_values_with_control(
+    uqa_sql::expr::compare_typed_values_with_enum_catalog(
         actual.unwrap_or(&Value::Null),
         expected,
         &uqa_core::memory::ProductionControl::uncontrolled(),
+        catalog,
+        None,
     )
     .map(std::cmp::Ordering::is_eq)
 }
@@ -100,9 +116,25 @@ impl ExactLookupOverlay for BTreeMap<DocId, Option<StoredDocument>> {
         values: &[Value],
         presence: FieldPresence,
     ) -> Result<Option<DocId>, SQLError> {
+        self.find_match_with_catalog(columns, values, presence, None)
+    }
+    fn find_match_with_catalog(
+        &self,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+        catalog: Option<&dyn SQLValueCatalog>,
+    ) -> Result<Option<DocId>, SQLError> {
         for (id, document) in self {
             if let Some(document) = document {
-                if matches_fields(document.fields(), columns, values, presence)? {
+                if matches_fields_with_control(
+                    document.fields(),
+                    columns,
+                    values,
+                    presence,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    catalog,
+                )? {
                     return Ok(Some(*id));
                 }
             }
@@ -120,11 +152,22 @@ impl super::document_changes::DocumentChanges {
         values: &[Value],
         presence: FieldPresence,
     ) -> Result<bool, SQLError> {
+        self.row_matches_with_catalog(id, columns, values, presence, None)
+    }
+
+    pub fn row_matches_with_catalog(
+        &self,
+        id: DocId,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+        catalog: Option<&dyn SQLValueCatalog>,
+    ) -> Result<bool, SQLError> {
         for (column, expected) in columns.iter().zip(values) {
             let actual = self
                 .get_field(id, column)
                 .map_err(|error| storage_error("read private exact key", &error))?;
-            if !matches_value(actual.as_ref(), expected, presence)? {
+            if !matches_value(actual.as_ref(), expected, presence, catalog)? {
                 return Ok(false);
             }
         }
@@ -148,10 +191,19 @@ impl ExactLookupOverlay for super::document_changes::DocumentChanges {
         values: &[Value],
         presence: FieldPresence,
     ) -> Result<Option<DocId>, SQLError> {
+        self.find_match_with_catalog(columns, values, presence, None)
+    }
+    fn find_match_with_catalog(
+        &self,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+        catalog: Option<&dyn SQLValueCatalog>,
+    ) -> Result<Option<DocId>, SQLError> {
         for change in self.changes() {
             let (id, present) =
                 change.map_err(|error| storage_error("read private exact key", &error))?;
-            if present && self.row_matches(id, columns, values, presence)? {
+            if present && self.row_matches_with_catalog(id, columns, values, presence, catalog)? {
                 return Ok(Some(id));
             }
         }
@@ -184,6 +236,7 @@ fn primary_key_doc_id(
 }
 
 pub struct ExactLookup<'a> {
+    pub catalog: Option<&'a dyn SQLValueCatalog>,
     pub table: &'a dyn TableRead,
     pub overlay: &'a dyn ExactLookupOverlay,
     pub read: Option<&'a SerializableRelationRead>,
@@ -209,10 +262,12 @@ impl ExactLookup<'_> {
         }
         let columns = [field.to_string()];
         let values = std::slice::from_ref(value);
-        if let Some(id) = self
-            .overlay
-            .find_match(&columns, values, FieldPresence::Required)?
-        {
+        if let Some(id) = self.overlay.find_match_with_catalog(
+            &columns,
+            values,
+            FieldPresence::Required,
+            self.catalog,
+        )? {
             return Ok(Some(id));
         }
         if self.overlay.is_empty()?
@@ -263,10 +318,12 @@ impl ExactLookup<'_> {
                 if let Some(read) = self.read {
                     read.observe_row(id)?;
                 }
-                if let Some(id) =
-                    self.overlay
-                        .find_match(columns, values, FieldPresence::MissingIsNull)?
-                {
+                if let Some(id) = self.overlay.find_match_with_catalog(
+                    columns,
+                    values,
+                    FieldPresence::MissingIsNull,
+                    self.catalog,
+                )? {
                     return Ok(Some(id));
                 }
                 if self.overlay.masks(id)? {
@@ -305,10 +362,12 @@ impl ExactLookup<'_> {
             let Some(candidates) = scan(column, &predicate)? else {
                 continue;
             };
-            if let Some(id) =
-                self.overlay
-                    .find_match(columns, values, FieldPresence::MissingIsNull)?
-            {
+            if let Some(id) = self.overlay.find_match_with_catalog(
+                columns,
+                values,
+                FieldPresence::MissingIsNull,
+                self.catalog,
+            )? {
                 return Ok(IndexConflictProbe::Conflict(id));
             }
             let documents = self.table.read_documents();
@@ -329,7 +388,12 @@ impl ExactLookup<'_> {
                     let actual = documents
                         .get_field(entry.doc_id, column)
                         .map_err(|error| storage_error("verify conflicting document", &error))?;
-                    if !matches_value(actual.as_ref(), expected, FieldPresence::MissingIsNull)? {
+                    if !matches_value(
+                        actual.as_ref(),
+                        expected,
+                        FieldPresence::MissingIsNull,
+                        self.catalog,
+                    )? {
                         matches = false;
                         break;
                     }
@@ -352,7 +416,10 @@ impl ExactLookup<'_> {
         if let Some(read) = self.read {
             read.observe_scan()?;
         }
-        if let Some(id) = self.overlay.find_match(columns, values, presence)? {
+        if let Some(id) =
+            self.overlay
+                .find_match_with_catalog(columns, values, presence, self.catalog)?
+        {
             return Ok(Some(id));
         }
         self.scan_documents(columns, values, presence)
@@ -390,7 +457,7 @@ impl ExactLookup<'_> {
                     let actual = documents.get_field(id, column).map_err(|error| {
                         storage_error("read command-visible document field", &error)
                     })?;
-                    if !matches_value(actual.as_ref(), expected, presence)? {
+                    if !matches_value(actual.as_ref(), expected, presence, self.catalog)? {
                         matches = false;
                         break;
                     }

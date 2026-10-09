@@ -70,7 +70,8 @@ fn materialize(
     match (ty, value) {
         (ColumnType::Domain { base, .. }, _) => materialize(value, base, engine, control),
         (ColumnType::Composite(reference), Value::Record(fields)) => {
-            let descriptor = super::descriptor(engine.composite_types(), reference.oid)?;
+            let type_oid = fields.type_oid().unwrap_or(reference.oid);
+            let descriptor = super::descriptor(engine.composite_types(), type_oid)?;
             control.check()?;
             let mut output = ProductionVec::new(*control);
             output.reserve(descriptor.attributes.len())?;
@@ -88,7 +89,9 @@ fn materialize(
                     control.finish((name, value), control.combine(memory, name_memory))?,
                 )?;
             }
-            let (fields, memory) = output.finish()?.into_parts();
+            let (fields, memory) =
+                uqa_core::RecordValue::with_control(output.finish()?, Some(type_oid), control)?
+                    .into_parts();
             control
                 .finish(Value::Record(fields), memory)
                 .map_err(Into::into)

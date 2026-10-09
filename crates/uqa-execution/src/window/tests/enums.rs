@@ -68,7 +68,7 @@ fn spilled_window_peers_use_enum_identity_without_reading_labels() {
                 let value = match shape {
                     0 => value,
                     1 => Value::Array(ArrayValue::try_new(vec![value]).unwrap()),
-                    _ => Value::Record(vec![("e".into(), value)]),
+                    _ => Value::Record(vec![("e".into(), value)].into()),
                 };
                 partition
                     .push(&PhysicalRow::from_values(vec![value]))

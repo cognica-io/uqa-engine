@@ -129,12 +129,13 @@ impl uqa_execution::query::indexed_filter::QueryIndexRead for Engine {
     ) -> Result<uqa_execution::mutation::overlay::CommandIndexProbe, SQLError> {
         let table = self.command_overlay_table_name(table)?;
         let control = self.query_retention_control()?;
-        uqa_execution::mutation::overlay::CommandMutationOverlay::column_matches(
+        uqa_execution::mutation::overlay::CommandMutationOverlay::column_matches_with_catalog(
             &mut self.session.command_mutation_overlays.lock(),
             &table,
             &[field.to_owned()],
             std::slice::from_ref(value),
             &control,
+            Some(self),
         )
     }
 }

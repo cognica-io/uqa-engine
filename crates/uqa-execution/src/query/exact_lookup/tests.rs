@@ -66,6 +66,7 @@ fn indexed_conflict(
     scan: impl FnMut(&str, &Predicate) -> Result<Option<PostingList>, SQLError>,
 ) -> Result<IndexConflictProbe, SQLError> {
     ExactLookup {
+        catalog: None,
         table,
         overlay: &BTreeMap::new(),
         read: None,
@@ -241,6 +242,7 @@ fn private_rows_replace_delete_and_supply_matches_without_hiding_later_candidate
         ),
     ]);
     let lookup = ExactLookup {
+        catalog: None,
         table: &table,
         overlay: &overlay,
         read: None,
@@ -275,6 +277,7 @@ fn single_field_null_distinguishes_absent_fields_with_and_without_private_rows()
         BTreeMap::from([(3, Some(StoredDocument::new(BTreeMap::new())))]),
     ] {
         let lookup = ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None,
@@ -294,6 +297,7 @@ fn malformed_conflict_keys_do_not_read_an_index_or_document() {
     let table = Table::new([]);
     let overlay = BTreeMap::new();
     let lookup = ExactLookup {
+        catalog: None,
         table: &table,
         overlay: &overlay,
         read: None,
@@ -364,6 +368,7 @@ fn indexed_field_reads_mask_candidates_without_reading_stored_rows() {
         )]))),
     );
     let lookup = ExactLookup {
+        catalog: None,
         table: &table,
         overlay: &overlay,
         read: None,
@@ -393,6 +398,7 @@ fn indexed_field_reads_mask_candidates_without_reading_stored_rows() {
     );
     assert_eq!(
         ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None
@@ -413,6 +419,7 @@ fn unchanged_field_views_keep_direct_first_match_without_index_hydration() {
     ]);
     assert_eq!(
         ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &BTreeMap::new(),
             read: None
@@ -438,6 +445,7 @@ fn indexed_null_field_reads_recheck_presence_only_after_masking() {
     let overlay = BTreeMap::from([(1, None)]);
     assert_eq!(
         ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None
@@ -470,6 +478,7 @@ fn indexed_field_fallback_masks_invalid_values_before_comparing_visible_rows() {
     let mut overlay = BTreeMap::from([(1, None)]);
     assert_eq!(
         ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None
@@ -480,6 +489,7 @@ fn indexed_field_fallback_masks_invalid_values_before_comparing_visible_rows() {
     );
     assert_eq!(
         ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None
@@ -495,6 +505,7 @@ fn indexed_field_fallback_masks_invalid_values_before_comparing_visible_rows() {
     overlay.insert(3, None);
     assert_eq!(
         ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None
@@ -519,6 +530,7 @@ fn indexed_raw_field_probes_preserve_typed_enum_errors_and_record_row_equality()
     let overlay = BTreeMap::from([(2, None)]);
     for value in [label(20), Value::Int(7)] {
         assert!(ExactLookup {
+            catalog: None,
             table: &table,
             overlay: &overlay,
             read: None
@@ -528,7 +540,7 @@ fn indexed_raw_field_probes_preserve_typed_enum_errors_and_record_row_equality()
         .to_string()
         .contains("enum comparison reached operands of different types"));
     }
-    let record = Value::Record(vec![("x".into(), Value::Int(1))]);
+    let record = Value::Record(vec![("x".into(), Value::Int(1))].into());
     let row = Value::Row(vec![Value::Int(1)].into());
     for wrap in [
         (|value| value) as fn(Value) -> Value,
@@ -544,6 +556,7 @@ fn indexed_raw_field_probes_preserve_typed_enum_errors_and_record_row_equality()
             let index = ColumnValueIndex::build("a", [(1, stored)].into_iter());
             assert_eq!(
                 ExactLookup {
+                    catalog: None,
                     table: &table,
                     overlay: &overlay,
                     read: None

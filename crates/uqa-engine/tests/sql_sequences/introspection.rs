@@ -216,7 +216,8 @@ fn qualified_sequence_introspection_preserves_bound_catalog_calls() {
                     .columns
                     .iter()
                     .map(|column| (column.clone(), record.rows[0][column].clone()))
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
             );
             assert_eq!(scalar.rows[0]["value"], expected, "{call}");
         }

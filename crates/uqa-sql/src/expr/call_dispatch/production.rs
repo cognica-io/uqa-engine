@@ -128,7 +128,7 @@ fn eval_dispatched(
         return result;
     }
     super::super::builtin::eval_dispatched_builtin_with_control(
-        binding, dispatch, arguments, control,
+        binding, dispatch, arguments, control, context,
     )
 }
 

@@ -149,10 +149,11 @@ fn payload(
         "record" => return structured::record(content, control, depth, buffered),
         "map" => return structured::map(content, control, depth, buffered),
         "array" => return structured::sql_array(content, control, depth, buffered),
-        "legacy_vector" | "typed_row" | "datum" => {
+        "legacy_vector" | "typed_row" | "typed_record" | "datum" => {
             let value = modern(content, control, depth - 1)?;
             return if (kind == "legacy_vector" && matches!(&*value, Value::LegacyVector(_)))
                 || (kind == "typed_row" && matches!(&*value, Value::Row(_)))
+                || (kind == "typed_record" && matches!(&*value, Value::Record(_)))
                 || (kind == "datum" && matches!(&*value, Value::Datum(_)))
             {
                 Ok(value)

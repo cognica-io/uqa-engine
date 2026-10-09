@@ -332,6 +332,7 @@ pub fn eval_bound_builtin_function_call(
         dispatch,
         &evaluated,
         &uqa_core::memory::ProductionControl::uncontrolled(),
+        ctx,
     )
     .map(|value| {
         value
@@ -345,19 +346,17 @@ pub(super) fn eval_dispatched_builtin_with_control(
     dispatch: FunctionDispatch,
     evaluated: &[Value],
     control: &uqa_core::memory::ProductionControl<'_>,
+    context: &EvalContext<'_>,
 ) -> Result<uqa_core::memory::Produced<Value>> {
     if dispatch == FunctionDispatch::FieldSelect {
         if let Some(field) = &binding.composite_field {
             // Arguments have already run: descriptor changes must not suppress their observable effects.
-            control.check()?;
-            if field.dropped
-                || evaluated
-                    .first()
-                    .is_some_and(|value| matches!(value, Value::Null))
-            {
-                return Ok(control.finish(Value::Null, control.empty_reservation())?);
-            }
-            super::composites::validate_field_result(field)?;
+            return super::composites::fields::select_with_control(
+                field,
+                evaluated,
+                context.engine,
+                control,
+            );
         }
     }
     if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(

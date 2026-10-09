@@ -214,6 +214,22 @@ fn encoded_column_type(ty: Option<&uqa_sql::ast::ColumnType>) -> ExecResult<Stri
     )
 }
 
+fn add_record_size(
+    total: &mut usize,
+    fields: &uqa_core::RecordValue,
+    depth: usize,
+) -> ExecResult<()> {
+    add_size(total, 8, "record length")?;
+    if fields.type_oid().is_some() {
+        add_size(total, 4, "record type OID")?;
+    }
+    for (name, value) in fields {
+        add_string_size(total, name, "record field name")?;
+        add_value_size(total, value, depth + 1)?;
+    }
+    Ok(())
+}
+
 fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
@@ -297,14 +313,7 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             }
             Ok(())
         }
-        Value::Record(fields) => {
-            add_size(total, 8, "record length")?;
-            for (name, value) in fields {
-                add_string_size(total, name, "record field name")?;
-                add_value_size(total, value, depth + 1)?;
-            }
-            Ok(())
-        }
+        Value::Record(fields) => add_record_size(total, fields, depth),
         Value::Map(values) => {
             add_size(total, 8, "map length")?;
             for (key, value) in values {
@@ -493,6 +502,25 @@ fn write_slot(writer: &mut impl Write, slot: Option<usize>) -> ExecResult<()> {
     }
 }
 
+fn encode_record(
+    writer: &mut impl Write,
+    fields: &uqa_core::RecordValue,
+    depth: usize,
+) -> ExecResult<()> {
+    if let Some(oid) = fields.type_oid() {
+        write_tag(writer, 23)?;
+        write_raw(writer, &oid.to_le_bytes(), "record type OID")?;
+    } else {
+        write_tag(writer, 14)?;
+    }
+    write_u64(writer, fields.len())?;
+    for (name, value) in fields {
+        write_bytes(writer, name.as_bytes())?;
+        encode_value(writer, value, depth + 1)?;
+    }
+    Ok(())
+}
+
 fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
@@ -575,15 +603,7 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             encode_values(writer, values, depth)
         }
         Value::Row(values) => encode_row(writer, values, depth),
-        Value::Record(fields) => {
-            write_tag(writer, 14)?;
-            write_u64(writer, fields.len())?;
-            for (name, value) in fields {
-                write_bytes(writer, name.as_bytes())?;
-                encode_value(writer, value, depth + 1)?;
-            }
-            Ok(())
-        }
+        Value::Record(fields) => encode_record(writer, fields, depth),
         Value::Map(values) => {
             write_tag(writer, 9)?;
             write_u64(writer, values.len())?;

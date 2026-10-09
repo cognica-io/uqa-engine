@@ -326,12 +326,13 @@ fn map_enum_values(
                     .collect::<Result<_>>()?,
             )?,
         ),
-        Value::Record(fields) => Value::Record(
+        Value::Record(fields) => Value::Record(uqa_core::RecordValue::from_parts(
             fields
                 .iter()
                 .map(|(name, element)| Ok((name.clone(), map_enum_values(element, convert)?)))
                 .collect::<Result<_>>()?,
-        ),
+            fields.type_oid(),
+        )),
         Value::Map(fields) => Value::Map(
             fields
                 .iter()

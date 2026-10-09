@@ -125,11 +125,14 @@ fn admitted_compact_json_matches_existing_value_conversion_for_nested_carriers()
     .unwrap();
     let values = [
         Value::Row((0..12).map(Value::Int).collect()),
-        Value::Record(vec![
-            ("z".into(), Value::Int(1)),
-            ("a".into(), Value::Int(2)),
-            ("z".into(), Value::Int(3)),
-        ]),
+        Value::Record(
+            vec![
+                ("z".into(), Value::Int(1)),
+                ("a".into(), Value::Int(2)),
+                ("z".into(), Value::Int(3)),
+            ]
+            .into(),
+        ),
         Value::Array(array),
         Value::List(vec![
             Value::Void,

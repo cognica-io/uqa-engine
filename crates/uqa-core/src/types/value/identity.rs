@@ -36,7 +36,8 @@ impl Value {
                 left.field_types() == right.field_types() && same_elements(left, right)
             }
             (Self::Record(left), Self::Record(right)) => {
-                left.len() == right.len()
+                left.type_oid() == right.type_oid()
+                    && left.len() == right.len()
                     && left.iter().zip(right).all(|((a, left), (b, right))| {
                         a == b && left.has_same_representation(right)
                     })
@@ -152,7 +153,7 @@ mod tests {
             let wrappers: [fn(Value) -> Value; 4] = [
                 |value| Value::Array(ArrayValue::try_new(vec![value]).unwrap()),
                 |value| Value::Row(vec![value].into()),
-                |value| Value::Record(vec![("key".into(), value)]),
+                |value| Value::Record(vec![("key".into(), value)].into()),
                 |value| Value::Map(std::collections::BTreeMap::from([("key".into(), value)])),
             ];
             for wrap in wrappers {

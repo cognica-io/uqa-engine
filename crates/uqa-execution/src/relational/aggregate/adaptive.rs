@@ -370,12 +370,14 @@ fn value_retained_bytes(value: &Value) -> usize {
             values.retained_buffer_bytes().unwrap_or(usize::MAX),
             |bytes, value| bytes.saturating_add(value_retained_bytes(value)),
         ),
-        Value::Record(fields) => fields.iter().fold(0usize, |bytes, (name, value)| {
-            bytes
-                .saturating_add(name.capacity())
-                .saturating_add(value_retained_bytes(value))
-                .saturating_add(2 * std::mem::size_of::<usize>())
-        }),
+        Value::Record(fields) => fields.iter().fold(
+            fields.retained_buffer_bytes().unwrap_or(usize::MAX),
+            |bytes, (name, value)| {
+                bytes
+                    .saturating_add(name.capacity())
+                    .saturating_add(value_retained_bytes(value))
+            },
+        ),
         Value::Map(values) => values.iter().fold(0usize, |bytes, (key, value)| {
             bytes
                 .saturating_add(key.capacity())

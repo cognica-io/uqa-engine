@@ -211,20 +211,23 @@ mod tests {
 
     #[test]
     fn ordered_distinct_preserves_first_rows_and_input_order_across_spill() {
-        let old = Value::Record(vec![(
-            "a".into(),
-            Value::Datum(uqa_core::DatumValue::new(
-                17,
-                0,
-                vec![13, b'h', b'e', b'l', b'l', b'o'],
-            )),
-        )]);
-        let fresh = Value::Record(vec![("a".into(), Value::Bytes(b"hello".to_vec()))]);
+        let old = Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(
+                    17,
+                    0,
+                    vec![13, b'h', b'e', b'l', b'l', b'o'],
+                )),
+            )]
+            .into(),
+        );
+        let fresh = Value::Record(vec![("a".into(), Value::Bytes(b"hello".to_vec()))].into());
         let mut hash = crate::CanonicalRowHashSet::new();
         assert!(hash.insert_values(std::slice::from_ref(&old)).unwrap());
         assert!(!hash.insert_values(std::slice::from_ref(&fresh)).unwrap());
         assert!(hash.contains_borrowed(&[&fresh]).unwrap());
-        let other = Value::Record(vec![("a".into(), Value::Bytes(b"abc".to_vec()))]);
+        let other = Value::Record(vec![("a".into(), Value::Bytes(b"abc".to_vec()))].into());
         for budget in [1, 1024 * 1024] {
             let scan = TableScan::from_physical_rows(
                 RowSchema::new(vec!["key".into(), "id".into()]),
@@ -254,14 +257,17 @@ mod tests {
 
     #[test]
     fn ordered_distinct_reads_a_malformed_key_only_when_comparing_two_rows() {
-        let bad = Value::Record(vec![(
-            "a".into(),
-            Value::Datum(uqa_core::DatumValue::new(
-                1700,
-                0,
-                vec![2, 0, 0, 0, 3, b'x'],
-            )),
-        )]);
+        let bad = Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(
+                    1700,
+                    0,
+                    vec![2, 0, 0, 0, 3, b'x'],
+                )),
+            )]
+            .into(),
+        );
         for budget in [1, 1024 * 1024] {
             for count in 0..=2 {
                 let scan = TableScan::from_physical_rows(

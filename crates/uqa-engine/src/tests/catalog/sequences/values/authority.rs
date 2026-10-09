@@ -108,10 +108,13 @@ fn cached_values_and_introspection_observe_committed_membership_revocation() {
                 inspect
                     .pg_get_sequence_data_value(&[Value::Int(oid)])
                     .unwrap(),
-                Value::Record(vec![
-                    ("last_value".into(), Value::Null),
-                    ("is_called".into(), Value::Null)
-                ])
+                Value::Record(
+                    vec![
+                        ("last_value".into(), Value::Null),
+                        ("is_called".into(), Value::Null)
+                    ]
+                    .into()
+                )
             );
             assert_eq!(
                 values

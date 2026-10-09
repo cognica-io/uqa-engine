@@ -209,7 +209,10 @@ fn retained_field_type_errors_follow_record_nullness_and_release_argument_memory
     }));
     for dropped in [false, true] {
         binding.composite_field.as_mut().unwrap().dropped = dropped;
-        for base in [Value::Null, Value::Record(vec![("b".into(), Value::Null)])] {
+        for base in [
+            Value::Null,
+            Value::Record(vec![("b".into(), Value::Null)].into()),
+        ] {
             let result = eval_generated_function_call_with_control(
                 "field",
                 Some(&binding),

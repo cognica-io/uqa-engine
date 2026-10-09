@@ -98,7 +98,7 @@ fn enum_sort_keeps_catalog_through_runs_merge_top_k_and_nested_keys() {
                         let value = match shape {
                             0 => value,
                             1 => Value::Array(ArrayValue::try_new(vec![value]).unwrap()),
-                            _ => Value::Record(vec![("e".into(), value)]),
+                            _ => Value::Record(vec![("e".into(), value)].into()),
                         };
                         ResultRow::from([("key".into(), value), ("input".into(), Value::Int(id))])
                     })

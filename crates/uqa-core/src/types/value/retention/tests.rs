@@ -82,13 +82,14 @@ fn nested_collections_count_spare_slots_once_and_keep_field_names() {
         ),
     ));
     let expected = fields.capacity() * size_of::<(String, Value)>()
+        + crate::RecordValue::retained_header_bytes()
         + 512
         + crate::RowValue::decoded_header_bytes()
         + size_of::<Value>()
         + size_of::<(String, Value)>()
         + 256
         + 4096;
-    let charge = Value::Record(fields)
+    let charge = Value::Record(fields.into())
         .reserve_retained_payload(&budget, &cancellation)
         .unwrap();
     assert_eq!(charge.bytes(), expected);
@@ -153,12 +154,15 @@ fn counting_retained_payload_does_not_reserve_the_payload_again() {
     );
     assert_eq!(no_workspace.peak(), 0);
 
-    let value = Value::Record(vec![(
-        text(256),
-        Value::List(vec![Value::Map(
-            [(text(128), Value::Bytes(Vec::with_capacity(8192)))].into(),
-        )]),
-    )]);
+    let value = Value::Record(
+        vec![(
+            text(256),
+            Value::List(vec![Value::Map(
+                [(text(128), Value::Bytes(Vec::with_capacity(8192)))].into(),
+            )]),
+        )]
+        .into(),
+    );
     let original = MemoryBudget::new(1 << 20);
     let charge = value
         .reserve_retained_payload(&original, &cancellation)

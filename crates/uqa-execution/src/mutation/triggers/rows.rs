@@ -91,7 +91,8 @@ pub(super) fn trigger_record(
             definitions
                 .iter()
                 .map(|column| (column.name.clone(), Value::Null))
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
         ));
     };
     let mut materialized = document.clone();
@@ -104,7 +105,9 @@ pub(super) fn trigger_record(
         }
     }
     if definitions.is_empty() {
-        return Ok(Value::Record(materialized.into_iter().collect()));
+        return Ok(Value::Record(
+            materialized.into_iter().collect::<Vec<_>>().into(),
+        ));
     }
     // Only an identity an integer key names says what the key is.
     let fallback_id = if uqa_sql::semantics::key_identity::is_key_document_id(doc_id) {
@@ -127,7 +130,8 @@ pub(super) fn trigger_record(
                 });
                 (column.name.clone(), value)
             })
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
     ))
 }
 

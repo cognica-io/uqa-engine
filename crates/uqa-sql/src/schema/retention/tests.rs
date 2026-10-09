@@ -145,7 +145,7 @@ fn column_literals_reuse_core_value_ownership_including_spare_capacity() {
         Value::Str(spare_text("value", 1025)),
     ));
     let mut values = Vec::with_capacity(11);
-    values.push(Value::Record(fields));
+    values.push(Value::Record(fields.into()));
     let value = Value::List(values);
     let budget = MemoryBudget::new(64 * 1024);
     let cancellation = CancellationToken::new();

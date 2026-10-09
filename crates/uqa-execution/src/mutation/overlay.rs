@@ -220,6 +220,19 @@ impl CommandMutationOverlay {
         presence: FieldPresence,
         control: &StorageReadControl,
     ) -> Result<Option<DocId>, SQLError> {
+        Self::find_match_with_catalog(overlays, table, fields, values, presence, control, None)
+    }
+
+    /// Retain catalog-dependent comparison semantics while newer frames mask older rows.
+    pub fn find_match_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<Option<DocId>, SQLError> {
         if fields.len() != values.len() {
             return Err(SQLError::Internal(
                 "command-overlay exact lookup has mismatched fields and values".into(),
@@ -236,7 +249,9 @@ impl CommandMutationOverlay {
                     .is_some_and(|table| table.has_fallible_comparison)
             })
         {
-            return comparison::find_match(overlays, table, fields, values, presence, control);
+            return comparison::find_match(
+                overlays, table, fields, values, presence, control, catalog,
+            );
         }
         let (fields, key) = keys::lookup_parts(fields, values, control)?;
         for overlay in overlays.iter_mut() {
@@ -420,7 +435,26 @@ impl CommandMutationOverlay {
         values: &[Value],
         control: &StorageReadControl,
     ) -> Result<BudgetedVec<DocId>, SQLError> {
-        Self::matches_keys(overlays, table, fields, values, KeyKind::Columns, control)
+        Self::matches_with_catalog(overlays, table, fields, values, control, None)
+    }
+
+    pub fn matches_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<BudgetedVec<DocId>, SQLError> {
+        Self::matches_keys(
+            overlays,
+            table,
+            fields,
+            values,
+            KeyKind::Columns,
+            control,
+            catalog,
+        )
     }
 
     fn matches_keys(
@@ -430,6 +464,7 @@ impl CommandMutationOverlay {
         values: &[Value],
         kind: KeyKind,
         control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     ) -> Result<BudgetedVec<DocId>, SQLError> {
         if fields.len() != values.len() {
             return Err(SQLError::Internal(
@@ -448,7 +483,7 @@ impl CommandMutationOverlay {
                     .is_some_and(|table| table.has_fallible_comparison)
             })
         {
-            return comparison::matches(overlays, table, fields, values, kind, control);
+            return comparison::matches(overlays, table, fields, values, kind, control, catalog);
         }
         let (fields, key) = keys::lookup_parts(fields, values, control)?;
         for overlay in overlays.iter_mut() {

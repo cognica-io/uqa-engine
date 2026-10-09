@@ -57,7 +57,19 @@ impl CommandMutationOverlay {
         values: &[Value],
         control: &StorageReadControl,
     ) -> Result<CommandIndexProbe, SQLError> {
-        let matches = Self::matches(overlays, table, fields, values, control)?;
+        Self::column_matches_with_catalog(overlays, table, fields, values, control, None)
+    }
+
+    pub fn column_matches_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<CommandIndexProbe, SQLError> {
+        let matches =
+            Self::matches_with_catalog(overlays, table, fields, values, control, catalog)?;
         let changes = Self::changes(overlays, table, DocumentChanges::default(), control)?;
         Ok(CommandIndexProbe { matches, changes })
     }
@@ -69,6 +81,17 @@ impl CommandMutationOverlay {
         values: &[Value],
         control: &StorageReadControl,
     ) -> Result<CommandIndexProbe, SQLError> {
+        Self::expression_matches_with_catalog(overlays, table, physical_key, values, control, None)
+    }
+
+    pub fn expression_matches_with_catalog(
+        overlays: &mut [Self],
+        table: &str,
+        physical_key: &str,
+        values: &[Value],
+        control: &StorageReadControl,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<CommandIndexProbe, SQLError> {
         let matches = Self::matches_keys(
             overlays,
             table,
@@ -76,6 +99,7 @@ impl CommandMutationOverlay {
             &[Value::Row(values.to_vec().into())],
             KeyKind::Expressions,
             control,
+            catalog,
         )?;
         let changes = Self::changes(overlays, table, DocumentChanges::default(), control)?;
         Ok(CommandIndexProbe { matches, changes })

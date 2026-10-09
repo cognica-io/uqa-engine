@@ -82,10 +82,13 @@ fn owner_self_revocation_controls_sequence_values_without_hiding_metadata() {
                     &engine,
                     "SELECT pg_get_sequence_data('owned_ids'::regclass)"
                 ),
-                Value::Record(vec![
-                    ("last_value".into(), Value::Null),
-                    ("is_called".into(), Value::Null)
-                ])
+                Value::Record(
+                    vec![
+                        ("last_value".into(), Value::Null),
+                        ("is_called".into(), Value::Null)
+                    ]
+                    .into()
+                )
             );
             assert_eq!(scalar(&engine, "SELECT count(*) FROM information_schema.sequences WHERE sequence_name='owned_ids'"), Value::Int(1));
             assert_eq!(
@@ -124,10 +127,13 @@ fn owner_self_revocation_controls_sequence_values_without_hiding_metadata() {
                 &engine,
                 "SELECT pg_get_sequence_data('owned_ids'::regclass)"
             ),
-            Value::Record(vec![
-                ("last_value".into(), Value::Null),
-                ("is_called".into(), Value::Null)
-            ])
+            Value::Record(
+                vec![
+                    ("last_value".into(), Value::Null),
+                    ("is_called".into(), Value::Null)
+                ]
+                .into()
+            )
         );
     }
 }

@@ -448,7 +448,7 @@ fn composites_retained_in_constants_are_not_evaluated_without_the_catalog() {
     });
     let literal = ScalarExpr::TypedLiteral {
         composite_source: None,
-        value: Value::Record(vec![("a".into(), Value::Int(4))]),
+        value: Value::Record(vec![("a".into(), Value::Int(4))].into()),
         ty: ty.catalog_name(),
         bound_type: Some(ty),
         parameter_index: None,
@@ -475,7 +475,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
     });
     let literal = ScalarExpr::TypedLiteral {
         composite_source: None,
-        value: Value::Record(vec![("b".into(), Value::Str("x".into()))]),
+        value: Value::Record(vec![("b".into(), Value::Str("x".into()))].into()),
         ty: ty.catalog_name(),
         bound_type: Some(ty.clone()),
         parameter_index: None,
@@ -568,14 +568,17 @@ fn assert_malformed_constant_field_copy(call: &ScalarExpr) {
     if let ScalarExpr::Func { args, .. } = &mut physical {
         if let ScalarExpr::Cast { expr, .. } = &mut args[0] {
             if let ScalarExpr::TypedLiteral { value, .. } = expr.as_mut() {
-                *value = Value::Record(vec![(
-                    "b".into(),
-                    Value::Datum(uqa_core::DatumValue::new(
-                        25,
-                        0,
-                        vec![2, 0, 0, 0, 3, 0, 0, 0],
-                    )),
-                )]);
+                *value = Value::Record(
+                    vec![(
+                        "b".into(),
+                        Value::Datum(uqa_core::DatumValue::new(
+                            25,
+                            0,
+                            vec![2, 0, 0, 0, 3, 0, 0, 0],
+                        )),
+                    )]
+                    .into(),
+                );
             }
         }
     }
@@ -699,4 +702,38 @@ fn strict_comparison_null_folding_does_not_resolve_discarded_catalog_types() {
         scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
         Some(ColumnType::Boolean)
     );
+}
+
+#[test]
+fn physical_record_comparisons_keep_their_runtime_catalog() {
+    let value = Value::Datum(uqa_core::DatumValue::new(20_001, 0, vec![0; 24]));
+    let literal = ScalarExpr::TypedLiteral {
+        composite_source: None,
+        value: value.clone(),
+        ty: "composite#20001".into(),
+        bound_type: Some(ColumnType::Composite(
+            uqa_sql::ast::CompositeTypeReference {
+                schema: "public".into(),
+                name: "pair".into(),
+                oid: 20_001,
+                array_oid: 20_002,
+                relation_oid: 20_003,
+            },
+        )),
+        parameter_index: None,
+    };
+    for left in [literal, ScalarExpr::Literal(value)] {
+        let expression = ScalarExpr::Binary {
+            op: uqa_sql::ast::BinaryOp::Equal,
+            lhs: Box::new(left.clone()),
+            rhs: Box::new(left),
+        };
+        assert_eq!(
+            fold_literal_expression(expression.clone(), |_| panic!(
+                "physical comparison requires its catalog"
+            ))
+            .unwrap(),
+            expression
+        );
+    }
 }

@@ -1,0 +1,924 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE actual_record AS (n real,t text); CREATE TYPE declared_record AS (n double precision,t text); CREATE TYPE record_source AS (a actual_record); CREATE VIEW record_bytes AS SELECT '(\"(0.1,one)\")'::record_source AS v; ALTER TYPE record_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE record_target AS (a bytea)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "ALTER TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM record_bytes; EXECUTE format('CREATE VIEW record_value AS SELECT %L::record_target AS v',r); END $$; ALTER TYPE record_target ALTER ATTRIBUTE a TYPE declared_record",
+      "command_tags": [
+        "DO",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "physical"
+    },
+    {
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "isnull",
+            "ty"
+          ],
+          "type_oids": [
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "f",
+              "declared_record"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "shape"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(0.1,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "output"
+    },
+    {
+      "sql": "SELECT ((v).a).n::text AS value FROM record_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "attribute 1 has wrong type",
+        "detail": "Table has type real, but query expects double precision.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "field"
+    },
+    {
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "equal"
+    },
+    {
+      "sql": "SELECT ((v).a=ROW(0.1::double precision,'one')::declared_record)::text AS equal FROM record_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types real and double precision at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "cross_equal"
+    },
+    {
+      "sql": "SELECT ((v).a<(v).a)::text AS less FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "less"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "false"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "order"
+    },
+    {
+      "sql": "SELECT ((v).a<ROW(0.1::double precision,'one')::declared_record)::text AS less FROM record_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types real and double precision at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "cross_order"
+    },
+    {
+      "sql": "SELECT ('(,one)'::actual_record='(,one)'::declared_record)::text AS equal",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types real and double precision at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "null_types"
+    },
+    {
+      "sql": "SELECT ((v).a=NULL::declared_record)::text AS equal FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_record"
+    },
+    {
+      "sql": "CREATE TABLE record_saved(v record_target); INSERT INTO record_saved SELECT v FROM record_value",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "storage_setup"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM record_saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(0.1,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "storage_output"
+    },
+    {
+      "sql": "SELECT ((v).a).n::text AS value FROM record_saved",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "attribute 1 has wrong type",
+        "detail": "Table has type real, but query expects double precision.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "storage_field"
+    },
+    {
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM record_saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "storage_equal"
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX record_saved_key ON record_saved(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "storage_unique"
+    },
+    {
+      "sql": "INSERT INTO record_saved SELECT v FROM record_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"record_saved_key\"",
+        "detail": "Key (v)=((\"(0.1,one)\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "storage_duplicate"
+    },
+    {
+      "sql": "SELECT count(*)::text AS n FROM record_saved WHERE v=(SELECT v FROM record_value)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "storage_lookup"
+    },
+    {
+      "sql": "SELECT count(*)::text AS n FROM record_saved x WHERE EXISTS (SELECT 1 FROM record_saved y WHERE x.v=y.v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "exists"
+    },
+    {
+      "sql": "SELECT count(*)::text AS n FROM record_saved x WHERE EXISTS (SELECT 1 FROM (SELECT v FROM record_saved UNION ALL SELECT v FROM record_saved) y WHERE x.v=y.v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "exists_union"
+    },
+    {
+      "sql": "BEGIN; CREATE TABLE record_pending(v record_target UNIQUE); INSERT INTO record_pending SELECT v FROM record_value; INSERT INTO record_pending SELECT v FROM record_value",
+      "command_tags": [
+        "BEGIN",
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"record_pending_v_key\"",
+        "detail": "Key (v)=((\"(0.1,one)\")) already exists.",
+        "hint": null
+      },
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "command_duplicate"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "command_rollback"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value,count(*)::text AS n FROM record_saved GROUP BY (v).a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "(0.1,one)",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "group"
+    },
+    {
+      "sql": "SELECT DISTINCT (v).a::text AS value FROM record_saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(0.1,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct"
+    },
+    {
+      "sql": "ALTER TYPE actual_record RENAME ATTRIBUTE t TO renamed",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "actual_rename"
+    },
+    {
+      "sql": "SELECT ((v).a).t AS value FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "one"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "field_number"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(0.1,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "actual_rename_output"
+    },
+    {
+      "sql": "CREATE TYPE first_real AS (a integer,b real); CREATE TYPE first_double AS (a integer,b double precision); CREATE TYPE one_integer AS (a integer)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "lazy_setup"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real='(2,1)'::first_double)::text AS equal",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "false"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "lazy_equal"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real<'(2,1)'::first_double)::text AS less",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "less"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "lazy_order"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real='(1,1)'::first_double)::text AS equal",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types real and double precision at record column 2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "reached_mismatch"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real<'(2)'::one_integer)::text AS less",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "less"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "lazy_arity"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real='(1)'::one_integer)::text AS equal",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare record types with different numbers of columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "reached_arity"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real=ROW(1,1::real))::text AS equal",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_comparison"
+    },
+    {
+      "sql": "SELECT ('(1,1)'::first_real=ROW(1,1::double precision))::text AS equal",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types real and double precision at record column 2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "row_mismatch"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM record_saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(0.1,one)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_output",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT ((v).a).t AS value FROM record_saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "one"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_field",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM record_saved",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_equal",
+      "reopen": true
+    },
+    {
+      "sql": "INSERT INTO record_saved SELECT v FROM record_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"record_saved_key\"",
+        "detail": "Key (v)=((\"(0.1,one)\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "reopen_duplicate",
+      "reopen": true
+    },
+    {
+      "sql": "DROP TABLE record_saved; DROP TYPE first_real,first_double,one_integer",
+      "command_tags": [
+        "DROP TABLE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup_more",
+      "reopen": true
+    },
+    {
+      "sql": "DROP VIEW record_value,record_bytes; DROP TYPE record_target,record_source; DROP TYPE actual_record,declared_record",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ]
+}

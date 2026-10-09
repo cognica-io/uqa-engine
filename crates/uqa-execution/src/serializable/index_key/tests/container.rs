@@ -52,7 +52,7 @@ fn array_ranges_preserve_elements_dimensions_lower_bounds_and_fractional_cuts() 
         Value::JsonB("[]".into()),
         Value::List(vec![]),
         Value::Row(vec![].into()),
-        Value::Record(vec![]),
+        Value::Record(vec![].into()),
         Value::Map(std::collections::BTreeMap::new()),
     ]);
     verify(

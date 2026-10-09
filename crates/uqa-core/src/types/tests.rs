@@ -775,10 +775,13 @@ fn value_json_round_trips_every_variant() {
         Value::JsonB("{\"a\": 1, \"b\": 2}".into()),
         Value::List(vec![Value::Str("a".into()), Value::Int(300)]),
         Value::Row(vec![Value::Int(1), Value::Null].into()),
-        Value::Record(vec![
-            ("key".into(), Value::Str("a".into())),
-            ("value".into(), Value::Json("1".into())),
-        ]),
+        Value::Record(
+            vec![
+                ("key".into(), Value::Str("a".into())),
+                ("value".into(), Value::Json("1".into())),
+            ]
+            .into(),
+        ),
         Value::Map(BTreeMap::from([(
             "k".to_string(),
             Value::List(vec![Value::Float(0.5)]),

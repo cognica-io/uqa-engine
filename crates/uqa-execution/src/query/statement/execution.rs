@@ -123,7 +123,11 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
             block,
             params,
             ctes,
-            bind_output_mode(context.generation, output_mode)?,
+            bind_output_mode(
+                context.generation,
+                output_mode,
+                context.source.types.enum_labels(),
+            )?,
         ),
         RelationalPlan::SetOp { .. } => {
             execute_set_operation(context, plan, params, ctes, output_mode)
@@ -149,7 +153,11 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
                 subqueries,
                 params,
                 ctes,
-                bind_output_mode(context.generation, output_mode)?,
+                bind_output_mode(
+                    context.generation,
+                    output_mode,
+                    context.source.types.enum_labels(),
+                )?,
             )
         }
     }
@@ -414,6 +422,10 @@ pub fn collect_query_operator<'a, S: Clone + Send + Sync + 'static>(
         context.source.relational.runtime,
         columns,
         operator,
-        bind_output_mode(context.generation, output_mode)?,
+        bind_output_mode(
+            context.generation,
+            output_mode,
+            context.source.types.enum_labels(),
+        )?,
     )
 }

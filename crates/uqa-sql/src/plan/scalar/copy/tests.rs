@@ -63,10 +63,13 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
         CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
     };
     let original = CompositeConstantSource {
-        value: Value::Record(vec![
-            ("a".into(), Value::Str("A".into())),
-            ("dropped".into(), Value::Str("retained".repeat(1024))),
-        ]),
+        value: Value::Record(
+            vec![
+                ("a".into(), Value::Str("A".into())),
+                ("dropped".into(), Value::Str("retained".repeat(1024))),
+            ]
+            .into(),
+        ),
         descriptors: vec![CompositeTypeDescriptor {
             dropped: vec![crate::expr::composites::DroppedCompositeAttribute {
                 number: 3,
@@ -90,7 +93,7 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
         }],
     };
     let expression = crate::ast::Expr::TypedLiteral {
-        value: Value::Record(vec![("a".into(), Value::Bool(true))]),
+        value: Value::Record(vec![("a".into(), Value::Bool(true))].into()),
         ty: "composite#20001".into(),
         composite_source: Some(Box::new(original)),
     };

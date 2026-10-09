@@ -873,10 +873,13 @@ fn json_each_in_the_select_list_returns_a_typed_record() {
     assert_eq!(result.column_types, [Some(ColumnType::Record)]);
     assert_eq!(
         result.rows[0]["pair"],
-        Value::Record(vec![
-            ("key".into(), Value::Str("a".into())),
-            ("value".into(), Value::Str("1".into())),
-        ])
+        Value::Record(
+            vec![
+                ("key".into(), Value::Str("a".into())),
+                ("value".into(), Value::Str("1".into())),
+            ]
+            .into()
+        )
     );
 }
 

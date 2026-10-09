@@ -101,6 +101,7 @@ pub trait MutationNamespace {
 #[derive(Clone, Copy)]
 pub struct ConstraintContext<'a> {
     pub catalog: &'a dyn ConstraintCatalog,
+    pub values: &'a (dyn uqa_sql::expr::SQLValueCatalog + Send + Sync),
     pub reads: &'a dyn MutationRead,
     pub indexes: &'a dyn MutationIndexRead,
     pub transactions: &'a dyn ConstraintTransactions,

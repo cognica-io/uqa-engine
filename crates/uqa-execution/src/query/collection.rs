@@ -45,7 +45,9 @@ pub fn collect_query_operator<'a>(
         QueryOutputMode::SharedSpill => {
             collect_spilled_rows(runtime, operator.as_mut(), internal_schema)?
         }
-        QueryOutputMode::ExistsKeySet => collect_exists_keys(&columns, operator.as_mut())?,
+        QueryOutputMode::ExistsKeySet(catalog) => {
+            collect_exists_keys(&columns, operator.as_mut(), catalog)?
+        }
         QueryOutputMode::RowConsumer(consumer) => {
             collect_consumed_rows(&columns, &internal_schema, &mut operator, &consumer)?
         }
@@ -128,6 +130,7 @@ fn collect_spilled_rows(
 fn collect_exists_keys(
     columns: &[String],
     operator: &mut dyn crate::PhysicalOperator,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> Result<QueryRows, SQLError> {
     if operator.row_schema().len() < columns.len() {
         return Err(SQLError::Internal(format!(
@@ -175,7 +178,7 @@ fn collect_exists_keys(
                 key.push(value);
             }
             if !contains_null {
-                if let Err(error) = keys.insert_borrowed(&key) {
+                if let Err(error) = keys.insert_borrowed_with_catalog(&key, catalog) {
                     return Err(close_after_physical_failure(
                         operator,
                         error,

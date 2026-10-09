@@ -63,7 +63,7 @@ fn shaped(shape: usize, value: Value) -> Value {
     match shape {
         0 => value,
         1 => Value::Array(ArrayValue::try_new(vec![value]).unwrap()),
-        _ => Value::Record(vec![("e".into(), value)]),
+        _ => Value::Record(vec![("e".into(), value)].into()),
     }
 }
 

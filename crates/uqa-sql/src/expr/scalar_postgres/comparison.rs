@@ -6,9 +6,7 @@
 
 //! Bound comparison syntax uses shared SQL comparison and native array traversal owners.
 
-use super::super::{
-    eval_comparison_truth_with_enum_catalog, value_to_string_with_control, EngineHook, EvalContext,
-};
+use super::super::{eval_comparison_truth_with_engine, value_to_string_with_control, EvalContext};
 use crate::{
     ast::{BinaryOp, FunctionDispatch},
     error::{Result, SQLError},
@@ -158,12 +156,12 @@ fn compare(
     context: &EvalContext<'_>,
     slot: usize,
 ) -> Result<Option<bool>> {
-    eval_comparison_truth_with_enum_catalog(
+    eval_comparison_truth_with_engine(
         op,
         left,
         right,
         control,
-        context.engine.and_then(EngineHook::enum_labels),
+        context.engine,
         context.enum_comparison_state_at(slot),
     )
 }

@@ -110,7 +110,12 @@ pub(super) fn validate_index_rows(
             keys.push(values)?;
         }
     }
-    let Some(values) = keys.first_duplicate(statement.unique, statement.nulls_not_distinct)? else {
+    let Some(values) = keys.first_duplicate(
+        statement.unique,
+        statement.nulls_not_distinct,
+        context.expressions.values,
+    )?
+    else {
         return Ok(());
     };
     Err(unique_build::duplicated_index_key(

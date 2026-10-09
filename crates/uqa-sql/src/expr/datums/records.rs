@@ -114,7 +114,9 @@ pub(super) fn read(
             control,
         )?;
     }
-    let (fields, memory) = fields.finish()?.into_parts();
+    let (fields, memory) =
+        uqa_core::RecordValue::with_control(fields.finish()?, Some(type_oid), control)?
+            .into_parts();
     drop(backing_memory);
     Ok(control.finish(Value::Record(fields), memory)?)
 }

@@ -97,7 +97,9 @@ pub fn construct_with_control(
             control.finish((name, value), control.combine(name_memory, value_memory))?,
         )?;
     }
-    let (fields, memory) = fields.finish()?.into_parts();
+    let (fields, memory) =
+        uqa_core::RecordValue::with_control(fields.finish()?, Some(descriptor.type_oid), control)?
+            .into_parts();
     control
         .finish(Value::Record(fields), memory)
         .map_err(Into::into)
@@ -214,11 +216,14 @@ mod tests {
         assert_eq!(evaluated, vec![0, 2]);
         assert_eq!(
             *value,
-            Value::Record(vec![
-                ("a1".into(), Value::Int(0)),
-                ("a3".into(), Value::Int(2)),
-                ("a4".into(), Value::Null)
-            ])
+            Value::Record(
+                vec![
+                    ("a1".into(), Value::Int(0)),
+                    ("a3".into(), Value::Int(2)),
+                    ("a4".into(), Value::Null)
+                ]
+                .into()
+            )
         );
         assert!(budget.used() > 0);
         drop(value);
@@ -267,5 +272,27 @@ mod tests {
             evaluate_with_control(&binding, 1, Some(&Catalog), &control, |_| unreachable!())
                 .unwrap_err();
         assert_eq!(error.sqlstate(), Some("57014"));
+    }
+    #[test]
+    fn composite_only_embedding_keeps_comparison_metadata_without_enum_support() {
+        let value = Value::Record(uqa_core::RecordValue::from_parts(
+            vec![
+                ("a1".into(), Value::Int(1)),
+                ("a3".into(), Value::Int(2)),
+                ("a4".into(), Value::Null),
+            ],
+            Some(20_001),
+        ));
+        let expression = crate::ast::Expr::Binary {
+            op: crate::ast::BinaryOp::Equal,
+            lhs: Box::new(crate::ast::Expr::Literal(value.clone())),
+            rhs: Box::new(crate::ast::Expr::Literal(value)),
+        };
+        assert!(Catalog.enum_labels().is_none());
+        let context = crate::expr::EvalContext::new(None, &[]).with_engine(&Catalog);
+        assert_eq!(
+            crate::expr::eval(&expression, &context).unwrap(),
+            Value::Bool(true)
+        );
     }
 }

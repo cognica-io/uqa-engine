@@ -55,7 +55,7 @@ pub trait SQLValueCatalog {
 }
 
 /// Adapt a scalar context without requiring embedders that only provide domain or composite metadata to implement enum support.
-pub(super) struct EngineValueCatalog<'a>(pub &'a dyn super::EngineHook);
+pub struct EngineValueCatalog<'a>(pub &'a dyn super::EngineHook);
 
 impl SQLValueCatalog for EngineValueCatalog<'_> {
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<crate::ColumnType>> {

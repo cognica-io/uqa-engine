@@ -76,12 +76,13 @@ fn read_datums(value: &Value, catalog: Option<&dyn EnumLabelCatalog>) -> Result<
                     .collect::<Result<_, _>>()?,
             )?,
         ),
-        Value::Record(fields) => Value::Record(
+        Value::Record(fields) => Value::Record(uqa_core::RecordValue::from_parts(
             fields
                 .iter()
                 .map(|(name, value)| Ok((name.clone(), read_datums(value, catalog)?)))
                 .collect::<Result<_, SQLError>>()?,
-        ),
+            fields.type_oid(),
+        )),
         Value::Map(values) => Value::Map(
             values
                 .iter()

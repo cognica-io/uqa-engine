@@ -68,7 +68,7 @@ pub fn execute_query_block_operator_output<'a, S: Clone + 'static>(
 ) -> Result<QueryOutput, SQLError> {
     let runtime = context.runtime;
     let type_resolver = context.expression_scope(ctes.clone());
-    if matches!(&output_mode, QueryOutputMode::ExistsKeySet)
+    if matches!(&output_mode, QueryOutputMode::ExistsKeySet(_))
         && matches!(statement.compute, ComputePlan::Project)
         && statement.order_by.is_empty()
         && statement.limit.is_none()

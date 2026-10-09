@@ -106,13 +106,14 @@ pub fn shape_trigger_outcome(
         (Value::Record(fields), _) | (_, Value::Record(fields)) => fields,
         _ => return Err(trigger_shape_error()),
     };
-    Ok(Value::Record(
+    Ok(Value::Record(uqa_core::RecordValue::from_parts(
         fields
             .iter()
             .map(|(name, _)| name.clone())
             .zip(values)
             .collect(),
-    ))
+        fields.type_oid(),
+    )))
 }
 
 fn record_types_match(source: Option<&ColumnType>, target: Option<&ColumnType>) -> bool {

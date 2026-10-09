@@ -40,7 +40,7 @@ pub fn format_postgres_text(
         return format_array(value, element, engine);
     }
     if let (ColumnType::Composite(reference), Value::Record(fields)) = (ty, value) {
-        return format_record(fields, reference.oid, engine);
+        return format_record(fields, fields.type_oid().unwrap_or(reference.oid), engine);
     }
     Ok(match value {
         Value::Bool(value) => if *value { "t" } else { "f" }.into(),

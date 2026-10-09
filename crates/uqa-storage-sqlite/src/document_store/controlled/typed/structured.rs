@@ -64,7 +64,8 @@ pub(super) fn record(
     }
     let (fields, retained) = fields.into_parts();
     memory.absorb(retained);
-    Ok(Budgeted::new(Value::Record(fields), memory))
+    memory.grow(uqa_core::RecordValue::retained_header_bytes())?;
+    Ok(Budgeted::new(Value::Record(fields.into()), memory))
 }
 
 pub(super) fn sql_array(

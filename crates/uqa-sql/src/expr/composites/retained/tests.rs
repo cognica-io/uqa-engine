@@ -57,14 +57,17 @@ fn nested_projection_and_binary_output_keep_the_original_inner_tuple() {
         ),
     ]);
     let record = |a| {
-        Value::Record(vec![
-            ("lead".into(), Value::Int(9)),
-            (
-                "item".into(),
-                Value::Record(vec![("a".into(), a), ("b".into(), Value::Int(17))]),
-            ),
-            ("tail".into(), Value::Int(23)),
-        ])
+        Value::Record(
+            vec![
+                ("lead".into(), Value::Int(9)),
+                (
+                    "item".into(),
+                    Value::Record(vec![("a".into(), a), ("b".into(), Value::Int(17))].into()),
+                ),
+                ("tail".into(), Value::Int(23)),
+            ]
+            .into(),
+        )
     };
     let source = record(Value::Int(1_065_353_216));
     let mut current = original.clone();

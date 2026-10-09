@@ -103,7 +103,14 @@ fn set_row_value(row: PhysicalRow, columns: &[String]) -> Value {
         return values.into_iter().next().unwrap_or(Value::Null);
     }
     debug_assert_eq!(columns.len(), values.len());
-    Value::Record(columns.iter().cloned().zip(values).collect())
+    Value::Record(
+        columns
+            .iter()
+            .cloned()
+            .zip(values)
+            .collect::<Vec<_>>()
+            .into(),
+    )
 }
 
 /// Projection and output batching applied after set expansion.

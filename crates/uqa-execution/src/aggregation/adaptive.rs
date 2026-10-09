@@ -703,12 +703,14 @@ fn value_retained_bytes(value: &Value) -> usize {
             values.retained_buffer_bytes().unwrap_or(usize::MAX),
             |bytes, value| bytes.saturating_add(value_retained_bytes(value)),
         ),
-        Value::Record(fields) => fields.iter().fold(0usize, |bytes, (name, value)| {
-            bytes
-                .saturating_add(name.capacity())
-                .saturating_add(value_retained_bytes(value))
-                .saturating_add(2 * std::mem::size_of::<usize>())
-        }),
+        Value::Record(fields) => fields.iter().fold(
+            fields.retained_buffer_bytes().unwrap_or(usize::MAX),
+            |bytes, (name, value)| {
+                bytes
+                    .saturating_add(name.capacity())
+                    .saturating_add(value_retained_bytes(value))
+            },
+        ),
         Value::Map(values) => values.iter().fold(0usize, |bytes, (key, value)| {
             bytes
                 .saturating_add(key.capacity())
@@ -731,15 +733,18 @@ mod tests {
 
     #[test]
     fn datum_hash_buckets_compare_decoded_sql_values() {
-        let old = Value::Record(vec![(
-            "a".into(),
-            Value::Datum(uqa_core::DatumValue::new(
-                17,
-                0,
-                vec![13, b'h', b'e', b'l', b'l', b'o'],
-            )),
-        )]);
-        let fresh = Value::Record(vec![("a".into(), Value::Bytes(b"hello".to_vec()))]);
+        let old = Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(
+                    17,
+                    0,
+                    vec![13, b'h', b'e', b'l', b'l', b'o'],
+                )),
+            )]
+            .into(),
+        );
+        let fresh = Value::Record(vec![("a".into(), Value::Bytes(b"hello".to_vec()))].into());
         let mut index = GroupIndex::with_hasher(ahash::RandomState::new());
         let hash = hash_canonical_row(index.hasher(), [Some(&old)].into_iter()).unwrap();
         assert_eq!(

@@ -119,7 +119,7 @@ impl VariableResolver for RuleRowTypeResolver<'_> {
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(self
             .validate_row_qualifier(name)?
-            .then(|| ResolvedVariable::untyped(Value::Record(Vec::new()))))
+            .then(|| ResolvedVariable::untyped(Value::Record(Vec::new().into()))))
     }
 
     fn resolve_qualified(
@@ -137,7 +137,7 @@ impl VariableResolver for RuleRowTypeResolver<'_> {
     fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
         Ok(self
             .validate_row_qualifier(qualifier)?
-            .then(|| Expr::Literal(Value::Record(Vec::new()))))
+            .then(|| Expr::Literal(Value::Record(Vec::new().into()))))
     }
 }
 

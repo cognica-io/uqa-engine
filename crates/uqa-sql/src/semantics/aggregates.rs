@@ -96,6 +96,9 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         }
         (ScalarExpr::Not(a), ScalarExpr::Not(b))
         | (ScalarExpr::UnaryMinus(a), ScalarExpr::UnaryMinus(b)) => exprs_match(a, b),
+        (ScalarExpr::CompositeRow { .. }, ScalarExpr::CompositeRow { .. }) => {
+            composite_rows_match(lhs, rhs)
+        }
         (
             ScalarExpr::Cast {
                 expr: a, ty: at, ..
@@ -106,6 +109,25 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         ) => at == bt && exprs_match(a, b),
         _ => false,
     }
+}
+
+fn composite_rows_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
+    let (
+        ScalarExpr::CompositeRow {
+            items: a,
+            binding: ab,
+            bound_type: at,
+        },
+        ScalarExpr::CompositeRow {
+            items: b,
+            binding: bb,
+            bound_type: bt,
+        },
+    ) = (lhs, rhs)
+    else {
+        return false;
+    };
+    ab == bb && at == bt && a.len() == b.len() && a.iter().zip(b).all(|(a, b)| exprs_match(a, b))
 }
 
 fn typed_literals_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {

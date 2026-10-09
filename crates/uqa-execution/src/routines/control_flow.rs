@@ -341,7 +341,8 @@ impl Interpreter<'_> {
                     fields
                         .iter()
                         .map(|field| (field.name.clone(), self.values[field.varno].clone()))
-                        .collect(),
+                        .collect::<Vec<_>>()
+                        .into(),
                 )),
                 Some(_) => Err(SQLError::Internal(format!(
                     "PL/pgSQL retvarno {index} is not a returnable datum"

@@ -84,7 +84,7 @@ impl RuntimeRuleResolver<'_> {
                     .map(|field| (column.clone(), field.value))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(ResolvedVariable::untyped(Value::Record(fields)))
+        Ok(ResolvedVariable::untyped(Value::Record(fields.into())))
     }
 }
 

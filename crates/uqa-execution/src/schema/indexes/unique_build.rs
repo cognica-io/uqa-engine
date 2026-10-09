@@ -96,7 +96,9 @@ pub fn validate_unique_index_build(
             &document,
         )?)?;
     }
-    let Some(values) = keys.first_duplicate(true, build.nulls_not_distinct)? else {
+    let Some(values) =
+        keys.first_duplicate(true, build.nulls_not_distinct, context.expressions.values)?
+    else {
         return Ok(());
     };
     Err(duplicated_index_key(

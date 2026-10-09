@@ -427,7 +427,14 @@ impl<'a> BinaryReader<'a> {
                 };
                 Ok(Value::Row(row))
             }
-            14 => {
+            tag @ (14 | 23) => {
+                let type_oid = if tag == 23 {
+                    Some(u32::from_le_bytes(
+                        self.read_i32("record type OID")?.to_le_bytes(),
+                    ))
+                } else {
+                    None
+                };
                 let count = self.read_count("record length", 9)?;
                 let mut fields = Vec::new();
                 fields.try_reserve_exact(count).map_err(|error| {
@@ -438,7 +445,9 @@ impl<'a> BinaryReader<'a> {
                     let value = self.read_value(depth + 1)?;
                     fields.push((name, value));
                 }
-                Ok(Value::Record(fields))
+                Ok(Value::Record(uqa_core::RecordValue::from_parts(
+                    fields, type_oid,
+                )))
             }
             tag @ (15 | 21) => {
                 let element_type_oid = if tag == 21 {

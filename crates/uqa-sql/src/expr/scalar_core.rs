@@ -9,7 +9,7 @@
 use crate::{
     ast::BinaryOp,
     error::{Result, SQLError},
-    expr::{eval_comparison_truth_with_enum_catalog, EngineHook, EvalContext},
+    expr::{eval_comparison_truth_with_engine, EvalContext},
 };
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -99,12 +99,12 @@ pub(super) fn selection_with_context(
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("nullif takes 2 args".into()));
             }
-            if eval_comparison_truth_with_enum_catalog(
+            if eval_comparison_truth_with_engine(
                 BinaryOp::Equal,
                 &args[0],
                 &args[1],
                 control,
-                context.engine.and_then(EngineHook::enum_labels),
+                context.engine,
                 None,
             )? == Some(true)
             {
@@ -128,12 +128,12 @@ pub(super) fn selection_with_context(
                         } else {
                             BinaryOp::Greater
                         };
-                        if eval_comparison_truth_with_enum_catalog(
+                        if eval_comparison_truth_with_engine(
                             op,
                             previous,
                             value,
                             control,
-                            context.engine.and_then(EngineHook::enum_labels),
+                            context.engine,
                             context.enum_comparison_state(),
                         )? == Some(true)
                         {

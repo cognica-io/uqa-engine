@@ -63,7 +63,7 @@ pub fn collect_exists_key_operator<'a>(
         for row in &batch.rows {
             let view = batch.schema.view(row);
             let inserted = if let Some(direct_columns) = direct_columns.as_ref() {
-                insert_direct_key(&mut keys, direct_columns, &view)
+                insert_direct_key(&mut keys, direct_columns, &view, evaluator.enum_labels())
             } else {
                 let mut key = SmallVec::<[Value; 4]>::with_capacity(projections.len());
                 let mut contains_null = false;
@@ -88,7 +88,7 @@ pub fn collect_exists_key_operator<'a>(
                 if contains_null {
                     Ok(false)
                 } else {
-                    keys.insert_values(&key)
+                    keys.insert_values_with_catalog(&key, evaluator.enum_labels())
                 }
             };
             if let Err(error) = inserted {
@@ -114,6 +114,7 @@ fn insert_direct_key(
     keys: &mut crate::CanonicalRowHashSet,
     columns: &[DirectColumnKey],
     row: &dyn uqa_sql::expr::RowLookup,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> crate::ExecResult<bool> {
     let mut key = SmallVec::<[&Value; 4]>::with_capacity(columns.len());
     for column in columns {
@@ -125,5 +126,5 @@ fn insert_direct_key(
         }
         key.push(value);
     }
-    keys.insert_borrowed(&key)
+    keys.insert_borrowed_with_catalog(&key, catalog)
 }

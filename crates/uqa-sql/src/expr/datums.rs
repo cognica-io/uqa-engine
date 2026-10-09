@@ -18,7 +18,8 @@ mod fixed;
 mod malformed;
 mod records;
 
-pub(crate) fn contains_datum(value: &Value) -> bool {
+/// Whether catalog-free constant evaluation could reach an admitted physical value.
+pub fn contains_datum(value: &Value) -> bool {
     match value {
         Value::Datum(_) => true,
         Value::Array(array) => array.elements().iter().any(contains_datum),
@@ -28,6 +29,16 @@ pub(crate) fn contains_datum(value: &Value) -> bool {
         Value::Map(values) => values.values().any(contains_datum),
         _ => false,
     }
+}
+
+/// Read only the actual tuple type of a value already selected as a composite by SQL analysis.
+pub(in crate::expr) fn record_type_oid(
+    datum: &DatumValue,
+    control: &ProductionControl<'_>,
+) -> Result<u32, SQLError> {
+    let payload = payload(datum, control)?;
+    word(payload.bytes().get(4..).unwrap_or_default())
+        .ok_or_else(|| corrupt("invalid record header"))
 }
 
 /// Shape functions inspect only the detoasted array header, without resolving or observing its elements.

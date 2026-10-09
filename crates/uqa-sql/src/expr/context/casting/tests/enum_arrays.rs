@@ -62,21 +62,24 @@ fn retained_enum_oids_fill_legacy_carriers_and_preserve_unread_values() {
     };
     assert_eq!(label.label_oid(), Some(16_386));
     let legacy = Value::Enum(label.clone().with_label_oid(None));
-    let original = Value::Record(vec![
-        ("label".into(), legacy.clone()),
-        (
-            "labels".into(),
-            Value::Array(
-                uqa_core::ArrayValue::with_lower_bounds(vec![legacy, Value::Null], vec![-2])
-                    .unwrap()
-                    .with_element_type_oid(Some(16_384)),
+    let original = Value::Record(
+        vec![
+            ("label".into(), legacy.clone()),
+            (
+                "labels".into(),
+                Value::Array(
+                    uqa_core::ArrayValue::with_lower_bounds(vec![legacy, Value::Null], vec![-2])
+                        .unwrap()
+                        .with_element_type_oid(Some(16_384)),
+                ),
             ),
-        ),
-        (
-            "unread".into(),
-            Value::Datum(uqa_core::DatumValue::new(1700, 0, Vec::new())),
-        ),
-    ]);
+            (
+                "unread".into(),
+                Value::Datum(uqa_core::DatumValue::new(1700, 0, Vec::new())),
+            ),
+        ]
+        .into(),
+    );
     let mut source = crate::expr::composites::CompositeConstantSource {
         value: original.clone(),
         descriptors: Vec::new(),
@@ -238,7 +241,7 @@ fn host_result_output_reads_physical_enums_inside_named_and_positional_values() 
         0,
         16_386_u32.to_le_bytes().to_vec(),
     ));
-    let record = Value::Record(vec![("label".into(), value.clone())]);
+    let record = Value::Record(vec![("label".into(), value.clone())].into());
     let mut result = crate::SQLResult::from_rows_with_positions(
         vec!["v".into(), "v".into()],
         vec![crate::ResultRow::new()],
@@ -249,7 +252,7 @@ fn host_result_output_reads_physical_enums_inside_named_and_positional_values() 
         result.positional_rows.unwrap(),
         vec![vec![
             Value::Str("renamed".into()),
-            Value::Record(vec![("label".into(), Value::Str("renamed".into()))])
+            Value::Record(vec![("label".into(), Value::Str("renamed".into()))].into())
         ]]
     );
     assert!(result.rows[0]

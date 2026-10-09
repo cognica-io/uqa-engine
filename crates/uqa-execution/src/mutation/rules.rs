@@ -554,7 +554,7 @@ where
                     .map(|field| (column, field.value))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(ResolvedVariable::untyped(Value::Record(fields)))
+        Ok(ResolvedVariable::untyped(Value::Record(fields.into())))
     }
 }
 

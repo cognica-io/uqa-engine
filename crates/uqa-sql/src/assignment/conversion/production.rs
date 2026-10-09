@@ -434,7 +434,13 @@ fn record_value(
     if let Some(memory) = &mut parts.memory {
         drop(memory.split(old_buffer_bytes));
     }
-    Ok(control.finish(Value::Record(parts.records), parts.memory)?)
+    let (record, memory) = uqa_core::RecordValue::with_control(
+        control.finish(parts.records, parts.memory)?,
+        None,
+        control,
+    )?
+    .into_parts();
+    Ok(control.finish(Value::Record(record), memory)?)
 }
 
 struct RecordParts {

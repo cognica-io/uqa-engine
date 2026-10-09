@@ -69,7 +69,7 @@ mod session_sleep;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
-pub use value_catalog::SQLValueCatalog;
+pub use value_catalog::{EngineValueCatalog, SQLValueCatalog};
 
 #[cfg(test)]
 use binary::eval_comparison_op;
@@ -79,9 +79,9 @@ pub use binary::{
     compare_with_control, equal_typed_values_with_enum_catalog, eval_binary_values,
     eval_binary_values_with_control, eval_binary_values_with_integer_width,
     eval_binary_values_with_integer_width_with_control, eval_comparison_truth,
-    eval_comparison_truth_with_control, eval_comparison_truth_with_enum_catalog,
-    integer_width_for_literal, integer_width_for_type, truthy, type_comparison_can_fail,
-    validate_legacy_vector_comparison, value_comparison_can_fail,
+    eval_comparison_truth_with_control, eval_comparison_truth_with_engine,
+    eval_comparison_truth_with_enum_catalog, integer_width_for_literal, integer_width_for_type,
+    truthy, type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};

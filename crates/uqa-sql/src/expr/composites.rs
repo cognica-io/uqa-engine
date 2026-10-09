@@ -19,6 +19,7 @@ mod changes;
 pub mod constants;
 pub mod constructor;
 pub(crate) mod datum;
+pub(super) mod fields;
 mod input;
 pub mod literal;
 pub(crate) mod retained;
@@ -99,6 +100,18 @@ pub fn validate_field_result(field: &crate::ast::CompositeFieldBinding) -> Resul
     let Some(current) = &field.changed_type else {
         return Ok(());
     };
+    validate_field_type(field, current)
+}
+
+pub(super) fn validate_field_type(
+    field: &crate::ast::CompositeFieldBinding,
+    current: &ColumnType,
+) -> Result<()> {
+    if crate::catalog::type_metadata::pg_type_oid(current)
+        == crate::catalog::type_metadata::pg_type_oid(&field.result_type)
+    {
+        return Ok(());
+    }
     Err(SQLError::Diagnostic {
         sqlstate: "42804".into(),
         message: format!("attribute {} has wrong type", field.number),
@@ -165,7 +178,10 @@ pub fn composite_from_text(engine: &dyn EngineHook, text: &str, type_oid: u32) -
         ));
         Ok(())
     })?;
-    Ok(Value::Record(fields))
+    Ok(Value::Record(uqa_core::RecordValue::from_parts(
+        fields,
+        Some(type_oid),
+    )))
 }
 
 /// Coerce the fields of an anonymous row to a composite type position by position, as `coerce_record_to_complex` does. The field count must match the live attributes.
@@ -196,7 +212,12 @@ fn composite_from_fields(
             Ok((attribute.name.clone(), converted))
         })
         .collect::<Result<Vec<_>>>()
-        .map(Value::Record)
+        .map(|fields| {
+            Value::Record(uqa_core::RecordValue::from_parts(
+                fields,
+                Some(descriptor.type_oid),
+            ))
+        })
 }
 
 /// Cast a value to a composite type: the identity for a value of the same type, `record_in` for unknown literals and string-category sources, and attribute-wise coercion for anonymous rows and records. Returns `None` when the target is not a composite type.
@@ -217,7 +238,14 @@ pub fn cast_to_composite(
         {
             composite_from_text(engine, text, reference.oid).map(Some)
         }
-        (Value::Record(_), Some(ColumnType::Composite(source))) if source.oid == reference.oid => {
+        (Value::Record(fields), Some(ColumnType::Composite(source)))
+            if source.oid == reference.oid =>
+        {
+            Ok(Some(Value::Record(fields.clone().with_type_oid(Some(
+                fields.type_oid().unwrap_or(source.oid),
+            )))))
+        }
+        (Value::Datum(_), Some(ColumnType::Composite(source))) if source.oid == reference.oid => {
             Ok(Some(value.clone()))
         }
         (Value::Record(_) | Value::Row(_), Some(source @ ColumnType::Composite(_))) => {

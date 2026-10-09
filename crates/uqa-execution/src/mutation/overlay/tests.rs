@@ -447,8 +447,8 @@ fn canonical_cache_matches_the_value_equality_oracle_for_normalized_nested_value
         Value::FixedChar("abc".into()),
         Value::Str("abc".into()),
         Value::Bytes(b"abc".to_vec()),
-        Value::Record(vec![("old".into(), Value::Int(1))]),
-        Value::Record(vec![("new".into(), Value::Float(1.0))]),
+        Value::Record(vec![("old".into(), Value::Int(1))].into()),
+        Value::Record(vec![("new".into(), Value::Float(1.0))].into()),
         Value::Array(ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![-1]).unwrap()),
         Value::Array(ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![1]).unwrap()),
         Value::Temporal(TemporalValue::TimeTz {

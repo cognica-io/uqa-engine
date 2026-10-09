@@ -176,6 +176,25 @@ fn output_for_cast<'a>(
             super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
         return Ok(Some((output, Some("text"))));
     }
+    if let Value::Record(record) = value {
+        if let Some(oid) = record.type_oid().filter(|_| is_string_type(target)) {
+            let ty = engine
+                .resolve_type_oid(oid)
+                .map_err(SQLError::Internal)?
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("type with OID {oid} does not exist"),
+                })?;
+            return Ok(Some((
+                Value::Str(crate::result::format_postgres_text(
+                    value,
+                    &ty,
+                    Some(engine),
+                )?),
+                Some("text"),
+            )));
+        }
+    }
     // `record_out` spells each field through its attribute type's output function.
     if let (Value::Record(_), Some(source @ ColumnType::Composite(_))) =
         (value, resolved_source_type)
@@ -265,20 +284,12 @@ pub fn cast_value_with_type_resolution_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
-    let resolved_target = engine
-        .map(|engine| engine.resolve_type_name(target_ty))
-        .transpose()
-        .map_err(SQLError::Internal)?
-        .flatten()
-        .map(|ty| ty.retain_external_with_control(control))
-        .transpose()?;
+    let resolved_target = resolve_catalog_type_with_control(target_ty, engine, control)?;
     control.check()?;
-    let resolved_source_type = match (engine, source_ty) {
-        (Some(engine), Some(source)) => engine
-            .resolve_type_name(source)
-            .map_err(SQLError::Internal)?,
-        _ => None,
-    };
+    let resolved_source_type = source_ty
+        .map(|source| resolve_catalog_type_with_control(source, engine, control))
+        .transpose()?
+        .flatten();
     let parsed_target = if resolved_target.is_some() {
         None
     } else {
@@ -287,6 +298,15 @@ pub fn cast_value_with_type_resolution_with_control(
     let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
+        if let Some(value) = record_identity_cast(
+            value,
+            resolved_source_type.as_deref(),
+            target,
+            engine,
+            control,
+        )? {
+            return Ok(value);
+        }
         if let Some(output) =
             physical_output_cast(value, source_ty, target_ty, target, engine, control)?
         {
@@ -298,7 +318,7 @@ pub fn cast_value_with_type_resolution_with_control(
         if let Some(value) = super::super::enums::cast_to_enum(
             engine.enum_labels(),
             value,
-            resolved_source_type.as_ref(),
+            resolved_source_type.as_deref(),
             target,
         )? {
             return Ok(control.retain_external_value(value)?);
@@ -306,7 +326,7 @@ pub fn cast_value_with_type_resolution_with_control(
         if let Some(value) = super::super::composites::cast_to_composite(
             engine,
             value,
-            resolved_source_type.as_ref(),
+            resolved_source_type.as_deref(),
             target,
         )? {
             return Ok(control.retain_external_value(value)?);
@@ -320,7 +340,7 @@ pub fn cast_value_with_type_resolution_with_control(
             engine,
             value,
             source_ty,
-            resolved_source_type.as_ref(),
+            resolved_source_type.as_deref(),
             target,
         )? {
             return cast_value_with_type_resolution_with_control(
@@ -336,17 +356,14 @@ pub fn cast_value_with_type_resolution_with_control(
             && (requires_catalog_array_cast(target)
                 || super::super::enums::contains_enum_carrier(value)
                 || resolved_source_type
-                    .as_ref()
+                    .as_deref()
                     .is_some_and(super::super::enums::is_enum_bearing))
         {
             return cast_catalog_array(value, source_ty, target, engine, control);
         }
     }
     let resolved_source = resolved_source_type
-        .map(|ty| {
-            let ty = ty.retain_external_with_control(control)?;
-            coercion_type_name_with_control(&ty, control)
-        })
+        .map(|ty| coercion_type_name_with_control(&ty, control))
         .transpose()?;
     let source_ty = resolved_source.as_deref().map(String::as_str).or(source_ty);
     let target_name = resolved_target
@@ -362,6 +379,57 @@ pub fn cast_value_with_type_resolution_with_control(
         engine,
         control,
     )
+}
+
+fn resolve_catalog_type_with_control(
+    name: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>> {
+    engine
+        .map(|engine| engine.resolve_type_name(name))
+        .transpose()
+        .map_err(SQLError::Internal)?
+        .flatten()
+        .map(|ty| {
+            ty.retain_external_with_control(control)
+                .map_err(SQLError::from)
+        })
+        .transpose()
+}
+
+fn record_identity_cast(
+    value: &Value,
+    resolved_source_type: Option<&ColumnType>,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    if matches!(target, ColumnType::Record) {
+        // Composite-to-record coercion is a binary relabel: even malformed physical fields remain unread.
+        if let Value::Datum(datum) = value {
+            let ty = engine
+                .resolve_type_oid(datum.type_oid())
+                .map_err(SQLError::Internal)?;
+            if matches!(ty, Some(ColumnType::Composite(_))) {
+                return Ok(Some(control.copy_value(value)?));
+            }
+        }
+        if let (Value::Record(record), Some(ColumnType::Composite(source))) =
+            (value, resolved_source_type)
+        {
+            let (value, memory) = control.copy_value(value)?.into_parts();
+            let Value::Record(value) = value else {
+                unreachable!();
+            };
+            return Ok(Some(control.finish(
+                Value::Record(value.with_type_oid(Some(record.type_oid().unwrap_or(source.oid)))),
+                memory,
+            )?));
+        }
+    }
+
+    Ok(None)
 }
 
 fn cast_resolved_value(

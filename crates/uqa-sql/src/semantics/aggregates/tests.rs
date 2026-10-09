@@ -9,6 +9,38 @@
 use super::*;
 
 #[test]
+fn analyzed_composite_rows_keep_complete_grouping_identity() {
+    let row = ScalarExpr::CompositeRow {
+        items: vec![ScalarExpr::Column("n".into())],
+        binding: crate::ast::CompositeRowBinding {
+            ty: "composite#20001".into(),
+            attributes: vec![1],
+            argument_types: Some(vec![crate::ColumnType::Integer]),
+        },
+        bound_type: None,
+    };
+    assert!(exprs_match(&row, &row.clone()));
+    let mut other = row.clone();
+    let ScalarExpr::CompositeRow { binding, .. } = &mut other else {
+        unreachable!()
+    };
+    binding.attributes[0] = 2;
+    assert!(!exprs_match(&row, &other));
+    let mut other = row.clone();
+    let ScalarExpr::CompositeRow { binding, .. } = &mut other else {
+        unreachable!()
+    };
+    binding.argument_types = Some(vec![crate::ColumnType::BigInteger]);
+    assert!(!exprs_match(&row, &other));
+    let mut other = row.clone();
+    let ScalarExpr::CompositeRow { items, .. } = &mut other else {
+        unreachable!()
+    };
+    items[0] = ScalarExpr::Column("m".into());
+    assert!(!exprs_match(&row, &other));
+}
+
+#[test]
 fn array_and_row_ordering_expressions_keep_structural_group_identity() {
     for (left, right, expected) in [
         ("ARRAY[n]", "ARRAY[n]", true),
@@ -199,12 +231,12 @@ fn composite_literals_with_equal_current_values_keep_distinct_original_datums() 
         CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
     };
     let expression = |original: &str| ScalarExpr::TypedLiteral {
-        value: Value::Record(vec![("a".into(), Value::Bool(true))]),
+        value: Value::Record(vec![("a".into(), Value::Bool(true))].into()),
         ty: "composite#20001".into(),
         bound_type: None,
         parameter_index: None,
         composite_source: Some(Box::new(CompositeConstantSource {
-            value: Value::Record(vec![("a".into(), Value::Str(original.into()))]),
+            value: Value::Record(vec![("a".into(), Value::Str(original.into()))].into()),
             descriptors: vec![CompositeTypeDescriptor {
                 dropped: Vec::new(),
                 type_oid: 20_001,

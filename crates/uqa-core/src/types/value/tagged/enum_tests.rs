@@ -38,7 +38,7 @@ fn enum_carriers_round_trip_through_serde_and_controlled_decoding() {
         Value::Array(
             ArrayValue::try_new(vec![label(7, &[1]), Value::Null, label(7, &[2])]).unwrap(),
         ),
-        Value::Record(vec![("mood".into(), physical_label(9, &[128], u32::MAX))]),
+        Value::Record(vec![("mood".into(), physical_label(9, &[128], u32::MAX))].into()),
     ];
     for value in values {
         let text = serde_json::to_string(&value).unwrap();

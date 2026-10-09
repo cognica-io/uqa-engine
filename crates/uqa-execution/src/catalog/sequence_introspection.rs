@@ -94,22 +94,25 @@ impl SequenceIntrospectionContext<'_> {
         };
         self.ensure_sequence_introspection_privilege(&sequence, SequenceAccess::Any)?;
         let state = sequence.state;
-        Ok(Value::Record(vec![
-            ("start_value".into(), Value::Int(state.start)),
-            ("minimum_value".into(), Value::Int(state.min_value)),
-            ("maximum_value".into(), Value::Int(state.max_value)),
-            ("increment".into(), Value::Int(state.increment)),
-            ("cycle_option".into(), Value::Bool(state.cycle)),
-            ("cache_size".into(), Value::Int(state.cache_size)),
-            (
-                "data_type".into(),
-                Value::Int(match state.data_type {
-                    SequenceDataType::SmallInt => 21,
-                    SequenceDataType::Integer => 23,
-                    SequenceDataType::BigInt => 20,
-                }),
-            ),
-        ]))
+        Ok(Value::Record(
+            vec![
+                ("start_value".into(), Value::Int(state.start)),
+                ("minimum_value".into(), Value::Int(state.min_value)),
+                ("maximum_value".into(), Value::Int(state.max_value)),
+                ("increment".into(), Value::Int(state.increment)),
+                ("cycle_option".into(), Value::Bool(state.cycle)),
+                ("cache_size".into(), Value::Int(state.cache_size)),
+                (
+                    "data_type".into(),
+                    Value::Int(match state.data_type {
+                        SequenceDataType::SmallInt => 21,
+                        SequenceDataType::Integer => 23,
+                        SequenceDataType::BigInt => 20,
+                    }),
+                ),
+            ]
+            .into(),
+        ))
     }
 
     pub fn pg_get_sequence_data_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
@@ -125,10 +128,13 @@ impl SequenceIntrospectionContext<'_> {
         {
             return Ok(null_sequence_data());
         }
-        Ok(Value::Record(vec![
-            ("last_value".into(), Value::Int(sequence.state.current)),
-            ("is_called".into(), Value::Bool(sequence.state.called)),
-        ]))
+        Ok(Value::Record(
+            vec![
+                ("last_value".into(), Value::Int(sequence.state.current)),
+                ("is_called".into(), Value::Bool(sequence.state.called)),
+            ]
+            .into(),
+        ))
     }
 
     pub fn pg_sequence_last_value_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
@@ -226,10 +232,13 @@ enum SequenceAccess {
 }
 
 fn null_sequence_data() -> Value {
-    Value::Record(vec![
-        ("last_value".into(), Value::Null),
-        ("is_called".into(), Value::Null),
-    ])
+    Value::Record(
+        vec![
+            ("last_value".into(), Value::Null),
+            ("is_called".into(), Value::Null),
+        ]
+        .into(),
+    )
 }
 
 fn read_sequence(

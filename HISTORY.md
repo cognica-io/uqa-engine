@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve a named record's actual tuple type through copying, storage and spill. Record output and field selection use that descriptor, and equality and ordering validate each reached field's type with PostgreSQL's NULL and short-circuit rules. Composite-to-record identity casts leave retained bytes unread.
+
 - Preserve resolved text types when propagating NULL and string constants from derived SELECT, VALUES and view outputs; keep bare untyped `pg_typeof` arguments unknown.
 
 - Preserve retained enum comparison semantics through external sorting, Top-K, DISTINCT and FETCH WITH TIES, including disk-spilled keys. UNION, INTERSECT and EXCEPT group enum identities without reading labels, preserving NULLs and ALL multiplicities. Window partition and peer boundaries use the same identity equality, preserving ranks and peer frames. Aggregate MIN/MAX, ordered and DISTINCT inputs, mode and discrete percentile retain enum catalog and comparison state across groups, window frames and spill merging. Recognize matching array and row constructors in DISTINCT ON ordering.

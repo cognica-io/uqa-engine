@@ -282,7 +282,7 @@ fn assign_levels(
                     SQLError::Internal(format!("composite value has no field `{field}`"))
                 })?;
             slot.1 = assign_levels(&slot.1, &types[1..], rest, &bounds[1..], value, composites)?;
-            Ok(Value::Record(fields))
+            Ok(Value::Record(fields.with_type_oid(Some(reference.oid))))
         }
         targets::AssignmentLevel::Subscripts(_) => {
             let slice = level.is_slice();

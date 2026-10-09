@@ -79,7 +79,10 @@ pub(super) fn project(
             usize::try_from(length).ok()?
         })?;
     }
-    Some(Value::Record(output))
+    Some(Value::Record(uqa_core::RecordValue::from_parts(
+        output,
+        Some(before.type_oid),
+    )))
 }
 
 fn retain_array_identity(value: &Value, before: &ColumnType, after: &ColumnType) -> Option<Value> {
@@ -206,7 +209,7 @@ mod tests {
         );
         assert_eq!(
             project(&fields, &before, &before, &super::super::Descriptors::new()),
-            Some(Value::Record(fields))
+            Some(Value::Record(fields.into()))
         );
     }
 

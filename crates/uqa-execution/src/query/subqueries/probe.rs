@@ -56,6 +56,7 @@ fn correlated_exists_matches<S: Clone>(
     outer_row: PhysicalOuterRow<'_>,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
+    let catalog = uqa_sql::expr::EngineValueCatalog(function_hook);
     with_outer_lookup(outer_row, |outer_row| match &lookup.outer_keys {
         CorrelatedExistsOuterKeys::Direct(columns) => {
             let mut key = smallvec::SmallVec::<[&Value; 4]>::with_capacity(columns.len());
@@ -70,7 +71,7 @@ fn correlated_exists_matches<S: Clone>(
             }
             lookup
                 .keys
-                .contains_borrowed(&key)
+                .contains_borrowed_with_catalog(&key, Some(&catalog))
                 .map_err(physical_exec_error)
         }
         CorrelatedExistsOuterKeys::Evaluated(expressions) => {
@@ -87,7 +88,7 @@ fn correlated_exists_matches<S: Clone>(
             }
             lookup
                 .keys
-                .contains_values(&key)
+                .contains_values_with_catalog(&key, Some(&catalog))
                 .map_err(physical_exec_error)
         }
     })

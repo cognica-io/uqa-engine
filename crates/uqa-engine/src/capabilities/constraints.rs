@@ -27,6 +27,7 @@ impl Engine {
     pub(crate) fn constraint_execution_context(&self) -> ConstraintContext<'_> {
         ConstraintContext {
             catalog: self,
+            values: self,
             reads: self,
             indexes: self,
             transactions: self,
@@ -143,12 +144,13 @@ impl MutationIndexRead for Engine {
     ) -> Result<uqa_execution::mutation::overlay::CommandIndexProbe, SQLError> {
         let table = self.command_overlay_table_name(table)?;
         let control = self.query_retention_control()?;
-        uqa_execution::mutation::overlay::CommandMutationOverlay::expression_matches(
+        uqa_execution::mutation::overlay::CommandMutationOverlay::expression_matches_with_catalog(
             &mut self.session.command_mutation_overlays.lock(),
             &table,
             physical_key,
             values,
             &control,
+            Some(self),
         )
     }
     fn value_index_scan_key(

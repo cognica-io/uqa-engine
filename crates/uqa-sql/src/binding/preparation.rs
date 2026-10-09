@@ -153,6 +153,7 @@ fn read_executable_inputs_inner(
     }
     let reusable = constants.reusable_across_messages();
     constants.apply(plan)?;
+    super::composite_inputs::retain_composite_inputs(routines, plan, params, binding)?;
     plan.normalize_window_definitions()?;
     let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
     if track_dependencies {

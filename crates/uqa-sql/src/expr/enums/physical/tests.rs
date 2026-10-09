@@ -19,7 +19,7 @@ fn physical(oid: u32) -> Value {
 fn nested(kind: usize, first: Value, second: Value) -> Value {
     match kind {
         0 => Value::Array(uqa_core::ArrayValue::try_new(vec![first, second]).unwrap()),
-        1 => Value::Record(vec![("e".into(), first), ("n".into(), second)]),
+        1 => Value::Record(vec![("e".into(), first), ("n".into(), second)].into()),
         2 => Value::Row(vec![first, second].into()),
         _ => unreachable!(),
     }
@@ -625,8 +625,8 @@ fn bound_key_equality_uses_raw_enum_identities_inside_containers() {
         let right = Value::Array(uqa_core::ArrayValue::try_new(vec![right, Value::Null]).unwrap());
         assert!(equal(&left, &right).unwrap());
         assert!(equal(
-            &Value::Record(vec![("a".into(), left)]),
-            &Value::Record(vec![("a".into(), right)])
+            &Value::Record(vec![("a".into(), left)].into()),
+            &Value::Record(vec![("a".into(), right)].into())
         )
         .unwrap());
     }

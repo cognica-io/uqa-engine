@@ -129,7 +129,7 @@ impl Value {
                         (!row.is_empty()).then(|| Children::Values(row.iter())),
                     ),
                     Self::Record(fields) => (
-                        buffer_bytes::<(String, Value)>(fields.capacity())?,
+                        fields.retained_buffer_bytes()?,
                         (!fields.is_empty()).then(|| Children::Record(fields.iter())),
                     ),
                     Self::Map(fields) => (

@@ -76,7 +76,8 @@ impl Interpreter<'_> {
                                 .into_iter()
                                 .enumerate()
                                 .map(|(index, value)| (format!("f{}", index + 1), value))
-                                .collect(),
+                                .collect::<Vec<_>>()
+                                .into(),
                         );
                         Ok(())
                     }
@@ -184,7 +185,8 @@ impl Interpreter<'_> {
                                     .unwrap_or(Value::Null),
                             )
                         })
-                        .collect(),
+                        .collect::<Vec<_>>()
+                        .into(),
                 );
                 self.values[*dno] = value;
                 self.record_types.insert(*dno, column_types.to_vec());

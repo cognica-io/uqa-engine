@@ -134,8 +134,8 @@ pub(crate) fn project_value(
             project_value(value, base, original, current, interpret_datums)
         }
         (ColumnType::Composite(reference), Value::Record(fields)) => {
-            let (Some(before), Some(after)) =
-                (original.get(&reference.oid), current.get(&reference.oid))
+            let type_oid = fields.type_oid().unwrap_or(reference.oid);
+            let (Some(before), Some(after)) = (original.get(&type_oid), current.get(&type_oid))
             else {
                 return Ok(value.clone());
             };
@@ -192,7 +192,12 @@ pub(crate) fn project_value(
                     Ok((attribute.name.clone(), value))
                 })
                 .collect::<Result<Vec<_>, _>>()
-                .map(Value::Record)
+                .map(|output| {
+                    Value::Record(uqa_core::RecordValue::from_parts(
+                        output,
+                        Some(fields.type_oid().unwrap_or(reference.oid)),
+                    ))
+                })
         }
         (ColumnType::Array(element), Value::Array(array)) => {
             let values = array

@@ -275,7 +275,7 @@ fn legacy_enum_constants_fill_physical_oids_before_type_changes(#[case] provider
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn composite_enum_reads_match_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!("../../../../../tests/parity/pg18/composite_enum_read_oracle.expected.json"),
     );
@@ -287,7 +287,7 @@ fn composite_enum_reads_match_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn composite_enum_support_functions_match_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!(
             "../../../../../tests/parity/pg18/composite_enum_support_oracle.expected.json"
@@ -301,7 +301,7 @@ fn composite_enum_support_functions_match_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn composite_enum_call_state_matches_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!(
             "../../../../../tests/parity/pg18/composite_enum_call_state_oracle.expected.json"
@@ -315,7 +315,7 @@ fn composite_enum_call_state_matches_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn composite_enum_operators_match_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!(
             "../../../../../tests/parity/pg18/composite_enum_operator_oracle.expected.json"
@@ -329,7 +329,7 @@ fn composite_enum_operators_match_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn composite_enum_consumers_match_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!(
             "../../../../../tests/parity/pg18/composite_enum_consumer_oracle.expected.json"
@@ -343,7 +343,7 @@ fn composite_enum_consumers_match_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn composite_nested_enum_equality_matches_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!(
             "../../../../../tests/parity/pg18/composite_enum_nested_equality_oracle.expected.json"
@@ -402,7 +402,7 @@ fn composite_nested_enum_order_matches_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn generated_enum_functions_match_postgresql(#[case] provider: usize) {
-    verify_enum_oracle(
+    verify_reopened_oracle(
         provider,
         include_str!("../../../../../tests/parity/pg18/enum_generated_oracle.expected.json"),
     );
@@ -482,7 +482,21 @@ fn physical_catalog_arrays_match_postgresql(#[case] provider: usize) {
     );
 }
 
-fn verify_enum_oracle(provider: usize, reference: &str) {
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn physical_record_descriptors_match_postgresql(#[case] provider: usize) {
+    verify_reopened_oracle(
+        provider,
+        include_str!(
+            "../../../../../tests/parity/pg18/composite_physical_record_oracle.expected.json"
+        ),
+    );
+}
+
+fn verify_reopened_oracle(provider: usize, reference: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("enum-reads.db");
     let engine = super::addition::open(provider, &path);

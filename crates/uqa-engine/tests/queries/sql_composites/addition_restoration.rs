@@ -76,10 +76,13 @@ fn downgrade(value: &mut Json) -> usize {
             let mut count = object.values_mut().map(downgrade).sum();
             if let Some(literal) = object.get("TypedLiteral") {
                 if serde_json::from_value::<Value>(literal["value"].clone()).ok()
-                    == Some(Value::Record(vec![
-                        ("a".into(), Value::Int(9)),
-                        ("b".into(), Value::Str("legacy".into())),
-                    ]))
+                    == Some(Value::Record(
+                        vec![
+                            ("a".into(), Value::Int(9)),
+                            ("b".into(), Value::Str("legacy".into())),
+                        ]
+                        .into(),
+                    ))
                 {
                     *value = json!({"Cast": {"expr": {"Literal": "(9,legacy)"}, "ty": literal["ty"], "implicit": false}});
                     return count + 1;
@@ -156,11 +159,14 @@ fn verify(engine: &Engine) {
         let result = exec(engine, query);
         assert_eq!(
             result.rows[0]["p"],
-            Value::Record(vec![
-                ("a".into(), Value::Int(a)),
-                ("b".into(), Value::Str(b.into())),
-                ("c".into(), Value::Null)
-            ]),
+            Value::Record(
+                vec![
+                    ("a".into(), Value::Int(a)),
+                    ("b".into(), Value::Str(b.into())),
+                    ("c".into(), Value::Null)
+                ]
+                .into()
+            ),
             "{query}"
         );
     }

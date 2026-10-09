@@ -16,7 +16,7 @@ use uqa_sql::ResultRow;
 
 use crate::{ExecResult, PhysicalRow, RowSchema};
 
-use super::encoding::{encode_key, encode_key_borrowed, hash_canonical_row};
+use super::encoding::{encode_key, encode_key_borrowed, hash_canonical_row_with_enum_catalog};
 use super::spill::SeenKeySet;
 
 /// Collision-safe in-memory set for positional SQL rows.
@@ -43,8 +43,20 @@ impl CanonicalRowHashSet {
     /// Insert a positional key assembled from borrowed values.
     /// Returns `true` only when this is the first SQL-equal key.
     pub fn insert_borrowed(&mut self, values: &[&Value]) -> ExecResult<bool> {
-        let hash = hash_canonical_row(self.index.hasher(), values.iter().copied().map(Some))?;
-        if self.matching(hash, values.iter().copied())? {
+        self.insert_borrowed_with_catalog(values, None)
+    }
+
+    pub fn insert_borrowed_with_catalog(
+        &mut self,
+        values: &[&Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        let hash = hash_canonical_row_with_enum_catalog(
+            self.index.hasher(),
+            values.iter().copied().map(Some),
+            catalog,
+        )?;
+        if self.matching(hash, values.iter().copied(), catalog)? {
             return Ok(false);
         }
 
@@ -61,8 +73,20 @@ impl CanonicalRowHashSet {
     /// Insert an already positional key without an intermediate borrowed-row
     /// carrier. Values are copied only for a previously unseen key.
     pub fn insert_values(&mut self, values: &[Value]) -> ExecResult<bool> {
-        let hash = hash_canonical_row(self.index.hasher(), values.iter().map(Some))?;
-        if self.matching(hash, values.iter())? {
+        self.insert_values_with_catalog(values, None)
+    }
+
+    pub fn insert_values_with_catalog(
+        &mut self,
+        values: &[Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        let hash = hash_canonical_row_with_enum_catalog(
+            self.index.hasher(),
+            values.iter().map(Some),
+            catalog,
+        )?;
+        if self.matching(hash, values.iter(), catalog)? {
             return Ok(false);
         }
 
@@ -75,20 +99,45 @@ impl CanonicalRowHashSet {
     /// Probe with a composite row of borrowed values without allocating or
     /// copying the key.
     pub fn contains_borrowed(&self, values: &[&Value]) -> ExecResult<bool> {
-        let hash = hash_canonical_row(self.index.hasher(), values.iter().copied().map(Some))?;
-        self.matching(hash, values.iter().copied())
+        self.contains_borrowed_with_catalog(values, None)
+    }
+
+    pub fn contains_borrowed_with_catalog(
+        &self,
+        values: &[&Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        let hash = hash_canonical_row_with_enum_catalog(
+            self.index.hasher(),
+            values.iter().copied().map(Some),
+            catalog,
+        )?;
+        self.matching(hash, values.iter().copied(), catalog)
     }
 
     /// Probe with an already positional value slice.
     pub fn contains_values(&self, values: &[Value]) -> ExecResult<bool> {
-        let hash = hash_canonical_row(self.index.hasher(), values.iter().map(Some))?;
-        self.matching(hash, values.iter())
+        self.contains_values_with_catalog(values, None)
+    }
+
+    pub fn contains_values_with_catalog(
+        &self,
+        values: &[Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> ExecResult<bool> {
+        let hash = hash_canonical_row_with_enum_catalog(
+            self.index.hasher(),
+            values.iter().map(Some),
+            catalog,
+        )?;
+        self.matching(hash, values.iter(), catalog)
     }
 
     fn matching<'a>(
         &self,
         hash: u64,
         values: impl ExactSizeIterator<Item = &'a Value> + Clone,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     ) -> ExecResult<bool> {
         let Some(bucket) = self.index.get(&hash) else {
             return Ok(false);
@@ -100,10 +149,12 @@ impl CanonicalRowHashSet {
             }
             let mut equal = true;
             for (stored, value) in stored.iter().zip(values.clone()) {
-                if !uqa_sql::expr::compare_typed_values_with_control(
+                if !uqa_sql::expr::compare_typed_values_with_enum_catalog(
                     stored,
                     value,
                     &uqa_core::memory::ProductionControl::uncontrolled(),
+                    catalog,
+                    None,
                 )?
                 .is_eq()
                 {

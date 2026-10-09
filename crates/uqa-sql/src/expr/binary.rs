@@ -20,8 +20,9 @@ pub use comparison::{
     compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
     compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
     compare_with_control, equal_typed_values_with_enum_catalog, eval_comparison_truth,
-    eval_comparison_truth_with_control, eval_comparison_truth_with_enum_catalog,
-    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
+    eval_comparison_truth_with_control, eval_comparison_truth_with_engine,
+    eval_comparison_truth_with_enum_catalog, type_comparison_can_fail,
+    validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
 };
 
@@ -45,12 +46,12 @@ pub(super) fn eval_binary(
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
     ) {
-        return eval_comparison_truth_with_enum_catalog(
+        return eval_comparison_truth_with_engine(
             op,
             &l,
             &r,
             &ProductionControl::uncontrolled(),
-            ctx.engine.and_then(super::EngineHook::enum_labels),
+            ctx.engine,
             None,
         )
         .map(|value| value.map_or(Value::Null, Value::Bool));
@@ -316,12 +317,12 @@ pub(super) fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
-    eval_comparison_truth_with_enum_catalog(
+    eval_comparison_truth_with_engine(
         op,
         l,
         r,
         &ProductionControl::uncontrolled(),
-        ctx.engine.and_then(super::EngineHook::enum_labels),
+        ctx.engine,
         None,
     )
     .map(|value| Some(value.map_or(Value::Null, Value::Bool)))

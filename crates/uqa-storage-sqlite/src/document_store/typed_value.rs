@@ -33,6 +33,7 @@ pub(super) enum StoredValue {
     Row(Vec<StoredValue>),
     TypedRow(uqa_core::RowValue),
     Record(Vec<(String, StoredValue)>),
+    TypedRecord(uqa_core::RecordValue),
     Map(BTreeMap<String, StoredValue>),
     Enum(uqa_core::EnumValue),
     Datum(uqa_core::DatumValue),
@@ -58,6 +59,7 @@ impl StoredValue {
             Value::List(values) => Self::List(values.into_iter().map(Self::from_value).collect()),
             Value::Row(values) if values.field_types().is_some() => Self::TypedRow(values),
             Value::Row(values) => Self::Row(values.into_iter().map(Self::from_value).collect()),
+            Value::Record(fields) if fields.type_oid().is_some() => Self::TypedRecord(fields),
             Value::Record(fields) => Self::Record(
                 fields
                     .into_iter()
@@ -94,11 +96,13 @@ impl StoredValue {
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
             Self::TypedRow(value) => Value::Row(value),
+            Self::TypedRecord(value) => Value::Record(value),
             Self::Record(fields) => Value::Record(
                 fields
                     .into_iter()
                     .map(|(name, value)| (name, value.into_value()))
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
             ),
             Self::Map(values) => Value::Map(
                 values
@@ -125,9 +129,12 @@ pub(super) fn value_requires_typed_encoding(value: &Value) -> bool {
                 || items.iter().any(value_requires_typed_encoding)
         }
         Value::Row(items) => items.iter().any(value_requires_typed_encoding),
-        Value::Record(fields) => fields
-            .iter()
-            .any(|(_, value)| value_requires_typed_encoding(value)),
+        Value::Record(fields) => {
+            fields.type_oid().is_some()
+                || fields
+                    .iter()
+                    .any(|(_, value)| value_requires_typed_encoding(value))
+        }
         Value::Map(values) => values.values().any(value_requires_typed_encoding),
         Value::Array(_)
         | Value::LegacyVector(_)

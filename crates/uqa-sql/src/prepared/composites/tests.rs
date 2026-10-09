@@ -68,10 +68,13 @@ impl CompositeTypeCatalog for Types {
 }
 
 fn value() -> Value {
-    Value::Record(vec![
-        ("a".into(), Value::Int(1)),
-        ("b".into(), Value::Str("x".into())),
-    ])
+    Value::Record(
+        vec![
+            ("a".into(), Value::Int(1)),
+            ("b".into(), Value::Str("x".into())),
+        ]
+        .into(),
+    )
 }
 
 #[test]
@@ -147,10 +150,7 @@ fn retained_fixed_width_fields_use_postgresql_datum_bits_and_restore_after_rollb
         let original = BTreeMap::from([(20_001, Arc::new(original))]);
         let current = BTreeMap::from([(20_001, Arc::new(current))]);
         let record = |value| {
-            Value::Record(vec![
-                ("a".into(), value),
-                ("b".into(), Value::Str("tail".into())),
-            ])
+            Value::Record(vec![("a".into(), value), ("b".into(), Value::Str("tail".into()))].into())
         };
         let input = record(input);
         assert_eq!(
@@ -178,7 +178,9 @@ fn projection_uses_original_numbers_preserves_array_bounds_and_can_restore_after
         Value::Array(
             ArrayValue::with_lower_bounds(
                 vec![
-                    Value::Record(vec![("a".into(), Value::Int(1)), ("b".into(), Value::Null)]),
+                    Value::Record(
+                        vec![("a".into(), Value::Int(1)), ("b".into(), Value::Null)].into()
+                    ),
                     Value::Null
                 ],
                 vec![-2]
@@ -199,10 +201,13 @@ fn generic_cache_keeps_source_datums_when_current_type_interpretation_loses_bits
     let source = Arc::new(source);
     let types = Types(RwLock::new(source.clone()));
     let mut plan = UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0));
-    let raw = Value::Record(vec![
-        ("a".into(), Value::Str("A".into())),
-        ("b".into(), Value::Str("tail".into())),
-    ]);
+    let raw = Value::Record(
+        vec![
+            ("a".into(), Value::Str("A".into())),
+            ("b".into(), Value::Str("tail".into())),
+        ]
+        .into(),
+    );
     plan.rewrite_scalar_expressions(&mut |node| {
         if matches!(node, ScalarExpr::Literal(Value::Int(1))) {
             *node = ScalarExpr::TypedLiteral {
@@ -235,10 +240,13 @@ fn generic_cache_keeps_source_datums_when_current_type_interpretation_loses_bits
     let executed = inputs.project_generic(&generic, &types).unwrap().unwrap();
     assert_eq!(
         values(&executed),
-        [Value::Record(vec![
-            ("a".into(), Value::Bool(true)),
-            ("b".into(), Value::Str("tail".into()))
-        ])]
+        [Value::Record(
+            vec![
+                ("a".into(), Value::Bool(true)),
+                ("b".into(), Value::Str("tail".into()))
+            ]
+            .into()
+        )]
     );
     *types.0.write().unwrap() = source;
     let restored = inputs.project_generic(&generic, &types).unwrap().unwrap();

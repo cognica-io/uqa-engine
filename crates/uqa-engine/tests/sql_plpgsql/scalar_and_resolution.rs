@@ -226,10 +226,7 @@ fn out_parameters_shape_result() {
     let record = scalar(&eng, "SELECT f_out(5) AS r");
     assert_eq!(
         record,
-        Value::Record(vec![
-            ("s".into(), Value::Int(6)),
-            ("p".into(), Value::Int(10)),
-        ])
+        Value::Record(vec![("s".into(), Value::Int(6)), ("p".into(), Value::Int(10)),].into())
     );
     // Single OUT parameter yields the bare value in scalar position.
     exec(

@@ -14,6 +14,7 @@ use crate::{
 
 mod allocation;
 use allocation::Workspace;
+mod record;
 mod row;
 
 fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
@@ -140,30 +141,10 @@ fn convert(
                 return Ok(Value::Row(row));
             }
         }
-        "record" if map.len() == 2 => {
-            let Some(Value::List(encoded_fields)) = map.get("fields") else {
-                return Ok(Value::Map(map));
-            };
-            for encoded in encoded_fields {
-                workspace.check()?;
-                if !matches!(encoded, Value::List(pair) if matches!(pair.as_slice(), [Value::Str(_), _]))
-                {
-                    return Ok(Value::Map(map));
-                }
+        "record" if map.len() == 2 || (map.len() == 3 && map.contains_key("type_oid")) => {
+            if let Some(record) = record::decoded(&mut map, workspace)? {
+                return Ok(Value::Record(record));
             }
-            let mut fields = workspace.vector(encoded_fields.len())?;
-            for encoded in take_list(&mut map, "fields") {
-                workspace.check()?;
-                let Value::List(mut pair) = encoded else {
-                    unreachable!("record pair was validated");
-                };
-                let value = pair.pop().expect("validated record value");
-                let Some(Value::Str(name)) = pair.pop() else {
-                    unreachable!("record name was validated");
-                };
-                fields.push((name, value));
-            }
-            return Ok(Value::Record(fields));
         }
         _ => {}
     }
