@@ -23,6 +23,9 @@ mod constraint_lookups;
 #[path = "sql_information_schema/expression_metadata.rs"]
 mod expression_metadata;
 
+#[path = "sql_information_schema/requested_fields.rs"]
+mod requested_fields;
+
 use type_metadata::{domain_layout, pg_type_routine_layout};
 
 fn array(values: Vec<Value>) -> Value {

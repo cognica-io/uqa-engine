@@ -1229,6 +1229,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "narrow_catalog_sources_do_not_construct_unused_expression_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/expression_metadata/requested_fields.rs",
+      "capability": "Requested virtual catalog fields",
+      "workload": "Repeated column sources with defaults/generated expressions and zero, one or 128 unrelated tables, plus domain and routine metadata without their defaults.",
+      "invariant": "No alias-output metadata is assembled for unrequested stored expressions; source aliases retain the same canonical field demand.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

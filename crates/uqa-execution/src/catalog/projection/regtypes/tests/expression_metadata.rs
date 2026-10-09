@@ -18,6 +18,7 @@ use uqa_sql::{
 };
 
 mod lifecycle;
+mod requested_fields;
 
 fn constant(oid: i64, ty: &str) -> Expr {
     Expr::TypedLiteral {
@@ -105,6 +106,7 @@ fn stored_expression_outputs_share_one_catalog_across_columns_and_aliases() {
                 &context,
                 &alias,
                 &services.resolution,
+                &crate::catalog::projection::CatalogRequest::default(),
             )
             .unwrap();
             assert_eq!(rows.len(), 2 * (unrelated + 1));
