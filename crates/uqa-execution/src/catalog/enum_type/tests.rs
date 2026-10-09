@@ -55,6 +55,10 @@ fn physical_label_lookup_tracks_the_pinned_registry_generation() {
     let value = cache.value(&first, 20_003).unwrap();
     assert_eq!(value.type_oid(), 20_000);
     assert_eq!(value.label_oid(), Some(20_003));
+    assert_eq!(cache.position(&first, 20_002), Some((20_000, 0)));
+    assert_eq!(cache.position(&first, 20_003), Some((20_000, 1)));
+    assert_eq!(cache.position(&first, 21_002), Some((21_000, 0)));
+    assert_eq!(cache.position(&first, 1), None);
     assert_eq!(cache.value(&first, 21_002).unwrap().type_oid(), 21_000);
     assert!(cache.value(&first, 1).is_none());
     let mut changed = first.as_ref().clone();
@@ -76,6 +80,8 @@ fn physical_label_lookup_tracks_the_pinned_registry_generation() {
         "renamed"
     );
     assert!(cache.value(&changed, 21_002).is_none());
+    assert_eq!(cache.position(&changed, 20_003), Some((20_000, 1)));
+    assert_eq!(cache.position(&changed, 21_002), None);
     assert_eq!(
         cache
             .labels(&first, 20_000)
@@ -86,6 +92,7 @@ fn physical_label_lookup_tracks_the_pinned_registry_generation() {
         "happy"
     );
     assert!(cache.value(&first, 21_002).is_some());
+    assert_eq!(cache.position(&first, 21_002), Some((21_000, 0)));
 }
 
 impl EnumRegistryPublication for Publication<'_> {

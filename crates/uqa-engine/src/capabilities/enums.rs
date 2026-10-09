@@ -75,6 +75,13 @@ impl Engine {
 }
 
 impl EnumLabelCatalog for Engine {
+    fn enum_label_position(&self, label_oid: u32) -> Result<Option<(u32, usize)>, SQLError> {
+        Ok(self
+            .runtime
+            .enum_label_cache
+            .position(&self.enum_registry_snapshot(), label_oid))
+    }
+
     fn enum_value_by_oid(&self, label_oid: u32) -> Result<Option<uqa_core::EnumValue>, SQLError> {
         Ok(self
             .runtime

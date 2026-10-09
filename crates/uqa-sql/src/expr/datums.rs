@@ -100,13 +100,7 @@ pub(crate) fn read_with_enum_catalog_and_control(
     {
         if let Some(enums) = enums {
             if enums.enum_type_labels(datum.type_oid())?.is_some() {
-                let oid = word(
-                    datum
-                        .bytes()
-                        .get(datum.offset() as usize..)
-                        .unwrap_or_default(),
-                )
-                .ok_or_else(|| corrupt("invalid datum length"))?;
+                let oid = enum_label_oid(datum)?;
                 return Ok(
                     control.retain_external_value(super::enums::enum_value_from_oid(
                         Some(enums),
@@ -118,6 +112,18 @@ pub(crate) fn read_with_enum_catalog_and_control(
     }
     let payload = payload(datum, control)?;
     read_payload(datum.type_oid(), payload.bytes(), control)
+}
+
+/// Read the fixed-width OID after the caller has selected an enum operation.
+/// Label existence belongs to the particular consuming operation, not this read.
+pub(crate) fn enum_label_oid(datum: &DatumValue) -> Result<u32, SQLError> {
+    word(
+        datum
+            .bytes()
+            .get(datum.offset() as usize..)
+            .unwrap_or_default(),
+    )
+    .ok_or_else(|| corrupt("invalid datum length"))
 }
 
 pub(super) fn compare_jsonb_with_control(

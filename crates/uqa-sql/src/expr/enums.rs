@@ -7,8 +7,8 @@
 //! Enum label input and output, ordered label functions and I/O casts through the statement's catalog.
 //!
 //! Values carry an immutable label key; the catalog supplies the current label text, so
-//! `ALTER TYPE ... RENAME VALUE` never rewrites stored values. Comparisons use the key order and
-//! need no catalog access.
+//! `ALTER TYPE ... RENAME VALUE` never rewrites stored values. Native comparisons use key order;
+//! physical enum support functions observe raw OIDs and consult catalog order only when needed.
 
 use std::sync::Arc;
 
@@ -18,6 +18,7 @@ use super::{Result, SQLError};
 use crate::ast::ColumnType;
 
 mod functions;
+mod physical;
 pub use functions::enum_function_value;
 
 /// One label of an enum type.
@@ -61,6 +62,11 @@ pub trait EnumLabelCatalog {
 
     /// Resolve an already admitted physical label OID across enum types. Output uses the label's actual identity even if a retained tuple now declares another enum type; it does not repeat input safety checks.
     fn enum_value_by_oid(&self, _label_oid: u32) -> Result<Option<EnumValue>> {
+        Ok(None)
+    }
+
+    /// The actual enum type and zero-based label position of an admitted physical OID in this generation. Positions have declaration/key order and avoid copying label keys for comparison.
+    fn enum_label_position(&self, _label_oid: u32) -> Result<Option<(u32, usize)>> {
         Ok(None)
     }
 
@@ -213,17 +219,35 @@ pub fn enum_range(
     lower: Option<&EnumValue>,
     upper: Option<&EnumValue>,
 ) -> Result<Value> {
+    let lower = lower
+        .map(|value| enum_label_oid(catalog, value))
+        .transpose()?;
+    let upper = upper
+        .map(|value| enum_label_oid(catalog, value))
+        .transpose()?;
+    range_by_oid(catalog, type_oid, lower, upper)
+}
+
+fn range_by_oid(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    lower: Option<u32>,
+    upper: Option<u32>,
+) -> Result<Value> {
     let labels = labels(catalog, type_oid)?;
     let mut elements = Vec::new();
+    let mut include = lower.is_none_or(|oid| oid == 0);
     for label in &labels.labels {
-        if lower.is_some_and(|lower| &label.key < lower.key()) {
-            continue;
+        if lower == Some(label.oid) {
+            include = true;
         }
-        if upper.is_some_and(|upper| &label.key > upper.key()) {
+        if include {
+            check_safe(catalog, &labels, label)?;
+            elements.push(labels.value(label));
+        }
+        if upper == Some(label.oid) {
             break;
         }
-        check_safe(catalog, &labels, label)?;
-        elements.push(labels.value(label));
     }
     ArrayValue::try_new(elements)
         .map(|array| array.with_element_type_oid(Some(type_oid)))

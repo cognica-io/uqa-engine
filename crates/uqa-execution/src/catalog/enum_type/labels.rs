@@ -84,6 +84,11 @@ impl EnumLabelCache {
         })
     }
 
+    /// Read the actual type and declaration-order position without allocating a value or copying its key.
+    pub fn position(&self, registry: &Arc<EnumRegistry>, label_oid: u32) -> Option<(u32, usize)> {
+        self.with_index(registry, |indexed| indexed.labels.get(&label_oid).copied())
+    }
+
     fn with_index<T>(
         &self,
         registry: &Arc<EnumRegistry>,

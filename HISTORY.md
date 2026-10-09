@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Add PostgreSQL `get_byte(bytea, integer)` with unsigned byte output, exact bounds diagnostics, strict NULL behavior and catalog identity.
 
-- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained tuple interpretation with fixed by-reference fields, alignment and dropped slots, deferred variable-width reads, retained JSON/JSONB output and physical JSONB comparisons, physical array element identity, domain base layouts/output, nested tuple and array formation, original enum label OIDs with deferred catalog output and consuming errors, original stored constants across commit and reopen, and atomic rollback.
+- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained tuple interpretation with fixed by-reference fields, alignment and dropped slots, deferred variable-width reads, retained JSON/JSONB output and physical JSONB comparisons, physical array element identity, domain base layouts/output, nested tuple and array formation, original enum label OIDs with deferred catalog output and OID-aware enum support functions, original stored constants across commit and reopen, and atomic rollback.
 
 - Rename composite attributes while preserving field identities, nested values, stored SQL references, prepared selectors and transaction rollback.
 

@@ -1,0 +1,180 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use std::sync::Arc;
+
+use super::*;
+use crate::ast::EnumFunctionOperation as Operation;
+use crate::expr::enums::{enum_function_value, EnumTypeLabel, EnumTypeLabels};
+use uqa_core::{DatumValue, EnumLabelKey, EnumValue};
+
+fn physical(oid: u32) -> Value {
+    Value::Datum(DatumValue::new(16_384, 0, oid.to_le_bytes().to_vec()))
+}
+
+#[test]
+fn invalid_label_identity_still_supports_equality_even_order_and_hashes() {
+    let apply = |operation, arguments: &[Value]| {
+        enum_function_value(None, operation, 16_384, arguments).unwrap()
+    };
+    assert_eq!(
+        apply(Operation::Equal, &[physical(1), physical(1)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        apply(Operation::Compare, &[physical(1), physical(1)]),
+        Value::Int(0)
+    );
+    assert_eq!(
+        apply(Operation::Compare, &[physical(2), physical(4)]),
+        Value::Int(-1)
+    );
+    assert_eq!(
+        apply(Operation::Hash, &[physical(1)]),
+        Value::Int(-1_905_060_026)
+    );
+    assert_eq!(
+        apply(Operation::ExtendedHash, &[physical(1), Value::Int(0)]),
+        Value::Int(-3_670_598_878_359_251_130)
+    );
+    let selected = apply(Operation::Smaller, &[physical(2), physical(4)]);
+    assert!(selected.has_same_representation(&physical(2)));
+    assert_eq!(
+        apply(Operation::Hash, &[selected]),
+        Value::Int(1_134_484_726)
+    );
+    assert_eq!(
+        apply(Operation::Compare, &[physical(1), Value::Null]),
+        Value::Null
+    );
+}
+
+#[test]
+fn legacy_native_keys_keep_catalog_free_equality_and_order() {
+    let keys = EnumLabelKey::initial(2).unwrap();
+    let values = keys
+        .into_iter()
+        .map(|key| Value::Enum(EnumValue::new(16_384, key)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        enum_function_value(None, Operation::Compare, 16_384, &values).unwrap(),
+        Value::Int(-1)
+    );
+    assert_eq!(
+        enum_function_value(None, Operation::Equal, 16_384, &values).unwrap(),
+        Value::Bool(false)
+    );
+}
+
+struct Catalog(Arc<EnumTypeLabels>);
+
+impl Catalog {
+    fn new() -> Self {
+        Self(Arc::new(EnumTypeLabels {
+            type_oid: 16_384,
+            labels: EnumLabelKey::initial(3)
+                .unwrap()
+                .into_iter()
+                .zip([(2, "first"), (5, "middle"), (4, "last")])
+                .map(|(key, (oid, label))| EnumTypeLabel {
+                    oid,
+                    key,
+                    label: label.into(),
+                })
+                .collect(),
+        }))
+    }
+}
+
+impl EnumLabelCatalog for Catalog {
+    fn enum_type_labels(&self, oid: u32) -> Result<Option<Arc<EnumTypeLabels>>> {
+        Ok((oid == self.0.type_oid).then(|| Arc::clone(&self.0)))
+    }
+    fn enum_label_position(&self, oid: u32) -> Result<Option<(u32, usize)>> {
+        Ok(self
+            .0
+            .labels
+            .iter()
+            .position(|label| label.oid == oid)
+            .map(|position| (self.0.type_oid, position)))
+    }
+    fn enum_label_uncommitted(&self, _: u32) -> bool {
+        false
+    }
+    fn enum_type_name(&self, _: u32) -> Result<Option<String>> {
+        Ok(Some("enum_probe".into()))
+    }
+    fn has_enum_types(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn odd_order_reads_actual_label_order_and_preserves_both_error_boundaries() {
+    let catalog = Catalog::new();
+    assert_eq!(
+        compare(Some(&catalog), &physical(5), &physical(4)).unwrap(),
+        Ordering::Less
+    );
+    for (left, right, expected_state, expected_message) in [
+        (1, 2, "22P03", "invalid internal value for enum: 1"),
+        (
+            2,
+            1,
+            "XX000",
+            "enum value 1 not found in cache for enum enum_probe",
+        ),
+    ] {
+        let error = compare(Some(&catalog), &physical(left), &physical(right)).unwrap_err();
+        let SQLError::Routine { sqlstate, message } = error else {
+            panic!("typed comparison diagnostic")
+        };
+        assert_eq!(sqlstate, expected_state);
+        assert_eq!(message, expected_message);
+    }
+}
+
+#[test]
+fn type_only_functions_do_not_read_bytes_and_bounds_match_label_oids() {
+    let catalog = Catalog::new();
+    let apply = |operation, arguments: &[Value]| {
+        enum_function_value(Some(&catalog), operation, 16_384, arguments).unwrap()
+    };
+    let unread = Value::Datum(DatumValue::new(16_384, u32::MAX, Vec::new()));
+    assert_eq!(
+        oid(
+            None,
+            &apply(Operation::First, std::slice::from_ref(&unread))
+        )
+        .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        oid(None, &apply(Operation::Last, std::slice::from_ref(&unread))).unwrap(),
+        Some(4)
+    );
+    let Value::Array(all) = apply(Operation::Range, &[unread]) else {
+        panic!("enum range")
+    };
+    assert_eq!(all.elements().len(), 3);
+    for (lower, upper, expected) in [
+        (physical(1), Value::Null, vec![]),
+        (Value::Null, physical(1), vec![2, 5, 4]),
+        (physical(0), physical(0), vec![2, 5, 4]),
+        (physical(5), physical(4), vec![5, 4]),
+        (physical(4), physical(2), vec![]),
+    ] {
+        let Value::Array(range) = apply(Operation::BoundedRange, &[lower, upper]) else {
+            panic!("enum range")
+        };
+        let actual = range
+            .elements()
+            .iter()
+            .map(|value| oid(None, value).unwrap().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+}
