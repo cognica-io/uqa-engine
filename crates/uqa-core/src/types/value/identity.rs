@@ -22,7 +22,9 @@ impl Value {
             | (Self::Json(left), Self::Json(right))
             | (Self::JsonB(left), Self::JsonB(right)) => left == right,
             (Self::Bytes(left), Self::Bytes(right)) => left == right,
-            (Self::Enum(left), Self::Enum(right)) => left == right,
+            (Self::Enum(left), Self::Enum(right)) => {
+                left == right && left.label_oid() == right.label_oid()
+            }
             (Self::Datum(left), Self::Datum(right)) => left == right,
             (Self::Temporal(left), Self::Temporal(right)) => same_temporal(left, right),
             (Self::Array(left), Self::Array(right)) => same_array(left, right),

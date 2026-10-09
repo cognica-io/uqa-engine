@@ -116,6 +116,8 @@ struct TaggedEnum<'a> {
     kind: &'static str,
     type_oid: u32,
     key: &'a super::EnumLabelKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label_oid: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -194,6 +196,7 @@ impl Serialize for Value {
                 kind: "enum",
                 type_oid: value.type_oid(),
                 key: value.key(),
+                label_oid: value.label_oid(),
             }
             .serialize(serializer),
         }

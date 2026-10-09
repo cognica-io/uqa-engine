@@ -105,6 +105,10 @@ fn typed_blob_round_trips_every_persisted_variant() {
             16_390,
             EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap(),
         )),
+        Value::Enum(
+            EnumValue::new(16_390, EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap())
+                .with_label_oid(Some(16_400)),
+        ),
         Value::Array(
             ArrayValue::try_new(vec![
                 Value::Enum(EnumValue::new(
@@ -168,6 +172,15 @@ fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
         r#"{"kind":"float_bits","value":18446744073709551615}"#,
         r#"{"kind":"enum","value":{"type_oid":7,"key":"40"}}"#,
         r#"{"kind":"enum","value":[7,"40"]}"#,
+        r#"{"kind":"enum","value":[7,"40",4294967295]}"#,
+        r#"{"kind":"enum","value":[7,"40",null]}"#,
+        r#"{"kind":"enum","value":[7,"40",1,2]}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":0}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":null}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":4294967296}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":-1}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":"9"}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":null,"label_oid":9}}"#,
         r#"{"kind":"enum","value":{"key":"40","type_oid":7}}"#,
         r#"{"kind":"enum","value":{"type_oid":7,"key":"40","extra":1}}"#,
         r#"{"kind":"enum","value":{"type_oid":7}}"#,

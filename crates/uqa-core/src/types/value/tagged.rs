@@ -132,7 +132,7 @@ fn convert(
                 return Ok(Value::LegacyVector(vector));
             }
         }
-        "enum" if map.len() == 3 && map.contains_key("type_oid") && map.contains_key("key") => {
+        "enum" if enum_carrier_fields(&map) => {
             return decoded_enum(&map, workspace).map(Value::Enum);
         }
         "row" if map.len() == 2 || (map.len() == 3 && map.contains_key("field_types")) => {
@@ -188,6 +188,12 @@ fn decoded_datum(
     Ok(crate::DatumValue::new(type_oid, offset, bytes))
 }
 
+fn enum_carrier_fields(map: &BTreeMap<String, Value>) -> bool {
+    (map.len() == 3 || (map.len() == 4 && map.contains_key("label_oid")))
+        && map.contains_key("type_oid")
+        && map.contains_key("key")
+}
+
 /// Enum carriers are recognized by their exact field set and then validated strictly; a stored label key that does not satisfy the key invariant is corruption rather than a document map.
 fn decoded_enum(
     map: &BTreeMap<String, Value>,
@@ -203,6 +209,13 @@ fn decoded_enum(
         }
         _ => return Err(malformed("type OID is not an integer")),
     };
+    let label_oid = match map.get("label_oid") {
+        None | Some(Value::Null) => None,
+        Some(Value::Int(oid)) => {
+            Some(u32::try_from(*oid).map_err(|_| malformed("label OID out of range"))?)
+        }
+        _ => return Err(malformed("label OID is not an integer")),
+    };
     let Some(Value::Str(hex)) = map.get("key") else {
         return Err(malformed("label key is not hexadecimal text"));
     };
@@ -211,7 +224,7 @@ fn decoded_enum(
     }
     workspace.reserve(hex.len() / 2)?;
     let key = EnumLabelKey::from_hex(hex).map_err(|error| malformed(&error.to_string()))?;
-    Ok(EnumValue::new(type_oid, key))
+    Ok(EnumValue::new(type_oid, key).with_label_oid(label_oid))
 }
 
 fn decoded_legacy_vector(

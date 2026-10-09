@@ -480,11 +480,22 @@ impl<'a> BinaryReader<'a> {
                 )))
             }
             16 => Ok(Value::Void),
-            18 => {
+            tag @ (18 | 22) => {
                 let type_oid = u32::from_le_bytes(self.read_i32("enum type OID")?.to_le_bytes());
+                let label_oid = if tag == 22 {
+                    Some(u32::from_le_bytes(
+                        self.read_i32("enum label OID")?.to_le_bytes(),
+                    ))
+                } else {
+                    None
+                };
                 let key = self.read_bytes("enum label key")?.to_vec();
                 uqa_core::EnumLabelKey::from_bytes(key)
-                    .map(|key| Value::Enum(uqa_core::EnumValue::new(type_oid, key)))
+                    .map(|key| {
+                        Value::Enum(
+                            uqa_core::EnumValue::new(type_oid, key).with_label_oid(label_oid),
+                        )
+                    })
                     .map_err(|error| {
                         spill_error(format!("invalid enum label key in spill file: {error}"))
                     })

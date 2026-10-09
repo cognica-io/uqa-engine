@@ -241,6 +241,9 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         Value::Json(value) | Value::JsonB(value) => add_string_size(total, value, "JSON value"),
         Value::Enum(value) => {
             add_size(total, 4, "enum type OID")?;
+            if value.label_oid().is_some() {
+                add_size(total, 4, "enum label OID")?;
+            }
             add_size(total, 8, "enum label key length")?;
             add_size(total, value.key().as_bytes().len(), "enum label key")
         }
@@ -504,8 +507,11 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
         Value::Null => write_tag(writer, 0),
         Value::Void => write_tag(writer, 16),
         Value::Enum(value) => {
-            write_tag(writer, 18)?;
+            write_tag(writer, if value.label_oid().is_some() { 22 } else { 18 })?;
             write_raw(writer, &value.type_oid().to_le_bytes(), "enum type OID")?;
+            if let Some(oid) = value.label_oid() {
+                write_raw(writer, &oid.to_le_bytes(), "enum label OID")?;
+            }
             write_bytes(writer, value.key().as_bytes())
         }
         Value::LegacyVector(vector) => encode_legacy_vector(writer, vector, depth),
