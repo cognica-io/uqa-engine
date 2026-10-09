@@ -7,6 +7,7 @@
 //! Physical enum operations read admitted OIDs without repeating enum input or output.
 
 use std::cmp::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 
 use uqa_core::Value;
 
@@ -15,6 +16,28 @@ use crate::error::{Result, SQLError};
 
 #[cfg(test)]
 mod tests;
+
+/// The type cache of one prepared enum comparison call. The execution owner
+/// creates a fresh state for each call site, retaining it across that site's rows.
+#[derive(Debug, Default)]
+pub struct EnumComparisonState {
+    type_oid: AtomicU32,
+}
+
+impl EnumComparisonState {
+    fn cached_type(&self) -> Option<u32> {
+        match self.type_oid.load(AtomicOrdering::Relaxed) {
+            0 => None,
+            oid => Some(oid),
+        }
+    }
+
+    fn remember_type(&self, oid: u32) -> u32 {
+        self.type_oid
+            .compare_exchange(0, oid, AtomicOrdering::Relaxed, AtomicOrdering::Relaxed)
+            .map_or_else(|existing| existing, |_| oid)
+    }
+}
 
 pub(super) fn oid(catalog: Option<&dyn EnumLabelCatalog>, value: &Value) -> Result<Option<u32>> {
     match value {
@@ -55,45 +78,71 @@ pub(super) fn compare(
     catalog: Option<&dyn EnumLabelCatalog>,
     left: &Value,
     right: &Value,
+    state: Option<&EnumComparisonState>,
 ) -> Result<Ordering> {
-    if let Some(order) = native_order(left, right) {
-        return Ok(order);
+    let legacy_keys = catalog.is_none()
+        && matches!((left, right), (Value::Enum(left), Value::Enum(right)) if left.label_oid().is_none() && right.label_oid().is_none());
+    if state.is_none() || legacy_keys {
+        if let Some(order) = native_order(left, right) {
+            return Ok(order);
+        }
     }
     let (Some(left), Some(right)) = (oid(catalog, left)?, oid(catalog, right)?) else {
         return Err(SQLError::Internal(
             "enum comparison lost a strict argument".into(),
         ));
     };
-    compare_oids(catalog, left, right)
+    compare_oids(catalog, left, right, state)
 }
 
-fn compare_oids(catalog: Option<&dyn EnumLabelCatalog>, left: u32, right: u32) -> Result<Ordering> {
+fn compare_oids(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    left: u32,
+    right: u32,
+    state: Option<&EnumComparisonState>,
+) -> Result<Ordering> {
     // Equal and even OIDs take PostgreSQL's catalog-free paths, including
     // retained values whose output would report an invalid label identity.
     if left == right || (left & 1 == 0 && right & 1 == 0) {
         return Ok(left.cmp(&right));
     }
-    let (type_oid, left_position) = catalog
+    let left_entry = catalog
         .map(|catalog| catalog.enum_label_position(left))
         .transpose()?
-        .flatten()
-        .ok_or_else(|| SQLError::Routine {
+        .flatten();
+    let type_oid = if let Some(oid) = state.and_then(EnumComparisonState::cached_type) {
+        oid
+    } else {
+        let (oid, _) = left_entry.ok_or_else(|| SQLError::Routine {
             sqlstate: "22P03".into(),
             message: format!("invalid internal value for enum: {left}"),
         })?;
+        state.map_or(oid, |state| state.remember_type(oid))
+    };
+    let Some((_, left_position)) = left_entry.filter(|(oid, _)| *oid == type_oid) else {
+        return Err(missing_cached_label(catalog, type_oid, left)?);
+    };
     let Some((_, right_position)) = catalog
         .map(|catalog| catalog.enum_label_position(right))
         .transpose()?
         .flatten()
         .filter(|(right_type, _)| *right_type == type_oid)
     else {
-        return Err(SQLError::Routine {
-            sqlstate: "XX000".into(),
-            message: format!(
-                "enum value {right} not found in cache for enum {}",
-                type_name(catalog, type_oid)?
-            ),
-        });
+        return Err(missing_cached_label(catalog, type_oid, right)?);
     };
     Ok(left_position.cmp(&right_position))
+}
+
+fn missing_cached_label(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    label_oid: u32,
+) -> Result<SQLError> {
+    Ok(SQLError::Routine {
+        sqlstate: "XX000".into(),
+        message: format!(
+            "enum value {label_oid} not found in cache for enum {}",
+            type_name(catalog, type_oid)?
+        ),
+    })
 }

@@ -1,0 +1,1410 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE enum_call_a AS ENUM ('first','last'); ALTER TYPE enum_call_a ADD VALUE 'middle' BEFORE 'last'; CREATE TYPE enum_call_b AS ENUM ('other'); ALTER TYPE enum_call_b ADD VALUE 'before' BEFORE 'other'; CREATE TYPE enum_call_holder AS (a enum_call_a,b enum_call_a); CREATE VIEW enum_call_source AS SELECT '(middle,last)'::enum_call_holder AS v; CREATE TYPE enum_call_raw AS (a integer); CREATE VIEW enum_call_raw_source AS SELECT '(1)'::enum_call_raw AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "ALTER TYPE",
+        "CREATE TYPE",
+        "ALTER TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM n FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source ORDER BY enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'middle'::enum_call_a END,CASE n WHEN 1 THEN (v).b ELSE 'last'::enum_call_a END); RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "catalog_order_by"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM count(*) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source GROUP BY enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'middle'::enum_call_a END,CASE n WHEN 1 THEN (v).b ELSE 'last'::enum_call_a END); RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "catalog_group_by"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM sum(enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'middle'::enum_call_a END,CASE n WHEN 1 THEN (v).b ELSE 'last'::enum_call_a END)) OVER () FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "catalog_window_argument"
+    },
+    {
+      "sql": "ALTER TYPE enum_call_holder ALTER ATTRIBUTE a TYPE enum_call_b,ALTER ATTRIBUTE b TYPE enum_call_b; ALTER TYPE enum_call_raw ALTER ATTRIBUTE a TYPE enum_call_b",
+      "command_tags": [
+        "ALTER TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "change"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_cmp"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_lt(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_lt"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_le(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_le"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_gt(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_gt"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_ge(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_ge"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_smaller(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_smaller"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_larger(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_larger"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 2 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 2 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_b"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "native_type_first"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM CASE n WHEN 1 THEN enum_cmp((v).a,(v).b) ELSE 0 END,CASE n WHEN 2 THEN enum_cmp('before'::enum_call_b,'other'::enum_call_b) ELSE 0 END FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "independent_calls"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).a ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "equal_first"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 1 THEN (v).b ELSE 'before'::enum_call_b END,'other'::enum_call_b) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_first"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_eq(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END),enum_ne(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "completed"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "equality_changes_types"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 1 THEN (s.v).a ELSE (r.v).a END,CASE n WHEN 1 THEN (s.v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source s CROSS JOIN enum_call_raw_source r; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_invalid_left"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM n FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source WHERE enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)<0; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "where"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM n FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source ORDER BY enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END); RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "order_by"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM count(*) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source GROUP BY enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END); RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "group_by"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM sum(enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "aggregate_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM sum(enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)) OVER () FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "window_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM DISTINCT enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "distinct"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM n FROM generate_series(1,2) AS g(n) JOIN enum_call_source ON enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)<0; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "join_predicate"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END),generate_series(1,2) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "set_projection"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM min(n) FILTER (WHERE enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)<0) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "aggregate_filter"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM count(*) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source GROUP BY n,v HAVING enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)<0; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "having"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM first_value(enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)) OVER (ORDER BY n ROWS CURRENT ROW) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "window_value"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM sum(enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)) OVER (PARTITION BY n) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "window_partitions"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM generate_series(1,enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)+2) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "set_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM n FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source CROSS JOIN LATERAL generate_series(1,enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END)+2) AS expanded(value); RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "lateral_argument"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM count(*) FROM generate_series(1,2) AS g(n) GROUP BY n HAVING enum_cmp(CASE n WHEN 1 THEN (SELECT (v).a FROM enum_call_source) ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (SELECT (v).b FROM enum_call_source) ELSE 'other'::enum_call_b END)<0; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "scalar_group_having"
+    },
+    {
+      "sql": "SET plan_cache_mode=force_generic_plan; PREPARE enum_call_repeated(boolean) AS SELECT enum_cmp(CASE WHEN $1 THEN (v).a ELSE 'before'::enum_call_b END,CASE WHEN $1 THEN (v).b ELSE 'other'::enum_call_b END) AS cmp FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source",
+      "command_tags": [
+        "SET",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prepare"
+    },
+    {
+      "sql": "EXECUTE enum_call_repeated(true)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cmp"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ],
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "execute_physical"
+    },
+    {
+      "sql": "EXECUTE enum_call_repeated(false)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cmp"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ],
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "execute_native"
+    },
+    {
+      "sql": "EXECUTE enum_call_repeated(true)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cmp"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ],
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "execute_physical_again"
+    },
+    {
+      "sql": "DEALLOCATE enum_call_repeated; RESET plan_cache_mode",
+      "command_tags": [
+        "DEALLOCATE",
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deallocate"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_call_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM enum_cmp(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_call_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_call_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_call_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_call_probe(); DROP FUNCTION enum_call_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_call_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_call_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "reopened_comparison",
+      "reopen": true
+    },
+    {
+      "sql": "DROP VIEW enum_call_raw_source,enum_call_source; DROP TYPE enum_call_raw,enum_call_holder,enum_call_b,enum_call_a",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ]
+}

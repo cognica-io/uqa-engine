@@ -307,11 +307,12 @@ pub fn eval_bound_builtin_function_call(
         type_oid,
     } = dispatch
     {
-        return super::enums::enum_function_value(
+        return super::enums::enum_function_value_with_state(
             ctx.engine.and_then(super::EngineHook::enum_labels),
             operation,
             type_oid,
             &evaluated,
+            ctx.enum_comparison_state(),
         );
     }
     eval_dispatched_builtin_with_control(

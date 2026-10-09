@@ -336,6 +336,7 @@ pub struct EvalContext<'a> {
     row_lookup: Option<&'a dyn RowLookup>,
     pub params: &'a [SQLParam],
     pub engine: Option<&'a dyn EngineHook>,
+    enum_comparison_state: Option<&'a super::enums::EnumComparisonState>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -345,6 +346,7 @@ impl<'a> EvalContext<'a> {
             row_lookup: row.map(|row| row as &dyn RowLookup),
             params,
             engine: None,
+            enum_comparison_state: None,
         }
     }
 
@@ -357,12 +359,26 @@ impl<'a> EvalContext<'a> {
             row_lookup: Some(row),
             params,
             engine: None,
+            enum_comparison_state: None,
         }
     }
 
     pub fn with_engine(mut self, engine: &'a dyn EngineHook) -> Self {
         self.engine = Some(engine);
         self
+    }
+
+    /// The state of the current bound enum call, supplied by its prepared execution owner.
+    pub fn with_enum_comparison_state(
+        mut self,
+        state: Option<&'a super::enums::EnumComparisonState>,
+    ) -> Self {
+        self.enum_comparison_state = state;
+        self
+    }
+
+    pub(super) fn enum_comparison_state(&self) -> Option<&super::enums::EnumComparisonState> {
+        self.enum_comparison_state
     }
 
     pub(super) fn row_lookup(&self) -> Result<&'a dyn RowLookup> {

@@ -94,6 +94,9 @@ impl EnumLabelCatalog for Catalog {
         Ok((oid == self.0.type_oid).then(|| Arc::clone(&self.0)))
     }
     fn enum_label_position(&self, oid: u32) -> Result<Option<(u32, usize)>> {
+        if matches!(oid, 8 | 11) {
+            return Ok(Some((16_400, usize::from(oid == 8))));
+        }
         Ok(self
             .0
             .labels
@@ -104,8 +107,15 @@ impl EnumLabelCatalog for Catalog {
     fn enum_label_uncommitted(&self, _: u32) -> bool {
         false
     }
-    fn enum_type_name(&self, _: u32) -> Result<Option<String>> {
-        Ok(Some("enum_probe".into()))
+    fn enum_type_name(&self, oid: u32) -> Result<Option<String>> {
+        Ok(Some(
+            if oid == 16_400 {
+                "second_enum"
+            } else {
+                "enum_probe"
+            }
+            .into(),
+        ))
     }
     fn has_enum_types(&self) -> bool {
         true
@@ -113,10 +123,67 @@ impl EnumLabelCatalog for Catalog {
 }
 
 #[test]
+fn comparison_cache_follows_the_first_slow_call_and_bypasses_fast_calls() {
+    let catalog = Catalog::new();
+    let state = EnumComparisonState::default();
+    let compare = |left, right| {
+        super::compare(
+            Some(&catalog),
+            &physical(left),
+            &physical(right),
+            Some(&state),
+        )
+    };
+    assert_eq!(compare(1, 1).unwrap(), Ordering::Equal);
+    assert_eq!(compare(2, 8).unwrap(), Ordering::Less);
+    assert_eq!(state.cached_type(), None);
+    assert_eq!(compare(11, 8).unwrap(), Ordering::Less);
+    assert_eq!(state.cached_type(), Some(16_400));
+    assert_eq!(compare(5, 5).unwrap(), Ordering::Equal);
+    assert_eq!(compare(4, 8).unwrap(), Ordering::Less);
+    let error = compare(5, 4).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error
+        .to_string()
+        .contains("enum value 5 not found in cache for enum second_enum"));
+    assert_eq!(compare(1, 2).unwrap_err().sqlstate(), Some("XX000"));
+    let fresh = EnumComparisonState::default();
+    let error =
+        super::compare(Some(&catalog), &physical(1), &physical(2), Some(&fresh)).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22P03"));
+    assert_eq!(fresh.cached_type(), None);
+}
+
+#[test]
+fn admitted_native_values_use_the_call_sites_existing_actual_type() {
+    let catalog = Catalog::new();
+    let state = EnumComparisonState::default();
+    super::compare(Some(&catalog), &physical(5), &physical(4), Some(&state)).unwrap();
+    let keys = EnumLabelKey::initial(2).unwrap();
+    let left = Value::Enum(EnumValue::new(16_400, keys[0].clone()).with_label_oid(Some(11)));
+    let right = Value::Enum(EnumValue::new(16_400, keys[1].clone()).with_label_oid(Some(8)));
+    let error = super::compare(Some(&catalog), &left, &right, Some(&state)).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error
+        .to_string()
+        .contains("enum value 11 not found in cache for enum enum_probe"));
+    assert_eq!(
+        super::compare(
+            Some(&catalog),
+            &left,
+            &right,
+            Some(&EnumComparisonState::default())
+        )
+        .unwrap(),
+        Ordering::Less,
+    );
+}
+
+#[test]
 fn odd_order_reads_actual_label_order_and_preserves_both_error_boundaries() {
     let catalog = Catalog::new();
     assert_eq!(
-        compare(Some(&catalog), &physical(5), &physical(4)).unwrap(),
+        compare(Some(&catalog), &physical(5), &physical(4), None).unwrap(),
         Ordering::Less
     );
     for (left, right, expected_state, expected_message) in [
@@ -128,7 +195,7 @@ fn odd_order_reads_actual_label_order_and_preserves_both_error_boundaries() {
             "enum value 1 not found in cache for enum enum_probe",
         ),
     ] {
-        let error = compare(Some(&catalog), &physical(left), &physical(right)).unwrap_err();
+        let error = compare(Some(&catalog), &physical(left), &physical(right), None).unwrap_err();
         let SQLError::Routine { sqlstate, message } = error else {
             panic!("typed comparison diagnostic")
         };
