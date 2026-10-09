@@ -399,10 +399,8 @@ pub(super) fn eval_dispatched_builtin_with_control(
         FunctionDispatch::Enum {
             operation,
             type_oid,
-        } => Ok(
-            control.retain_external_value(super::enums::enum_function_value(
-                None, operation, type_oid, evaluated,
-            )?)?,
+        } => super::enums::enum_function_value_with_control(
+            None, operation, type_oid, evaluated, None, control,
         ),
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => Err(
             SQLError::Internal("call-argument syntax marker reached scalar execution".into()),

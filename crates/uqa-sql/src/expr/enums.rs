@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_core::{ArrayValue, EnumLabelKey, EnumValue, Value};
 
 use super::{Result, SQLError};
@@ -19,7 +20,9 @@ use crate::ast::ColumnType;
 
 mod functions;
 mod physical;
-pub use functions::{enum_function_value, enum_function_value_with_state};
+pub use functions::{
+    enum_function_value, enum_function_value_with_control, enum_function_value_with_state,
+};
 pub(in crate::expr) use physical::comparison_order;
 pub use physical::{
     comparison_identity, eval_comparison, EnumComparisonState, EnumTypeComparisonStates,
@@ -56,6 +59,15 @@ impl EnumTypeLabels {
         Value::Enum(
             EnumValue::new(self.type_oid, label.key.clone()).with_label_oid(Some(label.oid)),
         )
+    }
+
+    fn value_with_control(
+        &self,
+        label: &EnumTypeLabel,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        let memory = control.reserve(label.key.as_bytes().len())?;
+        Ok(control.finish(self.value(label), memory)?)
     }
 }
 
@@ -205,6 +217,17 @@ pub fn enum_endpoint(
     type_oid: u32,
     last: bool,
 ) -> Result<Value> {
+    enum_endpoint_with_control(catalog, type_oid, last, &ProductionControl::uncontrolled())
+        .map(|value| value.into_uncontrolled().expect("ordinary enum endpoint"))
+}
+
+fn enum_endpoint_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    last: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let labels = labels(catalog, type_oid)?;
     let label = if last {
         labels.labels.last()
@@ -218,7 +241,7 @@ pub fn enum_endpoint(
         });
     };
     check_safe(catalog, &labels, label)?;
-    Ok(labels.value(label))
+    labels.value_with_control(label, control)
 }
 
 /// `enum_range(lower, upper)`: labels from `lower` through `upper` inclusive, where a missing bound is open. A lower bound after the upper bound yields an empty array. Every returned label must be usable.
@@ -243,25 +266,47 @@ fn range_by_oid(
     lower: Option<u32>,
     upper: Option<u32>,
 ) -> Result<Value> {
+    range_by_oid_with_control(
+        catalog,
+        type_oid,
+        lower,
+        upper,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|value| value.into_uncontrolled().expect("ordinary enum range"))
+}
+
+fn range_by_oid_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    lower: Option<u32>,
+    upper: Option<u32>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let labels = labels(catalog, type_oid)?;
-    let mut elements = Vec::new();
+    let mut elements = ProductionVec::new(*control);
     let mut include = lower.is_none_or(|oid| oid == 0);
     for label in &labels.labels {
+        control.check()?;
         if lower == Some(label.oid) {
             include = true;
         }
         if include {
             check_safe(catalog, &labels, label)?;
-            elements.push(labels.value(label));
+            elements.push_produced(labels.value_with_control(label, control)?)?;
         }
         if upper == Some(label.oid) {
             break;
         }
     }
-    ArrayValue::try_new(elements)
-        .map(|array| array.with_element_type_oid(Some(type_oid)))
-        .map(Value::Array)
-        .ok_or_else(|| SQLError::Internal("enum range array has invalid dimensions".into()))
+    let array = ArrayValue::try_new_with_control(elements.finish()?, control)?
+        .ok_or_else(|| SQLError::Internal("enum range array has invalid dimensions".into()))?;
+    let (array, memory) = array.into_parts();
+    Ok(control.finish(
+        Value::Array(array.with_element_type_oid(Some(type_oid))),
+        memory,
+    )?)
 }
 
 /// Replace every enum carrier inside a value by its label text, as the output functions of containers do.

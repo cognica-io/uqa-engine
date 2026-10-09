@@ -68,8 +68,14 @@ pub(super) fn evaluate_function(
         arguments
     };
     if control.budget().is_some() {
-        return uqa_sql::expr::eval_generated_function_call_with_control(
-            name, binding, arguments, control,
+        return uqa_sql::expr::eval_builtin_function_call_with_control(
+            name,
+            binding,
+            arguments,
+            control,
+            &context
+                .sql_context()
+                .with_enum_comparison_states(context.enum_comparison_states(args)),
         );
     }
     let arguments = arguments

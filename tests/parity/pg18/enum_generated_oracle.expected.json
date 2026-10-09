@@ -1,0 +1,582 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE enum_generated_label AS ENUM ('first','last'); ALTER TYPE enum_generated_label ADD VALUE 'middle' BEFORE 'last'",
+      "command_tags": [
+        "CREATE TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "CREATE TABLE enum_generated_values (id integer PRIMARY KEY, l enum_generated_label, r enum_generated_label, cmp integer GENERATED ALWAYS AS (enum_cmp(l,r)) STORED, same boolean GENERATED ALWAYS AS (enum_eq(l,r)) STORED, small enum_generated_label GENERATED ALWAYS AS (enum_smaller(l,r)) STORED, high enum_generated_label GENERATED ALWAYS AS (greatest(l,r)) STORED, array_less boolean GENERATED ALWAYS AS (ARRAY[l] < ARRAY[r]) STORED, hash_same boolean GENERATED ALWAYS AS (hashenum(l)=hashenum(r)) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "table"
+    },
+    {
+      "sql": "INSERT INTO enum_generated_values (id,l,r) VALUES (1,'middle','last'),(2,'last','first'),(3,NULL,'first'),(4,'middle','middle')",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "insert"
+    },
+    {
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r",
+            "cmp",
+            "same",
+            "small",
+            "high",
+            "array_less",
+            "hash_same"
+          ],
+          "type_oids": [
+            23,
+            20287,
+            20287,
+            23,
+            16,
+            20287,
+            20287,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "middle",
+              "last",
+              "-1",
+              "f",
+              "middle",
+              "last",
+              "t",
+              "f"
+            ],
+            [
+              "2",
+              "last",
+              "first",
+              "1",
+              "f",
+              "first",
+              "last",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              "first",
+              null,
+              null,
+              null,
+              "first",
+              "f",
+              null
+            ],
+            [
+              "4",
+              "middle",
+              "middle",
+              "0",
+              "t",
+              "middle",
+              "middle",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "read"
+    },
+    {
+      "sql": "UPDATE enum_generated_values SET l='first',r='middle' WHERE id=2",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "update"
+    },
+    {
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r",
+            "cmp",
+            "same",
+            "small",
+            "high",
+            "array_less",
+            "hash_same"
+          ],
+          "type_oids": [
+            23,
+            20287,
+            20287,
+            23,
+            16,
+            20287,
+            20287,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "middle",
+              "last",
+              "-1",
+              "f",
+              "middle",
+              "last",
+              "t",
+              "f"
+            ],
+            [
+              "2",
+              "first",
+              "middle",
+              "-1",
+              "f",
+              "first",
+              "middle",
+              "t",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              "first",
+              null,
+              null,
+              null,
+              "first",
+              "f",
+              null
+            ],
+            [
+              "4",
+              "middle",
+              "middle",
+              "0",
+              "t",
+              "middle",
+              "middle",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "updated"
+    },
+    {
+      "sql": "ALTER TYPE enum_generated_label RENAME VALUE 'middle' TO 'between'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rename"
+    },
+    {
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r",
+            "cmp",
+            "same",
+            "small",
+            "high",
+            "array_less",
+            "hash_same"
+          ],
+          "type_oids": [
+            23,
+            20287,
+            20287,
+            23,
+            16,
+            20287,
+            20287,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "between",
+              "last",
+              "-1",
+              "f",
+              "between",
+              "last",
+              "t",
+              "f"
+            ],
+            [
+              "2",
+              "first",
+              "between",
+              "-1",
+              "f",
+              "first",
+              "between",
+              "t",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              "first",
+              null,
+              null,
+              null,
+              "first",
+              "f",
+              null
+            ],
+            [
+              "4",
+              "between",
+              "between",
+              "0",
+              "t",
+              "between",
+              "between",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "renamed"
+    },
+    {
+      "sql": "BEGIN; UPDATE enum_generated_values SET l='last',r='between' WHERE id=1",
+      "command_tags": [
+        "BEGIN",
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "transaction"
+    },
+    {
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r",
+            "cmp",
+            "same",
+            "small",
+            "high",
+            "array_less",
+            "hash_same"
+          ],
+          "type_oids": [
+            23,
+            20287,
+            20287,
+            23,
+            16,
+            20287,
+            20287,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "last",
+              "between",
+              "1",
+              "f",
+              "between",
+              "last",
+              "f",
+              "f"
+            ],
+            [
+              "2",
+              "first",
+              "between",
+              "-1",
+              "f",
+              "first",
+              "between",
+              "t",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              "first",
+              null,
+              null,
+              null,
+              "first",
+              "f",
+              null
+            ],
+            [
+              "4",
+              "between",
+              "between",
+              "0",
+              "t",
+              "between",
+              "between",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "inside"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rollback"
+    },
+    {
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r",
+            "cmp",
+            "same",
+            "small",
+            "high",
+            "array_less",
+            "hash_same"
+          ],
+          "type_oids": [
+            23,
+            20287,
+            20287,
+            23,
+            16,
+            20287,
+            20287,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "between",
+              "last",
+              "-1",
+              "f",
+              "between",
+              "last",
+              "t",
+              "f"
+            ],
+            [
+              "2",
+              "first",
+              "between",
+              "-1",
+              "f",
+              "first",
+              "between",
+              "t",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              "first",
+              null,
+              null,
+              null,
+              "first",
+              "f",
+              null
+            ],
+            [
+              "4",
+              "between",
+              "between",
+              "0",
+              "t",
+              "between",
+              "between",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen",
+      "reopen": true
+    },
+    {
+      "sql": "DROP TABLE enum_generated_values; DROP TYPE enum_generated_label",
+      "command_tags": [
+        "DROP TABLE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ]
+}

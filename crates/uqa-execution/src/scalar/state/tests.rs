@@ -108,6 +108,65 @@ fn evaluate(
 }
 
 #[test]
+fn controlled_function_calls_retain_catalog_and_prepared_enum_state() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+
+    let mut greatest = expression(Operation::Compare);
+    if let ScalarExpr::Func { name, binding, .. } = &mut greatest {
+        *name = "greatest".into();
+        *binding = None;
+    }
+    let mut any = expression(Operation::Compare);
+    if let ScalarExpr::Func {
+        name,
+        binding,
+        args,
+        ..
+    } = &mut any
+    {
+        *name = "any_operator".into();
+        *binding = Some(FunctionBinding::dispatched(FunctionDispatch::AnyOperator));
+        args[1] = ScalarExpr::Array(vec![args[1].clone()]);
+        args.push(ScalarExpr::Literal(Value::Str("<".into())));
+    }
+    let physical = |oid: u32| Value::Datum(DatumValue::new(16_400, 0, oid.to_le_bytes().to_vec()));
+    for (expression, expected) in [
+        (expression(Operation::Compare), Value::Int(-1)),
+        (expression(Operation::Smaller), physical(5)),
+        (greatest, physical(4)),
+        (any, Value::Bool(true)),
+    ] {
+        let prepared = PreparedExpressions::scalar(expression);
+        let budget = MemoryBudget::new(16_384);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        for (left, right) in [(5, 4), (11, 8)] {
+            let row = ResultRow::from([
+                ("left".into(), physical(left)),
+                ("right".into(), physical(right)),
+            ]);
+            let context = ScalarEvalContext::new(Some(&row), &[])
+                .with_function_hook(&Catalog)
+                .with_function_states(prepared.calls());
+            let result = crate::scalar::evaluator::eval_scalar_inner(&prepared, &context, &control);
+            if left == 5 {
+                let result = result.unwrap();
+                assert!(result.has_same_representation(&expected));
+                assert_eq!(budget.used(), result.reserved_bytes());
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.sqlstate(), Some("XX000"));
+                assert!(error.to_string().contains("first_enum"));
+            }
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn calls_keep_separate_state_across_rows_and_clones_start_fresh() {
     let prepared = PreparedExpressions::scalars(vec![
         expression(Operation::Compare),

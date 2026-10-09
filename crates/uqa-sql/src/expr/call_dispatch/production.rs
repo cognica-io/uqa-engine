@@ -8,7 +8,7 @@
 
 use super::named::builtin_named_args;
 use crate::{
-    ast::FunctionBinding,
+    ast::{FunctionBinding, FunctionDispatch},
     error::{Result, SQLError},
 };
 use uqa_core::{
@@ -23,6 +23,23 @@ pub fn eval_generated_function_call_with_control(
     arguments: Produced<Vec<(Option<String>, Value)>>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    eval_builtin_function_call_with_control(
+        name,
+        binding,
+        arguments,
+        control,
+        &super::EvalContext::new(None, &[]),
+    )
+}
+
+/// Execute SQL-owned native built-ins with admitted arguments and the caller's catalog/comparison context. Session and user-function callbacks keep their separate execution boundaries.
+pub fn eval_builtin_function_call_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    arguments: Produced<Vec<(Option<String>, Value)>>,
+    control: &ProductionControl<'_>,
+    context: &super::EvalContext<'_>,
+) -> Result<Produced<Value>> {
     if let Some(error) = binding.and_then(|binding| binding.resolution_error.as_ref()) {
         return Err(error.sql_error());
     }
@@ -31,6 +48,9 @@ pub fn eval_generated_function_call_with_control(
         return Err(SQLError::Unsupported(
             "bound user function requires a logical engine session".into(),
         ));
+    }
+    if let (Some(binding), Some(hook)) = (binding, context.engine) {
+        hook.require_builtin_execute(binding)?;
     }
     if let Some((binding, dispatch)) =
         binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
@@ -42,12 +62,7 @@ pub fn eval_generated_function_call_with_control(
             )));
         }
         let evaluated = MovedArguments::new(arguments, control)?;
-        return super::super::builtin::eval_dispatched_builtin_with_control(
-            binding,
-            dispatch,
-            &evaluated.values,
-            control,
-        );
+        return eval_dispatched(binding, dispatch, &evaluated.values, control, context);
     }
     let name = binding.map_or(name, |binding| binding.name.as_str());
     let normalized =
@@ -59,14 +74,10 @@ pub fn eval_generated_function_call_with_control(
                 name, &arguments,
             ));
         };
-        super::super::scalar_dispatch::eval_generated_scalar_function(name, &positional, control)?
+        eval_scalar(name, &positional, control, context)?
     } else {
         let evaluated = MovedArguments::new(arguments, control)?;
-        super::super::scalar_dispatch::eval_generated_scalar_function(
-            name,
-            &evaluated.values,
-            control,
-        )?
+        eval_scalar(name, &evaluated.values, control, context)?
     };
     if matches!(*value, Value::Int(_) | Value::Float(_)) {
         if let Some(binding) = binding {
@@ -86,6 +97,53 @@ pub fn eval_generated_function_call_with_control(
         }
     }
     Ok(value)
+}
+
+fn eval_dispatched(
+    binding: &FunctionBinding,
+    dispatch: FunctionDispatch,
+    arguments: &[Value],
+    control: &ProductionControl<'_>,
+    context: &super::EvalContext<'_>,
+) -> Result<Produced<Value>> {
+    if let FunctionDispatch::Enum {
+        operation,
+        type_oid,
+    } = dispatch
+    {
+        return super::super::enums::enum_function_value_with_control(
+            context
+                .engine
+                .and_then(super::super::EngineHook::enum_labels),
+            operation,
+            type_oid,
+            arguments,
+            context.enum_comparison_state(),
+            control,
+        );
+    }
+    if let Some(result) = super::super::scalar_postgres::eval_comparison_with_context(
+        dispatch, arguments, control, context,
+    ) {
+        return result;
+    }
+    super::super::builtin::eval_dispatched_builtin_with_control(
+        binding, dispatch, arguments, control,
+    )
+}
+
+fn eval_scalar(
+    name: &str,
+    arguments: &[Value],
+    control: &ProductionControl<'_>,
+    context: &super::EvalContext<'_>,
+) -> Result<Produced<Value>> {
+    if matches!(name, "coalesce" | "nullif" | "greatest" | "least") {
+        return super::super::scalar_core::selection_with_context(
+            name, arguments, control, context,
+        );
+    }
+    super::super::scalar_dispatch::eval_generated_scalar_function(name, arguments, control)
 }
 
 /// Moving positional values must not make a second payload copy. The new vector's complete capacity is admitted by Core before movement; the original argument buffer and payload lease remain with this guard until dispatch finishes. Both vectors precede the shared lease on every failure path.

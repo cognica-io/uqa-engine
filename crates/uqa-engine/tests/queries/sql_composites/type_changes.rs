@@ -396,6 +396,18 @@ fn composite_nested_enum_order_matches_postgresql(#[case] provider: usize) {
     crate::pg18_oracle::verify(&engine, cold);
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn generated_enum_functions_match_postgresql(#[case] provider: usize) {
+    verify_enum_oracle(
+        provider,
+        include_str!("../../../../../tests/parity/pg18/enum_generated_oracle.expected.json"),
+    );
+}
+
 fn verify_enum_oracle(provider: usize, reference: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("enum-reads.db");

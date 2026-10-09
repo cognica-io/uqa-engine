@@ -22,7 +22,9 @@ mod named;
 mod production;
 mod temporal;
 use named::builtin_named_args;
-pub use production::eval_generated_function_call_with_control;
+pub use production::{
+    eval_builtin_function_call_with_control, eval_generated_function_call_with_control,
+};
 
 /// Execute a scalar function after its argument expressions have already been evaluated.
 ///
