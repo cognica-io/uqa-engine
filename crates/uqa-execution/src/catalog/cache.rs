@@ -14,6 +14,7 @@ use uqa_sql::SQLError;
 #[derive(Default)]
 pub struct RegtypeOutputCache {
     entry: Mutex<Option<Arc<RegtypeOutputCatalog>>>,
+    initialization: Mutex<()>,
     revision: AtomicU64,
 }
 
@@ -31,6 +32,11 @@ impl RegtypeOutputCache {
         &self,
         build: impl Fn() -> Result<RegtypeOutputCatalog, SQLError>,
     ) -> Result<Arc<RegtypeOutputCatalog>, SQLError> {
+        if let Some(catalog) = self.entry.lock().clone() {
+            return Ok(catalog);
+        }
+        // Refresh may invalidate output metadata while it is being derived; clear never takes this lock.
+        let _initialization = self.initialization.lock();
         loop {
             if let Some(catalog) = self.entry.lock().clone() {
                 return Ok(catalog);
@@ -46,7 +52,8 @@ impl RegtypeOutputCache {
         }
     }
     pub fn clear(&self) {
+        let mut entry = self.entry.lock();
         self.revision.fetch_add(1, Ordering::AcqRel);
-        self.entry.lock().take();
+        entry.take();
     }
 }

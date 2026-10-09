@@ -7,6 +7,7 @@
 //! `pg_depend` and `pg_shdepend` for the user objects of one catalog snapshot, derived from their definitions as `PostgreSQL` records the rows when it creates the objects, and the descriptions `getObjectDescription` gives the objects the rows name.
 
 mod addresses;
+mod cache;
 mod columns;
 mod composite_fields;
 mod composite_storage;
@@ -26,6 +27,9 @@ mod routines;
 mod rows;
 mod shared;
 mod types;
+
+pub(super) use cache::retained_dependencies;
+pub(in crate::catalog) use cache::DependencyCatalogCache;
 
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
@@ -55,6 +59,8 @@ impl CatalogDependencies {
         catalog: &CatalogReadView,
         resolution: &RelationNameResolution,
     ) -> Result<Self, SQLError> {
+        #[cfg(test)]
+        cache::record_build();
         let objects = CatalogObjects::collect(context, catalog, resolution)?;
         let mut builder = DependencyBuilder {
             context,

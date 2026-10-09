@@ -491,8 +491,7 @@ pub struct RegtypeOutputCatalog {
     procs: BTreeMap<i64, RegtypeCatalogEntry>,
     proc_names_by_namespace: BTreeMap<i64, BTreeSet<String>>,
     types: BTreeMap<i64, RegtypeCatalogEntry>,
-    /// The catalog's dependencies and object descriptions, derived when an object is first described.
-    dependencies: std::sync::OnceLock<Arc<super::CatalogDependencies>>,
+    dependencies: super::dependencies::DependencyCatalogCache,
 }
 
 impl RegtypeOutputCatalog {
@@ -613,7 +612,7 @@ impl RegtypeOutputCatalog {
             procs,
             proc_names_by_namespace,
             types,
-            dependencies: std::sync::OnceLock::new(),
+            dependencies: crate::catalog::projection::DependencyCatalogCache::default(),
         })
     }
 }
@@ -699,24 +698,17 @@ impl AliasConstantOutput {
     }
 }
 
-/// The dependencies of the catalog `reg*` output names, derived once until catalog state changes.
+/// Object descriptions share the same retained dependency generation as virtual catalog rows.
 pub(crate) fn catalog_dependencies(
     context: &CatalogContext<'_>,
 ) -> Result<Arc<super::CatalogDependencies>, SQLError> {
-    let catalog = regtype_output_catalog(context)?;
-    if let Some(dependencies) = catalog.dependencies.get() {
-        return Ok(dependencies.clone());
-    }
-    let view = context.catalog_read_view();
-    let view = view.metadata_view();
-    let mut resolution = context.session_execution_view().relation_name_resolution();
-    resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-    let dependencies = Arc::new(super::CatalogDependencies::build(
-        context,
-        &view,
-        &resolution,
-    )?);
-    Ok(catalog.dependencies.get_or_init(|| dependencies).clone())
+    // Preserve output-metadata validation before object-description dependency analysis.
+    let output = regtype_output_catalog(context)?;
+    output.dependencies.get_or_try_init(|| {
+        let view = context.catalog_read_view();
+        let resolution = context.session_execution_view().relation_name_resolution();
+        super::dependencies::retained_dependencies(context, &view, &resolution)
+    })
 }
 
 fn regtype_output_catalog(

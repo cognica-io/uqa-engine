@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod output_cache;
+
 #[test]
 fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
     use crate::catalog::{security::BoundTableSecurity, test_support, CatalogTableSnapshot};
@@ -66,7 +68,7 @@ fn legacy_vector_array_type_lookup_uses_the_array_identity() {
         procs: BTreeMap::new(),
         proc_names_by_namespace: BTreeMap::new(),
         types: BTreeMap::new(),
-        dependencies: std::sync::OnceLock::new(),
+        dependencies: crate::catalog::projection::DependencyCatalogCache::default(),
     };
     for (oid, name, array_oid, element_oid) in [
         (21, "int2", 1005, 0),
@@ -110,7 +112,7 @@ fn type_output_qualifies_shadowed_rows_and_arrays_by_first_visible_type() {
         procs: BTreeMap::new(),
         proc_names_by_namespace: BTreeMap::new(),
         types: BTreeMap::new(),
-        dependencies: std::sync::OnceLock::new(),
+        dependencies: crate::catalog::projection::DependencyCatalogCache::default(),
     };
     for (oid, namespace, name, array_oid, element_oid) in [
         (21_000, 20_000, "item", 21_001, 0),

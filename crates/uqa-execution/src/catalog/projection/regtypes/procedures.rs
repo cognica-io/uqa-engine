@@ -244,7 +244,7 @@ mod tests {
                     (17, entry("bytea", 11, &[], false)),
                     (25, entry("text", 11, &[], false)),
                 ]),
-                dependencies: std::sync::OnceLock::new(),
+                dependencies: crate::catalog::projection::DependencyCatalogCache::default(),
             },
             visibility: OutputVisibility {
                 schemas: vec!["body_shadow".into(), "pg_catalog".into()],

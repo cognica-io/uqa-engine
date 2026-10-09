@@ -1008,6 +1008,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "dependency_sources_and_descriptions_share_one_retained_derivation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/dependencies/cache/tests.rs",
+      "capability": "Retained catalog derivation",
+      "workload": "Repeated pg_depend/pg_shdepend aliases and object-description readers with zero, one and 128 unrelated relations.",
+      "invariant": "Exactly one complete derivation is retained; every alias preserves the complete dependency rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_dependency_readers_initialize_the_generation_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/dependencies/cache/tests.rs",
+      "capability": "Retained catalog derivation",
+      "workload": "Eight concurrent cold readers of one retained catalog with 128 unrelated relations.",
+      "invariant": "Exactly one dependency derivation is shared by all readers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "dependency_generations_preserve_renames_removal_and_fresh_ddl_builds",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/dependencies/cache/tests.rs",
+      "capability": "Retained catalog derivation",
+      "workload": "Retained, renamed and removed catalog generations plus two explicit DDL derivations.",
+      "invariant": "Old and new generations stay independent; explicit fresh DDL requests both build their current dependency graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_output_readers_share_one_cold_metadata_build",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/output_cache.rs",
+      "capability": "Retained catalog derivation",
+      "workload": "Eight concurrent cold readers of catalog output metadata.",
+      "invariant": "Exactly one output metadata build is shared by all readers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "description_metadata_reuses_dependencies_until_output_invalidation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/dependencies/cache/tests.rs",
+      "capability": "Retained catalog derivation",
+      "workload": "Repeated object descriptions in four fresh query views followed by catalog invalidation and rename.",
+      "invariant": "One dependency derivation is retained across unchanged queries; invalidation publishes a new generation without changing the retained result.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

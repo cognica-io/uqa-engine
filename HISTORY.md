@@ -22,7 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve lazy OLD/NEW view expressions in RULE conditions, including CASE, COALESCE and nested scalar subqueries, without discarding required volatile projection effects or live whole-row fields.
 
-- Reuse catalog inputs for scoped builtin permissions, scalar metadata, routine signatures and read-only view analysis; retain relation type descriptors without repeated catalog capture, while preserving private DDL, role changes, rollback and portal generations.
+- Reuse catalog inputs for scoped builtin permissions, scalar metadata, routine signatures and read-only view analysis; retain relation type descriptors and share dependency derivation across catalog aliases and object descriptions, with one concurrent cold initialization. Preserve private DDL, role changes, rollback, portal generations and fresh dependency checks after DDL locks.
 
 - Check type OID collisions directly from retained identities instead of building every `pg_type` row, while preserving builtin and user-type reservations and fresh checks after catalog lock waits.
 

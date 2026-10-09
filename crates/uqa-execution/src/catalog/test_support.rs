@@ -12,6 +12,9 @@ use super::{
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{ast::FunctionBinding, ColumnType, SQLError};
 
+mod services;
+pub(crate) use services::CatalogServices;
+
 pub(crate) fn table_snapshot(
     object_id: [u8; 16],
     columns: Vec<uqa_sql::ast::ColumnDef>,

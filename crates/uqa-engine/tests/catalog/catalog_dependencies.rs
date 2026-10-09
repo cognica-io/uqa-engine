@@ -8,6 +8,9 @@
 
 use uqa_engine::Engine;
 
+#[path = "catalog_dependencies/retention.rs"]
+mod retention;
+
 fn verify_catalog_dependencies(engine: &Engine) {
     crate::pg18_oracle::verify(
         engine,
