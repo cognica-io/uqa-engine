@@ -26,7 +26,8 @@ class ControlledBuildTest(unittest.TestCase):
         self.repository = self.root / "repository"
         self.shared = self.root / "claims-reference-source"
         self.binaries = self.root / "binaries"
-        subprocess.run(["git", "init", "--quiet", str(self.repository)], check=True)
+        self.git_environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        subprocess.run(["git", "init", "--quiet", str(self.repository)], env=self.git_environment, check=True)
         self.git("config", "user.name", "Build cache test")
         self.git("config", "user.email", "build-cache@example.invalid")
         source = self.repository / "lib.rs"
@@ -53,7 +54,7 @@ class ControlledBuildTest(unittest.TestCase):
 
     def git(self, *args, cwd=None):
         return subprocess.check_output(["git", *args], cwd=cwd or self.repository,
-                                       stderr=subprocess.PIPE, text=True).strip()
+                                       env=self.git_environment, stderr=subprocess.PIPE, text=True).strip()
 
     def cached_reference(self):
         directory = self.binaries / "claims-reference"
@@ -124,6 +125,18 @@ class ControlledBuildTest(unittest.TestCase):
                     self.assertEqual(artifact["build_environment"], self.host.build_environment)
                     self.assertEqual(artifact["sha256"], runner.file_hash(Path(artifact["path"])))
                 self.host.unit.assert_called_once()
+
+    def test_fixture_ignores_the_callers_git_repository_environment(self):
+        before = {name: (self.repository / ".git" / name).read_bytes() for name in ("HEAD", "index", "config")}
+        environment = {"GIT_DIR": str(self.repository / ".git"), "GIT_WORK_TREE": str(self.repository),
+                       "GIT_INDEX_FILE": str(self.root / "caller.index"),
+                       "GIT_COMMON_DIR": str(self.repository / ".git")}
+        result = unittest.TestResult()
+        with patch.dict(os.environ, environment):
+            ControlledBuildTest("test_cached_claim_reference_preserves_candidate_checkout_and_source_freshness").run(result)
+        self.assertTrue(result.wasSuccessful(), result.errors + result.failures)
+        self.assertEqual({name: (self.repository / ".git" / name).read_bytes() for name in before}, before)
+        self.assertFalse((self.root / "caller.index").exists())
 
 
 if __name__ == "__main__":
