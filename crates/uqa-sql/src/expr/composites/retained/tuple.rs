@@ -54,8 +54,14 @@ pub(super) fn project(
             offset = align(offset, alignment)?;
         }
         if let Some((index, attribute)) = current {
+            // Array operations dispatch on the admitted header's element OID. An unchanged byte position can retain its validated elements even when the declared array type changes.
+            let retained_array = (position == offset && original.ty != attribute.ty)
+                .then(|| retain_array_identity(value, &original.ty, &attribute.ty))
+                .flatten();
             output[index].1 = if position == offset && original.ty == attribute.ty {
                 value.clone()
+            } else if let Some(array) = retained_array {
+                array
             } else if length == -1 || !matches!(length, 1 | 2 | 4 | 8) {
                 Value::Datum(backing.field(base_oid(&attribute.ty)?, u32::try_from(offset).ok()?))
             } else {
@@ -73,6 +79,28 @@ pub(super) fn project(
         })?;
     }
     Some(Value::Record(output))
+}
+
+fn retain_array_identity(value: &Value, before: &ColumnType, after: &ColumnType) -> Option<Value> {
+    fn element_oid(ty: &ColumnType) -> Option<u32> {
+        match ty {
+            ColumnType::Domain { base, .. } => element_oid(base),
+            ColumnType::Array(element) => {
+                let mut leaf = element.as_ref();
+                while let ColumnType::Array(element) = leaf {
+                    leaf = element;
+                }
+                Some(pg_type_oid(leaf) as u32)
+            }
+            _ => None,
+        }
+    }
+    element_oid(after)?;
+    let Value::Array(array) = value else {
+        return None;
+    };
+    let oid = array.element_type_oid().or(element_oid(before));
+    Some(Value::Array(array.clone().with_element_type_oid(oid)))
 }
 
 fn base_oid(ty: &ColumnType) -> Option<u32> {

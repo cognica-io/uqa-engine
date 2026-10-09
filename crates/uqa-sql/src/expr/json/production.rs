@@ -175,24 +175,14 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
             Some(value) => value,
             None => Node::String(control.copy_text(text)?),
         },
-        Value::Array(array) => array_node(array.elements(), core_carrier, control)?,
-        Value::LegacyVector(vector) => {
-            if !core_carrier && vector.kind() == uqa_core::LegacyVectorKind::Oid {
-                let mut nodes = Values::new(control);
-                for value in vector.elements() {
-                    nodes.push(
-                        Node::String(super::super::conversion::value_to_string_with_control(
-                            value, control,
-                        )?),
-                        control,
-                    )?;
-                }
-                Node::Array(nodes)
-            } else {
-                array_node(vector.elements(), core_carrier, control)?
-            }
-        }
-        Value::List(values) => array_node(values, core_carrier, control)?,
+        Value::Array(array) => array_node(
+            array.elements(),
+            core_carrier,
+            array.element_type_oid(),
+            control,
+        )?,
+        Value::LegacyVector(vector) => legacy_vector_node(vector, core_carrier, control)?,
+        Value::List(values) => array_node(values, core_carrier, None, control)?,
         Value::Row(values) => {
             let mut fields = Values::new(control);
             for (index, value) in values.iter().enumerate() {
@@ -222,6 +212,26 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
     })
 }
 
+fn legacy_vector_node(
+    vector: &uqa_core::LegacyVectorValue,
+    core_carrier: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Node> {
+    if core_carrier || vector.kind() != uqa_core::LegacyVectorKind::Oid {
+        return array_node(vector.elements(), core_carrier, None, control);
+    }
+    let mut nodes = Values::new(control);
+    for value in vector.elements() {
+        nodes.push(
+            Node::String(super::super::conversion::value_to_string_with_control(
+                value, control,
+            )?),
+            control,
+        )?;
+    }
+    Ok(Node::Array(nodes))
+}
+
 fn binary_node(bytes: &[u8], control: &ProductionControl<'_>) -> Result<Node> {
     let mut text = ProductionString::new(*control);
     text.push_str("0x")?;
@@ -236,11 +246,24 @@ fn binary_node(bytes: &[u8], control: &ProductionControl<'_>) -> Result<Node> {
 fn array_node(
     values: &[Value],
     core_carrier: bool,
+    element_type_oid: Option<u32>,
     control: &ProductionControl<'_>,
 ) -> Result<Node> {
     let mut nodes = Values::new(control);
     for value in values {
-        nodes.push(from_value(value, core_carrier, control)?, control)?;
+        let node = match value {
+            Value::List(values) => array_node(values, core_carrier, element_type_oid, control)?,
+            Value::Float(value)
+                if !core_carrier && element_type_oid == Some(700) && value.is_finite() =>
+            {
+                Node::Number(crate::expr::floating::format_real_with_control(
+                    *value as f32,
+                    control,
+                )?)
+            }
+            value => from_value(value, core_carrier, control)?,
+        };
+        nodes.push(node, control)?;
     }
     Ok(Node::Array(nodes))
 }

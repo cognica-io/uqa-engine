@@ -367,7 +367,8 @@ fn array_value(
     let array = ArrayValue::with_lower_bounds_with_control(converted, bounds.finish()?, control)?
         .ok_or_else(array_shape_error)?;
     let (array, memory) = array.into_parts();
-    Ok(control.finish(Value::Array(array), memory)?)
+    let oid = crate::catalog::type_metadata::pg_type_oid(array_scalar_type(element)) as u32;
+    Ok(control.finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?)
 }
 
 fn array_elements(

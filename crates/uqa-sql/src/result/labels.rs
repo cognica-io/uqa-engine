@@ -63,7 +63,8 @@ fn read_datums(value: &Value) -> Result<Value, SQLError> {
                     .collect::<Result<_, _>>()?,
                 array.lower_bounds().to_vec(),
             )
-            .ok_or_else(|| SQLError::Internal("datum output changed array shape".into()))?,
+            .ok_or_else(|| SQLError::Internal("datum output changed array shape".into()))?
+            .with_element_type_oid(array.element_type_oid()),
         ),
         Value::List(values) => {
             Value::List(values.iter().map(read_datums).collect::<Result<_, _>>()?)

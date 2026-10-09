@@ -129,14 +129,7 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
         Value::Datum(value) => return value_to_json_text(&super::datums::read(value)?),
         Value::LegacyVector(vector) => legacy_vector_json(vector).to_string(),
-        Value::Array(array) => {
-            let values = array
-                .elements()
-                .iter()
-                .map(value_to_json_text)
-                .collect::<Result<Vec<_>>>()?;
-            format!("[{}]", values.join(","))
-        }
+        Value::Array(array) => array_json_text(array.elements(), array.element_type_oid())?,
         Value::List(values) => {
             let values = values
                 .iter()
@@ -164,6 +157,20 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
             format!("{{{}}}", values.join(","))
         }
     })
+}
+
+fn array_json_text(values: &[Value], oid: Option<u32>) -> Result<String> {
+    let fields = values
+        .iter()
+        .map(|value| match value {
+            Value::List(values) => array_json_text(values, oid),
+            Value::Float(value) if oid == Some(700) && value.is_finite() => {
+                Ok(super::format_real(*value as f32))
+            }
+            value => value_to_json_text(value),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(format!("[{}]", fields.join(",")))
 }
 
 fn legacy_vector_json(vector: &uqa_core::LegacyVectorValue) -> serde_json::Value {

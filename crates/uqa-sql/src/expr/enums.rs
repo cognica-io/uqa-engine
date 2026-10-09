@@ -204,6 +204,7 @@ pub fn enum_range(
         elements.push(labels.value(label));
     }
     ArrayValue::try_new(elements)
+        .map(|array| array.with_element_type_oid(Some(type_oid)))
         .map(Value::Array)
         .ok_or_else(|| SQLError::Internal("enum range array has invalid dimensions".into()))
 }
@@ -265,6 +266,7 @@ fn map_array(
     let elements = leaves(array.elements(), &mut convert)?;
     ArrayValue::with_lower_bounds(elements, array.lower_bounds().to_vec())
         .filter(|converted| converted.dimensions() == array.dimensions())
+        .map(|converted| converted.with_element_type_oid(array.element_type_oid()))
         .ok_or_else(|| SQLError::Internal("enum array conversion changed array dimensions".into()))
 }
 
@@ -370,7 +372,11 @@ pub fn fold_unknown_literal(
                     "array literal parsing produced a non-text element {other:?}"
                 ))),
             })
-            .map(|array| Some(Value::Array(array)))
+            .map(|array| {
+                Some(Value::Array(
+                    array.with_element_type_oid(Some(reference.oid)),
+                ))
+            })
         }
         _ => Ok(None),
     }

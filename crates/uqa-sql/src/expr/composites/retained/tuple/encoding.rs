@@ -11,6 +11,8 @@ use super::{
     CompositeTypeDescriptor, Value,
 };
 
+mod arrays;
+
 pub(super) fn encode(
     fields: &[(String, Value)],
     descriptor: &CompositeTypeDescriptor,
@@ -131,6 +133,7 @@ fn payload(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
         (Value::Decimal(number), ColumnType::Numeric { .. }) => {
             crate::catalog::node_tree::encode_numeric_datum(number).ok()
         }
+        (Value::Array(array), ColumnType::Array(element)) => arrays::payload(array, element),
         _ => None,
     }
 }

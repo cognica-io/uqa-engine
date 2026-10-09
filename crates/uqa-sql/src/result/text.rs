@@ -70,6 +70,14 @@ fn format_array(
     while let ColumnType::Array(inner) = element {
         element = inner;
     }
+    if let Value::Array(array) = value {
+        if let Some(actual) = array
+            .element_type_oid()
+            .and_then(crate::catalog::type_metadata::builtin_scalar_type)
+        {
+            element = actual;
+        }
+    }
     let (values, prefix) = match value {
         Value::Array(array) => array_parts(array),
         Value::LegacyVector(vector) => array_parts(vector.as_array()),

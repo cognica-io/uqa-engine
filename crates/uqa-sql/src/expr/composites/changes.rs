@@ -99,6 +99,7 @@ pub fn apply_attribute_change(
                 .map(|value| apply_array_element(value, element, target, change, catalog))
                 .collect::<Result<Vec<_>>>()?;
             ArrayValue::with_lower_bounds(elements, lower_bounds)
+                .map(|converted| converted.with_element_type_oid(array.element_type_oid()))
                 .map(Value::Array)
                 .ok_or_else(|| {
                     SQLError::Internal("composite attribute change reshaped an array".into())

@@ -12,6 +12,7 @@ use uqa_core::{
     DatumValue, DecimalValue, Value,
 };
 
+mod arrays;
 mod compression;
 mod fixed;
 mod malformed;
@@ -44,8 +45,18 @@ pub fn read_with_control(
         return value;
     }
     let payload = payload(datum, control)?;
-    let bytes = payload.bytes();
-    match datum.type_oid() {
+    read_payload(datum.type_oid(), payload.bytes(), control)
+}
+
+fn read_payload(
+    oid: u32,
+    bytes: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    if crate::catalog::type_metadata::builtin_array_element(oid).is_some() {
+        return arrays::read(bytes, control);
+    }
+    match oid {
         17 => {
             let mut output = ProductionVec::new(*control);
             output.reserve(bytes.len())?;
@@ -55,7 +66,7 @@ pub fn read_with_control(
             let (bytes, memory) = output.finish()?.into_parts();
             Ok(control.finish(Value::Bytes(bytes), memory)?)
         }
-        25 | 114 | 1042 | 1043 | 1790 => {
+        25 | 114 | 194 | 1042 | 1043 | 1790 => {
             let text = std::str::from_utf8(bytes).map_err(|error| SQLError::Routine {
                 sqlstate: "22021".into(),
                 message: format!(
@@ -64,7 +75,7 @@ pub fn read_with_control(
                 ),
             })?;
             let (text, memory) = control.copy_text(text)?.into_parts();
-            let value = match datum.type_oid() {
+            let value = match oid {
                 114 => Value::Json(text),
                 1042 => Value::FixedChar(text),
                 _ => Value::Str(text),

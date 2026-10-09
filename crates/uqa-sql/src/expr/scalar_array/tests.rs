@@ -18,6 +18,53 @@ fn evaluate(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Prod
 }
 
 #[test]
+fn array_transformations_keep_physical_element_identity_and_the_output_owner() {
+    let source = Value::Array(
+        ArrayValue::try_new(vec![Value::Int(2), Value::Null, Value::Int(1)])
+            .unwrap()
+            .with_element_type_oid(Some(23)),
+    );
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (name, args) in [
+        ("array_reverse", vec![source.clone()]),
+        ("array_sort", vec![source.clone()]),
+        ("array_cat", vec![source.clone(), source.clone()]),
+        ("array_append", vec![source.clone(), Value::Int(3)]),
+        ("array_remove", vec![source.clone(), Value::Int(1)]),
+    ] {
+        let output = evaluate(name, &args, &control);
+        let Value::Array(array) = &*output else {
+            panic!("array expected");
+        };
+        assert_eq!(array.element_type_oid(), Some(23), "{name}");
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+    let replaced = crate::expr::eval_scalar_function(
+        "array_replace",
+        &[source.clone(), Value::Int(1), Value::Int(3)],
+    )
+    .unwrap();
+    assert_eq!(replaced.array_view().unwrap().element_type_oid(), Some(23));
+    let different = Value::Array(
+        ArrayValue::try_new(vec![])
+            .unwrap()
+            .with_element_type_oid(Some(25)),
+    );
+    let error = eval_array_functions("array_cat", &[source, different])
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        error.to_string(),
+        "cannot concatenate arrays of different element types"
+    );
+}
+
+#[test]
 fn controlled_array_outputs_preserve_bounds_nulls_and_owned_payloads() {
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();

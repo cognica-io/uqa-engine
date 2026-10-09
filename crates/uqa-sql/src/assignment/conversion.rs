@@ -89,6 +89,11 @@ pub fn convert_declared_value_to_column_type(
             let converted =
                 convert_declared_array_elements(context, array.elements(), source, target)?;
             ArrayValue::with_lower_bounds(converted, array.lower_bounds().to_vec())
+                .map(|array| {
+                    array.with_element_type_oid(Some(crate::catalog::type_metadata::pg_type_oid(
+                        target,
+                    ) as u32))
+                })
                 .map(Value::Array)
                 .ok_or_else(|| {
                     SQLError::TypeMismatch(
@@ -231,6 +236,11 @@ fn convert_catalog_array(
     };
     let values = convert_catalog_array_elements(context, array.elements(), element)?;
     ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
+        .map(|array| {
+            array.with_element_type_oid(Some(crate::catalog::type_metadata::pg_type_oid(
+                array_scalar_type(element),
+            ) as u32))
+        })
         .map(Value::Array)
         .ok_or_else(|| {
             SQLError::TypeMismatch("multidimensional arrays must have matching dimensions".into())

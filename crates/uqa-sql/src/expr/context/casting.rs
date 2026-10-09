@@ -511,14 +511,21 @@ fn cast_catalog_array(
     let leaf = array_leaf_type(target);
     let target_element = control.copy_text(&leaf.catalog_name())?;
     let target_name = target.sql_name_with_control(control)?;
-    cast_array(
+    let output = cast_array(
         value,
         source_element,
         &target_element,
         &target_name,
         Some(engine),
         control,
-    )
+    )?;
+    let (Value::Array(array), memory) = output.into_parts() else {
+        return Err(SQLError::Internal(
+            "catalog array cast returned a non-array".into(),
+        ));
+    };
+    let oid = crate::catalog::type_metadata::pg_type_oid(leaf) as u32;
+    Ok(control.finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?)
 }
 
 fn cast_array(
@@ -546,7 +553,12 @@ fn cast_array(
     let array = rebuild_array(array, elements, control)?
         .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))?;
     let (array, memory) = array.into_parts();
-    Ok(control.finish(Value::Array(array), memory)?)
+    let oid = if target_element == "regrole" {
+        Some(crate::catalog::type_metadata::pg_type_oid(&ColumnType::Regrole) as u32)
+    } else {
+        array.element_type_oid()
+    };
+    Ok(control.finish(Value::Array(array.with_element_type_oid(oid)), memory)?)
 }
 
 fn cast_array_elements(
@@ -584,11 +596,17 @@ pub(super) fn rebuild_array(
     for bound in source.lower_bounds() {
         bounds.push_copy(*bound)?;
     }
-    Ok(ArrayValue::with_lower_bounds_with_control(
-        elements,
-        bounds.finish()?,
-        control,
-    )?)
+    ArrayValue::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
+        .map(|array| {
+            let (array, memory) = array.into_parts();
+            control
+                .finish(
+                    array.with_element_type_oid(source.element_type_oid()),
+                    memory,
+                )
+                .map_err(Into::into)
+        })
+        .transpose()
 }
 
 #[cfg(test)]

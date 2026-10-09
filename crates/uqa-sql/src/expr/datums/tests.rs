@@ -7,6 +7,50 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+#[test]
+fn retained_array_header_controls_elements_bounds_and_resource_ownership() {
+    // Captured by interpreting PostgreSQL's retained integer[][] field as bytea; the payload includes its null bitmap and non-default bounds.
+    let hex = "0200000028000000170000000200000002000000ffffffff020000000d00000000000000010000000300000004000000";
+    let payload = (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect::<Vec<_>>();
+    let mut bytes = ((payload.len() as u32 + 4) << 2).to_le_bytes().to_vec();
+    bytes.extend_from_slice(&payload);
+    let datum = DatumValue::new(1009, 0, bytes);
+    let memory = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let value = read_with_control(&datum, &control).unwrap();
+    let Value::Array(array) = &*value else {
+        panic!("array expected");
+    };
+    assert_eq!(array.element_type_oid(), Some(23));
+    assert_eq!(array.dimensions(), &[2, 2]);
+    assert_eq!(array.lower_bounds(), &[-1, 2]);
+    assert_eq!(
+        array.elements(),
+        &[
+            Value::List(vec![Value::Int(1), Value::Null]),
+            Value::List(vec![Value::Int(3), Value::Int(4)])
+        ]
+    );
+    assert!(memory.used() > 0);
+    drop(value);
+    assert_eq!(memory.used(), 0);
+    for end in 0..datum.bytes().len() {
+        assert!(read(&DatumValue::new(1009, 0, datum.bytes()[..end].to_vec())).is_err());
+    }
+    let small = MemoryBudget::new(64);
+    assert!(read_with_control(&datum, &ProductionControl::new(&small, &token, &token)).is_err());
+    assert_eq!(small.used(), 0);
+    token.cancel();
+    assert_eq!(
+        read_with_control(&datum, &control).unwrap_err().sqlstate(),
+        Some("57014")
+    );
+}
+
 fn compressed(method: u32, length: u32, bytes: &[u8]) -> DatumValue {
     let mut data = (((bytes.len() as u32 + 8) << 2) | 2).to_le_bytes().to_vec();
     data.extend_from_slice(&((method << 30) | length).to_le_bytes());
@@ -60,6 +104,16 @@ fn fixed_reference_outputs_retain_bounds_and_the_output_allowance() {
     assert!(memory.used() >= 36);
     drop(output);
     assert_eq!(memory.used(), 0);
+    let interval = read_with_control(&datum.field(1186, 0), &control).unwrap();
+    assert_eq!(
+        *interval,
+        Value::Temporal(uqa_core::TemporalValue::Interval {
+            months: 3,
+            days: 2,
+            micros: 1
+        })
+    );
+    drop(interval);
     assert_eq!(
         read(&datum.field(1186, 0)).unwrap(),
         Value::Temporal(uqa_core::TemporalValue::Interval {

@@ -6,6 +6,25 @@
 
 use super::super::{parse_json, typed_json_value};
 use super::*;
+
+#[test]
+fn array_json_uses_its_physical_real_output_through_nested_dimensions() {
+    let value =
+        crate::expr::cast_value(&Value::Str("{{1.23456789,NaN},{-0,2}}".into()), "real[]").unwrap();
+    let expected = "[[1.2345679,\"NaN\"],[-0,2]]";
+    assert_eq!(
+        crate::expr::json::value_to_json_text(&value).unwrap(),
+        expected
+    );
+    let memory = uqa_core::memory::MemoryBudget::new(16384);
+    let token = uqa_core::CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let output = format_value_as_json_with_control(&value, &control).unwrap();
+    assert_eq!(output.as_str(), expected);
+    assert!(memory.used() > 0);
+    drop(output);
+    assert_eq!(memory.used(), 0);
+}
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue, TemporalValue};
 
 fn reference(value: &Value, jsonb: bool) -> Result<Value> {

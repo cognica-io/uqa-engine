@@ -170,6 +170,7 @@ pub(crate) fn project_value(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
+                .map(|converted| converted.with_element_type_oid(array.element_type_oid()))
                 .map(Value::Array)
                 .ok_or_else(|| {
                     SQLError::Internal("retained composite projection changed array shape".into())

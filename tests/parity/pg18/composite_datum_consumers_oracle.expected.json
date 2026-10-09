@@ -2248,6 +2248,1780 @@
           "rows": []
         }
       ]
+    },
+    {
+      "sql": "CREATE TYPE array_ints_bytes AS(a integer[],b integer); PREPARE array_ints_bytes_p AS SELECT '(\"{1,2}\",7)'::array_ints_bytes; PREPARE array_ints_bytes_eq(array_ints_bytes) AS SELECT '(\"{1,2}\",7)'::array_ints_bytes=$1; ALTER TYPE array_ints_bytes ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_ints_bytes_setup"
+    },
+    {
+      "sql": "EXECUTE array_ints_bytes_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_ints_bytes"
+          ],
+          "type_oids": [
+            18856
+          ],
+          "rows": [
+            [
+              "(\"\\\\x01000000000000001700000002000000010000000100000002000000\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_ints_bytes_output"
+    },
+    {
+      "sql": "DEALLOCATE array_ints_bytes_p; DEALLOCATE array_ints_bytes_eq; DROP TYPE array_ints_bytes",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_ints_bytes_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_ints_texts AS(a integer[],b integer); PREPARE array_ints_texts_p AS SELECT '(\"{1,2}\",7)'::array_ints_texts; PREPARE array_ints_texts_eq(array_ints_texts) AS SELECT '(\"{1,2}\",7)'::array_ints_texts=$1; ALTER TYPE array_ints_texts ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_ints_texts_setup"
+    },
+    {
+      "sql": "EXECUTE array_ints_texts_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_ints_texts"
+          ],
+          "type_oids": [
+            18859
+          ],
+          "rows": [
+            [
+              "(\"{1,2}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_ints_texts_output"
+    },
+    {
+      "sql": "EXECUTE array_ints_texts_eq(ROW(ARRAY['1','2'],7)::array_ints_texts)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_ints_texts_eq"
+    },
+    {
+      "sql": "DEALLOCATE array_ints_texts_p; DEALLOCATE array_ints_texts_eq; DROP TYPE array_ints_texts",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_ints_texts_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_texts_ints AS(a text[],b integer); PREPARE array_texts_ints_p AS SELECT '(\"{hello,world}\",7)'::array_texts_ints; PREPARE array_texts_ints_eq(array_texts_ints) AS SELECT '(\"{hello,world}\",7)'::array_texts_ints=$1; ALTER TYPE array_texts_ints ALTER ATTRIBUTE a TYPE integer[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_texts_ints_setup"
+    },
+    {
+      "sql": "EXECUTE array_texts_ints_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_texts_ints"
+          ],
+          "type_oids": [
+            18862
+          ],
+          "rows": [
+            [
+              "(\"{hello,world}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_texts_ints_output"
+    },
+    {
+      "sql": "EXECUTE array_texts_ints_eq(ROW(ARRAY[1,2],7)::array_texts_ints)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_texts_ints_eq"
+    },
+    {
+      "sql": "DEALLOCATE array_texts_ints_p; DEALLOCATE array_texts_ints_eq; DROP TYPE array_texts_ints",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_texts_ints_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_empty AS(a integer[],b integer); PREPARE array_datum_empty_p AS SELECT '(\"{}\",7)'::array_datum_empty; PREPARE array_datum_empty_eq(array_datum_empty) AS SELECT '(\"{}\",7)'::array_datum_empty=$1; PREPARE array_datum_empty_lt(array_datum_empty) AS SELECT '(\"{}\",7)'::array_datum_empty<$1; ALTER TYPE array_datum_empty ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_empty_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_empty_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_empty"
+          ],
+          "type_oids": [
+            18865
+          ],
+          "rows": [
+            [
+              "({},7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_empty_output"
+    },
+    {
+      "sql": "EXECUTE array_datum_empty_eq(ROW(ARRAY[]::text[],7)::array_datum_empty)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_empty_eq"
+    },
+    {
+      "sql": "EXECUTE array_datum_empty_lt(ROW(ARRAY[]::text[],7)::array_datum_empty)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_empty_lt"
+    },
+    {
+      "sql": "EXECUTE array_datum_empty_eq(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_empty_null"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_empty_p; DEALLOCATE array_datum_empty_eq; DEALLOCATE array_datum_empty_lt; DROP TYPE array_datum_empty",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_empty_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_nulls AS(a integer[],b integer); PREPARE array_datum_nulls_p AS SELECT '(\"{NULL,NULL}\",7)'::array_datum_nulls; PREPARE array_datum_nulls_eq(array_datum_nulls) AS SELECT '(\"{NULL,NULL}\",7)'::array_datum_nulls=$1; PREPARE array_datum_nulls_lt(array_datum_nulls) AS SELECT '(\"{NULL,NULL}\",7)'::array_datum_nulls<$1; ALTER TYPE array_datum_nulls ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_nulls_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_nulls_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_nulls"
+          ],
+          "type_oids": [
+            18868
+          ],
+          "rows": [
+            [
+              "(\"{NULL,NULL}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_nulls_output"
+    },
+    {
+      "sql": "EXECUTE array_datum_nulls_eq(ROW(ARRAY[NULL]::text[],7)::array_datum_nulls)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_nulls_eq"
+    },
+    {
+      "sql": "EXECUTE array_datum_nulls_lt(ROW(ARRAY[NULL]::text[],7)::array_datum_nulls)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_nulls_lt"
+    },
+    {
+      "sql": "EXECUTE array_datum_nulls_eq(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_nulls_null"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_nulls_p; DEALLOCATE array_datum_nulls_eq; DEALLOCATE array_datum_nulls_lt; DROP TYPE array_datum_nulls",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_nulls_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_dimensions AS(a text[],b integer); PREPARE array_datum_dimensions_p AS SELECT '(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)'::array_datum_dimensions; PREPARE array_datum_dimensions_eq(array_datum_dimensions) AS SELECT '(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)'::array_datum_dimensions=$1; PREPARE array_datum_dimensions_lt(array_datum_dimensions) AS SELECT '(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)'::array_datum_dimensions<$1; ALTER TYPE array_datum_dimensions ALTER ATTRIBUTE a TYPE integer[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_dimensions_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_dimensions_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_dimensions"
+          ],
+          "type_oids": [
+            18871
+          ],
+          "rows": [
+            [
+              "(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_dimensions_output"
+    },
+    {
+      "sql": "EXECUTE array_datum_dimensions_eq(ROW(ARRAY[[1,2],[3,4]],7)::array_datum_dimensions)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_dimensions_eq"
+    },
+    {
+      "sql": "EXECUTE array_datum_dimensions_lt(ROW(ARRAY[[1,2],[3,4]],7)::array_datum_dimensions)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_dimensions_lt"
+    },
+    {
+      "sql": "EXECUTE array_datum_dimensions_eq(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_dimensions_null"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_dimensions_p; DEALLOCATE array_datum_dimensions_eq; DEALLOCATE array_datum_dimensions_lt; DROP TYPE array_datum_dimensions",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_dimensions_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_bools AS(a boolean[],b integer); PREPARE array_datum_bools_p AS SELECT '(\"{t,f,NULL}\",7)'::array_datum_bools; PREPARE array_datum_bools_eq(array_datum_bools) AS SELECT '(\"{t,f,NULL}\",7)'::array_datum_bools=$1; PREPARE array_datum_bools_lt(array_datum_bools) AS SELECT '(\"{t,f,NULL}\",7)'::array_datum_bools<$1; ALTER TYPE array_datum_bools ALTER ATTRIBUTE a TYPE integer[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_bools_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_bools_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_bools"
+          ],
+          "type_oids": [
+            18874
+          ],
+          "rows": [
+            [
+              "(\"{t,f,NULL}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_bools_output"
+    },
+    {
+      "sql": "EXECUTE array_datum_bools_eq(ROW(ARRAY[1,0,NULL],7)::array_datum_bools)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_bools_eq"
+    },
+    {
+      "sql": "EXECUTE array_datum_bools_lt(ROW(ARRAY[1,0,NULL],7)::array_datum_bools)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_bools_lt"
+    },
+    {
+      "sql": "EXECUTE array_datum_bools_eq(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_bools_null"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_bools_p; DEALLOCATE array_datum_bools_eq; DEALLOCATE array_datum_bools_lt; DROP TYPE array_datum_bools",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_bools_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_reals AS(a real[],b integer); PREPARE array_datum_reals_p AS SELECT '(\"{1.23456789,NaN}\",7)'::array_datum_reals; PREPARE array_datum_reals_eq(array_datum_reals) AS SELECT '(\"{1.23456789,NaN}\",7)'::array_datum_reals=$1; PREPARE array_datum_reals_lt(array_datum_reals) AS SELECT '(\"{1.23456789,NaN}\",7)'::array_datum_reals<$1; ALTER TYPE array_datum_reals ALTER ATTRIBUTE a TYPE double precision[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_reals_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_reals_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_reals"
+          ],
+          "type_oids": [
+            18877
+          ],
+          "rows": [
+            [
+              "(\"{1.2345679,NaN}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_reals_output"
+    },
+    {
+      "sql": "EXECUTE array_datum_reals_eq(ROW(ARRAY[1.23456789,0]::double precision[],7)::array_datum_reals)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_reals_eq"
+    },
+    {
+      "sql": "EXECUTE array_datum_reals_lt(ROW(ARRAY[1.23456789,0]::double precision[],7)::array_datum_reals)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare arrays of different element types",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_reals_lt"
+    },
+    {
+      "sql": "EXECUTE array_datum_reals_eq(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_reals_null"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_reals_p; DEALLOCATE array_datum_reals_eq; DEALLOCATE array_datum_reals_lt; DROP TYPE array_datum_reals",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_reals_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_text_bytes AS(a text[],b integer); PREPARE array_datum_text_bytes_p AS SELECT '(\"{one,two}\",7)'::array_datum_text_bytes; PREPARE array_datum_text_bytes_eq(array_datum_text_bytes) AS SELECT '(\"{one,two}\",7)'::array_datum_text_bytes=$1; PREPARE array_datum_text_bytes_lt(array_datum_text_bytes) AS SELECT '(\"{one,two}\",7)'::array_datum_text_bytes<$1; ALTER TYPE array_datum_text_bytes ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_text_bytes_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_text_bytes_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_text_bytes"
+          ],
+          "type_oids": [
+            18880
+          ],
+          "rows": [
+            [
+              "(\"\\\\x01000000000000001900000002000000010000001c0000006f6e65001c00000074776f00\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_text_bytes_output"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_text_bytes_p; DEALLOCATE array_datum_text_bytes_eq; DEALLOCATE array_datum_text_bytes_lt; DROP TYPE array_datum_text_bytes",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_text_bytes_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_datum_null_bytes AS(a integer[],b integer); PREPARE array_datum_null_bytes_p AS SELECT '(\"[-1:0][2:3]={{1,NULL},{3,4}}\",7)'::array_datum_null_bytes; PREPARE array_datum_null_bytes_eq(array_datum_null_bytes) AS SELECT '(\"[-1:0][2:3]={{1,NULL},{3,4}}\",7)'::array_datum_null_bytes=$1; PREPARE array_datum_null_bytes_lt(array_datum_null_bytes) AS SELECT '(\"[-1:0][2:3]={{1,NULL},{3,4}}\",7)'::array_datum_null_bytes<$1; ALTER TYPE array_datum_null_bytes ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "PREPARE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_null_bytes_setup"
+    },
+    {
+      "sql": "EXECUTE array_datum_null_bytes_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_datum_null_bytes"
+          ],
+          "type_oids": [
+            18883
+          ],
+          "rows": [
+            [
+              "(\"\\\\x0200000028000000170000000200000002000000ffffffff020000000d00000000000000010000000300000004000000\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_null_bytes_output"
+    },
+    {
+      "sql": "DEALLOCATE array_datum_null_bytes_p; DEALLOCATE array_datum_null_bytes_eq; DEALLOCATE array_datum_null_bytes_lt; DROP TYPE array_datum_null_bytes",
+      "command_tags": [
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_null_bytes_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_extra_uuid AS(a uuid[],b integer); PREPARE array_extra_uuid_p AS SELECT '(\"{00112233-4455-6677-8899-aabbccddeeff}\",7)'::array_extra_uuid",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_uuid_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE array_extra_uuid ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_uuid_alter"
+    },
+    {
+      "sql": "EXECUTE array_extra_uuid_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_extra_uuid"
+          ],
+          "type_oids": [
+            18898
+          ],
+          "rows": [
+            [
+              "({00112233-4455-6677-8899-aabbccddeeff},7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_uuid_output"
+    },
+    {
+      "sql": "ROLLBACK; EXECUTE array_extra_uuid_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "array_extra_uuid"
+          ],
+          "type_oids": [
+            18898
+          ],
+          "rows": [
+            [
+              "({00112233-4455-6677-8899-aabbccddeeff},7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_uuid_rollback"
+    },
+    {
+      "sql": "DEALLOCATE array_extra_uuid_p; DROP TYPE array_extra_uuid",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_uuid_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_extra_timetz AS(a timetz[],b integer); PREPARE array_extra_timetz_p AS SELECT '(\"{12:30:00+09}\",7)'::array_extra_timetz",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_timetz_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE array_extra_timetz ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_timetz_alter"
+    },
+    {
+      "sql": "EXECUTE array_extra_timetz_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_extra_timetz"
+          ],
+          "type_oids": [
+            18901
+          ],
+          "rows": [
+            [
+              "({12:30:00+09},7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_timetz_output"
+    },
+    {
+      "sql": "ROLLBACK; EXECUTE array_extra_timetz_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "array_extra_timetz"
+          ],
+          "type_oids": [
+            18901
+          ],
+          "rows": [
+            [
+              "({12:30:00+09},7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_timetz_rollback"
+    },
+    {
+      "sql": "DEALLOCATE array_extra_timetz_p; DROP TYPE array_extra_timetz",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_timetz_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_extra_dates AS(a date[],b integer); PREPARE array_extra_dates_p AS SELECT '(\"{2000-01-02,1999-12-31}\",7)'::array_extra_dates",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_dates_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE array_extra_dates ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_dates_alter"
+    },
+    {
+      "sql": "EXECUTE array_extra_dates_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_extra_dates"
+          ],
+          "type_oids": [
+            18904
+          ],
+          "rows": [
+            [
+              "(\"{2000-01-02,1999-12-31}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_dates_output"
+    },
+    {
+      "sql": "ROLLBACK; EXECUTE array_extra_dates_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "array_extra_dates"
+          ],
+          "type_oids": [
+            18904
+          ],
+          "rows": [
+            [
+              "(\"{2000-01-02,1999-12-31}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_dates_rollback"
+    },
+    {
+      "sql": "DEALLOCATE array_extra_dates_p; DROP TYPE array_extra_dates",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_dates_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_extra_intervals AS(a interval[],b integer); PREPARE array_extra_intervals_p AS SELECT '(\"{1 day,02:00:00}\",7)'::array_extra_intervals",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_intervals_setup"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE array_extra_intervals ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_intervals_alter"
+    },
+    {
+      "sql": "EXECUTE array_extra_intervals_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_extra_intervals"
+          ],
+          "type_oids": [
+            18907
+          ],
+          "rows": [
+            [
+              "(\"{\"\"1 day\"\",02:00:00}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_intervals_output"
+    },
+    {
+      "sql": "ROLLBACK; EXECUTE array_extra_intervals_p",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "array_extra_intervals"
+          ],
+          "type_oids": [
+            18907
+          ],
+          "rows": [
+            [
+              "(\"{\"\"1 day\"\",02:00:00}\",7)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_intervals_rollback"
+    },
+    {
+      "sql": "DEALLOCATE array_extra_intervals_p; DROP TYPE array_extra_intervals",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fixed_intervals_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE array_json_real AS(a real[],b integer); PREPARE array_json_real_p AS SELECT to_json('(\"{{1.23456789,NaN},{-0,2}}\",7)'::array_json_real); ALTER TYPE array_json_real ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_json_setup"
+    },
+    {
+      "sql": "EXECUTE array_json_real_p",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_json"
+          ],
+          "type_oids": [
+            114
+          ],
+          "rows": [
+            [
+              "{\"a\":[[1.2345679,\"NaN\"],[-0,2]],\"b\":7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_json_output"
+    },
+    {
+      "sql": "DEALLOCATE array_json_real_p; DROP TYPE array_json_real",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_json_cleanup"
     }
   ]
 }

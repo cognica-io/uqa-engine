@@ -249,6 +249,7 @@ pub fn compare_typed_values_with_control(
             )
         }
         (Value::Array(left), Value::Array(right)) => {
+            validate_array_element_types(left, right)?;
             return left.cmp_by_with_control(right, control, compare_typed_values_with_control);
         }
         (Value::Record(left), Value::Record(right)) => {
@@ -314,10 +315,11 @@ pub fn validate_legacy_vector_comparison(vector: &uqa_core::LegacyVectorValue) -
 pub fn type_comparison_can_fail(ty: &crate::ast::ColumnType) -> bool {
     use crate::ast::ColumnType;
     match ty {
-        ColumnType::OidVector | ColumnType::Record | ColumnType::Composite(_) => true,
-        ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
-            type_comparison_can_fail(element)
-        }
+        ColumnType::OidVector
+        | ColumnType::Record
+        | ColumnType::Composite(_)
+        | ColumnType::Array(_) => true,
+        ColumnType::Domain { base: element, .. } => type_comparison_can_fail(element),
         _ => false,
     }
 }
@@ -329,7 +331,10 @@ pub fn value_comparison_can_fail(value: &Value) -> bool {
         Value::LegacyVector(vector) => {
             vector.kind() == uqa_core::LegacyVectorKind::Oid && !vector.has_vector_layout()
         }
-        Value::Array(array) => array.elements().iter().any(value_comparison_can_fail),
+        Value::Array(array) => {
+            array.element_type_oid().is_some()
+                || array.elements().iter().any(value_comparison_can_fail)
+        }
         Value::Row(values) => values.iter().any(value_comparison_can_fail),
         Value::List(values) => values.iter().any(value_comparison_can_fail),
         Value::Record(fields) => fields
@@ -343,6 +348,7 @@ fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>
     control.check()?;
     match (left, right) {
         (Value::Array(left), Value::Array(right)) => {
+            validate_array_element_types(left, right)?;
             left.eq_by_with_control(right, control, equal_sql_values)
         }
         (Value::Record(left), Value::Record(right)) => equal_sequence(
@@ -362,6 +368,20 @@ fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>
         }
         _ => Ok(compare_sql_values(left, right, control)?.is_eq()),
     }
+}
+
+fn validate_array_element_types(
+    left: &uqa_core::ArrayValue,
+    right: &uqa_core::ArrayValue,
+) -> Result<()> {
+    if matches!((left.element_type_oid(), right.element_type_oid()), (Some(left), Some(right)) if left != right)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "cannot compare arrays of different element types".into(),
+        });
+    }
+    Ok(())
 }
 
 fn equal_sequence<'a>(

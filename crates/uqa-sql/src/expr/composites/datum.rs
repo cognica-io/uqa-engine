@@ -25,7 +25,7 @@ pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType
     decode_bits(encode_bits(value, before)?, after)
 }
 
-pub(super) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
+pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
     Some(match (base(ty), value) {
         (ColumnType::Boolean, Value::Bool(value)) => u64::from(*value),
         (ColumnType::InternalChar, Value::Str(value)) => {
@@ -45,7 +45,7 @@ pub(super) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
     })
 }
 
-pub(super) fn decode_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
+pub(crate) fn decode_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
     match base(ty) {
         ColumnType::Boolean => Some(Value::Bool(bits as u8 != 0)),
         ColumnType::InternalChar => Some(Value::Str(if bits == 0 {

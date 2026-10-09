@@ -363,6 +363,286 @@
     {
       "id": "fixed_uuid_name_cleanup",
       "sql": "DEALLOCATE fixed_uuid_name_p; DROP TYPE fixed_uuid_name"
+    },
+    {
+      "id": "array_ints_bytes_setup",
+      "sql": "CREATE TYPE array_ints_bytes AS(a integer[],b integer); PREPARE array_ints_bytes_p AS SELECT '(\"{1,2}\",7)'::array_ints_bytes; PREPARE array_ints_bytes_eq(array_ints_bytes) AS SELECT '(\"{1,2}\",7)'::array_ints_bytes=$1; ALTER TYPE array_ints_bytes ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "array_ints_bytes_output",
+      "sql": "EXECUTE array_ints_bytes_p"
+    },
+    {
+      "id": "array_ints_bytes_cleanup",
+      "sql": "DEALLOCATE array_ints_bytes_p; DEALLOCATE array_ints_bytes_eq; DROP TYPE array_ints_bytes"
+    },
+    {
+      "id": "array_ints_texts_setup",
+      "sql": "CREATE TYPE array_ints_texts AS(a integer[],b integer); PREPARE array_ints_texts_p AS SELECT '(\"{1,2}\",7)'::array_ints_texts; PREPARE array_ints_texts_eq(array_ints_texts) AS SELECT '(\"{1,2}\",7)'::array_ints_texts=$1; ALTER TYPE array_ints_texts ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_ints_texts_output",
+      "sql": "EXECUTE array_ints_texts_p"
+    },
+    {
+      "id": "array_ints_texts_eq",
+      "sql": "EXECUTE array_ints_texts_eq(ROW(ARRAY['1','2'],7)::array_ints_texts)"
+    },
+    {
+      "id": "array_ints_texts_cleanup",
+      "sql": "DEALLOCATE array_ints_texts_p; DEALLOCATE array_ints_texts_eq; DROP TYPE array_ints_texts"
+    },
+    {
+      "id": "array_texts_ints_setup",
+      "sql": "CREATE TYPE array_texts_ints AS(a text[],b integer); PREPARE array_texts_ints_p AS SELECT '(\"{hello,world}\",7)'::array_texts_ints; PREPARE array_texts_ints_eq(array_texts_ints) AS SELECT '(\"{hello,world}\",7)'::array_texts_ints=$1; ALTER TYPE array_texts_ints ALTER ATTRIBUTE a TYPE integer[]"
+    },
+    {
+      "id": "array_texts_ints_output",
+      "sql": "EXECUTE array_texts_ints_p"
+    },
+    {
+      "id": "array_texts_ints_eq",
+      "sql": "EXECUTE array_texts_ints_eq(ROW(ARRAY[1,2],7)::array_texts_ints)"
+    },
+    {
+      "id": "array_texts_ints_cleanup",
+      "sql": "DEALLOCATE array_texts_ints_p; DEALLOCATE array_texts_ints_eq; DROP TYPE array_texts_ints"
+    },
+    {
+      "id": "array_empty_setup",
+      "sql": "CREATE TYPE array_datum_empty AS(a integer[],b integer); PREPARE array_datum_empty_p AS SELECT '(\"{}\",7)'::array_datum_empty; PREPARE array_datum_empty_eq(array_datum_empty) AS SELECT '(\"{}\",7)'::array_datum_empty=$1; PREPARE array_datum_empty_lt(array_datum_empty) AS SELECT '(\"{}\",7)'::array_datum_empty<$1; ALTER TYPE array_datum_empty ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_empty_output",
+      "sql": "EXECUTE array_datum_empty_p"
+    },
+    {
+      "id": "array_empty_eq",
+      "sql": "EXECUTE array_datum_empty_eq(ROW(ARRAY[]::text[],7)::array_datum_empty)"
+    },
+    {
+      "id": "array_empty_lt",
+      "sql": "EXECUTE array_datum_empty_lt(ROW(ARRAY[]::text[],7)::array_datum_empty)"
+    },
+    {
+      "id": "array_empty_null",
+      "sql": "EXECUTE array_datum_empty_eq(NULL)"
+    },
+    {
+      "id": "array_empty_cleanup",
+      "sql": "DEALLOCATE array_datum_empty_p; DEALLOCATE array_datum_empty_eq; DEALLOCATE array_datum_empty_lt; DROP TYPE array_datum_empty"
+    },
+    {
+      "id": "array_nulls_setup",
+      "sql": "CREATE TYPE array_datum_nulls AS(a integer[],b integer); PREPARE array_datum_nulls_p AS SELECT '(\"{NULL,NULL}\",7)'::array_datum_nulls; PREPARE array_datum_nulls_eq(array_datum_nulls) AS SELECT '(\"{NULL,NULL}\",7)'::array_datum_nulls=$1; PREPARE array_datum_nulls_lt(array_datum_nulls) AS SELECT '(\"{NULL,NULL}\",7)'::array_datum_nulls<$1; ALTER TYPE array_datum_nulls ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_nulls_output",
+      "sql": "EXECUTE array_datum_nulls_p"
+    },
+    {
+      "id": "array_nulls_eq",
+      "sql": "EXECUTE array_datum_nulls_eq(ROW(ARRAY[NULL]::text[],7)::array_datum_nulls)"
+    },
+    {
+      "id": "array_nulls_lt",
+      "sql": "EXECUTE array_datum_nulls_lt(ROW(ARRAY[NULL]::text[],7)::array_datum_nulls)"
+    },
+    {
+      "id": "array_nulls_null",
+      "sql": "EXECUTE array_datum_nulls_eq(NULL)"
+    },
+    {
+      "id": "array_nulls_cleanup",
+      "sql": "DEALLOCATE array_datum_nulls_p; DEALLOCATE array_datum_nulls_eq; DEALLOCATE array_datum_nulls_lt; DROP TYPE array_datum_nulls"
+    },
+    {
+      "id": "array_dimensions_setup",
+      "sql": "CREATE TYPE array_datum_dimensions AS(a text[],b integer); PREPARE array_datum_dimensions_p AS SELECT '(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)'::array_datum_dimensions; PREPARE array_datum_dimensions_eq(array_datum_dimensions) AS SELECT '(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)'::array_datum_dimensions=$1; PREPARE array_datum_dimensions_lt(array_datum_dimensions) AS SELECT '(\"[-1:0][2:3]={{one,NULL},{three,four}}\",7)'::array_datum_dimensions<$1; ALTER TYPE array_datum_dimensions ALTER ATTRIBUTE a TYPE integer[]"
+    },
+    {
+      "id": "array_dimensions_output",
+      "sql": "EXECUTE array_datum_dimensions_p"
+    },
+    {
+      "id": "array_dimensions_eq",
+      "sql": "EXECUTE array_datum_dimensions_eq(ROW(ARRAY[[1,2],[3,4]],7)::array_datum_dimensions)"
+    },
+    {
+      "id": "array_dimensions_lt",
+      "sql": "EXECUTE array_datum_dimensions_lt(ROW(ARRAY[[1,2],[3,4]],7)::array_datum_dimensions)"
+    },
+    {
+      "id": "array_dimensions_null",
+      "sql": "EXECUTE array_datum_dimensions_eq(NULL)"
+    },
+    {
+      "id": "array_dimensions_cleanup",
+      "sql": "DEALLOCATE array_datum_dimensions_p; DEALLOCATE array_datum_dimensions_eq; DEALLOCATE array_datum_dimensions_lt; DROP TYPE array_datum_dimensions"
+    },
+    {
+      "id": "array_bools_setup",
+      "sql": "CREATE TYPE array_datum_bools AS(a boolean[],b integer); PREPARE array_datum_bools_p AS SELECT '(\"{t,f,NULL}\",7)'::array_datum_bools; PREPARE array_datum_bools_eq(array_datum_bools) AS SELECT '(\"{t,f,NULL}\",7)'::array_datum_bools=$1; PREPARE array_datum_bools_lt(array_datum_bools) AS SELECT '(\"{t,f,NULL}\",7)'::array_datum_bools<$1; ALTER TYPE array_datum_bools ALTER ATTRIBUTE a TYPE integer[]"
+    },
+    {
+      "id": "array_bools_output",
+      "sql": "EXECUTE array_datum_bools_p"
+    },
+    {
+      "id": "array_bools_eq",
+      "sql": "EXECUTE array_datum_bools_eq(ROW(ARRAY[1,0,NULL],7)::array_datum_bools)"
+    },
+    {
+      "id": "array_bools_lt",
+      "sql": "EXECUTE array_datum_bools_lt(ROW(ARRAY[1,0,NULL],7)::array_datum_bools)"
+    },
+    {
+      "id": "array_bools_null",
+      "sql": "EXECUTE array_datum_bools_eq(NULL)"
+    },
+    {
+      "id": "array_bools_cleanup",
+      "sql": "DEALLOCATE array_datum_bools_p; DEALLOCATE array_datum_bools_eq; DEALLOCATE array_datum_bools_lt; DROP TYPE array_datum_bools"
+    },
+    {
+      "id": "array_reals_setup",
+      "sql": "CREATE TYPE array_datum_reals AS(a real[],b integer); PREPARE array_datum_reals_p AS SELECT '(\"{1.23456789,NaN}\",7)'::array_datum_reals; PREPARE array_datum_reals_eq(array_datum_reals) AS SELECT '(\"{1.23456789,NaN}\",7)'::array_datum_reals=$1; PREPARE array_datum_reals_lt(array_datum_reals) AS SELECT '(\"{1.23456789,NaN}\",7)'::array_datum_reals<$1; ALTER TYPE array_datum_reals ALTER ATTRIBUTE a TYPE double precision[]"
+    },
+    {
+      "id": "array_reals_output",
+      "sql": "EXECUTE array_datum_reals_p"
+    },
+    {
+      "id": "array_reals_eq",
+      "sql": "EXECUTE array_datum_reals_eq(ROW(ARRAY[1.23456789,0]::double precision[],7)::array_datum_reals)"
+    },
+    {
+      "id": "array_reals_lt",
+      "sql": "EXECUTE array_datum_reals_lt(ROW(ARRAY[1.23456789,0]::double precision[],7)::array_datum_reals)"
+    },
+    {
+      "id": "array_reals_null",
+      "sql": "EXECUTE array_datum_reals_eq(NULL)"
+    },
+    {
+      "id": "array_reals_cleanup",
+      "sql": "DEALLOCATE array_datum_reals_p; DEALLOCATE array_datum_reals_eq; DEALLOCATE array_datum_reals_lt; DROP TYPE array_datum_reals"
+    },
+    {
+      "id": "array_text_bytes_setup",
+      "sql": "CREATE TYPE array_datum_text_bytes AS(a text[],b integer); PREPARE array_datum_text_bytes_p AS SELECT '(\"{one,two}\",7)'::array_datum_text_bytes; PREPARE array_datum_text_bytes_eq(array_datum_text_bytes) AS SELECT '(\"{one,two}\",7)'::array_datum_text_bytes=$1; PREPARE array_datum_text_bytes_lt(array_datum_text_bytes) AS SELECT '(\"{one,two}\",7)'::array_datum_text_bytes<$1; ALTER TYPE array_datum_text_bytes ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "array_text_bytes_output",
+      "sql": "EXECUTE array_datum_text_bytes_p"
+    },
+    {
+      "id": "array_text_bytes_cleanup",
+      "sql": "DEALLOCATE array_datum_text_bytes_p; DEALLOCATE array_datum_text_bytes_eq; DEALLOCATE array_datum_text_bytes_lt; DROP TYPE array_datum_text_bytes"
+    },
+    {
+      "id": "array_null_bytes_setup",
+      "sql": "CREATE TYPE array_datum_null_bytes AS(a integer[],b integer); PREPARE array_datum_null_bytes_p AS SELECT '(\"[-1:0][2:3]={{1,NULL},{3,4}}\",7)'::array_datum_null_bytes; PREPARE array_datum_null_bytes_eq(array_datum_null_bytes) AS SELECT '(\"[-1:0][2:3]={{1,NULL},{3,4}}\",7)'::array_datum_null_bytes=$1; PREPARE array_datum_null_bytes_lt(array_datum_null_bytes) AS SELECT '(\"[-1:0][2:3]={{1,NULL},{3,4}}\",7)'::array_datum_null_bytes<$1; ALTER TYPE array_datum_null_bytes ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "array_null_bytes_output",
+      "sql": "EXECUTE array_datum_null_bytes_p"
+    },
+    {
+      "id": "array_null_bytes_cleanup",
+      "sql": "DEALLOCATE array_datum_null_bytes_p; DEALLOCATE array_datum_null_bytes_eq; DEALLOCATE array_datum_null_bytes_lt; DROP TYPE array_datum_null_bytes"
+    },
+    {
+      "id": "array_fixed_uuid_setup",
+      "sql": "CREATE TYPE array_extra_uuid AS(a uuid[],b integer); PREPARE array_extra_uuid_p AS SELECT '(\"{00112233-4455-6677-8899-aabbccddeeff}\",7)'::array_extra_uuid"
+    },
+    {
+      "id": "array_fixed_uuid_alter",
+      "sql": "BEGIN; ALTER TYPE array_extra_uuid ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_fixed_uuid_output",
+      "sql": "EXECUTE array_extra_uuid_p"
+    },
+    {
+      "id": "array_fixed_uuid_rollback",
+      "sql": "ROLLBACK; EXECUTE array_extra_uuid_p"
+    },
+    {
+      "id": "array_fixed_uuid_cleanup",
+      "sql": "DEALLOCATE array_extra_uuid_p; DROP TYPE array_extra_uuid"
+    },
+    {
+      "id": "array_fixed_timetz_setup",
+      "sql": "CREATE TYPE array_extra_timetz AS(a timetz[],b integer); PREPARE array_extra_timetz_p AS SELECT '(\"{12:30:00+09}\",7)'::array_extra_timetz"
+    },
+    {
+      "id": "array_fixed_timetz_alter",
+      "sql": "BEGIN; ALTER TYPE array_extra_timetz ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_fixed_timetz_output",
+      "sql": "EXECUTE array_extra_timetz_p"
+    },
+    {
+      "id": "array_fixed_timetz_rollback",
+      "sql": "ROLLBACK; EXECUTE array_extra_timetz_p"
+    },
+    {
+      "id": "array_fixed_timetz_cleanup",
+      "sql": "DEALLOCATE array_extra_timetz_p; DROP TYPE array_extra_timetz"
+    },
+    {
+      "id": "array_fixed_dates_setup",
+      "sql": "CREATE TYPE array_extra_dates AS(a date[],b integer); PREPARE array_extra_dates_p AS SELECT '(\"{2000-01-02,1999-12-31}\",7)'::array_extra_dates"
+    },
+    {
+      "id": "array_fixed_dates_alter",
+      "sql": "BEGIN; ALTER TYPE array_extra_dates ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_fixed_dates_output",
+      "sql": "EXECUTE array_extra_dates_p"
+    },
+    {
+      "id": "array_fixed_dates_rollback",
+      "sql": "ROLLBACK; EXECUTE array_extra_dates_p"
+    },
+    {
+      "id": "array_fixed_dates_cleanup",
+      "sql": "DEALLOCATE array_extra_dates_p; DROP TYPE array_extra_dates"
+    },
+    {
+      "id": "array_fixed_intervals_setup",
+      "sql": "CREATE TYPE array_extra_intervals AS(a interval[],b integer); PREPARE array_extra_intervals_p AS SELECT '(\"{1 day,02:00:00}\",7)'::array_extra_intervals"
+    },
+    {
+      "id": "array_fixed_intervals_alter",
+      "sql": "BEGIN; ALTER TYPE array_extra_intervals ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_fixed_intervals_output",
+      "sql": "EXECUTE array_extra_intervals_p"
+    },
+    {
+      "id": "array_fixed_intervals_rollback",
+      "sql": "ROLLBACK; EXECUTE array_extra_intervals_p"
+    },
+    {
+      "id": "array_fixed_intervals_cleanup",
+      "sql": "DEALLOCATE array_extra_intervals_p; DROP TYPE array_extra_intervals"
+    },
+    {
+      "id": "array_json_setup",
+      "sql": "CREATE TYPE array_json_real AS(a real[],b integer); PREPARE array_json_real_p AS SELECT to_json('(\"{{1.23456789,NaN},{-0,2}}\",7)'::array_json_real); ALTER TYPE array_json_real ALTER ATTRIBUTE a TYPE text[]"
+    },
+    {
+      "id": "array_json_output",
+      "sql": "EXECUTE array_json_real_p"
+    },
+    {
+      "id": "array_json_cleanup",
+      "sql": "DEALLOCATE array_json_real_p; DROP TYPE array_json_real"
     }
   ]
 }

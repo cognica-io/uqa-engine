@@ -12,7 +12,7 @@ pub(super) fn read(
     datum: &DatumValue,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>, SQLError>> {
-    matches!(datum.type_oid(), 19 | 1186 | 2950).then(|| decode(datum, control))
+    matches!(datum.type_oid(), 19 | 1186 | 1266 | 2950).then(|| decode(datum, control))
 }
 
 fn decode(
@@ -23,7 +23,15 @@ fn decode(
         .bytes()
         .get(datum.offset() as usize..)
         .ok_or_else(|| corrupt("invalid datum length"))?;
-    if datum.type_oid() == 19 {
+    read_bytes(datum.type_oid(), bytes, control)
+}
+
+pub(super) fn read_bytes(
+    oid: u32,
+    bytes: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    if oid == 19 {
         let end = bytes
             .iter()
             .position(|byte| *byte == 0)
@@ -33,16 +41,25 @@ fn decode(
         let (text, memory) = control.copy_text(text)?.into_parts();
         return Ok(control.finish(Value::Str(text), memory)?);
     }
+    if matches!(oid, 1186 | 1266) {
+        let length = if oid == 1186 { 16 } else { 12 };
+        let bytes = bytes
+            .get(..length)
+            .ok_or_else(|| corrupt("invalid datum length"))?;
+        let value = crate::catalog::node_tree::decode_temporal_datum(bytes, i64::from(oid))?;
+        return Ok(control.finish(Value::Temporal(value), control.empty_reservation())?);
+    }
     let bytes: [u8; 16] = bytes
         .get(..16)
         .and_then(|bytes| bytes.try_into().ok())
         .ok_or_else(|| corrupt("invalid datum length"))?;
-    if datum.type_oid() == 2950 {
+    if oid == 2950 {
         let (text, memory) =
             crate::expr::uuid::format_uuid_with_control(bytes, control)?.into_parts();
         Ok(control.finish(Value::Str(text), memory)?)
     } else {
-        let value = crate::catalog::node_tree::decode_temporal_datum(&bytes, 1186)?;
-        Ok(control.finish(Value::Temporal(value), None)?)
+        Err(SQLError::Unsupported(format!(
+            "physical fixed datum output for type OID {oid}"
+        )))
     }
 }

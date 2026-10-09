@@ -126,7 +126,9 @@ pub fn cast_value_from_with_control(
                     SQLError::TypeMismatch("array dimensions changed during cast".into())
                 })?;
         let (array, memory) = array.into_parts();
-        return Ok(control.finish(Value::Array(array), memory)?);
+        let element = crate::ColumnType::from_sql_name_with_control(element_type, control)?;
+        let oid = crate::catalog::type_metadata::pg_type_oid(&element) as u32;
+        return Ok(control.finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?);
     }
     let value = match &**base {
         "void" | "pg_catalog.void" => {

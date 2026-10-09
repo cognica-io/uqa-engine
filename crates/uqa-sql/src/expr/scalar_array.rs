@@ -288,6 +288,17 @@ pub(in crate::expr) fn preserve_polymorphic_array_type(
     output: Produced<Value>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    if let Value::Array(source) = source {
+        let (Value::Array(array), memory) = output.into_parts() else {
+            return Err(SQLError::Internal(
+                "array function returned a non-array".into(),
+            ));
+        };
+        return Ok(control.finish(
+            Value::Array(array.with_element_type_oid(source.element_type_oid())),
+            memory,
+        )?);
+    }
     let Value::LegacyVector(source) = source else {
         return Ok(output);
     };
@@ -375,9 +386,16 @@ fn rebuild_array(
             control,
         )?
     };
-    finish_array(rebuilt, control, || {
+    let output = finish_array(rebuilt, control, || {
         SQLError::TypeMismatch("array dimensions do not match".into())
-    })
+    })?;
+    let (Value::Array(array), memory) = output.into_parts() else {
+        unreachable!();
+    };
+    Ok(control.finish(
+        Value::Array(array.with_element_type_oid(original.element_type_oid())),
+        memory,
+    )?)
 }
 
 fn concatenate(
@@ -385,6 +403,13 @@ fn concatenate(
     right: &ArrayValue,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    if matches!((left.element_type_oid(), right.element_type_oid()), (Some(left), Some(right)) if left != right)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "cannot concatenate arrays of different element types".into(),
+        });
+    }
     if left.dimensions().is_empty() {
         return rebuild_array(right, copy_elements(right.elements(), control)?, control);
     }
@@ -433,7 +458,7 @@ fn concatenate(
             right.dimensions().len(),
         ))));
     };
-    finish_array(
+    let output = finish_array(
         ArrayValue::with_lower_bounds_with_control(
             elements.finish()?,
             bounds(lower_bounds, control)?,
@@ -441,7 +466,16 @@ fn concatenate(
         )?,
         control,
         || incompatible_array_concat(None),
-    )
+    )?;
+    let (Value::Array(array), memory) = output.into_parts() else {
+        unreachable!();
+    };
+    Ok(control.finish(
+        Value::Array(
+            array.with_element_type_oid(left.element_type_oid().or(right.element_type_oid())),
+        ),
+        memory,
+    )?)
 }
 
 fn incompatible_array_concat(detail: Option<String>) -> SQLError {

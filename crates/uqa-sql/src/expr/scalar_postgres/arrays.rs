@@ -89,12 +89,13 @@ fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
     match args[0].array_view() {
         Some(array) => {
             let elements = replace_elements(array.elements(), &args[1], &args[2], control)?;
-            build(
+            let output = build(
                 elements,
                 Some(bounds(array.lower_bounds(), control)?),
                 control,
                 "array dimensions do not match",
-            )
+            )?;
+            crate::expr::scalar_array::preserve_polymorphic_array_type(&args[0], output, control)
         }
         None if matches!(args[0], Value::Null) => inline(Value::Null, control),
         None => Err(SQLError::TypeMismatch(format!(

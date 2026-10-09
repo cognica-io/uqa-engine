@@ -94,6 +94,7 @@ fn materialize(
                 .map_err(Into::into)
         }
         (ColumnType::Array(element), Value::Array(array)) => {
+            let element_type_oid = array.element_type_oid();
             let elements = array_elements(array.elements(), element, engine, control)?;
             let mut bounds = ProductionVec::new(*control);
             for bound in array.lower_bounds() {
@@ -108,7 +109,10 @@ fn materialize(
                     })?;
             let (array, memory) = array.into_parts();
             control
-                .finish(Value::Array(array), memory)
+                .finish(
+                    Value::Array(array.with_element_type_oid(element_type_oid)),
+                    memory,
+                )
                 .map_err(Into::into)
         }
         _ => control.copy_value(value).map_err(Into::into),
