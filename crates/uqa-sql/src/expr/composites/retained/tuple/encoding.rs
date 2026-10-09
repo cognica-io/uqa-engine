@@ -6,6 +6,7 @@
 
 //! Heap tuple data and header construction, using SQL's existing scalar Datum codecs.
 
+use super::super::Descriptors;
 use super::{
     align, datum, pg_type_align, pg_type_len, pg_type_storage, width, ColumnType,
     CompositeTypeDescriptor, Value,
@@ -16,6 +17,7 @@ mod arrays;
 pub(super) fn encode(
     fields: &[(String, Value)],
     descriptor: &CompositeTypeDescriptor,
+    descriptors: &Descriptors,
 ) -> Option<(Vec<u8>, Vec<Option<usize>>, usize)> {
     let count = descriptor
         .attributes
@@ -48,7 +50,7 @@ pub(super) fn encode(
         let length = pg_type_len(&attribute.ty);
         if length == -1 {
             mask |= 2;
-            let payload = payload(value, &attribute.ty)?;
+            let payload = payload(value, &attribute.ty, descriptors)?;
             let short = payload.len() < 127 && pg_type_storage(&attribute.ty) != "p";
             if !short {
                 bytes.resize(
@@ -114,9 +116,9 @@ fn fixed(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
     }
 }
 
-fn payload(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
+fn payload(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Option<Vec<u8>> {
     if let ColumnType::Domain { base, .. } = ty {
-        return payload(value, base);
+        return payload(value, base, descriptors);
     }
     match (value, ty) {
         (
@@ -134,7 +136,13 @@ fn payload(value: &Value, ty: &ColumnType) -> Option<Vec<u8>> {
         (Value::Decimal(number), ColumnType::Numeric { .. }) => {
             crate::catalog::node_tree::encode_numeric_datum(number).ok()
         }
-        (Value::Array(array), ColumnType::Array(element)) => arrays::payload(array, element),
+        (Value::Array(array), ColumnType::Array(element)) => {
+            arrays::payload(array, element, descriptors)
+        }
+        (Value::Record(fields), ColumnType::Composite(reference)) => {
+            let (mut bytes, _, _) = encode(fields, descriptors.get(&reference.oid)?, descriptors)?;
+            Some(bytes.split_off(4))
+        }
         _ => None,
     }
 }

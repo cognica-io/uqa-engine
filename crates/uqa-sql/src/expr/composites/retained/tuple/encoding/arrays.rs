@@ -6,11 +6,17 @@
 
 //! Inline array datums keep their physical element identity, bounds and null bitmap.
 
-use super::{align, datum, fixed, pg_type_align, pg_type_len, width, ColumnType, Value};
+use super::{
+    align, datum, fixed, pg_type_align, pg_type_len, width, ColumnType, Descriptors, Value,
+};
 use crate::catalog::type_metadata::{builtin_scalar_type, pg_type_oid};
 use uqa_core::{memory::ProductionControl, ArrayValue};
 
-pub(super) fn payload(array: &ArrayValue, mut element: &ColumnType) -> Option<Vec<u8>> {
+pub(super) fn payload(
+    array: &ArrayValue,
+    mut element: &ColumnType,
+    descriptors: &Descriptors,
+) -> Option<Vec<u8>> {
     while let ColumnType::Array(inner) = element {
         element = inner;
     }
@@ -60,7 +66,7 @@ pub(super) fn payload(array: &ArrayValue, mut element: &ColumnType) -> Option<Ve
             bytes.resize(align(bytes.len(), pg_type_align(element).as_bytes()[0])?, 0);
             let length = pg_type_len(element);
             if length == -1 {
-                let payload = super::payload(value, element)?;
+                let payload = super::payload(value, element, descriptors)?;
                 let header = u32::try_from(payload.len().checked_add(4)?)
                     .ok()?
                     .checked_mul(4)?;
@@ -118,7 +124,7 @@ mod tests {
                 .step_by(2)
                 .map(|index| u8::from_str_radix(&reference[index..index + 2], 16).unwrap())
                 .collect::<Vec<_>>();
-            assert_eq!(payload(&array, &ty).unwrap(), expected);
+            assert_eq!(payload(&array, &ty, &Descriptors::new()).unwrap(), expected);
         }
     }
 }

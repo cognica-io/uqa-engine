@@ -13,6 +13,9 @@ use uqa_core::{ArrayValue, Value};
 
 mod tuple;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
 
 /// The original admitted datum and its field types, retained independently of subsequent descriptor interpretations.
@@ -126,8 +129,27 @@ pub(crate) fn project_value(
                 return Ok(value.clone());
             };
             if interpret_datums {
-                if let Some(projected) = tuple::project(fields, before, after) {
-                    return Ok(projected);
+                if let Some(Value::Record(mut projected)) =
+                    tuple::project(fields, before, after, original)
+                {
+                    for (attribute, (_, value)) in after.attributes.iter().zip(&mut projected) {
+                        let Some(old) = before
+                            .attributes
+                            .iter()
+                            .find(|old| old.number == attribute.number)
+                        else {
+                            continue;
+                        };
+                        let mut leaf = &old.ty;
+                        while let ColumnType::Domain { base, .. } | ColumnType::Array(base) = leaf {
+                            leaf = base;
+                        }
+                        if matches!(leaf, ColumnType::Composite(_)) {
+                            // Unchanged-position records and arrays still observe changes to their nested descriptors. Their original type identifies the retained payload even if the outer declaration changed.
+                            *value = project_value(value, &old.ty, original, current, true)?;
+                        }
+                    }
+                    return Ok(Value::Record(projected));
                 }
             }
             after

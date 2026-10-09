@@ -256,6 +256,8 @@ Retained JSONB fields keep their PostgreSQL container headers, entry offsets, ob
 
 A retained array field keeps its original element type OID, dimensions, lower bounds and NULL bitmap after the attribute declaration changes. Array output uses that original element type, including real-number formatting inside `to_json`. A domain array keeps the domain element OID and its base type's physical layout; output resolves the original domain by identity even if the current attribute declares another array type, without repeating domain input checks. Comparing it with a fresh array of a different element type reports `42804` (`cannot compare arrays of different element types`) before checking dimensions or elements, including empty arrays and arrays containing only NULLs; a NULL outer record still short-circuits.
 
+Stored nested composite constants retain their own tuple headers, type OIDs, NULL slots and aligned fields, including when they are array elements. Changing an outer attribute to bytea exposes that original storage. Changing an inner attribute instead interprets the nested value through its current descriptor; it does not replace the original source used by a later change or rollback.
+
 A named `ROW(...)` constructor whose arguments are constants can be folded when its plan is built; later descriptor changes read that retained datum. Constructors that still need evaluation keep the originally admitted argument types and report `42804` when a surviving attribute now has a different type OID. The check precedes argument evaluation; removed arguments remain unevaluated.
 
 ```sql execute

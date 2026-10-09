@@ -17,8 +17,9 @@ pub(super) fn project(
     fields: &[(String, Value)],
     before: &CompositeTypeDescriptor,
     after: &CompositeTypeDescriptor,
+    descriptors: &super::Descriptors,
 ) -> Option<Value> {
-    let (bytes, positions, start) = encoding::encode(fields, before)?;
+    let (bytes, positions, start) = encoding::encode(fields, before, descriptors)?;
     let backing = DatumValue::new(0, 0, bytes);
     let bytes = backing.bytes();
     let mut output = after
@@ -193,7 +194,7 @@ mod tests {
             Value::Int(87_398),
         ];
         assert_eq!(
-            project(&fields, &before, &after),
+            project(&fields, &before, &after, &super::super::Descriptors::new()),
             Some(Value::Record(
                 before
                     .attributes
@@ -204,7 +205,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            project(&fields, &before, &before),
+            project(&fields, &before, &before, &super::super::Descriptors::new()),
             Some(Value::Record(fields))
         );
     }
@@ -223,6 +224,12 @@ mod tests {
         };
         let mut after = before.clone();
         after.attributes[0].ty = ColumnType::BigInteger;
-        assert!(project(&[("a".into(), Value::Int(4))], &before, &after).is_none());
+        assert!(project(
+            &[("a".into(), Value::Int(4))],
+            &before,
+            &after,
+            &super::super::Descriptors::new()
+        )
+        .is_none());
     }
 }
