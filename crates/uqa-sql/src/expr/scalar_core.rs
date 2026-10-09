@@ -7,8 +7,9 @@
 //! Core control, string, regex, and basic numeric built-ins.
 
 use crate::{
+    ast::BinaryOp,
     error::{Result, SQLError},
-    expr::{compare_with_control, values_equal_with_control},
+    expr::{eval_comparison_truth_with_enum_catalog, EngineHook, EvalContext},
 };
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -73,6 +74,15 @@ fn selection(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    selection_with_context(name, args, control, &EvalContext::new(None, &[]))
+}
+
+pub(super) fn selection_with_context(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    context: &EvalContext<'_>,
+) -> Result<Produced<Value>> {
     let selected = match name {
         "coalesce" => {
             let mut selected = &Value::Null;
@@ -89,7 +99,15 @@ fn selection(
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("nullif takes 2 args".into()));
             }
-            if values_equal_with_control(&args[0], &args[1], control)? {
+            if eval_comparison_truth_with_enum_catalog(
+                BinaryOp::Equal,
+                &args[0],
+                &args[1],
+                control,
+                context.engine.and_then(EngineHook::enum_labels),
+                None,
+            )? == Some(true)
+            {
                 &Value::Null
             } else {
                 &args[0]
@@ -105,9 +123,19 @@ fn selection(
                 selected = Some(match selected {
                     None => value,
                     Some(previous) => {
-                        let order = compare_with_control(value, previous, control)?;
-                        if (name == "greatest" && order.is_gt())
-                            || (name == "least" && order.is_lt())
+                        let op = if name == "greatest" {
+                            BinaryOp::Less
+                        } else {
+                            BinaryOp::Greater
+                        };
+                        if eval_comparison_truth_with_enum_catalog(
+                            op,
+                            previous,
+                            value,
+                            control,
+                            context.engine.and_then(EngineHook::enum_labels),
+                            context.enum_comparison_state(),
+                        )? == Some(true)
                         {
                             value
                         } else {

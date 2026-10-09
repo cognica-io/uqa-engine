@@ -113,6 +113,9 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
     }
     match expr {
         ScalarExpr::And(parts) => {
+            if let Some(range) = predicates::lower_range(parts, constants) {
+                return Some(range);
+            }
             let mut out: Vec<RetrievalExpr> = Vec::with_capacity(parts.len());
             for p in parts {
                 out.push(lower_where(p, constants)?);

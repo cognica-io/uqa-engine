@@ -168,23 +168,26 @@ fn legacy_native_keys_keep_catalog_free_equality_and_order() {
     );
 }
 
-struct Catalog(Arc<EnumTypeLabels>);
+struct Catalog(Arc<EnumTypeLabels>, std::sync::atomic::AtomicI64);
 
 impl Catalog {
     fn new() -> Self {
-        Self(Arc::new(EnumTypeLabels {
-            type_oid: 16_384,
-            labels: EnumLabelKey::initial(3)
-                .unwrap()
-                .into_iter()
-                .zip([(2, "first"), (5, "middle"), (4, "last")])
-                .map(|(key, (oid, label))| EnumTypeLabel {
-                    oid,
-                    key,
-                    label: label.into(),
-                })
-                .collect(),
-        }))
+        Self(
+            Arc::new(EnumTypeLabels {
+                type_oid: 16_384,
+                labels: EnumLabelKey::initial(3)
+                    .unwrap()
+                    .into_iter()
+                    .zip([(2, "first"), (5, "middle"), (4, "last")])
+                    .map(|(key, (oid, label))| EnumTypeLabel {
+                        oid,
+                        key,
+                        label: label.into(),
+                    })
+                    .collect(),
+            }),
+            std::sync::atomic::AtomicI64::new(0),
+        )
     }
 }
 
@@ -223,10 +226,10 @@ impl EnumLabelCatalog for Catalog {
 
 impl crate::expr::EngineHook for Catalog {
     fn nextval(&self, _: &str) -> Result<i64> {
-        unreachable!()
+        Ok(self.1.fetch_add(1, AtomicOrdering::Relaxed) + 1)
     }
     fn currval(&self, _: &str) -> Result<i64> {
-        unreachable!()
+        Ok(self.1.load(AtomicOrdering::Relaxed))
     }
     fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64> {
         unreachable!()
@@ -405,4 +408,89 @@ fn type_only_functions_do_not_read_bytes_and_bounds_match_label_oids() {
             .collect::<Vec<_>>();
         assert_eq!(actual, expected);
     }
+}
+
+fn syntax_call(
+    name: &str,
+    args: Vec<crate::ast::Expr>,
+    dispatch: Option<crate::ast::FunctionDispatch>,
+) -> crate::ast::Expr {
+    crate::ast::Expr::Func {
+        name: name.into(),
+        binding: dispatch.map(crate::ast::FunctionBinding::dispatched),
+        args,
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
+    }
+}
+
+#[test]
+fn syntax_between_preserves_repeated_values_and_lazy_bounds() {
+    use crate::ast::{Expr, FunctionDispatch};
+    let catalog = Catalog::new();
+    let context = crate::expr::EvalContext::new(None, &[]).with_engine(&catalog);
+    let next = || {
+        syntax_call(
+            "nextval",
+            vec![Expr::Literal(Value::Str("seq".into()))],
+            None,
+        )
+    };
+    let number = |value| Expr::Literal(Value::Int(value));
+    let between = Expr::Between {
+        expr: Box::new(next()),
+        low: Box::new(number(0)),
+        high: Box::new(number(1)),
+    };
+    assert_eq!(
+        crate::expr::eval(&between, &context).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(catalog.1.load(AtomicOrdering::Relaxed), 2);
+    catalog.1.store(0, AtomicOrdering::Relaxed);
+    let between = Expr::Between {
+        expr: Box::new(number(0)),
+        low: Box::new(number(1)),
+        high: Box::new(next()),
+    };
+    assert_eq!(
+        crate::expr::eval(&between, &context).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(catalog.1.load(AtomicOrdering::Relaxed), 0);
+    let symmetric = syntax_call(
+        "between_symmetric",
+        vec![next(), number(1), number(1)],
+        Some(FunctionDispatch::BetweenSymmetric),
+    );
+    assert_eq!(
+        crate::expr::eval(&symmetric, &context).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(catalog.1.load(AtomicOrdering::Relaxed), 4);
+}
+
+#[test]
+fn syntax_membership_and_selection_observe_enum_ids_without_output() {
+    use crate::ast::Expr;
+    let catalog = Catalog::new();
+    let context = crate::expr::EvalContext::new(None, &[]).with_engine(&catalog);
+    let value = |oid| Expr::Literal(physical(oid));
+    let membership = Expr::InList {
+        expr: Box::new(value(1)),
+        list: vec![value(3), value(1)],
+        negated: false,
+    };
+    assert_eq!(
+        crate::expr::eval(&membership, &context).unwrap(),
+        Value::Bool(true)
+    );
+    let nullif = syntax_call("nullif", vec![value(1), value(1)], None);
+    assert_eq!(crate::expr::eval(&nullif, &context).unwrap(), Value::Null);
+    let greatest = syntax_call("greatest", vec![value(5), value(4)], None);
+    assert!(crate::expr::eval(&greatest, &context)
+        .unwrap()
+        .has_same_representation(&physical(4)));
 }

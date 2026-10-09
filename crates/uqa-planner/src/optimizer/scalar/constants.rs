@@ -192,14 +192,14 @@ pub(super) fn fold_authorized_literal(
     if let Some(literal) = composite_constant_field(&expression, types) {
         return literal;
     }
-    let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
-        if uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len()) == Some(true)
-            && args.iter().any(|argument| literal_value(argument).is_some_and(|value| matches!(value, Value::Null))));
+    let strict_null = strict_null_expression(&expression);
     if literal_value(&expression).is_some() || (!strict_null && !is_constant(&expression)) {
         return Ok(expression);
     }
     let schema = RowSchema::default();
     let selected_type = match &expression {
+        // An analyzed comparison has boolean output even when its discarded operand needs a live catalog to resolve its retained type name.
+        ScalarExpr::Binary { .. } if strict_null => Some(ColumnType::Boolean),
         ScalarExpr::Func {
             binding: Some(binding),
             ..
@@ -345,6 +345,38 @@ fn composite_constant_field(
         bound_type: Some(field.result_type.clone()),
         parameter_index: None,
     }))
+}
+
+/// Strict comparisons discard nonconstant siblings when an input is constant NULL, just as strict functions do. Compound predicates expose their individual comparisons before this pass.
+fn strict_null_expression(expression: &ScalarExpr) -> bool {
+    use uqa_sql::ast::BinaryOp;
+    let null = |argument: &ScalarExpr| {
+        literal_value(argument).is_some_and(|value| matches!(value, Value::Null))
+    };
+    match expression {
+        ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => {
+            uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
+                == Some(true)
+                && args.iter().any(null)
+        }
+        ScalarExpr::Binary {
+            op:
+                BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual,
+            lhs,
+            rhs,
+        } => null(lhs) || null(rhs),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

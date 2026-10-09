@@ -1,0 +1,1488 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE enum_consumer_a AS ENUM ('first','last'); ALTER TYPE enum_consumer_a ADD VALUE 'middle' BEFORE 'last'; CREATE TYPE enum_consumer_b AS ENUM ('other','lastb'); ALTER TYPE enum_consumer_b ADD VALUE 'before' BEFORE 'other'; ALTER TYPE enum_consumer_b ADD VALUE 'after' BEFORE 'lastb'; CREATE TYPE enum_consumer_holder AS (a enum_consumer_a,b enum_consumer_a); CREATE VIEW enum_consumer_source AS SELECT '(middle,last)'::enum_consumer_holder AS v; CREATE TYPE enum_consumer_raw AS (a integer,b integer); CREATE VIEW enum_consumer_invalid AS SELECT '(1,3)'::enum_consumer_raw AS v; CREATE VIEW enum_consumer_even AS SELECT '(2,4)'::enum_consumer_raw AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "ALTER TYPE",
+        "CREATE TYPE",
+        "ALTER TYPE",
+        "ALTER TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "ALTER TYPE enum_consumer_holder ALTER ATTRIBUTE a TYPE enum_consumer_b,ALTER ATTRIBUTE b TYPE enum_consumer_b; ALTER TYPE enum_consumer_raw ALTER ATTRIBUTE a TYPE enum_consumer_b,ALTER ATTRIBUTE b TYPE enum_consumer_b",
+      "command_tags": [
+        "ALTER TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "change"
+    },
+    {
+      "sql": "SELECT (v).a IN ((v).a,(v).b) AS yes,(v).a NOT IN ((v).a,(v).b) AS no FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "no"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "in"
+    },
+    {
+      "sql": "SELECT (v).a IN ((v).b,(v).a) AS yes FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "invalid_in"
+    },
+    {
+      "sql": "SELECT (v).a IN ('before','other') AS no FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "native_in"
+    },
+    {
+      "sql": "SELECT (v).a=ANY(ARRAY[(v).b,(v).a]) AS yes,(v).a<>ALL(ARRAY[(v).b]) AS different,(v).a<ANY(ARRAY[(v).b]) AS less FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "different",
+            "less"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "any_all"
+    },
+    {
+      "sql": "SELECT (v).a=ANY(ARRAY[(v).b,(v).a]) AS yes,(v).a<>ALL(ARRAY[(v).b]) AS different FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "different"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "invalid_any"
+    },
+    {
+      "sql": "SELECT (v).a=ANY(ARRAY[NULL::enum_consumer_b]) AS unknown,(v).a=ANY(ARRAY[]::enum_consumer_b[]) AS no FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "unknown",
+            "no"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_any"
+    },
+    {
+      "sql": "SELECT (v).a BETWEEN (v).a AND (v).b AS yes,(v).a NOT BETWEEN (v).a AND (v).b AS no FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "no"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "between"
+    },
+    {
+      "sql": "SELECT (v).a BETWEEN (v).a AND (v).a AS yes FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "invalid_equal_between"
+    },
+    {
+      "sql": "SELECT (v).a BETWEEN SYMMETRIC (v).b AND (v).a AS yes FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetric"
+    },
+    {
+      "sql": "SELECT (e.v).a BETWEEN (e.v).b AND (i.v).a AS no FROM enum_consumer_even e CROSS JOIN enum_consumer_invalid i",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "false_between"
+    },
+    {
+      "sql": "SELECT (v).a IS DISTINCT FROM (v).a AS no,(v).a IS DISTINCT FROM (v).b AS yes,(v).a IS NOT DISTINCT FROM (v).a AS same,(v).a IS DISTINCT FROM NULL AS present FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no",
+            "yes",
+            "same",
+            "present"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct"
+    },
+    {
+      "sql": "SELECT CASE (v).a WHEN (v).b THEN 0 WHEN (v).a THEN 1 ELSE 2 END AS choice FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "choice"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "case"
+    },
+    {
+      "sql": "SELECT NULLIF((v).a,(v).a) IS NULL AS yes,NULLIF((v).a,(v).b) IS NULL AS no FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "no"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif"
+    },
+    {
+      "sql": "SELECT GREATEST((v).a,(v).b) AS greatest,LEAST((v).a,(v).b) AS least FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "greatest",
+            "least"
+          ],
+          "type_oids": [
+            19683,
+            19683
+          ],
+          "rows": [
+            [
+              "last",
+              "middle"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "selection"
+    },
+    {
+      "sql": "SELECT enum_eq(GREATEST((v).a,(v).b),(v).b) AS greatest,enum_eq(LEAST((v).a,(v).b),(v).a) AS least FROM enum_consumer_even",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "greatest",
+            "least"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "selection_even"
+    },
+    {
+      "sql": "SELECT enum_eq(GREATEST(NULL,(v).a,NULL),(v).a) AS yes FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "selection_single"
+    },
+    {
+      "sql": "CREATE SEQUENCE enum_consumer_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "between_sequence_setup"
+    },
+    {
+      "sql": "SELECT nextval('enum_consumer_seq') BETWEEN 0 AND 1 AS no; SELECT currval('enum_consumer_seq') AS calls",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "calls"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "between_evaluation_count"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT nextval('enum_consumer_seq') BETWEEN SYMMETRIC 1 AND 1 AS no; SELECT currval('enum_consumer_seq') AS calls",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "calls"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetric_evaluation_count"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT 0 BETWEEN 1 AND nextval('enum_consumer_seq') AS no; SELECT nextval('enum_consumer_seq') AS first",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "first"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "between_lazy_bound"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT nextval('enum_consumer_seq') BETWEEN SYMMETRIC 0 AND 3 AS yes; SELECT currval('enum_consumer_seq') AS calls",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "yes"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "calls"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetric_lazy_alternative"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT nextval('enum_consumer_seq') BETWEEN SYMMETRIC NULL::bigint AND 100 AS nil; SELECT nextval('enum_consumer_seq') AS next",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "nil"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetric_constant_null_lower"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT nextval('enum_consumer_seq') BETWEEN SYMMETRIC 0 AND NULL::bigint AS nil; SELECT nextval('enum_consumer_seq') AS next",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "nil"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetric_constant_null_upper"
+    },
+    {
+      "sql": "SELECT '10' BETWEEN 0 AND '2' AS yes,'10' NOT BETWEEN 0 AND '2' AS no,'10' BETWEEN SYMMETRIC 0 AND '2' AS yes",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "no",
+            "yes"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "between_independent_coercions"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT nextval('enum_consumer_seq') BETWEEN NULL::bigint AND 100 AS nil; SELECT nextval('enum_consumer_seq') AS next",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "nil"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "between_constant_null"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT nextval('enum_consumer_seq') NOT BETWEEN SYMMETRIC 0 AND NULL::bigint AS nil; SELECT nextval('enum_consumer_seq') AS next",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "nil"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "not_symmetric_constant_null"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT (SELECT nextval('enum_consumer_seq')) BETWEEN 0 AND 1 AS no; SELECT nextval('enum_consumer_seq') AS next",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "between_independent_subqueries"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT (SELECT nextval('enum_consumer_seq')) BETWEEN SYMMETRIC 1 AND 1 AS no; SELECT nextval('enum_consumer_seq') AS next",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "next"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetric_independent_subqueries"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT CASE nextval('enum_consumer_seq') % 2 WHEN 1 THEN (v).b ELSE 'before'::enum_consumer_b END BETWEEN (v).a AND 'other'::enum_consumer_b AS yes FROM enum_consumer_source CROSS JOIN generate_series(1,2) AS g(n); SELECT currval('enum_consumer_seq') AS calls",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "yes"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ],
+            [
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "calls"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_between_caches"
+    },
+    {
+      "sql": "ALTER SEQUENCE enum_consumer_seq RESTART WITH 1; SELECT CASE nextval('enum_consumer_seq') % 4 WHEN 1 THEN (v).b WHEN 2 THEN 'after'::enum_consumer_b WHEN 3 THEN 'after'::enum_consumer_b ELSE (v).b END BETWEEN SYMMETRIC (v).a AND 'other'::enum_consumer_b AS no FROM enum_consumer_source CROSS JOIN generate_series(1,2) AS g(n); SELECT currval('enum_consumer_seq') AS calls",
+      "command_tags": [
+        "ALTER SEQUENCE",
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "no"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ],
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "calls"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "independent_symmetric_caches"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END<ANY(ARRAY[CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_consumer_b END]) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_any"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END<ALL(ARRAY[CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_consumer_b END]) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END BETWEEN CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END AND CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_consumer_b END FROM generate_series(1,2) AS g(n) CROSS JOIN enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_between"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END BETWEEN SYMMETRIC CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_consumer_b END AND CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END FROM generate_series(1,2) AS g(n) CROSS JOIN enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_symmetric"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM GREATEST(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_consumer_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_greatest"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM LEAST(CASE n WHEN 1 THEN (v).a ELSE 'before'::enum_consumer_b END,CASE n WHEN 1 THEN (v).b ELSE 'other'::enum_consumer_b END) FROM generate_series(1,2) AS g(n) CROSS JOIN enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cached_least"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM GREATEST('before'::enum_consumer_b,(v).a) FROM enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_b"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "selection_left_type"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_consumer_probe() RETURNS text LANGUAGE plpgsql AS $$ BEGIN PERFORM LEAST((v).a,'before'::enum_consumer_b) FROM enum_consumer_source; RETURN 'completed'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_consumer_probe(); DROP FUNCTION enum_consumer_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_consumer_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "XX000: enum value OID not found in cache for enum enum_consumer_a"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "selection_right_type"
+    },
+    {
+      "sql": "SELECT (v).a IN ((v).b,(v).a) AS yes,NULLIF((v).a,(v).a) IS NULL AS nil FROM enum_consumer_invalid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "nil"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_membership",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT GREATEST((v).a,(v).b) AS greatest,LEAST((v).a,(v).b) AS least FROM enum_consumer_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "greatest",
+            "least"
+          ],
+          "type_oids": [
+            19683,
+            19683
+          ],
+          "rows": [
+            [
+              "last",
+              "middle"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_selection",
+      "reopen": true
+    },
+    {
+      "sql": "DROP SEQUENCE enum_consumer_seq; DROP VIEW enum_consumer_source,enum_consumer_invalid,enum_consumer_even; DROP TYPE enum_consumer_holder,enum_consumer_raw,enum_consumer_a,enum_consumer_b",
+      "command_tags": [
+        "DROP SEQUENCE",
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ]
+}

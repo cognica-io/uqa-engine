@@ -6,6 +6,8 @@ This chapter is a name-level catalog of built-in expression functions. Most sign
 
 Implemented expression families include arithmetic, comparison, Boolean logic, NULL tests, `BETWEEN`, `IN`, `EXISTS`, `LIKE`, `ILIKE`, regular-expression matching, `SIMILAR TO`, concatenation, array construction and subscripting, casts, and searched or simple `CASE`.
 
+Range predicates follow PostgreSQL's separate comparison rules: `x BETWEEN lo AND hi` uses `x >= lo AND x <= hi`; `BETWEEN SYMMETRIC` also checks the reversed bounds. Each comparison selects its operand types independently. Volatile expressions and scalar subqueries can therefore run once for each reached comparison, subject to strict-NULL constant folding and Boolean short circuits. Negated range predicates use the corresponding negated comparisons.
+
 ```sql
 SELECT CASE
            WHEN score >= 0.8 THEN 'high'

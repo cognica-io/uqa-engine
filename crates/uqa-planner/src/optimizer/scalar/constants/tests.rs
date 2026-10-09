@@ -603,3 +603,73 @@ fn strict_null_folding_keeps_the_selected_fixed_return_type() {
         }
     ));
 }
+
+#[test]
+fn strict_comparison_null_folding_skips_volatile_operands() {
+    use uqa_sql::ast::BinaryOp;
+    for op in [
+        BinaryOp::Equal,
+        BinaryOp::NotEqual,
+        BinaryOp::Less,
+        BinaryOp::LessEqual,
+        BinaryOp::Greater,
+        BinaryOp::GreaterEqual,
+    ] {
+        for reverse in [false, true] {
+            let value = ScalarExpr::Func {
+                name: "nextval".into(),
+                binding: None,
+                args: vec![ScalarExpr::Literal(Value::Str("seq".into()))],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
+            };
+            let null = ScalarExpr::TypedLiteral {
+                composite_source: None,
+                value: Value::Null,
+                ty: "bigint".into(),
+                bound_type: Some(ColumnType::BigInteger),
+                parameter_index: None,
+            };
+            let (lhs, rhs) = if reverse {
+                (null, value)
+            } else {
+                (value, null)
+            };
+            let result = fold_literal_expression(
+                ScalarExpr::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+                |_| panic!("strict NULL comparison evaluated a volatile operand"),
+            )
+            .unwrap();
+            assert_eq!(literal_value(&result), Some(&Value::Null));
+            assert_eq!(
+                scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
+                Some(ColumnType::Boolean)
+            );
+        }
+    }
+}
+
+#[test]
+fn strict_comparison_null_folding_does_not_resolve_discarded_catalog_types() {
+    let expression = ScalarExpr::Binary {
+        op: uqa_sql::ast::BinaryOp::Equal,
+        lhs: Box::new(ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Str("(1)".into()))),
+            ty: "retained_composite".into(),
+            implicit: false,
+        }),
+        rhs: Box::new(ScalarExpr::Literal(Value::Null)),
+    };
+    let result = fold_literal_expression(expression, |_| panic!("discarded catalog read")).unwrap();
+    assert_eq!(literal_value(&result), Some(&Value::Null));
+    assert_eq!(
+        scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
+        Some(ColumnType::Boolean)
+    );
+}

@@ -315,6 +315,18 @@ pub fn eval_bound_builtin_function_call(
             ctx.enum_comparison_state(),
         );
     }
+    if let Some(result) = scalar_postgres::eval_comparison_with_context(
+        dispatch,
+        &evaluated,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        ctx,
+    ) {
+        return result.map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary comparison result")
+        });
+    }
     eval_dispatched_builtin_with_control(
         binding,
         dispatch,

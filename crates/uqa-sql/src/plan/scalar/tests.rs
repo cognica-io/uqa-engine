@@ -39,6 +39,8 @@ fn controlled_column_lowering_preserves_existing_scalar_shapes_and_input() {
         "SELECT a OR b OR c",
         "SELECT a IS NOT NULL",
         "SELECT a BETWEEN 1 AND 2",
+        "SELECT a BETWEEN SYMMETRIC 1 AND 2",
+        "SELECT a NOT BETWEEN SYMMETRIC 1 AND 2",
         "SELECT a NOT IN (1, 2, 3)",
         "SELECT CASE a WHEN 1 THEN 'first' ELSE 'last' END",
         "SELECT CASE WHEN a THEN 'yes' END",

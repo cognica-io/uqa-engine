@@ -8,12 +8,10 @@
 
 use uqa_core::{ArrayValue, Value};
 
-use crate::ast::Expr;
+use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
 
-use super::binary::{
-    compare_nullable_with_control, eval_binary, truthy, values_equal, values_equal_nullable,
-};
+use super::binary::{eval_binary, eval_comparison_truth_with_enum_catalog, truthy};
 use super::builtin::eval_bound_builtin_function_call;
 use super::call_arguments::evaluate_call_args;
 use super::call_dispatch::eval_function_call;
@@ -165,6 +163,26 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 }
                 return Ok(Value::Null);
             }
+            if binding.as_ref().is_some_and(|binding| {
+                binding.builtin
+                    && binding.dispatch == Some(crate::ast::FunctionDispatch::BetweenSymmetric)
+            }) {
+                let [value, low, high] = args.as_slice() else {
+                    return Err(SQLError::TypeMismatch(
+                        "BETWEEN SYMMETRIC takes 3 args".into(),
+                    ));
+                };
+                let forward = eval_between(value, low, high, ctx, 0)?;
+                if forward == Value::Bool(true) {
+                    return Ok(forward);
+                }
+                let backward = eval_between(value, high, low, ctx, 2)?;
+                return Ok(match (forward, backward) {
+                    (_, Value::Bool(true)) => Value::Bool(true),
+                    (Value::Null, _) | (_, Value::Null) => Value::Null,
+                    _ => Value::Bool(false),
+                });
+            }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
                 if binding.builtin {
@@ -196,7 +214,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             };
             for (cond, result) in when {
                 let matched = match &base_value {
-                    Some(bv) => values_equal(bv, &eval(cond, ctx)?)?,
+                    Some(bv) => {
+                        compare(BinaryOp::Equal, bv, &eval(cond, ctx)?, ctx, 0)? == Some(true)
+                    }
                     None => truthy(&eval(cond, ctx)?),
                 };
                 if matched {
@@ -269,12 +289,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let v = eval(expr, ctx)?;
             Ok(Value::Bool(uqa_core::sql_null_test(Some(&v), *negated)))
         }
-        Expr::Between { expr, low, high } => {
-            let v = eval(expr, ctx)?;
-            let lo = eval(low, ctx)?;
-            let hi = eval(high, ctx)?;
-            eval_between(&v, &lo, &hi)
-        }
+        Expr::Between { expr, low, high } => eval_between(expr, low, high, ctx, 0),
         Expr::InList {
             expr,
             list,
@@ -286,7 +301,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let mut saw_null = matches!(v, Value::Null);
             for item in list {
                 let candidate = eval(item, ctx)?;
-                match values_equal_nullable(&v, &candidate)? {
+                match compare(BinaryOp::Equal, &v, &candidate, ctx, 0)? {
                     Some(true) => return Ok(Value::Bool(!*negated)),
                     Some(false) => {}
                     None => saw_null = true,
@@ -315,28 +330,52 @@ fn explicit_expr_type(expr: &Expr) -> Option<&str> {
     }
 }
 
-/// `expr BETWEEN low AND high` under three-valued logic: a definite
-/// FALSE on either bound wins over a NULL on the other.
-pub(super) fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
-    eval_between_with_control(
-        v,
-        lo,
-        hi,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
-}
-
-pub(super) fn eval_between_with_control(
-    v: &Value,
-    lo: &Value,
-    hi: &Value,
-    control: &uqa_core::memory::ProductionControl<'_>,
+/// Evaluate `PostgreSQL`'s two comparisons in order, including repeated value
+/// evaluation and the short circuit after a false lower-bound comparison.
+fn eval_between(
+    expression: &Expr,
+    low: &Expr,
+    high: &Expr,
+    context: &EvalContext<'_>,
+    slot: usize,
 ) -> Result<Value> {
-    let ge = compare_nullable_with_control(v, lo, control)?.map(|ord| ord.is_ge());
-    let le = compare_nullable_with_control(v, hi, control)?.map(|ord| ord.is_le());
+    let ge = compare(
+        BinaryOp::GreaterEqual,
+        &eval(expression, context)?,
+        &eval(low, context)?,
+        context,
+        slot,
+    )?;
+    if ge == Some(false) {
+        return Ok(Value::Bool(false));
+    }
+    let le = compare(
+        BinaryOp::LessEqual,
+        &eval(expression, context)?,
+        &eval(high, context)?,
+        context,
+        slot + 1,
+    )?;
     Ok(match (ge, le) {
-        (Some(false), _) | (_, Some(false)) => Value::Bool(false),
+        (_, Some(false)) => Value::Bool(false),
         (Some(true), Some(true)) => Value::Bool(true),
         _ => Value::Null,
     })
+}
+
+fn compare(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    context: &EvalContext<'_>,
+    slot: usize,
+) -> Result<Option<bool>> {
+    eval_comparison_truth_with_enum_catalog(
+        op,
+        left,
+        right,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        context.engine.and_then(super::EngineHook::enum_labels),
+        context.enum_comparison_state_at(slot),
+    )
 }

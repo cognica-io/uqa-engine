@@ -46,7 +46,27 @@ pub fn eval_comparison_truth_with_control(
     Ok(out)
 }
 
+/// Observe scalar enum identities with the caller's catalog and comparison
+/// state, preserving the ordinary three-valued rules for every other carrier.
+pub fn eval_comparison_truth_with_enum_catalog(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
+    state: Option<&super::super::enums::EnumComparisonState>,
+) -> Result<Option<bool>> {
+    control.check()?;
+    match super::super::enums::eval_comparison(op, left, right, enums, state)? {
+        Some(Value::Bool(value)) => Ok(Some(value)),
+        Some(Value::Null) => Ok(None),
+        None => eval_comparison_truth_with_control(op, left, right, control),
+        Some(_) => unreachable!("comparison produces only boolean or NULL"),
+    }
+}
+
 /// Two-valued equality treats SQL UNKNOWN as no match for CASE, NULLIF and membership probes.
+#[cfg(test)]
 pub(in crate::expr) fn values_equal(a: &Value, b: &Value) -> Result<bool> {
     Ok(values_equal_nullable(a, b)? == Some(true))
 }
@@ -59,6 +79,7 @@ pub fn values_equal_with_control(
     Ok(values_equal_nullable_with_control(a, b, control)? == Some(true))
 }
 
+#[cfg(test)]
 pub(in crate::expr) fn values_equal_nullable(a: &Value, b: &Value) -> Result<Option<bool>> {
     values_equal_nullable_with_control(a, b, &ProductionControl::uncontrolled())
 }

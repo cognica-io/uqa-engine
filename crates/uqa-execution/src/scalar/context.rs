@@ -72,12 +72,12 @@ impl<'a> ScalarEvalContext<'a> {
         self
     }
 
-    pub(super) fn enum_comparison_state(
+    pub(super) fn enum_comparison_states(
         &self,
         arguments: &[super::ScalarExpr],
-    ) -> Option<&uqa_sql::expr::enums::EnumComparisonState> {
+    ) -> [Option<&uqa_sql::expr::enums::EnumComparisonState>; 4] {
         self.function_states
-            .and_then(|states| states.enum_comparison(arguments))
+            .map_or([None; 4], |states| states.enum_comparisons(arguments))
     }
 
     pub(super) fn enum_binary_comparison_state(

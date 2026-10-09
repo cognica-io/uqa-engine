@@ -10,13 +10,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Add PostgreSQL `get_byte(bytea, integer)` with unsigned byte output, exact bounds diagnostics, strict NULL behavior and catalog identity.
 
-- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained tuple interpretation with fixed by-reference fields, alignment and dropped slots, deferred variable-width reads, retained JSON/JSONB output and physical JSONB comparisons, physical array element identity, domain base layouts/output, nested tuple and array formation, original enum label OIDs with deferred catalog output, OID-aware enum comparisons and support functions with per-call state, consistent enum hash-aggregation keys, original stored constants across commit and reopen, and atomic rollback.
+- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained tuple interpretation with fixed by-reference fields, alignment and dropped slots, deferred variable-width reads, retained JSON/JSONB output and physical JSONB comparisons, physical array element identity, domain base layouts/output, nested tuple and array formation, original enum label OIDs with deferred catalog output, OID-aware enum comparisons, membership, selection and support functions with per-call state, consistent enum hash-aggregation keys, original stored constants across commit and reopen, and atomic rollback.
 
 - Rename composite attributes while preserving field identities, nested values, stored SQL references, prepared selectors and transaction rollback.
 
 - Remove composite attributes with PostgreSQL DROP ATTRIBUTE semantics, including mixed ADD/DROP order, stable surviving field identities, retained constructor effects, nested stored values and atomic rollback across all storage providers.
 
 ### Fixed
+
+- Preserve PostgreSQL BETWEEN operand coercions, strict-NULL folding and volatile/subquery evaluation counts, while keeping simple inclusive ranges on their existing access path.
 
 - Avoid unnecessary maintenance-thread wakeups when opening sessions, committing statistics changes or updating DiskANN policy, and skip idle statistics table passes until committed state changes or pending statistics reach their refresh deadline.
 

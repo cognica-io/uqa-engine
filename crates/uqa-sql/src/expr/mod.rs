@@ -75,10 +75,10 @@ pub use binary::{
     compare_nullable_with_control, compare_typed_values_with_control, compare_with_control,
     equal_typed_values_with_enum_catalog, eval_binary_values, eval_binary_values_with_control,
     eval_binary_values_with_integer_width, eval_binary_values_with_integer_width_with_control,
-    eval_comparison_truth, eval_comparison_truth_with_control, integer_width_for_literal,
-    integer_width_for_type, truthy, type_comparison_can_fail, validate_legacy_vector_comparison,
-    value_comparison_can_fail, values_equal_nullable_with_control, values_equal_with_control,
-    IntegerWidth,
+    eval_comparison_truth, eval_comparison_truth_with_control,
+    eval_comparison_truth_with_enum_catalog, integer_width_for_literal, integer_width_for_type,
+    truthy, type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
+    values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
 pub use casting::{
@@ -140,7 +140,6 @@ pub(crate) use context::{requires_catalog_constant_input, requires_domain_array_
 pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
 mod numeric_operator;
-use evaluator::eval_between_with_control;
 pub use numeric_operator::{eval_numeric_operator, eval_numeric_operator_with_control};
 
 #[cfg(test)]
