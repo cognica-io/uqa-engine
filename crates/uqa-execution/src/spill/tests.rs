@@ -14,6 +14,7 @@ use uqa_sql::expr::RowLookup as _;
 use super::*;
 use crate::ColumnIdentity;
 
+mod datums;
 mod enums;
 mod legacy_vectors;
 
@@ -276,10 +277,13 @@ fn exact_value_variants_and_float_bits_round_trip() {
         ),
         (
             "record".into(),
-            Value::Record(vec![
-                ("key".into(), Value::Str("a".into())),
-                ("value".into(), Value::Json("1".into())),
-            ]),
+            Value::Record(
+                vec![
+                    ("key".into(), Value::Str("a".into())),
+                    ("value".into(), Value::Json("1".into())),
+                ]
+                .into(),
+            ),
         ),
         (
             "nan".into(),

@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE cw_tuple AS(a bigint,b integer,c smallint,d boolean,e integer); PREPARE cw_whole AS SELECT '(72623859790382856,287454020,21862,t,2005440938)'::cw_tuple AS v; PREPARE cw_null AS SELECT '(,287454020,21862,t,2005440938)'::cw_tuple AS v; PREPARE cw_bitmap AS SELECT '(,287454020,21862,t,2005440938)'::cw_tuple IS NULL AS n, '(,287454020,21862,t,2005440938)'::cw_tuple IS NOT NULL AS nn; EXECUTE cw_whole; EXECUTE cw_null; EXECUTE cw_bitmap"
+    },
+    {
+      "id": "narrow",
+      "sql": "BEGIN; ALTER TYPE cw_tuple ALTER ATTRIBUTE a TYPE integer; EXECUTE cw_whole; EXECUTE cw_null; EXECUTE cw_bitmap"
+    },
+    {
+      "id": "narrow_twice",
+      "sql": "ALTER TYPE cw_tuple ALTER ATTRIBUTE a TYPE smallint; EXECUTE cw_whole; EXECUTE cw_null"
+    },
+    {
+      "id": "retype_later",
+      "sql": "ALTER TYPE cw_tuple ALTER ATTRIBUTE b TYPE smallint; EXECUTE cw_whole; EXECUTE cw_null"
+    },
+    {
+      "id": "drop",
+      "sql": "ALTER TYPE cw_tuple DROP ATTRIBUTE a; EXECUTE cw_whole; EXECUTE cw_null"
+    },
+    {
+      "id": "append",
+      "sql": "ALTER TYPE cw_tuple ADD ATTRIBUTE x bigint; EXECUTE cw_whole; EXECUTE cw_null; EXECUTE cw_bitmap"
+    },
+    {
+      "id": "undo",
+      "sql": "ROLLBACK; EXECUTE cw_whole; EXECUTE cw_null; EXECUTE cw_bitmap"
+    },
+    {
+      "id": "stored",
+      "sql": "CREATE VIEW cw_view AS SELECT '(72623859790382856,287454020,21862,t,2005440938)'::cw_tuple AS v; ALTER TYPE cw_tuple ALTER ATTRIBUTE a TYPE integer; SELECT * FROM cw_view"
+    },
+    {
+      "id": "stored_reopen",
+      "sql": "SELECT * FROM cw_view",
+      "reopen": true
+    },
+    {
+      "id": "stored_again",
+      "sql": "ALTER TYPE cw_tuple ALTER ATTRIBUTE a TYPE smallint; SELECT * FROM cw_view",
+      "reopen": true
+    },
+    {
+      "id": "stored_restore",
+      "sql": "ALTER TYPE cw_tuple ALTER ATTRIBUTE a TYPE bigint; SELECT * FROM cw_view",
+      "reopen": true
+    },
+    {
+      "id": "widen_setup",
+      "sql": "CREATE TYPE cw_wide AS(a integer,b integer,c bigint); PREPARE cw_widen AS SELECT '(16909060,84281096,72623859790382856)'::cw_wide AS v; EXECUTE cw_widen"
+    },
+    {
+      "id": "widen",
+      "sql": "ALTER TYPE cw_wide ALTER ATTRIBUTE a TYPE bigint; ALTER TYPE cw_wide DROP ATTRIBUTE c; EXECUTE cw_widen"
+    },
+    {
+      "id": "nulls",
+      "sql": "CREATE TYPE cw_empty AS(a integer,b integer); PREPARE cw_mixed AS SELECT '(1,)'::cw_empty IS NULL AS n, '(1,)'::cw_empty IS NOT NULL AS nn; EXECUTE cw_mixed; ALTER TYPE cw_empty DROP ATTRIBUTE b; EXECUTE cw_mixed; ALTER TYPE cw_empty ADD ATTRIBUTE c text; EXECUTE cw_mixed"
+    }
+  ]
+}

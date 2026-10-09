@@ -253,7 +253,8 @@ fn positional_trigger_record(
                         .unwrap_or(Value::Null),
                 )
             })
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
     ))
 }
 

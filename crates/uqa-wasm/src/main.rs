@@ -616,6 +616,9 @@ const ENCRYPTION_UNAVAILABLE: &str = "encryption is not available in browser bui
 
 fn value_to_json(value: Value) -> Result<JSON, String> {
     match value {
+        Value::Datum(datum) => {
+            value_to_json(uqa_sql::expr::datums::read(&datum).map_err(|error| error.to_string())?)
+        }
         Value::Null => Ok(JSON::Null),
         Value::Void => Ok(json!("")),
         Value::Bool(value) => Ok(json!(value)),

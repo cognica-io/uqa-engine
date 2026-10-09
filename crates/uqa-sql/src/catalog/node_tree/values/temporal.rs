@@ -13,7 +13,7 @@ use uqa_core::TemporalValue;
 const EPOCH_DAYS: i32 = 10_957;
 const EPOCH_MICROS: i64 = 946_684_800_000_000;
 
-pub(super) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLError> {
+pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLError> {
     let bytes = match (value, oid) {
         (TemporalValue::Date { days }, 1082) => {
             let days = days

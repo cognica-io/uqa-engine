@@ -119,6 +119,7 @@ impl PhysicalIndexDefinitions {
                     key_values_equal(
                         &index_key_values(expressions, table, &index.keys, &stored)?,
                         &values,
+                        context.values,
                     )?;
                 }
             }

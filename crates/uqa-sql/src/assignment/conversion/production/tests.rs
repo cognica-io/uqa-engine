@@ -107,7 +107,7 @@ fn record_assignment_moves_existing_payloads_and_drops_the_source_buffer() {
     assert_eq!(text.as_ptr(), pointer);
     assert_eq!(fields[0].0, "f1");
     assert_eq!(fields[1], ("f2".into(), Value::Int(7)));
-    let exact = fields.capacity() * size_of::<(String, Value)>()
+    let exact = fields.retained_buffer_bytes().unwrap()
         + fields
             .iter()
             .map(|(name, _)| name.capacity())

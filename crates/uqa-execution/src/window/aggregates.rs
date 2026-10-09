@@ -18,9 +18,9 @@ use uqa_sql::{SQLError, ScalarExpr};
 
 pub(super) struct WindowAggregate {
     name: String,
-    args: Vec<ScalarExpr>,
+    args: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     /// Rows for which this condition is not true do not enter the aggregate.
-    filter: Option<ScalarExpr>,
+    filter: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
     template: AggregateAccumulatorTemplate,
     budget_bytes: usize,
     accumulator: AggregateAccumulator,
@@ -41,8 +41,10 @@ impl WindowAggregate {
         let accumulator = instantiate(&template, budget_bytes);
         Self {
             name: name.to_string(),
-            args: args.to_vec(),
-            filter: filter.cloned(),
+            args: crate::scalar::PreparedExpressions::scalars(args.to_vec()),
+            filter: filter
+                .cloned()
+                .map(crate::scalar::PreparedExpressions::scalar),
             template,
             budget_bytes,
             accumulator,
@@ -103,11 +105,21 @@ impl WindowAggregate {
                     rows.with_context(self.aggregated_upto, |context| {
                         // `advance_windowaggregate`: a row whose filter is not true is skipped.
                         if let Some(filter) = filter {
-                            if !uqa_sql::expr::truthy(&crate::eval_scalar(filter, context)?) {
+                            if !uqa_sql::expr::truthy(&crate::eval_scalar(
+                                filter,
+                                &(*context).with_function_states(filter.calls()),
+                            )?) {
                                 return Ok(());
                             }
                         }
-                        observe_aggregate(accumulator, name, args, false, &[], context)
+                        observe_aggregate(
+                            accumulator,
+                            name,
+                            args,
+                            false,
+                            &[],
+                            &(*context).with_function_states(args.calls()),
+                        )
                     })?;
                 }
             }

@@ -326,57 +326,10 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 rhs: Box::new(compile_expr(rhs)?),
             })
         }
-        AExprKind::AexprBetween | AExprKind::AexprNotBetween => {
-            let expr = a
-                .lexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("BETWEEN without lhs".into()))?;
-            let rhs = a
-                .rexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("BETWEEN without rhs".into()))?;
-            let bounds = match rhs.node.as_ref() {
-                Some(NodeEnum::List(l)) if l.items.len() == 2 => l.items.clone(),
-                _ => return Err(SQLError::Internal("BETWEEN expects 2 bounds".into())),
-            };
-            let between = Expr::Between {
-                expr: Box::new(compile_expr(expr)?),
-                low: Box::new(compile_expr(&bounds[0])?),
-                high: Box::new(compile_expr(&bounds[1])?),
-            };
-            Ok(if matches!(kind, AExprKind::AexprNotBetween) {
-                Expr::Not(Box::new(between))
-            } else {
-                between
-            })
-        }
-        AExprKind::AexprBetweenSym | AExprKind::AexprNotBetweenSym => {
-            let expr = a
-                .lexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("BETWEEN without lhs".into()))?;
-            let rhs = a
-                .rexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("BETWEEN without rhs".into()))?;
-            let bounds = match rhs.node.as_ref() {
-                Some(NodeEnum::List(l)) if l.items.len() == 2 => l.items.clone(),
-                _ => return Err(SQLError::Internal("BETWEEN expects 2 bounds".into())),
-            };
-            let call = dispatched_call(
-                FunctionDispatch::BetweenSymmetric,
-                vec![
-                    compile_expr(expr)?,
-                    compile_expr(&bounds[0])?,
-                    compile_expr(&bounds[1])?,
-                ],
-            );
-            Ok(if matches!(kind, AExprKind::AexprNotBetweenSym) {
-                Expr::Not(Box::new(call))
-            } else {
-                call
-            })
-        }
+        AExprKind::AexprBetween
+        | AExprKind::AexprNotBetween
+        | AExprKind::AexprBetweenSym
+        | AExprKind::AexprNotBetweenSym => compile_between(a),
         AExprKind::AexprDistinct | AExprKind::AexprNotDistinct => {
             let lhs = a
                 .lexpr
@@ -613,4 +566,48 @@ pub(in crate::compiler) fn compile_null_test(n: &pg_query::protobuf::NullTest) -
         expr: Box::new(compile_expr(arg)?),
         negated,
     })
+}
+
+/// Expand before binding so each comparison owns its coercions, subqueries and runtime state, as `PostgreSQL`'s `transformAExprBetween` does.
+fn compile_between(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
+    use pg_query::protobuf::AExprKind;
+    let value = a
+        .lexpr
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("BETWEEN without lhs".into()))?;
+    let rhs = a
+        .rexpr
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("BETWEEN without rhs".into()))?;
+    let Some(NodeEnum::List(bounds)) = rhs.node.as_ref() else {
+        return Err(SQLError::Internal("BETWEEN expects 2 bounds".into()));
+    };
+    let [low, high] = bounds.items.as_slice() else {
+        return Err(SQLError::Internal("BETWEEN expects 2 bounds".into()));
+    };
+    let negated = matches!(
+        a.kind(),
+        AExprKind::AexprNotBetween | AExprKind::AexprNotBetweenSym
+    );
+    crate::type_resolution::between::expand(
+        matches!(
+            a.kind(),
+            AExprKind::AexprBetweenSym | AExprKind::AexprNotBetweenSym
+        ),
+        negated,
+        |op, upper| {
+            Ok(Expr::Binary {
+                op,
+                lhs: Box::new(compile_expr(value)?),
+                rhs: Box::new(compile_expr(if upper { high } else { low })?),
+            })
+        },
+        |and, items| {
+            if and {
+                Expr::And(items)
+            } else {
+                Expr::Or(items)
+            }
+        },
+    )
 }

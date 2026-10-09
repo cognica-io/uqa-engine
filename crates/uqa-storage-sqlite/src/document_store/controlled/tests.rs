@@ -73,6 +73,11 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Int(2)], vec![-2]).unwrap(),
         ),
         Value::Array(ArrayValue::with_lower_bounds(Vec::new(), Vec::new()).unwrap()),
+        Value::Array(
+            ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![-3])
+                .unwrap()
+                .with_element_type_oid(Some(23)),
+        ),
         Value::LegacyVector(
             LegacyVectorValue::try_new(LegacyVectorKind::SmallInteger, Vec::new()).unwrap(),
         ),
@@ -91,10 +96,19 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ])
             .unwrap(),
         ),
+        Value::Datum(uqa_core::DatumValue::new(
+            1700,
+            0,
+            vec![2, 0, 0, 0, 3, b'x'],
+        )),
         Value::Enum(EnumValue::new(
             16_390,
             EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap(),
         )),
+        Value::Enum(
+            EnumValue::new(16_390, EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap())
+                .with_label_oid(Some(16_400)),
+        ),
         Value::Array(
             ArrayValue::try_new(vec![
                 Value::Enum(EnumValue::new(
@@ -112,10 +126,13 @@ fn typed_blob_round_trips_every_persisted_variant() {
     for value in [
         Value::List(scalars.clone()),
         Value::Row(scalars.into()),
-        Value::Record(vec![
-            ("duplicate".into(), Value::Int(1)),
-            ("duplicate".into(), Value::Int(2)),
-        ]),
+        Value::Record(
+            vec![
+                ("duplicate".into(), Value::Int(1)),
+                ("duplicate".into(), Value::Int(2)),
+            ]
+            .into(),
+        ),
         Value::Map(BTreeMap::from([(
             "nested".into(),
             Value::List(vec![Value::Bytes(vec![1])]),
@@ -143,6 +160,12 @@ fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
         r#"{"kind":"decimal","value":["decimal","1e-10"]}"#,
         r#"{"kind":"decimal","value":{"$uqa_type":"decimal","value":"0","extra":"\uD800"}}"#,
         r#"{"kind":"array","value":[[1,2],[-1]]}"#,
+        r#"{"kind":"array","value":[[1,2],[-1],23]}"#,
+        r#"{"kind":"array","value":[[1,2],[-1],null]}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":23}}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":-1}}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":4294967296}}"#,
+        r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"element_type_oid":23,"element_type_oid":25}}"#,
         r#"{"kind":"array","value":{"elements":[1],"lower_bounds":[1],"unknown":"\uD800"}}"#,
         r#"{"kind":"temporal","value":["date",1]}"#,
         r#"{"kind":"temporal","value":{"$uqa_type":"date","days":1,"micros":2}}"#,
@@ -152,6 +175,15 @@ fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
         r#"{"kind":"float_bits","value":18446744073709551615}"#,
         r#"{"kind":"enum","value":{"type_oid":7,"key":"40"}}"#,
         r#"{"kind":"enum","value":[7,"40"]}"#,
+        r#"{"kind":"enum","value":[7,"40",4294967295]}"#,
+        r#"{"kind":"enum","value":[7,"40",null]}"#,
+        r#"{"kind":"enum","value":[7,"40",1,2]}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":0}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":null}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":4294967296}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":-1}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":"9"}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","label_oid":null,"label_oid":9}}"#,
         r#"{"kind":"enum","value":{"key":"40","type_oid":7}}"#,
         r#"{"kind":"enum","value":{"type_oid":7,"key":"40","extra":1}}"#,
         r#"{"kind":"enum","value":{"type_oid":7}}"#,

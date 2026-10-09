@@ -22,15 +22,23 @@ fn decode_controlled(text: &str) -> Result<Value, JsonReadError> {
         .map(|value| value.into_parts().0)
 }
 
+fn physical_label(type_oid: u32, key: &[u8], oid: u32) -> Value {
+    let Value::Enum(value) = label(type_oid, key) else {
+        unreachable!()
+    };
+    Value::Enum(value.with_label_oid(Some(oid)))
+}
+
 #[test]
 fn enum_carriers_round_trip_through_serde_and_controlled_decoding() {
     let values = [
         label(16_390, &[64]),
         label(u32::MAX, &[0, 255, 7]),
+        physical_label(16_390, &[0x0a, 0xff], 16_400),
         Value::Array(
             ArrayValue::try_new(vec![label(7, &[1]), Value::Null, label(7, &[2])]).unwrap(),
         ),
-        Value::Record(vec![("mood".into(), label(9, &[128]))]),
+        Value::Record(vec![("mood".into(), physical_label(9, &[128], u32::MAX))].into()),
     ];
     for value in values {
         let text = serde_json::to_string(&value).unwrap();
@@ -43,11 +51,27 @@ fn enum_carriers_round_trip_through_serde_and_controlled_decoding() {
         serde_json::to_string(&label(16_390, &[0x0a, 0xff])).unwrap(),
         r#"{"$uqa_type":"enum","type_oid":16390,"key":"0aff"}"#
     );
+    assert_eq!(
+        serde_json::to_string(&physical_label(16_390, &[0x0a, 0xff], 16_400)).unwrap(),
+        r#"{"$uqa_type":"enum","type_oid":16390,"key":"0aff","label_oid":16400}"#
+    );
 }
 
 #[test]
 fn malformed_enum_carriers_are_typed_failures() {
     let cases = [
+        (
+            r#"{"$uqa_type":"enum","type_oid":7,"key":"01","label_oid":-1}"#,
+            "label OID out of range",
+        ),
+        (
+            r#"{"$uqa_type":"enum","type_oid":7,"key":"01","label_oid":4294967296}"#,
+            "label OID out of range",
+        ),
+        (
+            r#"{"$uqa_type":"enum","type_oid":7,"key":"01","label_oid":"7"}"#,
+            "label OID is not an integer",
+        ),
         (
             r#"{"$uqa_type":"enum","type_oid":-1,"key":"01"}"#,
             "type OID out of range",

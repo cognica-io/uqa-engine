@@ -240,6 +240,16 @@ impl ColumnValueIndex {
         predicate: &Predicate,
         observe: impl FnOnce() -> Result<(), uqa_sql::SQLError>,
     ) -> Result<Option<PostingList>, uqa_sql::SQLError> {
+        self.scan_observing_with_catalog(predicate, None, observe)
+    }
+
+    /// Evaluate catalog-dependent keys in the same catalog generation as the caller.
+    pub fn scan_observing_with_catalog(
+        &self,
+        predicate: &Predicate,
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+        observe: impl FnOnce() -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<Option<PostingList>, uqa_sql::SQLError> {
         if self.is_carried() {
             return Ok(None);
         }
@@ -247,7 +257,7 @@ impl ColumnValueIndex {
             observe()?;
             let mut ids = Vec::new();
             for (&id, value) in &self.values {
-                if comparison::matches(value, predicate)? {
+                if comparison::matches(value, predicate, catalog)? {
                     ids.push(id);
                 }
             }

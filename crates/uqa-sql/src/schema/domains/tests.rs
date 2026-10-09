@@ -258,7 +258,7 @@ fn unknown_check_literals_are_read_as_boolean_and_existing_not_null_is_retained(
         )
         .unwrap();
         assert!(
-            matches!(check.expression, Expr::TypedLiteral { value, ty } if value == expected && ty == "boolean")
+            matches!(check.expression, Expr::TypedLiteral { value, ty, .. } if value == expected && ty == "boolean")
         );
     }
     let constraint = prepare_added_not_null(

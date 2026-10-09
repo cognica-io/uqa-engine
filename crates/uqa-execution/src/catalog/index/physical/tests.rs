@@ -79,6 +79,7 @@ fn values(definitions: &PhysicalIndexDefinitions, key: &ValueIndexKey) -> Result
     definitions
         .document_values(
             IndexExpressionContext {
+                values: None,
                 catalog: &context,
                 expressions: &context,
             },
@@ -173,6 +174,7 @@ fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
     let child = prepared
         .document_values(
             IndexExpressionContext {
+                values: None,
                 catalog: &Context,
                 expressions: &Context,
             },
@@ -297,6 +299,7 @@ fn composite_unique_keys_retain_the_same_complete_tuple_in_storage_and_commands(
             .search_fields("public.t", &[], &[])
             .contains(&physical));
         let context = IndexExpressionContext {
+            values: None,
             catalog: &Context,
             expressions: &Context,
         };

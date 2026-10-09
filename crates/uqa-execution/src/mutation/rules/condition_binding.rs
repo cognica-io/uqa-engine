@@ -5,207 +5,10 @@
 //
 
 use super::{
-    bind_expr, BTreeMap, BinaryOp, Expr, ProjectedRuntimeRuleResolver, RuleColumnMetadata,
-    RuleContext, RuleRowImage, RuleRowSide, SQLError, Value,
+    BTreeMap, ProjectedRuntimeRuleResolver, RuleColumnMetadata, RuleContext, RuleRowImage,
+    RuleRowSide, SQLError, Value,
 };
 use uqa_sql::catalog::roles::RoleReference;
-
-fn evaluate_rule_condition_piece<F>(
-    context: RuleContext<'_>,
-    expression: &Expr,
-    resolver: &mut ProjectedRuntimeRuleResolver<'_, F>,
-) -> Result<Value, SQLError>
-where
-    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
-{
-    let bound = bind_rule_condition_expression(context, expression, resolver)?;
-    context.expressions.evaluate(&bound)
-}
-
-fn bind_rule_condition_expressions<F>(
-    context: RuleContext<'_>,
-    expressions: &[Expr],
-    resolver: &mut ProjectedRuntimeRuleResolver<'_, F>,
-) -> Result<Vec<Expr>, SQLError>
-where
-    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
-{
-    expressions
-        .iter()
-        .map(|expression| bind_rule_condition_expression(context, expression, resolver))
-        .collect()
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves action and RETURNING order"
-)]
-fn bind_rule_condition_expression<F>(
-    context: RuleContext<'_>,
-    expression: &Expr,
-    resolver: &mut ProjectedRuntimeRuleResolver<'_, F>,
-) -> Result<Expr, SQLError>
-where
-    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
-{
-    Ok(match expression {
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            let base = base
-                .as_deref()
-                .map(|base| evaluate_rule_condition_piece(context, base, resolver))
-                .transpose()?;
-            let mut selected = None;
-            for (condition, result) in when {
-                let condition = evaluate_rule_condition_piece(context, condition, resolver)?;
-                let matches = if let Some(base) = base.as_ref() {
-                    matches!(
-                        uqa_sql::expr::eval_binary_values(BinaryOp::Equal, base, &condition)?,
-                        Value::Bool(true)
-                    )
-                } else {
-                    uqa_sql::expr::truthy(&condition)
-                };
-                if matches {
-                    selected = Some(bind_rule_condition_expression(context, result, resolver)?);
-                    break;
-                }
-            }
-            if let Some(selected) = selected {
-                selected
-            } else if let Some(branch) = else_branch.as_deref() {
-                bind_rule_condition_expression(context, branch, resolver)?
-            } else {
-                Expr::Literal(Value::Null)
-            }
-        }
-        Expr::And(items) => {
-            let mut saw_null = false;
-            let mut result = Value::Bool(true);
-            for item in items {
-                let value = evaluate_rule_condition_piece(context, item, resolver)?;
-                if matches!(value, Value::Null) {
-                    saw_null = true;
-                } else if !uqa_sql::expr::truthy(&value) {
-                    result = Value::Bool(false);
-                    saw_null = false;
-                    break;
-                }
-            }
-            if saw_null {
-                result = Value::Null;
-            }
-            Expr::Literal(result)
-        }
-        Expr::Or(items) => {
-            let mut saw_null = false;
-            let mut result = Value::Bool(false);
-            for item in items {
-                let value = evaluate_rule_condition_piece(context, item, resolver)?;
-                if matches!(value, Value::Null) {
-                    saw_null = true;
-                } else if uqa_sql::expr::truthy(&value) {
-                    result = Value::Bool(true);
-                    saw_null = false;
-                    break;
-                }
-            }
-            if saw_null {
-                result = Value::Null;
-            }
-            Expr::Literal(result)
-        }
-        Expr::Func {
-            order_syntax,
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => Expr::Func {
-            order_syntax: *order_syntax,
-            name: name.clone(),
-            binding: binding.clone(),
-            args: bind_rule_condition_expressions(context, args, resolver)?,
-            distinct: *distinct,
-            order_by: order_by
-                .iter()
-                .map(|order| {
-                    Ok(uqa_sql::ast::OrderBy {
-                        expr: bind_rule_condition_expression(context, &order.expr, resolver)?,
-                        descending: order.descending,
-                        nulls: order.nulls,
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?,
-            filter: filter
-                .as_deref()
-                .map(|filter| {
-                    bind_rule_condition_expression(context, filter, resolver).map(Box::new)
-                })
-                .transpose()?,
-        },
-        Expr::Array(items) => {
-            Expr::Array(bind_rule_condition_expressions(context, items, resolver)?)
-        }
-        Expr::Row(items) => Expr::Row(bind_rule_condition_expressions(context, items, resolver)?),
-        Expr::CompositeRow { items, binding } => Expr::CompositeRow {
-            items: bind_rule_condition_expressions(context, items, resolver)?,
-            binding: binding.clone(),
-        },
-        Expr::Binary { op, lhs, rhs } => Expr::Binary {
-            op: *op,
-            lhs: Box::new(bind_rule_condition_expression(context, lhs, resolver)?),
-            rhs: Box::new(bind_rule_condition_expression(context, rhs, resolver)?),
-        },
-        Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(bind_rule_condition_expression(
-            context, inner, resolver,
-        )?)),
-        Expr::Not(inner) => Expr::Not(Box::new(bind_rule_condition_expression(
-            context, inner, resolver,
-        )?)),
-        Expr::IsNull { expr, negated } => Expr::IsNull {
-            expr: Box::new(bind_rule_condition_expression(context, expr, resolver)?),
-            negated: *negated,
-        },
-        Expr::Between { expr, low, high } => Expr::Between {
-            expr: Box::new(bind_rule_condition_expression(context, expr, resolver)?),
-            low: Box::new(bind_rule_condition_expression(context, low, resolver)?),
-            high: Box::new(bind_rule_condition_expression(context, high, resolver)?),
-        },
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => Expr::InList {
-            expr: Box::new(bind_rule_condition_expression(context, expr, resolver)?),
-            list: bind_rule_condition_expressions(context, list, resolver)?,
-            negated: *negated,
-        },
-        Expr::Cast { expr, ty, implicit } => Expr::Cast {
-            implicit: *implicit,
-            expr: Box::new(bind_rule_condition_expression(context, expr, resolver)?),
-            ty: ty.clone(),
-        },
-        Expr::WindowCall { .. }
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. }
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Param(_)
-        | Expr::InternalColumn(_)
-        | Expr::Default
-        | Expr::Literal(_)
-        | Expr::TypedLiteral { .. }
-        | Expr::Star
-        | Expr::QualifiedStar(_) => bind_expr(expression, resolver)?,
-    })
-}
 
 fn materialize_rule_condition_row<F>(
     binding: &uqa_sql::catalog::events::RuleConditionBinding,
@@ -264,7 +67,7 @@ pub(super) fn rule_condition_matches<F>(
 where
     F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
 {
-    let Some(condition) = rule.definition.condition.as_ref() else {
+    let Some(_) = rule.definition.condition.as_ref() else {
         return Ok(true);
     };
     if let Some((plan, binding)) = rule.bound_condition_plan() {
@@ -293,17 +96,7 @@ where
             )?,
         ));
     }
-    let condition = bind_rule_condition_expression(
-        context,
-        condition,
-        &mut ProjectedRuntimeRuleResolver {
-            row_index,
-            row,
-            columns,
-            project,
-        },
-    )?;
-    Ok(uqa_sql::expr::truthy(
-        &context.expressions.evaluate(&condition)?,
+    Err(SQLError::Internal(
+        "stored rule condition has no analyzed plan".into(),
     ))
 }

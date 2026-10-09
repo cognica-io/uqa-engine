@@ -33,6 +33,10 @@ fn verify_common_type_contexts(engine: &Engine) {
         engine,
         include_str!("../../../../tests/parity/pg18/common_type_contexts_oracle.expected.json"),
     );
+    crate::pg18_oracle::verify(
+        engine,
+        include_str!("../../../../tests/parity/pg18/constant_source_types_oracle.expected.json"),
+    );
 }
 
 #[test]

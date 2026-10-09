@@ -6,6 +6,8 @@ This chapter is a name-level catalog of built-in expression functions. Most sign
 
 Implemented expression families include arithmetic, comparison, Boolean logic, NULL tests, `BETWEEN`, `IN`, `EXISTS`, `LIKE`, `ILIKE`, regular-expression matching, `SIMILAR TO`, concatenation, array construction and subscripting, casts, and searched or simple `CASE`.
 
+Range predicates follow PostgreSQL's separate comparison rules: `x BETWEEN lo AND hi` uses `x >= lo AND x <= hi`; `BETWEEN SYMMETRIC` also checks the reversed bounds. Each comparison selects its operand types independently. Volatile expressions and scalar subqueries can therefore run once for each reached comparison, subject to strict-NULL constant folding and Boolean short circuits. Negated range predicates use the corresponding negated comparisons. Initial catalog restoration expands predecessor compound range predicates in views, defaults, CHECK constraints, generated columns, index expressions, partition keys, domain definitions, routines, rules, trigger conditions and foreign-table schemas. Copied operands retain their bound catalog identities and receive independent subquery initialization slots. Schema/procedural execution and view execution optimize private copies; view planning then selects its streaming or materialized path. Rule WHERE conditions use analyzed scalar plans and reject constant UNKNOWN qualifications without executing discarded operands. Scalar values and CHECK constraints retain their distinct three-valued behavior. Required catalog changes commit together during initial open; a failed restoration rolls them back and secondary sessions cannot perform the migration. Eligible volatile view and derived-table projections evaluate rows as their parent requests them, so a parent LIMIT does not exhaust unrelated input rows. Shared CTE materialization remains controlled by the CTE owner.
+
 ```sql
 SELECT CASE
            WHEN score >= 0.8 THEN 'high'
@@ -153,6 +155,10 @@ SELECT md5('abc') AS text_hash,
 SELECT crc32(decode('00ff10', 'hex')) AS crc32,
        crc32c(decode('00ff10', 'hex')) AS crc32c;
 ```
+
+`get_byte(bytea, integer)` returns the unsigned byte at a zero-based position as `integer`. A negative index or an index at or beyond the byte length raises `2202E` with the valid range; either NULL argument returns NULL. The strict, immutable, parallel-safe function is available through `pg_catalog` and accepts the same implicit argument conversions as PostgreSQL.
+
+`substr(bytea, start[, count])` and `substring(bytea FROM start [FOR count])` return raw bytes using one-based positions. A start before one reduces the available count; a start past the end or a zero count returns empty bytea. Negative counts raise `22011`, and NULL arguments return NULL. Binary substring, reverse, length, encoding, hashing, concatenation and position operate on the byte payload, including retained composite fields interpreted as bytea after an attribute type change.
 
 `encode(bytea, format)` and `decode(text, format)` write and read the three formats of PostgreSQL's `encode.c`, whose names compare without regard to case. `hex` writes two lowercase digits for each byte and reads pairs of digits that spaces, tabs and line breaks may separate. `base64` writes a line break after every 76 characters, including one that ends the output, and reads past whitespace; an `=` pads the last group of a sequence. `escape` writes a NUL or a byte with its high bit set as a backslash and three octal digits and doubles a backslash, and reads a backslash followed by another backslash or three octal digits, as the `bytea` input function does. An invalid hex digit reports `22023`, `invalid hexadecimal digit: "g"`, an odd number of digits `22023`, `invalid hexadecimal data: odd number of digits`, an invalid base64 symbol or an incomplete group `22023` with PostgreSQL's message and hint, an invalid escape `22P02`, and an unknown format `22023`, `unrecognized encoding: "name"`.
 

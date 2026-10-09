@@ -10,7 +10,7 @@ use std::sync::Arc;
 use uqa_sql::{
     plan::UnifiedPlan,
     prepared::{
-        definition::PreparedDefinitionContext,
+        definition::{PreparedDefinition, PreparedDefinitionContext},
         entry::PreparedStatementPlan,
         planning::{PreparedPlanAnalysis, PreparedPlanSelection, PreparedPlanUpdate},
     },
@@ -130,31 +130,19 @@ fn select(
         total_custom_cost: entry.total_custom_cost,
     };
     let mut custom = super::choose_custom_plan(usage, &mode, generic_cost);
-    let projected = if custom || generic_plan.is_none() {
+    let generic_projection = !custom;
+    let source_logical_plan = logical_plan;
+    let projected = if custom {
         inputs.project_logical(logical_plan, context.analysis.types)?
+    } else if generic_plan.is_none() {
+        inputs.project_for_generic(logical_plan, context.analysis.types)?
     } else {
         None
     };
     let logical_plan = projected.as_ref().unwrap_or(logical_plan);
     let mut composite_inputs = inputs.clone();
     if check_analysis && (custom || generic_plan.is_none() || reanalyzed.is_some()) {
-        let result_schema = match &reanalyzed {
-            Some(definition) => definition.result_schema.clone(),
-            None => uqa_sql::prepared::definition::analyze_result_schema(
-                &context.analysis,
-                logical_plan,
-                &entry.parameter_types,
-            )?,
-        };
-        if !uqa_sql::prepared::prepared_result_schema_matches(
-            entry.result_schema.as_ref(),
-            result_schema.as_ref(),
-        ) {
-            return Err(uqa_sql::SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "cached plan must not change result type".into(),
-            });
-        }
+        validate_result_schema(context, entry, logical_plan, reanalyzed.as_ref())?;
     }
     if !custom && generic_plan.is_none() {
         let plan = context.optimization.optimize_plan(logical_plan.clone())?;
@@ -166,7 +154,13 @@ fn select(
         custom = super::choose_custom_plan(usage, &mode, generic_cost);
     }
     let (plan, custom_cost) = if custom {
-        let mut plan = logical_plan.clone();
+        let mut plan = if generic_projection {
+            inputs
+                .project_logical(source_logical_plan, context.analysis.types)?
+                .unwrap_or_else(|| source_logical_plan.clone())
+        } else {
+            logical_plan.clone()
+        };
         super::specialize_parameters(&mut plan, parameters);
         let plan = context.optimization.optimize_plan(plan)?;
         let cost = context
@@ -198,6 +192,32 @@ fn select(
             custom_cost,
         },
     })
+}
+
+fn validate_result_schema(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+    logical_plan: &UnifiedPlan,
+    reanalyzed: Option<&PreparedDefinition>,
+) -> Result<(), SQLError> {
+    let result_schema = match reanalyzed {
+        Some(definition) => definition.result_schema.clone(),
+        None => uqa_sql::prepared::definition::analyze_result_schema(
+            &context.analysis,
+            logical_plan,
+            &entry.parameter_types,
+        )?,
+    };
+    if !uqa_sql::prepared::prepared_result_schema_matches(
+        entry.result_schema.as_ref(),
+        result_schema.as_ref(),
+    ) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "cached plan must not change result type".into(),
+        });
+    }
+    Ok(())
 }
 
 fn reanalyze(

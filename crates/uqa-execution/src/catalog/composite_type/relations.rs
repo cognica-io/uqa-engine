@@ -103,6 +103,30 @@ pub fn descriptor(
     };
     let identity = RelationIdentity::new(reference.schema, reference.name);
     let snapshot = catalog.snapshot();
+    let dropped =
+        snapshot
+            .tables
+            .get(&identity)
+            .map(|table| table.dropped_attributes.as_slice())
+            .or_else(|| {
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .get(&identity)
+                    .map(|table| table.dropped_attributes.as_slice())
+            })
+            .unwrap_or_default()
+            .iter()
+            .map(|attribute| {
+                Ok(uqa_sql::expr::composites::DroppedCompositeAttribute {
+                    number: attribute.number,
+                    length: attribute.type_length,
+                    alignment: attribute.alignment.as_bytes().first().copied().ok_or_else(
+                        || SQLError::Internal("dropped attribute has no physical alignment".into()),
+                    )?,
+                })
+            })
+            .collect::<Result<_, SQLError>>()?;
     let columns = if let Some(table) = snapshot.tables.get(&identity) {
         table
             .columns
@@ -166,6 +190,7 @@ pub fn descriptor(
         })
         .collect::<Result<_, SQLError>>()?;
     Ok(Some(Arc::new(CompositeTypeDescriptor {
+        dropped,
         type_oid: oid,
         relation_oid: reference.relation_oid,
         attributes,

@@ -44,7 +44,12 @@ impl CompositeConstantChange<'_> {
         Ok(true)
     }
 
-    fn typed_value(&self, value: &mut Value, name: &str) -> Result<bool, SQLError> {
+    fn typed_value(
+        &self,
+        value: &mut Value,
+        name: &str,
+        source: &mut Option<Box<super::CompositeConstantSource>>,
+    ) -> Result<bool, SQLError> {
         let Some(ty) = self.types.resolve_type_name(name)? else {
             return if crate::ast::UserTypeIdentity::parse(name).is_some() {
                 Err(SQLError::Internal(format!(
@@ -54,19 +59,56 @@ impl CompositeConstantChange<'_> {
                 Ok(false)
             };
         };
+        if !matches!(value, Value::Null) && type_contains_composite(&ty, self.target, self.catalog)?
+        {
+            if source.is_none() {
+                *source = Some(Box::new(super::CompositeConstantSource::capture(
+                    value,
+                    &ty,
+                    Some(self.catalog),
+                    self.types.enum_labels(),
+                )?));
+            }
+            source
+                .as_mut()
+                .expect("captured composite source")
+                .retain_enum_oids(self.types.enum_labels())?;
+            if let AttributeChange::Type { name, to, .. } = self.change {
+                *value = source
+                    .as_ref()
+                    .expect("captured composite source")
+                    .project_type_change(&ty, self.target, name, to, self.catalog)?;
+                return Ok(true);
+            }
+        }
         self.value(value, &ty)
     }
 
     fn syntax_node(&self, node: &mut Expr) -> Result<bool, SQLError> {
         match node {
-            Expr::TypedLiteral { value, ty } => self.typed_value(value, ty),
+            Expr::CompositeRow { binding, .. } => {
+                super::constructor::retain_argument_types(binding, self.types, Some(self.catalog))
+            }
+            Expr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+            } => self.typed_value(value, ty, composite_source),
             _ => Ok(false),
         }
     }
 
     fn scalar_node(&self, node: &mut ScalarExpr) -> Result<bool, SQLError> {
         match node {
-            ScalarExpr::TypedLiteral { value, ty, .. } => self.typed_value(value, ty),
+            ScalarExpr::CompositeRow { binding, .. } => {
+                super::constructor::retain_argument_types(binding, self.types, Some(self.catalog))
+            }
+            ScalarExpr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+                ..
+            } => self.typed_value(value, ty, composite_source),
             _ => Ok(false),
         }
     }

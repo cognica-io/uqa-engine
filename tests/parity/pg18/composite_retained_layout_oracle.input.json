@@ -1,0 +1,363 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "0_setup",
+      "sql": "CREATE TYPE cr_layout_0 AS(a integer,b text); PREPARE cr_layout_0_p AS SELECT '(1065353216,tail)'::cr_layout_0 AS v; EXECUTE cr_layout_0_p"
+    },
+    {
+      "id": "0_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_0 ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "0_read",
+      "sql": "EXECUTE cr_layout_0_p"
+    },
+    {
+      "id": "0_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_0_p; DEALLOCATE cr_layout_0_p; DROP TYPE cr_layout_0"
+    },
+    {
+      "id": "1_setup",
+      "sql": "CREATE TYPE cr_layout_1 AS(a real,b text); PREPARE cr_layout_1_p AS SELECT '(1,tail)'::cr_layout_1 AS v; EXECUTE cr_layout_1_p"
+    },
+    {
+      "id": "1_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_1 ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "1_read",
+      "sql": "EXECUTE cr_layout_1_p"
+    },
+    {
+      "id": "1_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_1_p; DEALLOCATE cr_layout_1_p; DROP TYPE cr_layout_1"
+    },
+    {
+      "id": "2_setup",
+      "sql": "CREATE TYPE cr_layout_2 AS(a integer,b text); PREPARE cr_layout_2_p AS SELECT '(-1,tail)'::cr_layout_2 AS v; EXECUTE cr_layout_2_p"
+    },
+    {
+      "id": "2_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_2 ALTER ATTRIBUTE a TYPE oid"
+    },
+    {
+      "id": "2_read",
+      "sql": "EXECUTE cr_layout_2_p"
+    },
+    {
+      "id": "2_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_2_p; DEALLOCATE cr_layout_2_p; DROP TYPE cr_layout_2"
+    },
+    {
+      "id": "3_setup",
+      "sql": "CREATE TYPE cr_layout_3 AS(a oid,b text); PREPARE cr_layout_3_p AS SELECT '(4294967295,tail)'::cr_layout_3 AS v; EXECUTE cr_layout_3_p"
+    },
+    {
+      "id": "3_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_3 ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "3_read",
+      "sql": "EXECUTE cr_layout_3_p"
+    },
+    {
+      "id": "3_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_3_p; DEALLOCATE cr_layout_3_p; DROP TYPE cr_layout_3"
+    },
+    {
+      "id": "4_setup",
+      "sql": "CREATE TYPE cr_layout_4 AS(a bigint,b text); PREPARE cr_layout_4_p AS SELECT '(4607182418800017408,tail)'::cr_layout_4 AS v; EXECUTE cr_layout_4_p"
+    },
+    {
+      "id": "4_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_4 ALTER ATTRIBUTE a TYPE double precision"
+    },
+    {
+      "id": "4_read",
+      "sql": "EXECUTE cr_layout_4_p"
+    },
+    {
+      "id": "4_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_4_p; DEALLOCATE cr_layout_4_p; DROP TYPE cr_layout_4"
+    },
+    {
+      "id": "5_setup",
+      "sql": "CREATE TYPE cr_layout_5 AS(a double precision,b text); PREPARE cr_layout_5_p AS SELECT '(1,tail)'::cr_layout_5 AS v; EXECUTE cr_layout_5_p"
+    },
+    {
+      "id": "5_alter",
+      "sql": "BEGIN; ALTER TYPE cr_layout_5 ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "5_read",
+      "sql": "EXECUTE cr_layout_5_p"
+    },
+    {
+      "id": "5_undo",
+      "sql": "ROLLBACK; EXECUTE cr_layout_5_p; DEALLOCATE cr_layout_5_p; DROP TYPE cr_layout_5"
+    },
+    {
+      "id": "nested_setup",
+      "sql": "CREATE TYPE cl_inner AS(a integer,b text); CREATE TYPE cl_outer AS(v cl_inner); PREPARE cl_nested AS SELECT '[0:1]={\"(1065353216,tail)\",\"(,tail)\"}'::cl_inner[] AS a, ROW('(1065353216,tail)'::cl_inner)::cl_outer AS n, NULL::cl_inner AS nil; EXECUTE cl_nested"
+    },
+    {
+      "id": "nested_alter",
+      "sql": "BEGIN; ALTER TYPE cl_inner ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "nested_read",
+      "sql": "EXECUTE cl_nested"
+    },
+    {
+      "id": "nested_undo",
+      "sql": "ROLLBACK; EXECUTE cl_nested; DEALLOCATE cl_nested; DROP TYPE cl_outer; DROP TYPE cl_inner"
+    },
+    {
+      "id": "domain_setup",
+      "sql": "CREATE DOMAIN cl_negative AS real CHECK(VALUE<0); CREATE TYPE cl_domain AS(a integer,b text); PREPARE cl_domain_p AS SELECT '(1065353216,tail)'::cl_domain AS v; EXECUTE cl_domain_p"
+    },
+    {
+      "id": "domain_alter",
+      "sql": "BEGIN; ALTER TYPE cl_domain ALTER ATTRIBUTE a TYPE cl_negative"
+    },
+    {
+      "id": "domain_read",
+      "sql": "EXECUTE cl_domain_p"
+    },
+    {
+      "id": "domain_fresh",
+      "sql": "SELECT '(1,tail)'::cl_domain"
+    },
+    {
+      "id": "domain_undo",
+      "sql": "ROLLBACK; EXECUTE cl_domain_p; DEALLOCATE cl_domain_p; DROP TYPE cl_domain; DROP DOMAIN cl_negative"
+    },
+    {
+      "id": "view_setup",
+      "sql": "CREATE TYPE cl_view_t AS(a integer,b text); CREATE VIEW cl_view AS SELECT '(1065353216,tail)'::cl_view_t AS v; PREPARE cl_view_scalar AS SELECT (v).a FROM cl_view; PREPARE cl_view_whole AS SELECT v FROM cl_view; EXECUTE cl_view_scalar; EXECUTE cl_view_whole; SELECT * FROM cl_view"
+    },
+    {
+      "id": "view_alter",
+      "sql": "BEGIN; ALTER TYPE cl_view_t ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "view_read",
+      "sql": "SELECT * FROM cl_view; EXECUTE cl_view_whole; EXECUTE cl_view_scalar"
+    },
+    {
+      "id": "view_undo",
+      "sql": "ROLLBACK; SELECT * FROM cl_view; EXECUTE cl_view_scalar; EXECUTE cl_view_whole; DEALLOCATE cl_view_scalar; DEALLOCATE cl_view_whole; DROP VIEW cl_view; DROP TYPE cl_view_t"
+    },
+    {
+      "id": "late_setup",
+      "sql": "CREATE TYPE cl_nan AS(a integer); PREPARE cl_nan_p AS SELECT '(2139095041)'::cl_nan AS v"
+    },
+    {
+      "id": "late_alter",
+      "sql": "BEGIN; ALTER TYPE cl_nan ALTER ATTRIBUTE a TYPE real; EXECUTE cl_nan_p"
+    },
+    {
+      "id": "late_undo",
+      "sql": "ROLLBACK; EXECUTE cl_nan_p; DEALLOCATE cl_nan_p; DROP TYPE cl_nan"
+    },
+    {
+      "id": "cl_fixed_0_setup",
+      "sql": "CREATE TYPE cl_fixed_0 AS(a integer,b text); PREPARE cl_fixed_0_p AS SELECT '(0,tail)'::cl_fixed_0 AS v; EXECUTE cl_fixed_0_p"
+    },
+    {
+      "id": "cl_fixed_0_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_0 ALTER ATTRIBUTE a TYPE date"
+    },
+    {
+      "id": "cl_fixed_0_read",
+      "sql": "EXECUTE cl_fixed_0_p"
+    },
+    {
+      "id": "cl_fixed_0_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_0_p; DEALLOCATE cl_fixed_0_p; DROP TYPE cl_fixed_0"
+    },
+    {
+      "id": "cl_fixed_1_setup",
+      "sql": "CREATE TYPE cl_fixed_1 AS(a date,b text); PREPARE cl_fixed_1_p AS SELECT '(2000-01-01,tail)'::cl_fixed_1 AS v; EXECUTE cl_fixed_1_p"
+    },
+    {
+      "id": "cl_fixed_1_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_1 ALTER ATTRIBUTE a TYPE integer"
+    },
+    {
+      "id": "cl_fixed_1_read",
+      "sql": "EXECUTE cl_fixed_1_p"
+    },
+    {
+      "id": "cl_fixed_1_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_1_p; DEALLOCATE cl_fixed_1_p; DROP TYPE cl_fixed_1"
+    },
+    {
+      "id": "cl_fixed_2_setup",
+      "sql": "CREATE TYPE cl_fixed_2 AS(a bigint,b text); PREPARE cl_fixed_2_p AS SELECT '(0,tail)'::cl_fixed_2 AS v; EXECUTE cl_fixed_2_p"
+    },
+    {
+      "id": "cl_fixed_2_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_2 ALTER ATTRIBUTE a TYPE timestamp"
+    },
+    {
+      "id": "cl_fixed_2_read",
+      "sql": "EXECUTE cl_fixed_2_p"
+    },
+    {
+      "id": "cl_fixed_2_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_2_p; DEALLOCATE cl_fixed_2_p; DROP TYPE cl_fixed_2"
+    },
+    {
+      "id": "cl_fixed_3_setup",
+      "sql": "CREATE TYPE cl_fixed_3 AS(a timestamp,b text); PREPARE cl_fixed_3_p AS SELECT '(2000-01-01 00:00:00,tail)'::cl_fixed_3 AS v; EXECUTE cl_fixed_3_p"
+    },
+    {
+      "id": "cl_fixed_3_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_3 ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "cl_fixed_3_read",
+      "sql": "EXECUTE cl_fixed_3_p"
+    },
+    {
+      "id": "cl_fixed_3_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_3_p; DEALLOCATE cl_fixed_3_p; DROP TYPE cl_fixed_3"
+    },
+    {
+      "id": "cl_fixed_4_setup",
+      "sql": "CREATE TYPE cl_fixed_4 AS(a timestamp,b text); PREPARE cl_fixed_4_p AS SELECT '(2000-01-01 00:00:00,tail)'::cl_fixed_4 AS v; EXECUTE cl_fixed_4_p"
+    },
+    {
+      "id": "cl_fixed_4_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_4 ALTER ATTRIBUTE a TYPE timestamptz"
+    },
+    {
+      "id": "cl_fixed_4_read",
+      "sql": "EXECUTE cl_fixed_4_p"
+    },
+    {
+      "id": "cl_fixed_4_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_4_p; DEALLOCATE cl_fixed_4_p; DROP TYPE cl_fixed_4"
+    },
+    {
+      "id": "cl_fixed_5_setup",
+      "sql": "CREATE TYPE cl_fixed_5 AS(a time,b text); PREPARE cl_fixed_5_p AS SELECT '(01:02:03.456789,tail)'::cl_fixed_5 AS v; EXECUTE cl_fixed_5_p"
+    },
+    {
+      "id": "cl_fixed_5_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_5 ALTER ATTRIBUTE a TYPE bigint"
+    },
+    {
+      "id": "cl_fixed_5_read",
+      "sql": "EXECUTE cl_fixed_5_p"
+    },
+    {
+      "id": "cl_fixed_5_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_5_p; DEALLOCATE cl_fixed_5_p; DROP TYPE cl_fixed_5"
+    },
+    {
+      "id": "cl_fixed_6_setup",
+      "sql": "CREATE TYPE cl_fixed_6 AS(a bigint,b text); PREPARE cl_fixed_6_p AS SELECT '(3723456789,tail)'::cl_fixed_6 AS v; EXECUTE cl_fixed_6_p"
+    },
+    {
+      "id": "cl_fixed_6_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_6 ALTER ATTRIBUTE a TYPE time(0)"
+    },
+    {
+      "id": "cl_fixed_6_read",
+      "sql": "EXECUTE cl_fixed_6_p"
+    },
+    {
+      "id": "cl_fixed_6_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_6_p; DEALLOCATE cl_fixed_6_p; DROP TYPE cl_fixed_6"
+    },
+    {
+      "id": "cl_fixed_7_setup",
+      "sql": "CREATE TYPE cl_fixed_7 AS(a boolean,b text); PREPARE cl_fixed_7_p AS SELECT '(t,tail)'::cl_fixed_7 AS v; EXECUTE cl_fixed_7_p"
+    },
+    {
+      "id": "cl_fixed_7_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_7 ALTER ATTRIBUTE a TYPE \"char\""
+    },
+    {
+      "id": "cl_fixed_7_read",
+      "sql": "EXECUTE cl_fixed_7_p"
+    },
+    {
+      "id": "cl_fixed_7_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_7_p; DEALLOCATE cl_fixed_7_p; DROP TYPE cl_fixed_7"
+    },
+    {
+      "id": "cl_fixed_8_setup",
+      "sql": "CREATE TYPE cl_fixed_8 AS(a \"char\",b text); PREPARE cl_fixed_8_p AS SELECT '(A,tail)'::cl_fixed_8 AS v; EXECUTE cl_fixed_8_p"
+    },
+    {
+      "id": "cl_fixed_8_alter",
+      "sql": "BEGIN; ALTER TYPE cl_fixed_8 ALTER ATTRIBUTE a TYPE boolean"
+    },
+    {
+      "id": "cl_fixed_8_read",
+      "sql": "EXECUTE cl_fixed_8_p"
+    },
+    {
+      "id": "cl_fixed_8_undo",
+      "sql": "ROLLBACK; EXECUTE cl_fixed_8_p; DEALLOCATE cl_fixed_8_p; DROP TYPE cl_fixed_8"
+    },
+    {
+      "id": "char_saved_setup",
+      "sql": "CREATE TYPE cl_char_saved AS(a \"char\",b text); CREATE VIEW cl_char_saved_v AS SELECT '(A,tail)'::cl_char_saved AS v; CREATE VIEW cl_char_saved_array AS SELECT '[0:1]={\"(A,tail)\",\"(B,tail)\"}'::cl_char_saved[] AS v; CREATE FUNCTION cl_char_saved_f() RETURNS cl_char_saved LANGUAGE SQL BEGIN ATOMIC SELECT '(C,tail)'::cl_char_saved; END; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()"
+    },
+    {
+      "id": "char_saved_boolean",
+      "sql": "ALTER TYPE cl_char_saved ALTER ATTRIBUTE a TYPE boolean; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()"
+    },
+    {
+      "id": "char_saved_names",
+      "sql": "ALTER TYPE cl_char_saved RENAME ATTRIBUTE b TO label; ALTER TYPE cl_char_saved DROP ATTRIBUTE label, ADD ATTRIBUTE extra text; SELECT * FROM cl_char_saved_v"
+    },
+    {
+      "id": "durable_setup",
+      "sql": "CREATE TYPE cl_saved AS(a integer); CREATE VIEW cl_saved_v AS SELECT '(2139095041)'::cl_saved AS v; ALTER TYPE cl_saved ALTER ATTRIBUTE a TYPE real; SELECT * FROM cl_saved_v"
+    },
+    {
+      "id": "durable_read",
+      "sql": "SELECT * FROM cl_saved_v",
+      "reopen": true
+    },
+    {
+      "id": "durable_alter",
+      "sql": "ALTER TYPE cl_saved ALTER ATTRIBUTE a TYPE integer; SELECT * FROM cl_saved_v",
+      "reopen": true
+    },
+    {
+      "id": "durable_drop",
+      "sql": "DROP VIEW cl_saved_v; DROP TYPE cl_saved",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_reopen",
+      "sql": "SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_rollback",
+      "sql": "BEGIN; ALTER TYPE cl_char_saved ALTER ATTRIBUTE a TYPE \"char\"; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f(); ROLLBACK; SELECT * FROM cl_char_saved_v",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_restore",
+      "sql": "ALTER TYPE cl_char_saved ALTER ATTRIBUTE a TYPE \"char\"; SELECT * FROM cl_char_saved_v; SELECT * FROM cl_char_saved_array; SELECT cl_char_saved_f()",
+      "reopen": true
+    },
+    {
+      "id": "char_saved_drop",
+      "sql": "DROP VIEW cl_char_saved_v,cl_char_saved_array; DROP FUNCTION cl_char_saved_f(); DROP TYPE cl_char_saved",
+      "reopen": true
+    }
+  ]
+}

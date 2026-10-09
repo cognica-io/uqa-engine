@@ -11,10 +11,16 @@ use uqa_engine::Engine;
 #[path = "sql_composites/addition.rs"]
 mod addition;
 
+#[path = "sql_composites/range_restoration.rs"]
+mod range_restoration;
 #[path = "sql_composites/removal.rs"]
 mod removal;
 #[path = "sql_composites/renaming.rs"]
 mod renaming;
+#[path = "sql_composites/schema_range_restoration.rs"]
+mod schema_range_restoration;
+#[path = "sql_composites/type_changes.rs"]
+mod type_changes;
 
 fn verify_composite_types(engine: &Engine) {
     crate::pg18_oracle::verify(

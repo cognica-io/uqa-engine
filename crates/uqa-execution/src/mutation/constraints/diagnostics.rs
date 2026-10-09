@@ -68,29 +68,28 @@ pub(crate) fn enforced_key_description(
             }
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    render_index_key(diagnostics.catalog, &key.keys, &types, values).map(Some)
+    let resolution = diagnostics.catalog.session.relation_name_resolution();
+    render_index_key(diagnostics.catalog, &resolution, &key.keys, &types, values).map(Some)
 }
 
 /// `(names)=(values)` for the values of an index's keys, printed with the keys' output types.
 fn render_index_key(
     catalog_context: CatalogContext<'_>,
+    resolution: &crate::catalog::RelationNameResolution,
     keys: &[uqa_sql::ast::IndexKey],
     key_types: &[ColumnType],
     values: &[Value],
 ) -> Result<String, SQLError> {
     let catalog = catalog_context.catalog_read_view();
-    let resolution = catalog_context
-        .session_execution_view()
-        .relation_name_resolution();
     let names = keys
         .iter()
         .map(|key| {
             projection::index_key_definition(
                 Some(&crate::catalog::projection::CatalogOutput(catalog_context)),
                 &catalog,
-                &resolution,
+                resolution,
                 key,
-                false,
+                true,
             )
         })
         .collect::<Result<Vec<_>, _>>()?
@@ -127,7 +126,11 @@ impl crate::schema::indexes::unique_build::IndexKeyDescription for ConstraintCon
         if !diagnostics.authorization.can_view_index_key(table, keys)? {
             return Ok(None);
         }
-        render_index_key(diagnostics.catalog, keys, key_types, values).map(Some)
+        // PostgreSQL builds indexes under RestrictSearchPath; diagnostic type
+        // names therefore qualify user schemas even when the caller sees them.
+        let mut resolution = diagnostics.catalog.session.relation_name_resolution();
+        resolution.search_path = vec!["pg_catalog".into(), "pg_temp".into()];
+        render_index_key(diagnostics.catalog, &resolution, keys, key_types, values).map(Some)
     }
 }
 

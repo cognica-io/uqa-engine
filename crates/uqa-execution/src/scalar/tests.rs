@@ -102,6 +102,7 @@ fn arithmetic_does_not_require_parser_ast() {
 #[test]
 fn nested_real_arithmetic_retains_width_without_a_row_schema() {
     let real = |value| ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: Value::Float(value),
         ty: "real".into(),
         bound_type: None,
@@ -168,10 +169,13 @@ fn scalar_relation_stars_and_aliases_materialize_named_whole_rows() {
     let row = PhysicalRow::from_values(vec![Value::Int(7), Value::Str("seven".into())]);
     let view = schema.view(&row);
     let context = ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema);
-    let expected = Value::Record(vec![
-        ("a".into(), Value::Int(7)),
-        ("b".into(), Value::Str("seven".into())),
-    ]);
+    let expected = Value::Record(
+        vec![
+            ("a".into(), Value::Int(7)),
+            ("b".into(), Value::Str("seven".into())),
+        ]
+        .into(),
+    );
     assert_eq!(
         eval_scalar(&ScalarExpr::QualifiedStar("item".into()), &context).unwrap(),
         expected
@@ -220,7 +224,7 @@ fn scalar_whole_rows_read_hidden_physical_identity_aliases() {
 
     assert_eq!(
         eval_scalar(&ScalarExpr::Column("new".into()), &context).unwrap(),
-        Value::Record(vec![("i".into(), Value::Int(42))])
+        Value::Record(vec![("i".into(), Value::Int(42))].into())
     );
 }
 

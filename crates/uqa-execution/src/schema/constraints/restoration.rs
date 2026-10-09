@@ -83,12 +83,20 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
     };
     let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)?;
     for row in catalog.load_tables()? {
-        let columns = if row.columns_json.is_empty() {
+        let mut columns = if row.columns_json.is_empty() {
             Vec::new()
         } else {
             serde_json::from_str(&row.columns_json)?
         };
-        let constraints = names.decode(&row)?;
+        let mut constraints = names.decode(&row)?;
+        if uqa_sql::schema::dependencies::rewrites::upgrade_legacy_schema_function_dispatches(
+            &mut columns,
+            &mut constraints,
+        ) {
+            return Err(StorageBackendError::Other(
+                "table expressions require an initial-open migration".into(),
+            ));
+        }
         validate(&columns, &constraints)?;
     }
     let reference_format = crate::catalog::foreign::reference::check_format(catalog)?;

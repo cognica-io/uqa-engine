@@ -128,8 +128,59 @@ impl Lowering<'_> {
             Source::Borrowed(binding) => Ok(crate::ast::CompositeRowBinding {
                 ty: self.copy_text(&binding.ty)?,
                 attributes: self.map(binding.attributes.iter(), |_, number| Ok(*number))?,
+                argument_types: binding
+                    .argument_types
+                    .as_ref()
+                    .map(|types| {
+                        self.map(types.iter(), |this, ty| {
+                            Ok(this
+                                .scalar_type_copy(Some(ty))?
+                                .expect("constructor argument type"))
+                        })
+                    })
+                    .transpose()?,
             }),
         }
+    }
+
+    pub(super) fn composite_source(
+        &mut self,
+        source: Option<Source<'_, Box<crate::expr::composites::CompositeConstantSource>>>,
+    ) -> Result<Option<Box<crate::expr::composites::CompositeConstantSource>>> {
+        use crate::expr::composites::{
+            CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
+        };
+        source
+            .map(|source| match source {
+                Source::Owned(source) => Ok(source),
+                Source::Borrowed(source) => self.boxed(|this| {
+                    Ok(CompositeConstantSource {
+                        value: this.value(Source::Borrowed(&source.value))?,
+                        descriptors: this.map(source.descriptors.iter(), |this, descriptor| {
+                            Ok(CompositeTypeDescriptor {
+                                dropped: this.map(descriptor.dropped.iter(), |_, attribute| {
+                                    Ok(*attribute)
+                                })?,
+                                type_oid: descriptor.type_oid,
+                                relation_oid: descriptor.relation_oid,
+                                attributes: this.map(
+                                    descriptor.attributes.iter(),
+                                    |this, attribute| {
+                                        Ok(CompositeAttribute {
+                                            name: this.copy_text(&attribute.name)?,
+                                            ty: this
+                                                .scalar_type_copy(Some(&attribute.ty))?
+                                                .expect("source attribute type"),
+                                            number: attribute.number,
+                                        })
+                                    },
+                                )?,
+                            })
+                        })?,
+                    })
+                }),
+            })
+            .transpose()
     }
 
     pub(super) fn value(&mut self, source: Source<'_, Value>) -> Result<Value> {

@@ -67,12 +67,18 @@ pub(super) fn needs_sql_comparison(predicate: &Predicate, stored_can_fail: bool)
     }
 }
 
-pub(super) fn matches(value: &Value, predicate: &Predicate) -> Result<bool, SQLError> {
+pub(super) fn matches(
+    value: &Value,
+    predicate: &Predicate,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+) -> Result<bool, SQLError> {
     let compare = |other: &Value| {
-        uqa_sql::expr::compare_typed_values_with_control(
+        uqa_sql::expr::compare_typed_values_with_enum_catalog(
             value,
             other,
             &ProductionControl::uncontrolled(),
+            catalog,
+            None,
         )
     };
     if matches!(value, Value::Null) {

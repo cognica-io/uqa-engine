@@ -76,6 +76,10 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
     }
 }
 impl QueryOutputRewriter for Engine {
+    fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError> {
+        super::statement_planning::optimize_engine_query(self, query)
+    }
+
     fn push_output_filter(
         &self,
         query: &QueryPlan,

@@ -200,10 +200,8 @@ fn assignment_to_a_domain_preserves_a_typed_composite_base_and_checks_only_the_o
         relation_oid: 20_003,
     });
     let context = context(pair.clone());
-    let value = Value::Record(vec![
-        ("a".into(), Value::Int(4)),
-        ("added".into(), Value::Null),
-    ]);
+    let value =
+        Value::Record(vec![("a".into(), Value::Int(4)), ("added".into(), Value::Null)].into());
     let result = crate::assignment::conversion::coerce_assignment_value(
         &context,
         value.clone(),

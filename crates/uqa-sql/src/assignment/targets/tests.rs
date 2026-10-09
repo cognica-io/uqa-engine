@@ -64,6 +64,7 @@ impl crate::expr::composites::CompositeTypeCatalog for PairCatalog {
     {
         Ok((type_oid == 30_002).then(|| {
             std::sync::Arc::new(crate::expr::composites::CompositeTypeDescriptor {
+                dropped: Vec::new(),
                 type_oid,
                 relation_oid: 30_001,
                 attributes: vec![

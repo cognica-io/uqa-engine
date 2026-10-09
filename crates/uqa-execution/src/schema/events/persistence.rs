@@ -55,27 +55,34 @@ impl EventRestoreContext<'_> {
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
         let mut recorded_oids = false;
-        let mut rebound_constructors = false;
+        let mut restored_expressions = false;
         for mut rule in stored.rules {
+            let mut expression_migration =
+                rule.definition.condition.is_some() && rule.bound_condition_plan().is_none();
+            if let Some(condition) = &mut rule.definition.condition {
+                expression_migration |= condition.upgrade_legacy_serialized_dispatches();
+            }
+            if let Some(condition) = &mut rule.condition_plan {
+                expression_migration |= condition
+                    .upgrade_legacy_range_predicates()
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            }
+            for action in &mut rule.definition.actions {
+                expression_migration |= action.upgrade_legacy_serialized_dispatches();
+            }
             let constructor_migration =
                 rule_constructor_migration(&mut rule.definition, self.analysis.routines)?;
-            if constructor_migration && !allows_migration {
+            if (constructor_migration || expression_migration) && !allows_migration {
                 return Err(StorageBackendError::Other(
-                    "rule constructors require an initial-open migration".into(),
+                    "rule expressions require an initial-open migration".into(),
                 ));
             }
-            rebound_constructors |= constructor_migration;
+            restored_expressions |= constructor_migration || expression_migration;
             let persisted_definition = if migrating_catalog || constructor_migration {
                 None
             } else {
                 Some(serde_json::to_string(&rule.definition)?)
             };
-            if let Some(condition) = &mut rule.definition.condition {
-                condition.upgrade_legacy_serialized_dispatches();
-            }
-            for action in &mut rule.definition.actions {
-                action.upgrade_legacy_serialized_dispatches();
-            }
             let stored_condition_plan = rule.condition_plan.clone();
             let stored_condition_binding = rule.condition_binding.clone();
             let (relation, condition_plan, condition_binding, dependencies) = self
@@ -125,7 +132,7 @@ impl EventRestoreContext<'_> {
             }
         }
         **self.catalog.registry.rules() = rules;
-        if migrating_catalog || recorded_oids || rebound_constructors {
+        if migrating_catalog || recorded_oids || restored_expressions {
             let rules = self.reads.read_rules();
             self.catalog
                 .publication
@@ -160,9 +167,7 @@ impl EventRestoreContext<'_> {
             if trigger.definition.constraint && trigger.constraint_name.is_none() {
                 trigger.constraint_name = Some(trigger.definition.name.clone());
             }
-            if let Some(condition) = &mut trigger.definition.when {
-                condition.upgrade_legacy_serialized_dispatches();
-            }
+            migrated |= restore_trigger_expression(&mut trigger, allows_migration)?;
             let (relation, condition_routine_bindings_changed) = self
                 .analysis
                 .validate_trigger_definition(&mut trigger.definition, RelationLookupMode::Bound)
@@ -235,6 +240,24 @@ impl EventRestoreContext<'_> {
         }
         Ok(())
     }
+}
+
+fn restore_trigger_expression(
+    trigger: &mut StoredTrigger,
+    allows_migration: bool,
+) -> StorageBackendResult<bool> {
+    let changed = trigger
+        .definition
+        .when
+        .as_mut()
+        .is_some_and(uqa_sql::ast::Expr::upgrade_legacy_serialized_dispatches);
+    if changed && !allows_migration {
+        return Err(StorageBackendError::Other(format!(
+            "trigger `{}` WHEN condition requires an initial-open expression migration",
+            trigger.definition.name
+        )));
+    }
+    Ok(changed)
 }
 
 fn rule_constructor_migration(

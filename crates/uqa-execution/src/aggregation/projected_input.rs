@@ -68,6 +68,7 @@ impl ProjectedAggregatePlans {
         accumulators: &mut [AggregateAccumulator],
         row: &Row,
         params: &[uqa_sql::SQLParam],
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         if !self.all_direct || self.plans.len() != accumulators.len() {
             return Err(SQLError::Internal(
@@ -84,7 +85,7 @@ impl ProjectedAggregatePlans {
                 }
                 ProjectedAggregateInput::Slot(slot) => {
                     if let Some(value) = row.positional_column(*slot) {
-                        accumulator.observe_projected(value)?;
+                        accumulator.observe_projected(value, enums)?;
                     }
                 }
                 ProjectedAggregateInput::IntegerExpression {
@@ -99,7 +100,7 @@ impl ProjectedAggregatePlans {
                         let context = ScalarEvalContext::from_row_lookup(row, params)
                             .with_row_schema(&self.input_schema);
                         let value = crate::eval_scalar(fallback, &context)?;
-                        accumulator.observe_projected(&value)?;
+                        accumulator.observe_projected(&value, enums)?;
                     }
                 },
             }
@@ -126,7 +127,12 @@ impl ProjectedAggregatePlans {
                 }
                 ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Slot(slot)) => {
                     if let Some(value) = row.positional_column(*slot) {
-                        accumulators[index].observe_projected(value)?;
+                        accumulators[index].observe_projected(
+                            value,
+                            context
+                                .function_hook()
+                                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+                        )?;
                     }
                 }
                 ProjectedAggregatePlan::Direct(ProjectedAggregateInput::IntegerExpression {
@@ -139,7 +145,12 @@ impl ProjectedAggregatePlans {
                     ProjectedIntegerValue::Null => {}
                     ProjectedIntegerValue::General => {
                         let value = crate::eval_scalar(fallback, context)?;
-                        accumulators[index].observe_projected(&value)?;
+                        accumulators[index].observe_projected(
+                            &value,
+                            context
+                                .function_hook()
+                                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+                        )?;
                     }
                 },
                 ProjectedAggregatePlan::General => super::sort_fallback::observe_target(

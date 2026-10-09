@@ -6,6 +6,7 @@
 
 //! Replay checked-in `PostgreSQL` 18 simple-query oracles: command tags, SQLSTATE and message, DETAIL and HINT when the transcript records them, every result row as `PostgreSQL` text, and the notices and warnings when the transcript records them.
 
+use std::borrow::Cow;
 use uqa_core::Value;
 use uqa_engine::sql::{format_postgres_text, postgres_result_type};
 use uqa_engine::Engine;
@@ -37,7 +38,6 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
     let mut tags = Vec::new();
     let mut results = Vec::new();
     let outcome = engine.sql_simple_query(sql, &[], |result| {
-        tags.push(result.command_tag.clone());
         let rows = (0..result.rows.len())
             .map(|position| {
                 result
@@ -67,6 +67,7 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
                     .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<Vec<_>, _>>()?;
+        tags.push(result.command_tag.clone());
         let types = result
             .column_types
             .iter()
@@ -107,11 +108,33 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
 /// Compare the diagnostic fields the transcript recorded; transcripts captured without `--details` omit DETAIL and HINT.
 fn error_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     match (actual.as_object(), expected.as_object()) {
-        (Some(actual), Some(expected)) => expected
-            .iter()
-            .all(|(field, value)| actual.get(field).unwrap_or(&serde_json::Value::Null) == value),
+        (Some(actual), Some(expected)) => expected.iter().all(|(field, value)| {
+            let actual = actual.get(field).unwrap_or(&serde_json::Value::Null);
+            if field == "message" {
+                if let (Some(actual), Some(expected)) = (actual.as_str(), value.as_str()) {
+                    return diagnostic_message(actual) == diagnostic_message(expected);
+                }
+            }
+            actual == value
+        }),
         _ => actual == expected,
     }
+}
+
+/// Process-local addresses vary between executions of the same `PostgreSQL` query. Keep the complete diagnostic and corrupt header; normalize only a syntactically valid pointer in this one diagnostic.
+fn diagnostic_message(message: &str) -> Cow<'_, str> {
+    const PREFIX: &str = "pfree called with invalid pointer 0x";
+    if let Some((address, header)) = message
+        .strip_prefix(PREFIX)
+        .and_then(|s| s.split_once(" (header "))
+    {
+        if !address.is_empty() && address.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Cow::Owned(format!(
+                "pfree called with invalid pointer <address> (header {header}"
+            ));
+        }
+    }
+    Cow::Borrowed(message)
 }
 
 /// Replay every case of an oracle transcript and panic with each difference.

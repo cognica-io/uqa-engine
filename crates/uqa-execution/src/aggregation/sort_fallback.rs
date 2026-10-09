@@ -7,9 +7,10 @@
 //! Bounded sort aggregation for non-mergeable aggregate states.
 
 use super::{
-    aggregate_targets, eval_scalar, new_aggregate_accumulators_with_budget, observe_aggregate,
-    AggregateAccumulator, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext, SQLError,
-    SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
+    aggregate_accumulator_templates, aggregate_targets, eval_scalar,
+    instantiate_aggregate_accumulators, observe_aggregate, AggregateAccumulator, PlanSubqueryArena,
+    QueryBlockPlan, QueryExpressionContext, SQLError, SQLParam, ScalarEvalContext, ScalarExpr,
+    SpillBuffer, Value,
 };
 use crate::RowSchemaExecution;
 use crate::{ExternalSort, PhysicalOperator, RowSchema, SortKey, SpillScan};
@@ -50,6 +51,7 @@ pub(super) fn aggregate_sorted_input(
     sorted.open().map_err(exec_to_sql_error)?;
 
     let hook = context;
+    let enums = uqa_sql::expr::EngineHook::enum_labels(context);
     let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(hook));
     let aggregate_targets = aggregate_targets(context, statement)
         .into_iter()
@@ -62,6 +64,21 @@ pub(super) fn aggregate_sorted_input(
             )
         })
         .collect::<Vec<_>>();
+    let aggregate_targets = crate::scalar::PreparedExpressions::scalars(aggregate_targets);
+    let group_expressions = crate::scalar::PreparedExpressions::scalars(
+        statement
+            .group_by
+            .iter()
+            .map(|expression| {
+                crate::bind_type_introspection_with_resolver(
+                    expression.clone(),
+                    input_schema,
+                    params,
+                    context,
+                )
+            })
+            .collect(),
+    );
     let output_plan = super::output::AggregateOutputPlan::compile(
         context,
         statement,
@@ -70,6 +87,8 @@ pub(super) fn aggregate_sorted_input(
         input_schema,
         params,
     )?;
+    let templates =
+        aggregate_accumulator_templates(context, &aggregate_targets, input_schema, params)?;
     let accumulator_budget = (phase_budget / aggregate_targets.len().max(1)).max(1);
     let mut current_key: Option<Vec<Value>> = None;
     let mut current_accumulators = Vec::new();
@@ -85,13 +104,23 @@ pub(super) fn aggregate_sorted_input(
                     .with_function_hook(hook)
                     .with_subquery_runner(&subquery_arena)
                     .with_physical_outer_row(&batch.schema, &row);
-                let key = statement
-                    .group_by
+                let key = group_expressions
                     .iter()
-                    .map(|expr| eval_scalar(expr, &scalar_context))
+                    .map(|expr| {
+                        eval_scalar(
+                            expr,
+                            &scalar_context.with_function_states(group_expressions.calls()),
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                if current_key.as_ref().is_some_and(|current| current != &key) {
+                if current_key
+                    .as_ref()
+                    .map(|current| crate::relational::equal_sort_key_values(current, &key, enums))
+                    .transpose()
+                    .map_err(exec_to_sql_error)?
+                    .is_some_and(|equal| !equal)
+                {
                     let finished_key = current_key.take().ok_or_else(|| {
                         SQLError::Internal("streaming aggregate lost its group key".into())
                     })?;
@@ -114,18 +143,13 @@ pub(super) fn aggregate_sorted_input(
                 }
                 if current_key.is_none() {
                     current_key = Some(key);
-                    current_accumulators = new_aggregate_accumulators_with_budget(
-                        context,
-                        &aggregate_targets,
-                        input_schema,
-                        params,
-                        accumulator_budget,
-                    )?;
+                    current_accumulators =
+                        instantiate_aggregate_accumulators(&templates, accumulator_budget);
                 }
                 observe_targets(
                     &mut current_accumulators,
                     &aggregate_targets,
-                    &scalar_context,
+                    &scalar_context.with_function_states(aggregate_targets.calls()),
                 )?;
             }
         }
@@ -143,13 +167,7 @@ pub(super) fn aggregate_sorted_input(
                 super::output::push_output_row(&mut output, output_schema, &mut pending, row)?;
             }
         } else if statement.group_by.is_empty() {
-            let accumulators = new_aggregate_accumulators_with_budget(
-                context,
-                &aggregate_targets,
-                input_schema,
-                params,
-                accumulator_budget,
-            )?;
+            let accumulators = instantiate_aggregate_accumulators(&templates, accumulator_budget);
             if let Some(row) = super::output::finish_group(
                 context,
                 statement,

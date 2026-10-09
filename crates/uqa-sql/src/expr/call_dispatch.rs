@@ -22,7 +22,9 @@ mod named;
 mod production;
 mod temporal;
 use named::builtin_named_args;
-pub use production::eval_generated_function_call_with_control;
+pub use production::{
+    eval_builtin_function_call_with_control, eval_generated_function_call_with_control,
+};
 
 /// Execute a scalar function after its argument expressions have already been evaluated.
 ///
@@ -252,6 +254,19 @@ fn eval_function_call_inner(
     }
     if let Some(result) = temporal::extract_session_zone(lower, &evaluated, ctx) {
         return result;
+    }
+    if matches!(lower, "coalesce" | "nullif" | "greatest" | "least") {
+        return super::scalar_core::selection_with_context(
+            lower,
+            &evaluated,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            ctx,
+        )
+        .map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary selection result")
+        });
     }
     match eval_scalar_function(lower, &evaluated) {
         // Unknown built-in: fall through to user-defined functions,

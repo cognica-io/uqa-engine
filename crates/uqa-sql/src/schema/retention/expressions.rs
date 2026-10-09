@@ -21,9 +21,32 @@ impl<'a> Walker<'a> {
                 self.text(column)?;
             }
             Expr::Literal(value) => self.value(value)?,
-            Expr::TypedLiteral { value, ty } => {
+            Expr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+            } => {
                 self.value(value)?;
                 self.text(ty)?;
+                if let Some(source) = composite_source {
+                    self.charge(size_of::<crate::expr::composites::CompositeConstantSource>())?;
+                    self.value(&source.value)?;
+                    self.buffer::<crate::expr::composites::CompositeTypeDescriptor>(
+                        source.descriptors.capacity(),
+                    )?;
+                    for descriptor in &source.descriptors {
+                        self.buffer::<crate::expr::composites::DroppedCompositeAttribute>(
+                            descriptor.dropped.capacity(),
+                        )?;
+                        self.buffer::<crate::expr::composites::CompositeAttribute>(
+                            descriptor.attributes.capacity(),
+                        )?;
+                        for attribute in &descriptor.attributes {
+                            self.text(&attribute.name)?;
+                            self.node(Node::Type(&attribute.ty))?;
+                        }
+                    }
+                }
             }
             Expr::Func {
                 order_syntax: _,
@@ -45,6 +68,9 @@ impl<'a> Walker<'a> {
             Expr::CompositeRow { items, binding } => {
                 self.text(&binding.ty)?;
                 self.buffer::<i16>(binding.attributes.capacity())?;
+                if let Some(types) = &binding.argument_types {
+                    self.children(types, Node::Type)?;
+                }
                 self.children(items, Node::Expr)?;
             }
             Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {

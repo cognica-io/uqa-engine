@@ -91,6 +91,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve an already admitted catalog type identity without name lookup or input privileges.
+    fn resolve_type_oid(&self, _oid: u32) -> std::result::Result<Option<ColumnType>, String> {
+        Ok(None)
+    }
+
     /// Apply catalog-owned domain conversion and constraints. A missing implementation leaves built-in catalog domains on their base-type conversion path.
     fn cast_domain(
         &self,
@@ -331,6 +336,7 @@ pub struct EvalContext<'a> {
     row_lookup: Option<&'a dyn RowLookup>,
     pub params: &'a [SQLParam],
     pub engine: Option<&'a dyn EngineHook>,
+    enum_comparison_states: [Option<&'a super::enums::EnumComparisonState>; 4],
 }
 
 impl<'a> EvalContext<'a> {
@@ -340,6 +346,7 @@ impl<'a> EvalContext<'a> {
             row_lookup: row.map(|row| row as &dyn RowLookup),
             params,
             engine: None,
+            enum_comparison_states: [None; 4],
         }
     }
 
@@ -352,12 +359,43 @@ impl<'a> EvalContext<'a> {
             row_lookup: Some(row),
             params,
             engine: None,
+            enum_comparison_states: [None; 4],
         }
     }
 
     pub fn with_engine(mut self, engine: &'a dyn EngineHook) -> Self {
         self.engine = Some(engine);
         self
+    }
+
+    /// The state of the current bound enum call, supplied by its prepared execution owner.
+    pub fn with_enum_comparison_state(
+        mut self,
+        state: Option<&'a super::enums::EnumComparisonState>,
+    ) -> Self {
+        self.enum_comparison_states[0] = state;
+        self
+    }
+
+    /// Independent comparisons within one prepared expression, including the
+    /// four operators of BETWEEN SYMMETRIC, retain separate type caches.
+    pub fn with_enum_comparison_states(
+        mut self,
+        states: [Option<&'a super::enums::EnumComparisonState>; 4],
+    ) -> Self {
+        self.enum_comparison_states = states;
+        self
+    }
+
+    pub(super) fn enum_comparison_state(&self) -> Option<&super::enums::EnumComparisonState> {
+        self.enum_comparison_states[0]
+    }
+
+    pub(super) fn enum_comparison_state_at(
+        &self,
+        slot: usize,
+    ) -> Option<&super::enums::EnumComparisonState> {
+        self.enum_comparison_states[slot]
     }
 
     pub(super) fn row_lookup(&self) -> Result<&'a dyn RowLookup> {

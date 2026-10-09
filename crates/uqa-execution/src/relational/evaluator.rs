@@ -19,6 +19,11 @@ use crate::PhysicalRow;
 pub trait ExpressionEvaluator: Send + Sync {
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value>;
 
+    /// Borrow the same retained enum catalog used while evaluating expressions.
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        None
+    }
+
     fn evaluate_physical(
         &self,
         expression: &ScalarExpr,
@@ -26,6 +31,17 @@ pub trait ExpressionEvaluator: Send + Sync {
         row: &PhysicalRow,
     ) -> ExecResult<Value> {
         self.evaluate(expression, &schema.view(row))
+    }
+
+    /// Evaluate a prepared physical expression with its execution-owned function state.
+    fn evaluate_physical_with_function_states(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        row: &PhysicalRow,
+        _states: &crate::scalar::FunctionCallStates,
+    ) -> ExecResult<Value> {
+        self.evaluate_physical(expression, schema, row)
     }
 
     /// Bound SQL parameters used by static type resolution. Implementations
@@ -80,12 +96,12 @@ pub trait RowPredicate: Send + Sync {
 
 pub type SharedRowPredicate<'a> = Arc<dyn RowPredicate + 'a>;
 
-pub(super) struct DefaultExpressionEvaluator {
+pub(crate) struct DefaultExpressionEvaluator {
     params: Vec<SQLParam>,
 }
 
 impl DefaultExpressionEvaluator {
-    pub(super) fn shared(params: Vec<SQLParam>) -> SharedExpressionEvaluator<'static> {
+    pub(crate) fn shared(params: Vec<SQLParam>) -> SharedExpressionEvaluator<'static> {
         Arc::new(Self { params })
     }
 }
@@ -110,5 +126,19 @@ impl ExpressionEvaluator for DefaultExpressionEvaluator {
 
     fn parameters(&self) -> &[SQLParam] {
         &self.params
+    }
+
+    fn evaluate_physical_with_function_states(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        row: &PhysicalRow,
+        states: &crate::scalar::FunctionCallStates,
+    ) -> ExecResult<Value> {
+        let view = schema.view(row);
+        let context = ScalarEvalContext::from_row_lookup(&view, &self.params)
+            .with_row_schema(schema)
+            .with_function_states(states);
+        Ok(eval_scalar(expression, &context)?)
     }
 }

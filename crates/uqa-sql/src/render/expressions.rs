@@ -41,7 +41,7 @@ pub(super) fn render_expr_in(
             )))
         }
         Expr::Literal(value) => value_sql(value)?,
-        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", value_sql(value)?),
+        Expr::TypedLiteral { value, ty, .. } => format!("({})::{ty}", value_sql(value)?),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             binding:

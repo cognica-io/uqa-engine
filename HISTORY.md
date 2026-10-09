@@ -8,15 +8,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add PostgreSQL `get_byte(bytea, integer)` with unsigned byte output, exact bounds diagnostics, strict NULL behavior and catalog identity.
+
+- Change composite attribute types with PostgreSQL declaration order, recursive storage-use checks, dependent expression rebuilding, prepared field diagnostics, retained tuple interpretation with fixed by-reference fields, alignment and dropped slots, deferred variable-width reads, retained JSON/JSONB output and physical JSONB comparisons, physical array element identity, catalog-dependent enum/domain/composite array decoding and output, header-only array properties, domain base layouts/output, nested tuple and array formation, original enum label OIDs with deferred catalog output, OID-aware scalar and nested enum comparisons, membership, selection and support functions with expression and session-type ordering state, consistent enum hash-aggregation keys, original stored constants across commit and reopen, and atomic rollback.
+
 - Rename composite attributes while preserving field identities, nested values, stored SQL references, prepared selectors and transaction rollback.
 
 - Remove composite attributes with PostgreSQL DROP ATTRIBUTE semantics, including mixed ADD/DROP order, stable surviving field identities, retained constructor effects, nested stored values and atomic rollback across all storage providers.
 
 ### Fixed
 
+- Preserve a named record's actual tuple type through copying, storage and spill. Record output and field selection use that descriptor, and equality and ordering validate each reached field's type with PostgreSQL's NULL and short-circuit rules. Composite-to-record identity casts leave retained bytes unread.
+
+- Preserve resolved text types when propagating NULL and string constants from derived SELECT, VALUES and view outputs; keep bare untyped `pg_typeof` arguments unknown.
+
+- Preserve retained enum comparison semantics through external sorting, Top-K, DISTINCT and FETCH WITH TIES, including disk-spilled keys. UNION, INTERSECT and EXCEPT group enum identities without reading labels, preserving NULLs and ALL multiplicities. Window partition and peer boundaries use the same identity equality, preserving ranks and peer frames. Aggregate MIN/MAX, ordered and DISTINCT inputs, mode and discrete percentile retain enum catalog and comparison state across groups, window frames and spill merging. Recognize matching array and row constructors in DISTINCT ON ordering.
+
+- Preserve enum catalog and comparison state in budgeted built-in calls, admitting selected values and enum ranges before allocation and releasing partial results on quota failure or cancellation.
+
+- Preserve PostgreSQL BETWEEN operand coercions, strict-NULL folding and volatile/subquery evaluation counts, while keeping simple inclusive ranges on their existing access path. Normalize predecessor view and stored schema expressions during initial restoration and optimize executable copies so NULL simplification and independent subquery initialization also apply after reopening. Plan rule WHERE conditions before evaluation, while preserving scalar and CHECK NULL semantics. Eligible volatile views and derived tables now stop evaluating rows when a parent LIMIT has enough results.
+
 - Avoid unnecessary maintenance-thread wakeups when opening sessions, committing statistics changes or updating DiskANN policy, and skip idle statistics table passes until committed state changes or pending statistics reach their refresh deadline.
 
 - Reuse the retained query catalog for scalar type resolution instead of recapturing all table metadata for each row, preserving the selected domain identity across later catalog changes.
+
+- Apply binary substring positions and retained bytea scalar operations to raw bytes, preserving result types, bounds, encoding, hashes, lengths, NULL behavior and PostgreSQL planning/runtime error order.
+
+- Retain catalog-dependent composite and enum input casts during grouping analysis, including their array forms, instead of evaluating them through builtin-only conversion.
+
+- Protect original composite constant metadata from older writers with SQLite record format 61 and redb record format 57; preserve record history, receipts and sequence durability during the upgrade.
+
+- Preserve PostgreSQL named ROW constructor folding and argument-type checks across prepared execution, composite attribute changes and rollback, before evaluating argument effects.
+
+- Name expression-index field selections after the selected attribute instead of an internal dispatch label.
 
 - Resolve PostgreSQL `regcollation` names, numeric OIDs and arrays with the correct input diagnostics, lookup behavior, catalog type metadata and durable stored values.
 

@@ -48,6 +48,13 @@ fn document() -> StoredDocument {
                     .unwrap(),
                 ),
             ),
+            (
+                "named_record".into(),
+                Value::Record(uqa_core::RecordValue::from_parts(
+                    vec![("n".into(), Value::Float(0.1))],
+                    Some(20_001),
+                )),
+            ),
             ("text".into(), Value::Str("한글🙂".repeat(2048))),
             ("bytes".into(), Value::Bytes(vec![3; 32 << 10])),
             (
@@ -63,10 +70,13 @@ fn document() -> StoredDocument {
             ),
             (
                 "record".into(),
-                Value::Record(vec![
-                    ("b".into(), Value::Bool(true)),
-                    ("a".into(), Value::Json(" {\"x\":1} ".into())),
-                ]),
+                Value::Record(
+                    vec![
+                        ("b".into(), Value::Bool(true)),
+                        ("a".into(), Value::Json(" {\"x\":1} ".into())),
+                    ]
+                    .into(),
+                ),
             ),
             (
                 "row".into(),
@@ -131,6 +141,8 @@ fn verify(connection: &ManagedConnection, provider: Provider) {
     assert_eq!(live[3].as_ref().unwrap().fields(), expected.fields());
     assert!(live[3].as_ref().unwrap().fields()["typed_row"]
         .has_same_representation(&expected.fields()["typed_row"]));
+    assert!(live[3].as_ref().unwrap().fields()["named_record"]
+        .has_same_representation(&expected.fields()["named_record"]));
     assert_eq!(live[3].as_ref().unwrap().metadata(), expected.metadata());
     drop(live);
     assert_eq!(control.memory().used(), 0);

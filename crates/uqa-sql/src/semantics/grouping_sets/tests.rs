@@ -18,6 +18,25 @@ impl FunctionTypeResolver for Catalog {
                 .map(|element| element.map(|element| ColumnType::Array(Box::new(element))));
         }
         let name = name.replace('"', "");
+        if name == "grouping_composite" {
+            return Ok(Some(ColumnType::Composite(
+                crate::ast::CompositeTypeReference {
+                    schema: "public".into(),
+                    name,
+                    oid: 50_002,
+                    array_oid: 50_003,
+                    relation_oid: 50_004,
+                },
+            )));
+        }
+        if name == "grouping_enum" {
+            return Ok(Some(ColumnType::Enum(crate::ast::EnumTypeReference {
+                schema: "public".into(),
+                name,
+                oid: 50_005,
+                array_oid: 50_006,
+            })));
+        }
         Ok(matches!(
             name.as_str(),
             "grouping_literal_numeric" | "public.grouping_literal_numeric"
@@ -227,6 +246,10 @@ fn grouping_identity_keeps_catalog_casts_for_the_catalog_resolver() {
         "regprocedure",
         "grouping_literal_numeric",
         "grouping_literal_numeric[]",
+        "grouping_composite",
+        "grouping_composite[]",
+        "grouping_enum",
+        "grouping_enum[]",
         "regtype[]",
     ] {
         let input = ScalarExpr::Literal(Value::Str("catalog-dependent input".into()));

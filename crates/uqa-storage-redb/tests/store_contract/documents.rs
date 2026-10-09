@@ -89,7 +89,10 @@ fn controlled_whole_rows_keep_redb_selected_payloads_after_provider_close() {
             ("payload".into(), uqa_core::Value::Bytes(vec![7; 32 << 10])),
             (
                 "record".into(),
-                uqa_core::Value::Record(vec![("field".into(), uqa_core::Value::Int(9))]),
+                uqa_core::Value::Record(uqa_core::RecordValue::from_parts(
+                    vec![("field".into(), uqa_core::Value::Int(9))],
+                    Some(20_001),
+                )),
             ),
         ]
         .into(),
@@ -117,6 +120,8 @@ fn controlled_whole_rows_keep_redb_selected_payloads_after_provider_close() {
     assert!(page[1].is_none());
     for index in [0, 2] {
         assert_eq!(page[index].as_ref().unwrap().fields(), expected.fields());
+        assert!(page[index].as_ref().unwrap().fields()["record"]
+            .has_same_representation(&expected.fields()["record"]));
         assert_eq!(
             page[index].as_ref().unwrap().metadata(),
             expected.metadata()

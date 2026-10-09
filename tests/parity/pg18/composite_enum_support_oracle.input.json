@@ -1,0 +1,137 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE support_enum_a AS ENUM ('first','last'); CREATE TYPE support_enum_b AS ENUM ('other'); CREATE TYPE support_enum_raw AS (one integer,two integer,four integer,zero integer); CREATE VIEW support_enum_raw_value AS SELECT '(1,2,4,0)'::support_enum_raw AS v; CREATE TYPE support_enum_good AS (a support_enum_a); CREATE VIEW support_enum_good_value AS SELECT '(first)'::support_enum_good AS v"
+    },
+    {
+      "id": "change",
+      "sql": "ALTER TYPE support_enum_raw ALTER ATTRIBUTE one TYPE support_enum_a, ALTER ATTRIBUTE two TYPE support_enum_a, ALTER ATTRIBUTE four TYPE support_enum_a, ALTER ATTRIBUTE zero TYPE support_enum_a; ALTER TYPE support_enum_good ALTER ATTRIBUTE a TYPE support_enum_b"
+    },
+    {
+      "id": "equal_invalid",
+      "sql": "SELECT enum_eq((v).one,(v).one) AS eq,enum_ne((v).one,(v).two) AS ne,enum_eq((v).one,(v).two) AS different FROM support_enum_raw_value"
+    },
+    {
+      "id": "compare_same_invalid",
+      "sql": "SELECT enum_cmp((v).one,(v).one) AS cmp,enum_lt((v).one,(v).one) AS lt,enum_le((v).one,(v).one) AS le,enum_gt((v).one,(v).one) AS gt,enum_ge((v).one,(v).one) AS ge FROM support_enum_raw_value"
+    },
+    {
+      "id": "even_order",
+      "sql": "SELECT enum_cmp((v).two,(v).four) AS cmp,enum_lt((v).two,(v).four) AS lt,enum_gt((v).four,(v).two) AS gt,enum_cmp((v).four,(v).two) AS reverse FROM support_enum_raw_value"
+    },
+    {
+      "id": "odd_left_invalid",
+      "sql": "SELECT enum_cmp((v).one,(v).two) FROM support_enum_raw_value"
+    },
+    {
+      "id": "odd_right_invalid",
+      "sql": "SELECT enum_cmp((v).two,(v).one) FROM support_enum_raw_value"
+    },
+    {
+      "id": "valid_left_invalid_right",
+      "sql": "SELECT enum_cmp('first'::support_enum_a,(v).one) FROM support_enum_raw_value"
+    },
+    {
+      "id": "even_invalid_and_valid",
+      "sql": "SELECT enum_lt((v).two,'first'::support_enum_a) AS lt,enum_gt('first'::support_enum_a,(v).two) AS gt FROM support_enum_raw_value"
+    },
+    {
+      "id": "hash_invalid",
+      "sql": "SELECT hashenum((v).one) AS hash,hashenumextended((v).one,0) AS extended,hashenumextended((v).one,42) AS seeded FROM support_enum_raw_value"
+    },
+    {
+      "id": "selected_invalid_hash",
+      "sql": "SELECT hashenum(enum_smaller((v).two,(v).four)) AS smaller,hashenum(enum_larger((v).two,(v).four)) AS larger FROM support_enum_raw_value"
+    },
+    {
+      "id": "selected_invalid_output",
+      "sql": "SELECT enum_smaller((v).two,(v).four) FROM support_enum_raw_value"
+    },
+    {
+      "id": "type_only_invalid",
+      "sql": "SELECT enum_first((v).one) AS first,enum_last((v).one) AS last,enum_range((v).one) AS labels FROM support_enum_raw_value"
+    },
+    {
+      "id": "invalid_bounds",
+      "sql": "SELECT enum_range((v).one,NULL::support_enum_a) AS lower,enum_range(NULL::support_enum_a,(v).one) AS upper,enum_range((v).one,(v).one) AS both FROM support_enum_raw_value"
+    },
+    {
+      "id": "zero_bounds",
+      "sql": "SELECT enum_range((v).zero,(v).zero) AS both,enum_range((v).zero,(v).one) AS upper,enum_range((v).one,(v).zero) AS lower FROM support_enum_raw_value"
+    },
+    {
+      "id": "null_arguments",
+      "sql": "SELECT enum_cmp((v).one,NULL::support_enum_a) AS cmp,enum_eq(NULL::support_enum_a,(v).one) AS eq,hashenum(NULL::support_enum_a) AS hash,enum_smaller(NULL::support_enum_a,(v).one) AS smaller FROM support_enum_raw_value"
+    },
+    {
+      "id": "foreign_type_only",
+      "sql": "SELECT enum_first((v).a) AS first,enum_last((v).a) AS last,enum_range((v).a) AS labels FROM support_enum_good_value"
+    },
+    {
+      "id": "foreign_bounds",
+      "sql": "SELECT enum_range((v).a,NULL::support_enum_b) AS lower,enum_range(NULL::support_enum_b,(v).a) AS upper FROM support_enum_good_value"
+    },
+    {
+      "id": "foreign_comparison",
+      "sql": "SELECT enum_eq((v).a,'other'::support_enum_b) AS eq,enum_ne((v).a,'other'::support_enum_b) AS ne,enum_cmp((v).a,'other'::support_enum_b) AS cmp FROM support_enum_good_value"
+    },
+    {
+      "id": "foreign_hash",
+      "sql": "SELECT hashenum((v).a)=hashenum('first'::support_enum_a) AS hash,hashenumextended((v).a,42)=hashenumextended('first'::support_enum_a,42) AS extended FROM support_enum_good_value"
+    },
+    {
+      "id": "foreign_selected_output",
+      "sql": "SELECT enum_smaller((v).a,'other'::support_enum_b) AS smaller,enum_larger((v).a,'other'::support_enum_b) AS larger FROM support_enum_good_value"
+    },
+    {
+      "id": "add_middle",
+      "sql": "ALTER TYPE support_enum_a ADD VALUE 'middle' BEFORE 'last'"
+    },
+    {
+      "id": "native_odd_order",
+      "sql": "SELECT enum_cmp('middle'::support_enum_a,'last'::support_enum_a) AS before_last,enum_cmp('middle'::support_enum_a,'first'::support_enum_a) AS after_first,enum_range('first'::support_enum_a,'last'::support_enum_a) AS all_labels"
+    },
+    {
+      "id": "odd_retained_setup",
+      "sql": "CREATE TYPE support_enum_odd AS (a support_enum_a,b support_enum_a); CREATE VIEW support_enum_odd_value AS SELECT '(middle,last)'::support_enum_odd AS v; ALTER TYPE support_enum_odd ALTER ATTRIBUTE a TYPE support_enum_b, ALTER ATTRIBUTE b TYPE support_enum_b"
+    },
+    {
+      "id": "odd_retained_order",
+      "sql": "SELECT enum_cmp((v).a,(v).b) AS cmp,enum_smaller((v).a,(v).b) AS smaller,enum_larger((v).a,(v).b) AS larger FROM support_enum_odd_value"
+    },
+    {
+      "id": "rename",
+      "sql": "ALTER TYPE support_enum_a RENAME VALUE 'first' TO 'renamed'"
+    },
+    {
+      "id": "reopened_selected_output",
+      "sql": "SELECT enum_smaller((v).a,'other'::support_enum_b) AS smaller,enum_larger((v).a,'other'::support_enum_b) AS larger FROM support_enum_good_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_hash",
+      "sql": "SELECT hashenum((v).one) AS hash,hashenumextended((v).one,0) AS extended FROM support_enum_raw_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_range",
+      "sql": "SELECT enum_range((v).one) AS all_labels,enum_range((v).one,NULL::support_enum_a) AS lower,enum_range(NULL::support_enum_a,(v).one) AS upper FROM support_enum_raw_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_odd_order",
+      "sql": "SELECT enum_cmp((v).a,(v).b) AS cmp,enum_smaller((v).a,(v).b) AS smaller FROM support_enum_odd_value",
+      "reopen": true
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW support_enum_raw_value,support_enum_good_value,support_enum_odd_value; DROP TYPE support_enum_raw,support_enum_good,support_enum_odd; DROP TYPE support_enum_a,support_enum_b",
+      "reopen": true
+    }
+  ]
+}

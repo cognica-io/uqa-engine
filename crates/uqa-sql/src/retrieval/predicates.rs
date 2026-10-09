@@ -147,6 +147,36 @@ pub(super) fn lower_comparison(
     })
 }
 
+/// Independent analyzed bounds on one unchanged column retain a single range access path. Coerced or differently qualified columns must keep their separate comparisons.
+pub(super) fn lower_range(
+    parts: &[ScalarExpr],
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
+    let [ScalarExpr::Binary {
+        op: BinaryOp::GreaterEqual,
+        lhs: lower_column,
+        rhs: low,
+    }, ScalarExpr::Binary {
+        op: BinaryOp::LessEqual,
+        lhs: upper_column,
+        rhs: high,
+    }] = parts
+    else {
+        return None;
+    };
+    if lower_column != upper_column {
+        return None;
+    }
+    let field = filter_field(lower_column, constants)?;
+    let low = const_value(low, constants)?;
+    let high = const_value(high, constants)?;
+    Some(RetrievalExpr::Filter {
+        field,
+        predicate: Predicate::Between { low, high },
+        source: None,
+    })
+}
+
 /// The stored field a predicate on `expr` filters. An engine pseudo column is one only where the relation declares a column of that name, and the `_meta` namespace never is: a predicate on either stays relational, where the column carries the row's value.
 pub(super) fn filter_field(
     expr: &ScalarExpr,

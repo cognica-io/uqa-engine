@@ -62,6 +62,7 @@ impl ArrayValue {
                 elements,
                 dimensions,
                 lower_bounds,
+                element_type_oid: None,
             },
             memory: control.combine(
                 control.combine(elements_memory, dimensions_memory),

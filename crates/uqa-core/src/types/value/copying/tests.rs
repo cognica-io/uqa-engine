@@ -42,20 +42,23 @@ fn values() -> Vec<Value> {
             Value::Row(vec![Value::Void].into()),
         ]),
         Value::Row(vec![Value::Int(7), Value::Null].into()),
-        Value::Record(vec![
-            ("duplicate".into(), Value::Int(1)),
-            ("duplicate".into(), Value::Str("second".into())),
-        ]),
+        Value::Record(
+            vec![
+                ("duplicate".into(), Value::Int(1)),
+                ("duplicate".into(), Value::Str("second".into())),
+            ]
+            .into(),
+        ),
         Value::Map(
             [(
                 "nested".into(),
-                Value::Record(vec![("field".into(), Value::Row(vec![Value::Null].into()))]),
+                Value::Record(vec![("field".into(), Value::Row(vec![Value::Null].into()))].into()),
             )]
             .into(),
         ),
         Value::List(Vec::new()),
         Value::Row(Vec::new().into()),
-        Value::Record(Vec::new()),
+        Value::Record(Vec::new().into()),
         Value::Map(BTreeMap::new()),
     ]
 }
@@ -138,7 +141,6 @@ fn empty_value_carriers_and_inline_scalars_need_no_payload_or_traversal_allocati
         Value::Str(String::new()),
         Value::Bytes(Vec::new()),
         Value::List(Vec::new()),
-        Value::Record(Vec::new()),
         Value::Map(BTreeMap::new()),
     ] {
         assert_eq!(
@@ -219,7 +221,8 @@ fn cancellation_during_chunked_payload_copy_and_after_its_last_step_discards_the
 fn nested_value_copy_uses_a_charged_traversal_stack_and_preserves_record_order() {
     let budget = MemoryBudget::new(1 << 22);
     let cancellation = CancellationToken::new();
-    let mut source = Value::Record(vec![("z".into(), Value::Int(1)), ("a".into(), Value::Void)]);
+    let mut source =
+        Value::Record(vec![("z".into(), Value::Int(1)), ("a".into(), Value::Void)].into());
     for _ in 0..256 {
         source = Value::List(vec![source]);
     }

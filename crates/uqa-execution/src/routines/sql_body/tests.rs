@@ -18,15 +18,13 @@ fn definition(sql: &str) -> CreateFunction {
 fn a_composite_out_parameter_is_one_value_but_a_procedure_returns_its_output_tuple() {
     let function = definition("CREATE FUNCTION f(OUT a record) LANGUAGE sql AS 'SELECT 1'");
     let procedure = definition("CREATE PROCEDURE p(OUT a record) LANGUAGE sql AS 'SELECT 1'");
-    let record = Value::Record(vec![
-        ("x".into(), Value::Int(1)),
-        ("y".into(), Value::Int(2)),
-    ]);
+    let record =
+        Value::Record(vec![("x".into(), Value::Int(1)), ("y".into(), Value::Int(2))].into());
     assert_eq!(
         output_values(&function, record.clone(), 1).unwrap(),
         vec![record.clone()]
     );
-    let tuple = Value::Record(vec![("a".into(), record.clone())]);
+    let tuple = Value::Record(vec![("a".into(), record.clone())].into());
     assert_eq!(output_values(&procedure, tuple, 1).unwrap(), vec![record]);
 }
 

@@ -248,6 +248,7 @@ fn canonical_value(value: &Value) -> String {
         | Value::List(_)
         | Value::Row(_)
         | Value::Record(_)
+        | Value::Datum(_)
         | Value::Map(_) => serde_json::to_string(value).expect("serialize canonical TPC-H value"),
     }
 }

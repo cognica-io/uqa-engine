@@ -1,0 +1,468 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE enum_sort_a AS ENUM ('first','last'); ALTER TYPE enum_sort_a ADD VALUE 'middle' BEFORE 'last'; CREATE TYPE enum_sort_b AS ENUM ('other'); ALTER TYPE enum_sort_b ADD VALUE 'before' BEFORE 'other'; CREATE TYPE enum_sort_holder AS (a enum_sort_a,b enum_sort_a); CREATE VIEW enum_sort_source AS SELECT '(middle,last)'::enum_sort_holder AS v; CREATE TYPE enum_sort_raw AS (a integer,b integer); CREATE VIEW enum_sort_invalid AS SELECT '(1,3)'::enum_sort_raw AS v; CREATE VIEW enum_sort_even AS SELECT '(2,4)'::enum_sort_raw AS v; CREATE TYPE enum_sort_record AS (e enum_sort_b,n integer); ALTER TYPE enum_sort_holder ALTER ATTRIBUTE a TYPE enum_sort_b,ALTER ATTRIBUTE b TYPE enum_sort_b; ALTER TYPE enum_sort_raw ALTER ATTRIBUTE a TYPE enum_sort_b,ALTER ATTRIBUTE b TYPE enum_sort_b"
+    },
+    {
+      "id": "source_scalar_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY e) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT e)::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ARRAY[e]) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ARRAY[e])::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ROW(e,0)::enum_sort_record) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ROW(e,0)::enum_sort_record)::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_max_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_window_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text||'':''||(r=(SELECT (v).a FROM enum_sort_source))::text,'','' ORDER BY n) FROM (SELECT n,min(e) OVER (ORDER BY n ROWS UNBOUNDED PRECEDING) AS r FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY e) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT e)::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ARRAY[e]) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ARRAY[e])::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ROW(e,0)::enum_sort_record) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ROW(e,0)::enum_sort_record)::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_max_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_window_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text||'':''||(r=(SELECT (v).a FROM enum_sort_source))::text,'','' ORDER BY n) FROM (SELECT n,min(e) OVER (ORDER BY n ROWS UNBOUNDED PRECEDING) AS r FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY e) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT e)::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ARRAY[e]) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ARRAY[e])::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ROW(e,0)::enum_sort_record) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ROW(e,0)::enum_sort_record)::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_max_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_window_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text||'':''||(r=(SELECT (v).a FROM enum_sort_invalid))::text,'','' ORDER BY n) FROM (SELECT n,min(e) OVER (ORDER BY n ROWS UNBOUNDED PRECEDING) AS r FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY e) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT e)::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ARRAY[e]) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ARRAY[e])::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ROW(e,0)::enum_sort_record) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ROW(e,0)::enum_sort_record)::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_max_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_window_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text||'':''||(r=(SELECT (v).a FROM enum_sort_invalid))::text,'','' ORDER BY n) FROM (SELECT n,min(e) OVER (ORDER BY n ROWS UNBOUNDED PRECEDING) AS r FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY e) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT e)::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ARRAY[e]) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ARRAY[e])::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_ordered_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ROW(e,0)::enum_sort_record) FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_distinct_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ROW(e,0)::enum_sort_record)::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_max_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_window_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text||'':''||(r=(SELECT (v).a FROM enum_sort_even))::text,'','' ORDER BY n) FROM (SELECT n,min(e) OVER (ORDER BY n ROWS UNBOUNDED PRECEDING) AS r FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY e) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT e)::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ARRAY[e]) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ARRAY[e])::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_ordered_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text,'','' ORDER BY ROW(e,0)::enum_sort_record) FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_distinct_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(DISTINCT ROW(e,0)::enum_sort_record)::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_max_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_window_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(n::text||'':''||(r=(SELECT (v).a FROM enum_sort_even))::text,'','' ORDER BY n) FROM (SELECT n,min(e) OVER (ORDER BY n ROWS UNBOUNDED PRECEDING) AS r FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "min_across_groups",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT (n-1)/2 AS g,min(CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) AS m FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source GROUP BY (n-1)/2) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "max_across_groups",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT (n-1)/2 AS g,max(CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) AS m FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source GROUP BY (n-1)/2) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_max_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_scalar_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_record_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "source_array_max_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_source))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_max_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_scalar_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_record_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "invalid_array_max_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_invalid))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_mode_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_percentile_disc_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_min_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_max_mixed",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_scalar_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY e) = (SELECT (v).a FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_mode_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (mode() WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_record_percentile_disc_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (percentile_disc(0.5) WITHIN GROUP (ORDER BY ROW(e,0)::enum_sort_record) = (SELECT ROW((v).a,0)::enum_sort_record FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_min_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (min(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "even_array_max_same",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT (max(ARRAY[e]) = (SELECT ARRAY[(v).a] FROM enum_sort_even))::text FROM (SELECT (v).a AS e,n FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "min_window_partitions",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT min(CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) OVER (PARTITION BY (n-1)/2 ORDER BY n ROWS UNBOUNDED PRECEDING) AS m FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "min_window_moving",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT min(CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) OVER (ORDER BY n ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS m FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "max_window_partitions",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT max(CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) OVER (PARTITION BY (n-1)/2 ORDER BY n ROWS UNBOUNDED PRECEDING) AS m FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "max_window_moving",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT max(CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) OVER (ORDER BY n ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS m FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "ordered_scalar_cache_per_group",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT string_agg(r,'','' ORDER BY g) FROM (SELECT (n-1)/2 AS g,string_agg(n::text,'','' ORDER BY CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN ''before''::enum_sort_b ELSE ''other''::enum_sort_b END) AS r FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source GROUP BY (n-1)/2) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "projected_setup",
+      "sql": "CREATE TABLE enum_sort_projected (g integer,e enum_sort_b); INSERT INTO enum_sort_projected SELECT (n-1)/2,CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).b WHEN 3 THEN 'before'::enum_sort_b ELSE 'other'::enum_sort_b END FROM generate_series(1,4) AS input(n) CROSS JOIN enum_sort_source"
+    },
+    {
+      "id": "projected_extrema",
+      "sql": "SELECT (min(e)=(SELECT (v).a FROM enum_sort_source))::text AS minimum,(max(e)=(SELECT (v).b FROM enum_sort_source))::text AS maximum FROM enum_sort_projected WHERE g=0"
+    },
+    {
+      "id": "projected_group_state",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT bool_and(m IS NOT NULL)::text FROM (SELECT g,min(e) AS m FROM enum_sort_projected GROUP BY g) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()"
+    },
+    {
+      "id": "projected_cleanup",
+      "sql": "DROP TABLE enum_sort_projected"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW enum_sort_source,enum_sort_invalid,enum_sort_even; DROP TYPE enum_sort_holder,enum_sort_raw,enum_sort_record,enum_sort_a,enum_sort_b"
+    }
+  ]
+}

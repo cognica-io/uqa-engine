@@ -222,6 +222,9 @@ impl<'a> Walker<'a> {
         if let Some(field) = composite_field {
             self.charge(size_of::<crate::ast::CompositeFieldBinding>())?;
             self.ty(&field.result_type)?;
+            if let Some(ty) = &field.changed_type {
+                self.ty(ty)?;
+            }
         }
         if let Some(error) = resolution_error {
             self.charge(size_of::<FunctionResolutionError>())?;

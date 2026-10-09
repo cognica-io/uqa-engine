@@ -59,6 +59,7 @@ impl RegclassBinding<'_> {
                 message: format!("relation \"{reference}\" does not exist"),
             })?;
         *expression = Expr::TypedLiteral {
+            composite_source: None,
             value: Value::Int(oid),
             ty: "regclass".into(),
         };

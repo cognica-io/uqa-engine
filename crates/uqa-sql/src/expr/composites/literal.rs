@@ -70,7 +70,8 @@ fn materialize(
     match (ty, value) {
         (ColumnType::Domain { base, .. }, _) => materialize(value, base, engine, control),
         (ColumnType::Composite(reference), Value::Record(fields)) => {
-            let descriptor = super::descriptor(engine.composite_types(), reference.oid)?;
+            let type_oid = fields.type_oid().unwrap_or(reference.oid);
+            let descriptor = super::descriptor(engine.composite_types(), type_oid)?;
             control.check()?;
             let mut output = ProductionVec::new(*control);
             output.reserve(descriptor.attributes.len())?;
@@ -88,12 +89,15 @@ fn materialize(
                     control.finish((name, value), control.combine(memory, name_memory))?,
                 )?;
             }
-            let (fields, memory) = output.finish()?.into_parts();
+            let (fields, memory) =
+                uqa_core::RecordValue::with_control(output.finish()?, Some(type_oid), control)?
+                    .into_parts();
             control
                 .finish(Value::Record(fields), memory)
                 .map_err(Into::into)
         }
         (ColumnType::Array(element), Value::Array(array)) => {
+            let element_type_oid = array.element_type_oid();
             let elements = array_elements(array.elements(), element, engine, control)?;
             let mut bounds = ProductionVec::new(*control);
             for bound in array.lower_bounds() {
@@ -108,7 +112,10 @@ fn materialize(
                     })?;
             let (array, memory) = array.into_parts();
             control
-                .finish(Value::Array(array), memory)
+                .finish(
+                    Value::Array(array.with_element_type_oid(element_type_oid)),
+                    memory,
+                )
                 .map_err(Into::into)
         }
         _ => control.copy_value(value).map_err(Into::into),

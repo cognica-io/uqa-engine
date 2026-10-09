@@ -13,7 +13,7 @@ use uqa_core::{
 };
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{
-    cast_value_with_type_resolution_with_control, eval_binary_values_with_control,
+    cast_value_with_type_resolution_with_control,
     eval_binary_values_with_integer_width_with_control, negate_value_with_control, truthy,
     IntegerWidth,
 };
@@ -166,6 +166,25 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar_inner(lhs, context, control)?;
             let right = eval_scalar_inner(rhs, context, control)?;
+            if matches!(
+                op,
+                BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+            ) {
+                let value = uqa_sql::expr::eval_comparison_truth_with_engine(
+                    *op,
+                    &left,
+                    &right,
+                    control,
+                    context.function_hook(),
+                    context.enum_binary_comparison_state(lhs),
+                )?;
+                return plain(value.map_or(Value::Null, Value::Bool), control);
+            }
             if (matches!(*left, Value::Float(_)) || matches!(*right, Value::Float(_)))
                 && matches!(
                     op,
@@ -369,7 +388,7 @@ fn materialize_qualified_whole_row(
             Ok((column, value))
         })
         .collect::<Result<Vec<_>, _>>()
-        .map(Value::Record)
+        .map(|fields| Value::Record(fields.into()))
 }
 
 fn eval_parameter(
@@ -438,17 +457,98 @@ fn eval_between(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let value = eval_scalar_inner(expression, context, control)?;
-    let low = eval_scalar_inner(low, context, control)?;
-    let high = eval_scalar_inner(high, context, control)?;
-    let greater_equal =
-        eval_binary_values_with_control(BinaryOp::GreaterEqual, &value, &low, control)?;
-    let less_equal = eval_binary_values_with_control(BinaryOp::LessEqual, &value, &high, control)?;
-    match (&*greater_equal, &*less_equal) {
-        (Value::Bool(false), _) | (_, Value::Bool(false)) => plain(Value::Bool(false), control),
-        (Value::Bool(true), Value::Bool(true)) => plain(Value::Bool(true), control),
-        _ => plain(Value::Null, control),
+    let states = [
+        context.enum_binary_comparison_state(low),
+        context.enum_binary_comparison_state(high),
+    ];
+    eval_between_states(expression, low, high, context, control, states)
+}
+
+fn eval_between_states(
+    expression: &ScalarExpr,
+    low: &ScalarExpr,
+    high: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+    states: [Option<&uqa_sql::expr::enums::EnumComparisonState>; 2],
+) -> Result<Produced<Value>, SQLError> {
+    let ge = {
+        let value = eval_scalar_inner(expression, context, control)?;
+        let low = eval_scalar_inner(low, context, control)?;
+        compare_values(
+            BinaryOp::GreaterEqual,
+            &value,
+            &low,
+            context,
+            control,
+            states[0],
+        )?
+    };
+    if ge == Some(false) {
+        return plain(Value::Bool(false), control);
     }
+    let value = eval_scalar_inner(expression, context, control)?;
+    let high = eval_scalar_inner(high, context, control)?;
+    let le = compare_values(
+        BinaryOp::LessEqual,
+        &value,
+        &high,
+        context,
+        control,
+        states[1],
+    )?;
+    plain(
+        match (ge, le) {
+            (_, Some(false)) => Value::Bool(false),
+            (Some(true), Some(true)) => Value::Bool(true),
+            _ => Value::Null,
+        },
+        control,
+    )
+}
+
+fn eval_between_symmetric(
+    args: &[ScalarExpr],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let [value, low, high] = args else {
+        return Err(SQLError::TypeMismatch(
+            "BETWEEN SYMMETRIC takes 3 args".into(),
+        ));
+    };
+    let states = context.enum_comparison_states(args);
+    let forward = eval_between_states(value, low, high, context, control, [states[0], states[1]])?;
+    if *forward == Value::Bool(true) {
+        return Ok(forward);
+    }
+    let backward = eval_between_states(value, high, low, context, control, [states[2], states[3]])?;
+    plain(
+        match (&*forward, &*backward) {
+            (_, Value::Bool(true)) => Value::Bool(true),
+            (Value::Null, _) | (_, Value::Null) => Value::Null,
+            _ => Value::Bool(false),
+        },
+        control,
+    )
+}
+
+fn compare_values(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+    state: Option<&uqa_sql::expr::enums::EnumComparisonState>,
+) -> Result<Option<bool>, SQLError> {
+    uqa_sql::expr::eval_comparison_truth_with_engine(
+        op,
+        left,
+        right,
+        control,
+        context.function_hook(),
+        state,
+    )
 }
 
 fn eval_in_list(
@@ -462,9 +562,9 @@ fn eval_in_list(
     let mut saw_null = matches!(*needle, Value::Null);
     for item in list {
         let candidate = eval_scalar_inner(item, context, control)?;
-        match *eval_binary_values_with_control(BinaryOp::Equal, &needle, &candidate, control)? {
-            Value::Bool(true) => return plain(Value::Bool(!negated), control),
-            Value::Null => saw_null = true,
+        match compare_values(BinaryOp::Equal, &needle, &candidate, context, control, None)? {
+            Some(true) => return plain(Value::Bool(!negated), control),
+            None => saw_null = true,
             _ => {}
         }
     }
@@ -491,10 +591,10 @@ fn eval_case(
     for (condition, result) in branches {
         let condition = eval_scalar_inner(condition, context, control)?;
         let matched = match &base {
-            Some(base) => matches!(
-                *eval_binary_values_with_control(BinaryOp::Equal, base, &condition, control)?,
-                Value::Bool(true)
-            ),
+            Some(base) => {
+                compare_values(BinaryOp::Equal, base, &condition, context, control, None)?
+                    == Some(true)
+            }
             None => truthy(&condition),
         };
         if matched {

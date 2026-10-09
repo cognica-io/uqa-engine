@@ -12,6 +12,9 @@ use uqa_sql::{scalar_type, RowSchema, ScalarExpr};
 
 use super::Value;
 
+mod composites;
+pub(super) use composites::fold_composite_constructor;
+
 pub(crate) fn retain_computed_integer(
     expression: ScalarExpr,
     parameter_index: Option<usize>,
@@ -25,6 +28,7 @@ pub(crate) fn retain_computed_integer(
         uqa_sql::expr::IntegerWidth::BigInt => ColumnType::BigInteger,
     };
     ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: Value::Int(value),
         ty: ty.sql_name(),
         bound_type: Some(ty),
@@ -71,7 +75,10 @@ pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
 
 fn is_constant(expression: &ScalarExpr) -> bool {
     match expression {
-        ScalarExpr::Literal(_) => true,
+        ScalarExpr::Literal(value) => {
+            !uqa_sql::expr::composites::literal::contains_records(value)
+                && !uqa_sql::expr::datums::contains_datum(value)
+        }
         ScalarExpr::TypedLiteral {
             value,
             ty,
@@ -79,6 +86,7 @@ fn is_constant(expression: &ScalarExpr) -> bool {
             ..
         } => {
             !uqa_sql::expr::composites::literal::contains_records(value)
+                && !uqa_sql::expr::datums::contains_datum(value)
                 && (bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok())
         }
         ScalarExpr::Array(items)
@@ -155,13 +163,14 @@ pub(super) fn fold_literal_expression(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
 ) -> Result<ScalarExpr, SQLError> {
-    fold_authorized_literal(expression, evaluate, None)
+    fold_authorized_literal(expression, evaluate, None, None)
 }
 
 pub(super) fn fold_authorized_literal(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
     permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
 ) -> Result<ScalarExpr, SQLError> {
     if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
         if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
@@ -174,6 +183,7 @@ pub(super) fn fold_authorized_literal(
             if let Ok(target) = ColumnType::from_sql_name(ty) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
+                        composite_source: None,
                         value: Value::Null,
                         ty: ty.clone(),
                         bound_type: Some(target),
@@ -183,17 +193,32 @@ pub(super) fn fold_authorized_literal(
             }
         }
     }
-    if let Some(literal) = composite_constant_field(&expression) {
-        return Ok(literal);
+    if let Some(literal) = composite_constant_field(&expression, types) {
+        return literal;
     }
-    let strict_null = matches!(&expression, ScalarExpr::Func { name, binding, args, .. }
-        if uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len()) == Some(true)
-            && args.iter().any(|argument| literal_value(argument).is_some_and(|value| matches!(value, Value::Null))));
+    let strict_null = strict_null_expression(&expression);
     if literal_value(&expression).is_some() || (!strict_null && !is_constant(&expression)) {
         return Ok(expression);
     }
     let schema = RowSchema::default();
-    let ty = scalar_type(&expression, &schema, &[])?;
+    let selected_type = match &expression {
+        // An analyzed comparison has boolean output even when its discarded operand needs a live catalog to resolve its retained type name.
+        ScalarExpr::Binary { .. } if strict_null => Some(ColumnType::Boolean),
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if strict_null => {
+            if let Some(error) = &binding.resolution_error {
+                return Err(error.sql_error());
+            }
+            uqa_sql::type_resolution::fixed_builtin_return_type(binding)
+        }
+        _ => None,
+    };
+    let ty = match selected_type {
+        Some(ty) => Some(ty),
+        None => scalar_type(&expression, &schema, &[])?,
+    };
     // Keep operator-selected casts before evaluation can replace the expression with a literal, including PostgreSQL unknown string inputs.
     let expression = uqa_sql::bind_type_introspection(expression, &schema, &[]);
     let value = if strict_null {
@@ -213,8 +238,8 @@ pub(super) fn fold_authorized_literal(
         evaluate(&expression)?
     };
     let literal = ScalarExpr::Literal(value.clone());
-    // Evaluated integers are values, not the bare integer syntax that ORDER BY and DISTINCT ON interpret as output positions.
-    if !matches!(value, Value::Int(_))
+    // Computed integers are not ORDER BY positions, and computed strings are not fresh unknown literals. Preserve their resolved types when replacing the expression.
+    if !matches!(value, Value::Int(_) | Value::Str(_))
         && !matches!(expression, ScalarExpr::Cast { .. })
         && scalar_type(&literal, &schema, &[])? == ty
     {
@@ -222,6 +247,7 @@ pub(super) fn fold_authorized_literal(
     }
     Ok(match ty {
         Some(ty) => ScalarExpr::TypedLiteral {
+            composite_source: None,
             value,
             ty: ty.sql_name(),
             bound_type: Some(ty),
@@ -231,7 +257,10 @@ pub(super) fn fold_authorized_literal(
     })
 }
 
-fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
+fn composite_constant_field(
+    expression: &ScalarExpr,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+) -> Option<Result<ScalarExpr, SQLError>> {
     let ScalarExpr::Func {
         binding: Some(binding),
         args,
@@ -243,12 +272,17 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
     if binding.dispatch != Some(uqa_sql::ast::FunctionDispatch::FieldSelect) {
         return None;
     }
-    let field = binding.composite_field.as_ref()?;
     let [base, ScalarExpr::Literal(Value::Str(name))] = args.as_slice() else {
         return None;
     };
     let base = match base {
-        ScalarExpr::Cast { expr, ty, .. } if matches!(expr.as_ref(), ScalarExpr::TypedLiteral { ty: literal_type, .. } if ty == literal_type) => {
+        ScalarExpr::Cast { expr, ty, .. }
+            if matches!(expr.as_ref(), ScalarExpr::TypedLiteral { ty: literal_type, bound_type, .. }
+            if ty == literal_type || match (bound_type, types) {
+                (Some(ColumnType::Composite(reference)), Some(types)) => types.resolve_catalog_column_type_name(ty).is_ok_and(|target| matches!(target, ColumnType::Composite(target) if target.oid == reference.oid)),
+                _ => false,
+            }) =>
+        {
             expr
         }
         expression => expression,
@@ -256,10 +290,30 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
     let ScalarExpr::TypedLiteral {
         value,
         bound_type: Some(ColumnType::Composite(reference)),
+        composite_source,
         ..
     } = base
     else {
         return None;
+    };
+    let resolved;
+    let field = if let Some(field) = binding.composite_field.as_deref() {
+        field
+    } else {
+        let descriptor =
+            match uqa_sql::expr::composites::descriptor(types?.composite_types(), reference.oid) {
+                Ok(descriptor) => descriptor,
+                Err(error) => return Some(Err(error)),
+            };
+        let (_, attribute) = descriptor.attribute(name)?;
+        resolved = uqa_sql::ast::CompositeFieldBinding {
+            type_oid: reference.oid,
+            number: attribute.number,
+            result_type: attribute.ty.clone(),
+            dropped: false,
+            changed_type: None,
+        };
+        &resolved
     };
     if reference.oid != field.type_oid {
         return None;
@@ -267,20 +321,69 @@ fn composite_constant_field(expression: &ScalarExpr) -> Option<ScalarExpr> {
     let value = match value {
         Value::Null => Value::Null,
         Value::Record(fields) => {
+            if fields.type_oid().is_some_and(|oid| oid != reference.oid) {
+                return None;
+            }
             if field.dropped {
                 Value::Null
             } else {
-                fields.iter().find(|(key, _)| key == name)?.1.clone()
+                if let Err(error) = uqa_sql::expr::composites::validate_field_result(field) {
+                    return Some(Err(error));
+                }
+                match uqa_sql::expr::datums::copy_constant_field(
+                    &fields.iter().find(|(key, _)| key == name)?.1,
+                    &field.result_type,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => return Some(Err(error)),
+                }
             }
         }
         _ => return None,
     };
-    Some(ScalarExpr::TypedLiteral {
+    if composite_source.is_some() {
+        // Copying a selected constant can fail during planning. Keep the immutable source afterward so later descriptor changes still recompute its byte position.
+        return None;
+    }
+    Some(Ok(ScalarExpr::TypedLiteral {
+        composite_source: None,
         value,
         ty: field.result_type.catalog_name(),
         bound_type: Some(field.result_type.clone()),
         parameter_index: None,
-    })
+    }))
+}
+
+/// Strict comparisons discard nonconstant siblings when an input is constant NULL, just as strict functions do. Compound predicates expose their individual comparisons before this pass.
+fn strict_null_expression(expression: &ScalarExpr) -> bool {
+    use uqa_sql::ast::BinaryOp;
+    let null = |argument: &ScalarExpr| {
+        literal_value(argument).is_some_and(|value| matches!(value, Value::Null))
+    };
+    match expression {
+        ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => {
+            uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
+                == Some(true)
+                && args.iter().any(null)
+        }
+        ScalarExpr::Binary {
+            op:
+                BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual,
+            lhs,
+            rhs,
+        } => null(lhs) || null(rhs),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

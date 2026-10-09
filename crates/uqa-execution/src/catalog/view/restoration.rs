@@ -15,7 +15,7 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     binding::view_dependencies::{
         bind_query_plan_sequence_references, query_plan_has_legacy_routine_identity,
-        restoration::{bind_stored_view_relations, upgrade_legacy_view_dispatches},
+        restoration::{bind_stored_view_relations, upgrade_legacy_view_expressions},
     },
     catalog::stored_view::restoration::{self as analysis, RestoredView},
 };
@@ -159,7 +159,9 @@ pub fn restore_views_from_catalog(
         if view.kind == StoredViewKind::View && view.output_columns.is_none() {
             missing_output_columns.push(row.relation.clone());
         }
-        if upgrade_legacy_view_dispatches(&mut view.query) {
+        if upgrade_legacy_view_expressions(&mut view.query).map_err(|error| {
+            StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
+        })? {
             revised_rows.insert(row.relation.clone());
         }
         if query_plan_has_legacy_routine_identity(&view.query)

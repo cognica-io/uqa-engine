@@ -64,9 +64,11 @@ enum StoredValue {
     List(Vec<StoredValue>),
     Row(Vec<StoredValue>),
     TypedRow(uqa_core::RowValue),
+    TypedRecord(uqa_core::RecordValue),
     Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
     Enum(EnumValue),
+    Datum(uqa_core::DatumValue),
 }
 
 impl From<&Value> for StoredValue {
@@ -89,6 +91,9 @@ impl From<&Value> for StoredValue {
             Value::List(values) => Self::List(values.iter().map(Self::from).collect()),
             Value::Row(values) if values.field_types().is_some() => Self::TypedRow(values.clone()),
             Value::Row(values) => Self::Row(values.iter().map(Self::from).collect()),
+            Value::Record(fields) if fields.type_oid().is_some() => {
+                Self::TypedRecord(fields.clone())
+            }
             Value::Record(fields) => Self::Record(
                 fields
                     .iter()
@@ -102,6 +107,7 @@ impl From<&Value> for StoredValue {
                     .collect(),
             ),
             Value::Enum(value) => Self::Enum(value.clone()),
+            Value::Datum(value) => Self::Datum(value.clone()),
         }
     }
 }
@@ -126,11 +132,13 @@ impl StoredValue {
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
             Self::TypedRow(value) => Value::Row(value),
+            Self::TypedRecord(value) => Value::Record(value),
             Self::Record(fields) => Value::Record(
                 fields
                     .into_iter()
                     .map(|(name, value)| (name, value.into_value()))
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
             ),
             Self::Map(values) => Value::Map(
                 values
@@ -139,6 +147,7 @@ impl StoredValue {
                     .collect(),
             ),
             Self::Enum(value) => Value::Enum(value),
+            Self::Datum(value) => Value::Datum(value),
         }
     }
 }
@@ -662,6 +671,10 @@ mod tests {
                 .unwrap(),
             ),
             Value::Map(BTreeMap::from([("k".into(), Value::Str("v".into()))])),
+            Value::Record(uqa_core::RecordValue::from_parts(
+                vec![("n".into(), Value::Float(0.1))],
+                Some(20_001),
+            )),
         ];
         for value in values {
             let decoded = decode_value(&encode_value(&value).unwrap()).unwrap();
@@ -669,7 +682,7 @@ mod tests {
                 (Value::Float(left), Value::Float(right)) if left.is_nan() => {
                     assert!(right.is_nan());
                 }
-                _ => assert_eq!(decoded, value),
+                _ => assert!(decoded.has_same_representation(&value)),
             }
         }
     }

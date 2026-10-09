@@ -116,3 +116,51 @@ fn set_recognition_retains_conversions_and_quantified_operator_identity() {
     *binding = None;
     assert!(crate::semantics::membership_operands(&scalar).is_none());
 }
+
+#[test]
+fn analyzed_range_keeps_one_access_path_only_for_the_same_uncoerced_column() {
+    for sql in ["c BETWEEN 1 AND 3", "c >= 1 AND c <= 3"] {
+        let Some(RetrievalExpr::Filter {
+            field,
+            predicate: Predicate::Between { low, high },
+            source: None,
+        }) = lower(sql)
+        else {
+            panic!("one range access path: {sql}");
+        };
+        assert_eq!(field, "c");
+        assert_eq!(low, Value::Int(1));
+        assert_eq!(high, Value::Int(3));
+    }
+    let constants = RetrievalConstants {
+        params: &[],
+        evaluate: &|expression, _| constant(expression),
+        stores: &|_| true,
+    };
+    let qualified = |name: &str| ScalarExpr::QualifiedColumn {
+        qualifier: name.into(),
+        column: "c".into(),
+    };
+    for upper in [
+        qualified("b"),
+        ScalarExpr::Cast {
+            expr: Box::new(qualified("a")),
+            ty: "text".into(),
+            implicit: false,
+        },
+    ] {
+        let parts = [
+            ScalarExpr::Binary {
+                op: BinaryOp::GreaterEqual,
+                lhs: Box::new(qualified("a")),
+                rhs: Box::new(ScalarExpr::Literal(Value::Int(1))),
+            },
+            ScalarExpr::Binary {
+                op: BinaryOp::LessEqual,
+                lhs: Box::new(upper),
+                rhs: Box::new(ScalarExpr::Literal(Value::Int(3))),
+            },
+        ];
+        assert!(predicates::lower_range(&parts, &constants).is_none());
+    }
+}

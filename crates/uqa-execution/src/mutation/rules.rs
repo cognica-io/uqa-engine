@@ -12,8 +12,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, Expr, RuleEvent, Statement};
-use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
+use uqa_sql::ast::{Expr, RuleEvent, Statement};
+use uqa_sql::plpgsql::{ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
@@ -554,7 +554,7 @@ where
                     .map(|field| (column, field.value))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(ResolvedVariable::untyped(Value::Record(fields)))
+        Ok(ResolvedVariable::untyped(Value::Record(fields.into())))
     }
 }
 
@@ -604,9 +604,12 @@ pub mod views;
 
 fn prepare_rule_actions(
     context: RuleContext<'_>,
-    rule: uqa_sql::catalog::events::StoredRule,
+    mut rule: uqa_sql::catalog::events::StoredRule,
     columns: &BTreeMap<String, RuleColumnMetadata>,
 ) -> Result<PreparedRule, SQLError> {
+    if let Some(condition) = &mut rule.condition_plan {
+        context.expressions.prepare_condition(condition)?;
+    }
     let condition_references_row = if rule.bound_condition_plan().is_some() {
         rule_condition_plan_references_row(&rule)
     } else {

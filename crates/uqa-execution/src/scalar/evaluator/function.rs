@@ -48,6 +48,11 @@ pub(super) fn evaluate_function(
         }
         return plain(Value::Null, control);
     }
+    if binding.is_some_and(|binding| {
+        binding.builtin && binding.dispatch == Some(FunctionDispatch::BetweenSymmetric)
+    }) {
+        return super::eval_between_symmetric(args, context, control);
+    }
     let arguments = eval_call_arguments_with_control(args, context, control)?;
     let arguments = if binding.is_none_or(|binding| binding.builtin) {
         match super::super::call_arguments::expand_variadic_any_arguments(
@@ -63,8 +68,14 @@ pub(super) fn evaluate_function(
         arguments
     };
     if control.budget().is_some() {
-        return uqa_sql::expr::eval_generated_function_call_with_control(
-            name, binding, arguments, control,
+        return uqa_sql::expr::eval_builtin_function_call_with_control(
+            name,
+            binding,
+            arguments,
+            control,
+            &context
+                .sql_context()
+                .with_enum_comparison_states(context.enum_comparison_states(args)),
         );
     }
     let arguments = arguments
@@ -81,7 +92,9 @@ pub(super) fn evaluate_function(
             uqa_sql::expr::eval_bound_builtin_function_call(
                 binding,
                 arguments,
-                &context.sql_context(),
+                &context
+                    .sql_context()
+                    .with_enum_comparison_states(context.enum_comparison_states(args)),
             )
         } else {
             let sql_context = context.sql_context();
@@ -95,7 +108,13 @@ pub(super) fn evaluate_function(
                 .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
         }
     } else {
-        uqa_sql::expr::eval_function_call(name, arguments, &context.sql_context())
+        uqa_sql::expr::eval_function_call(
+            name,
+            arguments,
+            &context
+                .sql_context()
+                .with_enum_comparison_states(context.enum_comparison_states(args)),
+        )
     };
     ordinary_output(value, control)
 }

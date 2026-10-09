@@ -128,44 +128,101 @@ pub fn compare_sort_key_values(
 
 pub(crate) fn compare_sort_key_values_by<'a>(
     keys: &[SortKey],
-    mut values: impl FnMut(usize) -> (&'a Value, &'a Value),
+    values: impl FnMut(usize) -> (&'a Value, &'a Value),
 ) -> ExecResult<std::cmp::Ordering> {
-    use std::cmp::Ordering;
-    for (i, k) in keys.iter().enumerate() {
-        let (a, b) = values(i);
-        let a_null = matches!(a, Value::Null);
-        let b_null = matches!(b, Value::Null);
-        let nulls_first = k.nulls_first.unwrap_or(k.descending);
-        if a_null || b_null {
-            let null_cmp = if a_null == b_null {
-                Ordering::Equal
-            } else if a_null {
-                if nulls_first {
-                    Ordering::Less
-                } else {
+    SortComparison {
+        keys,
+        enums: None,
+        states: &[],
+        equality_keys: false,
+    }
+    .compare_by(values)
+}
+
+/// One ordering support call per key, retained across run generation, top-K selection and merge passes.
+#[derive(Clone, Copy)]
+pub(crate) struct SortComparison<'a> {
+    pub(crate) keys: &'a [SortKey],
+    pub(crate) enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+    pub(crate) states: &'a [uqa_sql::expr::enums::EnumComparisonState],
+    pub(crate) equality_keys: bool,
+}
+
+impl SortComparison<'_> {
+    pub(crate) fn compare_by<'v>(
+        &self,
+        mut values: impl FnMut(usize) -> (&'v Value, &'v Value),
+    ) -> ExecResult<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        for (i, k) in self.keys.iter().enumerate() {
+            let (a, b) = values(i);
+            let a_null = matches!(a, Value::Null);
+            let b_null = matches!(b, Value::Null);
+            let nulls_first = k.nulls_first.unwrap_or(k.descending);
+            if a_null || b_null {
+                let null_cmp = if a_null == b_null {
+                    Ordering::Equal
+                } else if a_null {
+                    if nulls_first {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                } else if nulls_first {
                     Ordering::Greater
+                } else {
+                    Ordering::Less
+                };
+                if null_cmp != Ordering::Equal {
+                    return Ok(null_cmp);
                 }
-            } else if nulls_first {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            };
-            if null_cmp != Ordering::Equal {
-                return Ok(null_cmp);
+                continue;
             }
-            continue;
+            let ord = if self.equality_keys {
+                uqa_sql::expr::compare_grouping_values_with_enum_catalog(
+                    a,
+                    b,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    self.enums,
+                )?
+            } else {
+                uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                    a,
+                    b,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    self.enums,
+                    self.states.get(i),
+                )?
+            };
+            let ord = if k.descending { ord.reverse() } else { ord };
+            if ord != Ordering::Equal {
+                return Ok(ord);
+            }
         }
-        let ord = uqa_sql::expr::compare_typed_values_with_control(
-            a,
-            b,
+        Ok(Ordering::Equal)
+    }
+}
+
+/// DISTINCT and WITH TIES use equality, without invoking a scalar ordering support function.
+pub(crate) fn equal_sort_key_values(
+    left: &[Value],
+    right: &[Value],
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+) -> ExecResult<bool> {
+    if left.len() != right.len() {
+        return Ok(false);
+    }
+    for (left, right) in left.iter().zip(right) {
+        if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
+            left,
+            right,
             &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?;
-        let ord = if k.descending { ord.reverse() } else { ord };
-        if ord != Ordering::Equal {
-            return Ok(ord);
+            enums,
+        )? {
+            return Ok(false);
         }
     }
-    Ok(Ordering::Equal)
+    Ok(true)
 }
 
 pub(super) fn compare_values(

@@ -80,7 +80,7 @@ mod tests {
         for value in [
             Value::List(elements.clone()),
             Value::Row(elements.clone().into()),
-            Value::Record(vec![("floats".into(), Value::List(elements.clone()))]),
+            Value::Record(vec![("floats".into(), Value::List(elements.clone()))].into()),
             Value::Array(ArrayValue::with_lower_bounds(elements.clone(), vec![-2]).unwrap()),
             Value::Map([("floats".into(), Value::List(elements))].into()),
             Value::Json(tag_text.into()),

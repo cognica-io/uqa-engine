@@ -19,6 +19,13 @@ pub fn format_postgres_text(
     ty: &ColumnType,
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
+    if let Value::Datum(datum) = value {
+        return format_postgres_text(
+            &crate::expr::datums::read_with_catalog(datum, engine)?,
+            ty,
+            engine,
+        );
+    }
     if let ColumnType::Domain { base, .. } = ty {
         return format_postgres_text(value, base, engine);
     }
@@ -33,7 +40,7 @@ pub fn format_postgres_text(
         return format_array(value, element, engine);
     }
     if let (ColumnType::Composite(reference), Value::Record(fields)) = (ty, value) {
-        return format_record(fields, reference.oid, engine);
+        return format_record(fields, fields.type_oid().unwrap_or(reference.oid), engine);
     }
     Ok(match value {
         Value::Bool(value) => if *value { "t" } else { "f" }.into(),
@@ -66,6 +73,25 @@ fn format_array(
     let mut element = element;
     while let ColumnType::Array(inner) = element {
         element = inner;
+    }
+    let catalog_element;
+    if let Value::Array(array) = value {
+        if let Some(oid) = array.element_type_oid() {
+            if let Some(actual) = crate::catalog::type_metadata::builtin_scalar_type(oid) {
+                element = actual;
+            } else if crate::catalog::type_metadata::pg_type_oid(element) != i64::from(oid) {
+                catalog_element = engine
+                    .map(|engine| engine.resolve_type_oid(oid))
+                    .transpose()
+                    .map_err(SQLError::Internal)?
+                    .flatten()
+                    .ok_or_else(|| SQLError::Routine {
+                        sqlstate: "XX000".into(),
+                        message: format!("cache lookup failed for type {oid}"),
+                    })?;
+                element = &catalog_element;
+            }
+        }
     }
     let (values, prefix) = match value {
         Value::Array(array) => array_parts(array),
@@ -153,4 +179,75 @@ fn array_parts(array: &uqa_core::ArrayValue) -> (&[Value], String) {
         prefix.push('=');
     }
     (array.elements(), prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use uqa_core::ArrayValue;
+
+    struct Catalog {
+        lookups: Cell<usize>,
+    }
+
+    fn domain() -> ColumnType {
+        ColumnType::Domain {
+            schema: "public".into(),
+            name: "real_value".into(),
+            oid: 16_500,
+            array_oid: Some(16_501),
+            base: Box::new(ColumnType::Real),
+        }
+    }
+
+    impl EngineHook for Catalog {
+        fn nextval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+
+        fn currval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+
+        fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+
+        fn resolve_type_oid(&self, oid: u32) -> Result<Option<ColumnType>, String> {
+            self.lookups.set(self.lookups.get() + 1);
+            Ok((oid == 16_500).then(domain))
+        }
+    }
+
+    #[test]
+    fn array_output_uses_original_catalog_element_and_reports_missing_identity() {
+        let catalog = Catalog {
+            lookups: Cell::new(0),
+        };
+        let value = Value::Array(
+            ArrayValue::try_new(vec![Value::Float(f64::from(0.1_f32)), Value::Null])
+                .unwrap()
+                .with_element_type_oid(Some(16_500)),
+        );
+        let changed = ColumnType::Array(Box::new(ColumnType::Text));
+        assert_eq!(
+            format_postgres_text(&value, &changed, Some(&catalog)).unwrap(),
+            "{0.1,NULL}"
+        );
+        assert_eq!(catalog.lookups.get(), 1);
+        assert_eq!(
+            format_postgres_text(
+                &value,
+                &ColumnType::Array(Box::new(domain())),
+                Some(&catalog),
+            )
+            .unwrap(),
+            "{0.1,NULL}"
+        );
+        assert_eq!(catalog.lookups.get(), 1);
+        let error = format_postgres_text(&value, &changed, None).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert_eq!(error.to_string(), "cache lookup failed for type 16500");
+    }
 }

@@ -124,7 +124,7 @@ impl crate::Engine {
     ) -> Result<Option<PostingList>, SQLError> {
         let observed = read.map(|read| (read, t.columns.snapshot()));
         self.read_value_index_state(table, t, field, |index| {
-            index.scan_observing(predicate, || {
+            index.scan_observing_with_catalog(predicate, Some(self), || {
                 if let Some((read, columns)) = &observed {
                     read.observe_column_index(columns, field, predicate)?;
                 }

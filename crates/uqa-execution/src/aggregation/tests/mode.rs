@@ -36,7 +36,9 @@ fn check_reference(budget_bytes: usize) {
                     value.clone(),
                     case["descending"].as_bool().unwrap(),
                 )];
-                accumulator.observe_with_sort_keys(&value, keys).unwrap();
+                accumulator
+                    .observe_with_sort_keys(&value, keys, None)
+                    .unwrap();
             }
             let should_spill =
                 budget_bytes == 1 && values.iter().any(|v| !matches!(v, Value::Null));
@@ -72,7 +74,11 @@ fn mode_combines_distinct_nan_payloads_in_memory_and_spill() {
             Value::Float(1.0),
         ] {
             accumulator
-                .observe_with_sort_keys(&value, vec![AggregateSortKey::ascending(value.clone())])
+                .observe_with_sort_keys(
+                    &value,
+                    vec![AggregateSortKey::ascending(value.clone())],
+                    None,
+                )
                 .unwrap();
         }
         assert_eq!(

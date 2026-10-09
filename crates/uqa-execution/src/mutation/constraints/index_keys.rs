@@ -16,12 +16,14 @@ use uqa_storage::document_store::Document;
 #[derive(Clone, Copy)]
 pub struct IndexExpressionContext<'a> {
     pub catalog: &'a dyn uqa_sql::semantics::conflict::ConflictCatalog,
+    pub values: Option<&'a (dyn uqa_sql::expr::SQLValueCatalog + Send + Sync)>,
     pub expressions: &'a dyn uqa_sql::semantics::partition::PartitionExpressions,
 }
 impl<'a> ConstraintContext<'a> {
     pub fn index_expressions(self) -> IndexExpressionContext<'a> {
         IndexExpressionContext {
             catalog: self.catalog,
+            values: Some(self.values),
             expressions: self.partitions.expressions,
         }
     }
@@ -240,7 +242,7 @@ impl EnforcedKeyExecution for EnforcedKey {
                 continue;
             };
             if let Some(actual) = self.values(context, table, &document)? {
-                if key_values_equal(&actual, values)? {
+                if key_values_equal(&actual, values, context.values)? {
                     return Ok(Some(id));
                 }
             }
@@ -265,7 +267,7 @@ fn find_conflict_excluding(
             continue;
         };
         if let Some(actual) = key.values(context, table, &document)? {
-            if key_values_equal(&actual, values)? {
+            if key_values_equal(&actual, values, context.values)? {
                 return Ok(Some(id));
             }
         }
@@ -273,12 +275,18 @@ fn find_conflict_excluding(
     Ok(None)
 }
 
-pub(crate) fn key_values_equal(left: &[Value], right: &[Value]) -> Result<bool, SQLError> {
+pub(crate) fn key_values_equal(
+    left: &[Value],
+    right: &[Value],
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
+) -> Result<bool, SQLError> {
     for (left, right) in left.iter().zip(right) {
-        if !uqa_sql::expr::compare_typed_values_with_control(
+        if !uqa_sql::expr::compare_typed_values_with_enum_catalog(
             left,
             right,
             &uqa_core::memory::ProductionControl::uncontrolled(),
+            Some(catalog),
+            None,
         )?
         .is_eq()
         {

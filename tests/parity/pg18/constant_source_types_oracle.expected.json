@@ -1,0 +1,413 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(NULL), pg_typeof('label');",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "unknown",
+              "unknown"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(s.x), s.x IS NULL FROM (SELECT NULL AS original) AS s(x);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "?column?"
+          ],
+          "type_oids": [
+            2206,
+            16
+          ],
+          "rows": [
+            [
+              "text",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (VALUES (NULL)) AS s(x);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x), x FROM (SELECT 'label' AS x) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "x"
+          ],
+          "type_oids": [
+            2206,
+            25
+          ],
+          "rows": [
+            [
+              "text",
+              "label"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x), x FROM (VALUES ('label')) AS s(x);",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "x"
+          ],
+          "type_oids": [
+            2206,
+            25
+          ],
+          "rows": [
+            [
+              "text",
+              "label"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x), pg_typeof(y) FROM (SELECT NULL::integer AS x, NULL::varchar(4) AS y) AS s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "integer",
+              "character varying"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT x FROM (SELECT NULL AS x) AS inner_s) AS outer_s;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x WHERE false) AS s;",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x), count(*) FROM (SELECT NULL AS x WHERE false) AS s GROUP BY x;",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "count"
+          ],
+          "type_oids": [
+            2206,
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x UNION ALL SELECT 1) AS s ORDER BY x NULLS FIRST;",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "integer"
+            ],
+            [
+              "integer"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW constant_source_null AS SELECT NULL AS x;",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(x), x IS NULL FROM constant_source_null;",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "?column?"
+          ],
+          "type_oids": [
+            2206,
+            16
+          ],
+          "rows": [
+            [
+              "text",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP VIEW constant_source_null;",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof(upper('label')), pg_typeof('a' || 'b'), pg_typeof(COALESCE(NULL, NULL)), pg_typeof(CASE WHEN true THEN 'label' END), pg_typeof(concat('a','b'));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof",
+            "pg_typeof",
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206,
+            2206,
+            2206,
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "text",
+              "text",
+              "text",
+              "text",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_typeof('label'::text), pg_typeof(NULL::text), pg_typeof((SELECT NULL));",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            2206,
+            2206,
+            2206
+          ],
+          "rows": [
+            [
+              "text",
+              "text",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

@@ -68,7 +68,9 @@ fn integer_expression_and_count_use_positional_state_updates() {
         values: vec![Value::Int(3), Value::Int(4)],
     };
     assert!(plans.all_direct());
-    plans.observe_direct(&mut accumulators, &row, &[]).unwrap();
+    plans
+        .observe_direct(&mut accumulators, &row, &[], None)
+        .unwrap();
 
     assert_eq!(accumulators[0].integer_sum, 12);
     assert_eq!(accumulators[0].count, 1);
@@ -94,7 +96,9 @@ fn non_integer_input_falls_back_to_canonical_expression_evaluation() {
         values: vec![Value::Float(1.5), Value::Int(2)],
     };
     assert!(plans.all_direct());
-    plans.observe_direct(&mut accumulators, &row, &[]).unwrap();
+    plans
+        .observe_direct(&mut accumulators, &row, &[], None)
+        .unwrap();
 
     assert_eq!(accumulators[0].count, 1);
     assert_eq!(accumulators[0].sum, 3.0);
@@ -129,6 +133,7 @@ fn bigint_operand_cast_preserves_postgresql_widening_and_null_aggregation() {
                     values,
                 },
                 &[],
+                None,
             )
             .unwrap();
     }
@@ -177,7 +182,7 @@ fn projected_integer_arithmetic_preserves_postgresql_operand_widths() {
             let mut accumulators = vec![AggregateAccumulator::builtin("sum")];
             // Independent PostgreSQL 18.6 reports 22003 for both int2 and int4 multiplication before SUM observes a row.
             let error = plans
-                .observe_direct(&mut accumulators, &row, &[])
+                .observe_direct(&mut accumulators, &row, &[], None)
                 .unwrap_err();
             assert_eq!(error.sqlstate(), Some("22003"));
             assert_eq!(accumulators[0].count, 0);

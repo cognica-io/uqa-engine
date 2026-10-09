@@ -168,9 +168,9 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "array_sort" if matches!(argument_count, 1..=3) => Some(true),
         "date_trunc" if matches!(argument_count, 2 | 3) => Some(true),
         "array_length" | "array_lower" | "array_upper" | "atan2" | "date_part" | "decode"
-        | "encode" | "extract" | "gcd" | "lcm" | "left" | "mod" | "power" | "pow" | "repeat"
-        | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date" | "to_number"
-        | "trim_array" | "point" | "st_distance" | "st_within"
+        | "encode" | "extract" | "gcd" | "get_byte" | "lcm" | "left" | "mod" | "power" | "pow"
+        | "repeat" | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date"
+        | "to_number" | "trim_array" | "point" | "st_distance" | "st_within"
             if argument_count == 2 =>
         {
             Some(true)
@@ -307,18 +307,32 @@ pub fn eval_bound_builtin_function_call(
         type_oid,
     } = dispatch
     {
-        return super::enums::enum_function_value(
+        return super::enums::enum_function_value_with_state(
             ctx.engine.and_then(super::EngineHook::enum_labels),
             operation,
             type_oid,
             &evaluated,
+            ctx.enum_comparison_state(),
         );
+    }
+    if let Some(result) = scalar_postgres::eval_comparison_with_context(
+        dispatch,
+        &evaluated,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        ctx,
+    ) {
+        return result.map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary comparison result")
+        });
     }
     eval_dispatched_builtin_with_control(
         binding,
         dispatch,
         &evaluated,
         &uqa_core::memory::ProductionControl::uncontrolled(),
+        ctx,
     )
     .map(|value| {
         value
@@ -332,16 +346,18 @@ pub(super) fn eval_dispatched_builtin_with_control(
     dispatch: FunctionDispatch,
     evaluated: &[Value],
     control: &uqa_core::memory::ProductionControl<'_>,
+    context: &EvalContext<'_>,
 ) -> Result<uqa_core::memory::Produced<Value>> {
-    if dispatch == FunctionDispatch::FieldSelect
-        && binding
-            .composite_field
-            .as_ref()
-            .is_some_and(|field| field.dropped)
-    {
-        // Arguments have already run: removal must not suppress their observable effects.
-        control.check()?;
-        return Ok(control.finish(Value::Null, control.empty_reservation())?);
+    if dispatch == FunctionDispatch::FieldSelect {
+        if let Some(field) = &binding.composite_field {
+            // Arguments have already run: descriptor changes must not suppress their observable effects.
+            return super::composites::fields::select_with_control(
+                field,
+                evaluated,
+                context.engine,
+                control,
+            );
+        }
     }
     if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
         dispatch, evaluated, control,
@@ -382,10 +398,8 @@ pub(super) fn eval_dispatched_builtin_with_control(
         FunctionDispatch::Enum {
             operation,
             type_oid,
-        } => Ok(
-            control.retain_external_value(super::enums::enum_function_value(
-                None, operation, type_oid, evaluated,
-            )?)?,
+        } => super::enums::enum_function_value_with_control(
+            None, operation, type_oid, evaluated, None, control,
         ),
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => Err(
             SQLError::Internal("call-argument syntax marker reached scalar execution".into()),

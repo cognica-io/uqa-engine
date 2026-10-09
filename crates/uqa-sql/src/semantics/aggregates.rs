@@ -32,20 +32,9 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (ScalarExpr::Column(c), ScalarExpr::QualifiedColumn { column, .. })
         | (ScalarExpr::QualifiedColumn { column, .. }, ScalarExpr::Column(c)) => c == column,
         (ScalarExpr::Literal(a), ScalarExpr::Literal(b)) => literals_equal(a, b),
-        (
-            ScalarExpr::TypedLiteral {
-                value: av,
-                ty: at,
-                bound_type: ab,
-                parameter_index: ap,
-            },
-            ScalarExpr::TypedLiteral {
-                value: bv,
-                ty: bt,
-                bound_type: bb,
-                parameter_index: bp,
-            },
-        ) => at == bt && ab == bb && ap == bp && literals_equal(av, bv),
+        (ScalarExpr::TypedLiteral { .. }, ScalarExpr::TypedLiteral { .. }) => {
+            typed_literals_match(lhs, rhs)
+        }
         (ScalarExpr::Param(a), ScalarExpr::Param(b)) => a == b,
         (ScalarExpr::Position(a), ScalarExpr::Position(b)) => a == b,
         (ScalarExpr::InternalColumn(a), ScalarExpr::InternalColumn(b)) => a == b,
@@ -99,11 +88,17 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
                 rhs: br,
             },
         ) => ao == bo && exprs_match(al, bl) && exprs_match(ar, br),
-        (ScalarExpr::And(a), ScalarExpr::And(b)) | (ScalarExpr::Or(a), ScalarExpr::Or(b)) => {
+        (ScalarExpr::And(a), ScalarExpr::And(b))
+        | (ScalarExpr::Or(a), ScalarExpr::Or(b))
+        | (ScalarExpr::Array(a), ScalarExpr::Array(b))
+        | (ScalarExpr::Row(a), ScalarExpr::Row(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
         }
         (ScalarExpr::Not(a), ScalarExpr::Not(b))
         | (ScalarExpr::UnaryMinus(a), ScalarExpr::UnaryMinus(b)) => exprs_match(a, b),
+        (ScalarExpr::CompositeRow { .. }, ScalarExpr::CompositeRow { .. }) => {
+            composite_rows_match(lhs, rhs)
+        }
         (
             ScalarExpr::Cast {
                 expr: a, ty: at, ..
@@ -114,6 +109,48 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         ) => at == bt && exprs_match(a, b),
         _ => false,
     }
+}
+
+fn composite_rows_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
+    let (
+        ScalarExpr::CompositeRow {
+            items: a,
+            binding: ab,
+            bound_type: at,
+        },
+        ScalarExpr::CompositeRow {
+            items: b,
+            binding: bb,
+            bound_type: bt,
+        },
+    ) = (lhs, rhs)
+    else {
+        return false;
+    };
+    ab == bb && at == bt && a.len() == b.len() && a.iter().zip(b).all(|(a, b)| exprs_match(a, b))
+}
+
+fn typed_literals_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
+    let (
+        ScalarExpr::TypedLiteral {
+            value: av,
+            ty: at,
+            bound_type: ab,
+            parameter_index: ap,
+            composite_source: ac,
+        },
+        ScalarExpr::TypedLiteral {
+            value: bv,
+            ty: bt,
+            bound_type: bb,
+            parameter_index: bp,
+            composite_source: bc,
+        },
+    ) = (lhs, rhs)
+    else {
+        return false;
+    };
+    at == bt && ab == bb && ap == bp && ac == bc && literals_equal(av, bv)
 }
 
 pub fn literals_equal(a: &Value, b: &Value) -> bool {

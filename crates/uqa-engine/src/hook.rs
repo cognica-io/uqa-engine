@@ -58,6 +58,15 @@ impl uqa_sql::expr::EngineHook for Engine {
         )
     }
 
+    fn resolve_type_oid(&self, oid: u32) -> Result<Option<uqa_sql::ast::ColumnType>, String> {
+        Ok(
+            uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid(
+                &self.catalog_execution(),
+                oid,
+            ),
+        )
+    }
+
     fn resolve_regclass_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
         uqa_execution::catalog::projection::resolve_regclass_oid(&self.catalog_execution(), name)
     }

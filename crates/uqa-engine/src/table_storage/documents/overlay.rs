@@ -202,13 +202,14 @@ impl Engine {
     ) -> Result<Option<DocId>, SQLError> {
         let table = self.command_overlay_table_name(table)?;
         let control = self.query_retention_control()?;
-        CommandMutationOverlay::find_match(
+        CommandMutationOverlay::find_match_with_catalog(
             &mut self.session.command_mutation_overlays.lock(),
             &table,
             fields,
             values,
             presence,
             &control,
+            Some(self),
         )
     }
 
@@ -225,9 +226,15 @@ impl Engine {
         let table = self.command_overlay_table_name(table)?;
         let control = self.query_retention_control()?;
         let mut overlays = self.session.command_mutation_overlays.lock();
-        let (matches, _memory) =
-            CommandMutationOverlay::matches(&mut overlays, &table, fields, values, &control)?
-                .into_parts();
+        let (matches, _memory) = CommandMutationOverlay::matches_with_catalog(
+            &mut overlays,
+            &table,
+            fields,
+            values,
+            &control,
+            Some(self),
+        )?
+        .into_parts();
         Ok(matches)
     }
 

@@ -75,6 +75,38 @@ impl Engine {
 }
 
 impl EnumLabelCatalog for Engine {
+    fn value_type_by_oid(&self, oid: u32) -> Result<Option<uqa_sql::ColumnType>, SQLError> {
+        uqa_sql::expr::EngineHook::resolve_type_oid(self, oid).map_err(SQLError::Internal)
+    }
+
+    fn value_composite_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<std::sync::Arc<uqa_sql::expr::composites::CompositeTypeDescriptor>>, SQLError>
+    {
+        uqa_sql::expr::composites::CompositeTypeCatalog::composite_type(self, oid)
+    }
+
+    fn enum_type_comparison_states(
+        &self,
+    ) -> Option<&uqa_sql::expr::enums::EnumTypeComparisonStates> {
+        Some(&self.session.enum_type_comparison_states)
+    }
+
+    fn enum_label_position(&self, label_oid: u32) -> Result<Option<(u32, usize)>, SQLError> {
+        Ok(self
+            .runtime
+            .enum_label_cache
+            .position(&self.enum_registry_snapshot(), label_oid))
+    }
+
+    fn enum_value_by_oid(&self, label_oid: u32) -> Result<Option<uqa_core::EnumValue>, SQLError> {
+        Ok(self
+            .runtime
+            .enum_label_cache
+            .value(&self.enum_registry_snapshot(), label_oid))
+    }
+
     fn enum_type_labels(
         &self,
         type_oid: u32,

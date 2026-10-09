@@ -822,3 +822,17 @@ fn join_reordering_preserves_lateral_boundary() {
         }
     ));
 }
+
+#[test]
+fn admitted_constant_group_keys_preserve_empty_input_grouping() {
+    for sql in [
+        "SELECT count(*) FROM (SELECT 4 AS key WHERE false) AS q GROUP BY key",
+        "SELECT count(*) FROM (SELECT 4 AS key) AS q GROUP BY key",
+        "SELECT 7 FROM (VALUES (1),(2)) AS q(v) GROUP BY CAST('same' AS text)",
+    ] {
+        let plan = optimized(sql);
+        let block = query_block(&plan);
+        assert_eq!(block.group_by, vec![ScalarExpr::Literal(Value::Bool(true))]);
+        assert!(matches!(block.compute, ComputePlan::Aggregate));
+    }
+}

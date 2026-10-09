@@ -1,6 +1,14 @@
 # Upgrading UQA Engine
 
-This page describes upgrade requirements for UQA Engine 0.5.2 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.2/docs/manual/reference/10-upgrading.md) when installing the 0.5.2 packages.
+This page describes upgrade requirements for development main and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.2/docs/manual/reference/10-upgrading.md) when installing the 0.5.2 packages.
+
+## Unreleased
+
+Composite attribute type changes retain each stored constant's original datum and creation descriptors separately from its current interpretation. SQLite record format 61 and redb record format 57 exclude older writers that would discard this metadata. Native SQLite mapping remains 15. Close all database owners and retain a pre-upgrade backup before opening an older database. Initial open upgrades the marker atomically while preserving record histories, receipts, identifier watermarks and the SQLite sequence durability certificate; it does not rewrite user rows. Older binaries reject the upgraded database.
+
+Rust constructors for `Expr::TypedLiteral` and `ScalarExpr::TypedLiteral` supply `composite_source: None` for a new constant. Expression adapters must preserve the optional source metadata when copying a retained constant; the SQL-owned lowering, retention and copy helpers account for its complete resource cost. `CompositeRowBinding.argument_types` records the admitted argument types; new bindings supply them, and predecessor bindings acquire them while their original descriptor is current. Copies must retain this metadata as well. `CompositeTypeDescriptor.dropped` retains removed slots' physical width and alignment so later fields in an already admitted tuple keep PostgreSQL's read positions; fresh descriptors with no dropped slots use an empty vector.
+
+`Value::Record` now wraps `RecordValue`. New untyped Rust records use `Value::Record(fields.into())`; SQL-produced named records also retain their actual tuple type OID. Custom adapters must preserve `RecordValue::type_oid()` when rebuilding fields, or move the original carrier. `RecordValue::from_parts` and `into_parts` carry fields and identity together; controlled producers use `RecordValue::with_control` to reserve the boxed header before allocation. Legacy serialized records without an OID remain readable. The unreleased storage markers above exclude released writers that would discard the new metadata. Execution adapters supply the active `SQLValueCatalog` to constraint and index contexts, exact-key lookups and catalog-aware row-key methods. A custom `EngineHook` used for typed output must resolve user type OIDs as well as composite descriptors; `EngineValueCatalog` adapts its capabilities without requiring enum support.
 
 ## 0.5.2
 

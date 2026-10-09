@@ -191,6 +191,7 @@ pub fn read_oid_alias_constants<C: OidAliasInput + ?Sized>(
         match read_constant(catalog, &alias, text, array) {
             Ok(value) => {
                 **expr = Expr::TypedLiteral {
+                    composite_source: None,
                     value,
                     ty: constant_type(alias, array).catalog_name(),
                 };
@@ -259,6 +260,7 @@ fn read_scalar_constant<C: OidAliasInput + ?Sized>(
             Ok(value) => {
                 if !keep_relations {
                     *argument = ScalarExpr::TypedLiteral {
+                        composite_source: None,
                         value,
                         ty: ColumnType::Regclass.catalog_name(),
                         bound_type: Some(ColumnType::Regclass),
@@ -286,6 +288,7 @@ fn read_scalar_constant<C: OidAliasInput + ?Sized>(
             }
             let bound_type = constant_type(alias, array);
             **expr = ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value,
                 ty: bound_type.catalog_name(),
                 bound_type: Some(bound_type),

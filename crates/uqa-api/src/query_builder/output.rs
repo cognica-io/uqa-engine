@@ -130,6 +130,7 @@ pub(super) fn infer_arrow_type(column_index: usize, column: &str, result: &SQLRe
             Value::Int(_) => DataType::Int64,
             Value::Float(_) => DataType::Float64,
             Value::Void
+            | Value::Datum(_)
             | Value::Enum(_)
             | Value::Decimal(_)
             | Value::Str(_)
@@ -286,6 +287,7 @@ fn i64_to_f64_exact(value: i64) -> Option<f64> {
 
 fn value_kind(value: &Value) -> &'static str {
     match value {
+        Value::Datum(datum) => uqa_sql::expr::datums::type_name(datum),
         Value::Null => "null",
         Value::Void => "void",
         Value::Bool(_) => "boolean",
@@ -309,6 +311,12 @@ fn value_kind(value: &Value) -> &'static str {
 
 fn value_to_arrow_string(value: &Value) -> Result<Option<String>, ArrowError> {
     Ok(match value {
+        Value::Datum(datum) => {
+            return value_to_arrow_string(
+                &uqa_sql::expr::datums::read(datum)
+                    .map_err(|error| ArrowError::CastError(error.to_string()))?,
+            )
+        }
         Value::Null => None,
         Value::Void => Some(String::new()),
         Value::Bool(v) => Some(v.to_string()),

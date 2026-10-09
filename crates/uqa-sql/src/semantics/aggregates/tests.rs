@@ -9,6 +9,66 @@
 use super::*;
 
 #[test]
+fn analyzed_composite_rows_keep_complete_grouping_identity() {
+    let row = ScalarExpr::CompositeRow {
+        items: vec![ScalarExpr::Column("n".into())],
+        binding: crate::ast::CompositeRowBinding {
+            ty: "composite#20001".into(),
+            attributes: vec![1],
+            argument_types: Some(vec![crate::ColumnType::Integer]),
+        },
+        bound_type: None,
+    };
+    assert!(exprs_match(&row, &row.clone()));
+    let mut other = row.clone();
+    let ScalarExpr::CompositeRow { binding, .. } = &mut other else {
+        unreachable!()
+    };
+    binding.attributes[0] = 2;
+    assert!(!exprs_match(&row, &other));
+    let mut other = row.clone();
+    let ScalarExpr::CompositeRow { binding, .. } = &mut other else {
+        unreachable!()
+    };
+    binding.argument_types = Some(vec![crate::ColumnType::BigInteger]);
+    assert!(!exprs_match(&row, &other));
+    let mut other = row.clone();
+    let ScalarExpr::CompositeRow { items, .. } = &mut other else {
+        unreachable!()
+    };
+    items[0] = ScalarExpr::Column("m".into());
+    assert!(!exprs_match(&row, &other));
+}
+
+#[test]
+fn array_and_row_ordering_expressions_keep_structural_group_identity() {
+    for (left, right, expected) in [
+        ("ARRAY[n]", "ARRAY[n]", true),
+        ("ROW(n, 0)", "ROW(n, 0)", true),
+        ("ROW(ARRAY[n], 0)", "ROW(ARRAY[n], 0)", true),
+        ("ARRAY[n, 0]", "ARRAY[0, n]", false),
+        ("ARRAY[n]", "ARRAY[n, 0]", false),
+        ("ROW(n, 0)", "ROW(n, 1)", false),
+        ("ROW(n, 0)", "ROW(n, 0.0)", false),
+        ("ARRAY[n]", "ROW(n)", false),
+    ] {
+        let sql = format!("SELECT DISTINCT ON ({left}) n FROM t ORDER BY {right},n");
+        let plan = crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        let crate::plan::UnifiedPlan::Query(query) = plan else {
+            unreachable!()
+        };
+        let crate::plan::RelationalPlan::QueryBlock(block) = query.root else {
+            unreachable!()
+        };
+        assert_eq!(
+            exprs_match(&block.distinct_on[0], &block.order_by[0].expr),
+            expected,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn builtin_aggregate_identity_distinguishes_qualification_and_scalar_overloads() {
     let call = |name: &str, binding| ScalarExpr::Func {
         order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
@@ -127,6 +187,7 @@ fn decimal_literal_identity_matches_its_clone_without_erasing_scale() {
 #[test]
 fn typed_literal_identity_retains_the_declared_type_and_datum() {
     let expression = |value, ty: &str| ScalarExpr::TypedLiteral {
+        composite_source: None,
         value,
         ty: ty.into(),
         bound_type: None,
@@ -147,12 +208,14 @@ fn typed_literal_identity_retains_the_declared_type_and_datum() {
         &ScalarExpr::Literal(Value::Int(1))
     ));
     let first = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: decimal("1.0"),
         ty: "numeric".into(),
         bound_type: None,
         parameter_index: Some(1),
     };
     let second = ScalarExpr::TypedLiteral {
+        composite_source: None,
         value: decimal("1.0"),
         ty: "numeric".into(),
         bound_type: None,
@@ -160,4 +223,33 @@ fn typed_literal_identity_retains_the_declared_type_and_datum() {
     };
     assert!(exprs_match(&first, &first.clone()));
     assert!(!exprs_match(&first, &second));
+}
+
+#[test]
+fn composite_literals_with_equal_current_values_keep_distinct_original_datums() {
+    use crate::expr::composites::{
+        CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
+    };
+    let expression = |original: &str| ScalarExpr::TypedLiteral {
+        value: Value::Record(vec![("a".into(), Value::Bool(true))].into()),
+        ty: "composite#20001".into(),
+        bound_type: None,
+        parameter_index: None,
+        composite_source: Some(Box::new(CompositeConstantSource {
+            value: Value::Record(vec![("a".into(), Value::Str(original.into()))].into()),
+            descriptors: vec![CompositeTypeDescriptor {
+                dropped: Vec::new(),
+                type_oid: 20_001,
+                relation_oid: 20_003,
+                attributes: vec![CompositeAttribute {
+                    name: "a".into(),
+                    ty: crate::ColumnType::InternalChar,
+                    number: 1,
+                }],
+            }],
+        })),
+    };
+    let first = expression("A");
+    assert!(exprs_match(&first, &first.clone()));
+    assert!(!exprs_match(&first, &expression("B")));
 }

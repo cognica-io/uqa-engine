@@ -35,7 +35,8 @@ pub fn coerce_routine_value_from(
                     .cloned()
                     .enumerate()
                     .map(|(index, value)| (format!("f{}", index + 1), value))
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
             )),
             _ => Err(SQLError::Routine {
                 sqlstate: "42804".into(),

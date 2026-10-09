@@ -121,17 +121,25 @@ fn require_arity(name: &str, args: &[Value], count: usize) -> Result<()> {
 
 fn dimensions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     require_arity("array_dims", args, 1)?;
-    let array = match &args[0] {
+    let physical;
+    let (dimensions, bounds) = match &args[0] {
         Value::Null => return inline(Value::Null, control),
-        Value::Array(array) => array,
-        Value::LegacyVector(vector) => vector.as_array(),
+        Value::Datum(datum) => {
+            physical = super::datums::array_shape(datum, control)?;
+            (physical.dimensions(), physical.lower_bounds())
+        }
+        Value::Array(array) => (array.dimensions(), array.lower_bounds()),
+        Value::LegacyVector(vector) => (
+            vector.as_array().dimensions(),
+            vector.as_array().lower_bounds(),
+        ),
         other => return Err(not_an_array("array_dims", other)),
     };
-    if array.dimensions().is_empty() {
+    if dimensions.is_empty() {
         return inline(Value::Null, control);
     }
     let mut output = ProductionString::new(*control);
-    for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
+    for (lower, length) in bounds.iter().zip(dimensions) {
         let length = i64::try_from(*length).map_err(|_| out_of_range("array dimension"))?;
         output.push_str(
             &control.format(format_args!("[{lower}:{}]", i64::from(*lower) + length - 1))?,
@@ -288,6 +296,17 @@ pub(in crate::expr) fn preserve_polymorphic_array_type(
     output: Produced<Value>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    if let Value::Array(source) = source {
+        let (Value::Array(array), memory) = output.into_parts() else {
+            return Err(SQLError::Internal(
+                "array function returned a non-array".into(),
+            ));
+        };
+        return Ok(control.finish(
+            Value::Array(array.with_element_type_oid(source.element_type_oid())),
+            memory,
+        )?);
+    }
     let Value::LegacyVector(source) = source else {
         return Ok(output);
     };
@@ -375,9 +394,16 @@ fn rebuild_array(
             control,
         )?
     };
-    finish_array(rebuilt, control, || {
+    let output = finish_array(rebuilt, control, || {
         SQLError::TypeMismatch("array dimensions do not match".into())
-    })
+    })?;
+    let (Value::Array(array), memory) = output.into_parts() else {
+        unreachable!();
+    };
+    Ok(control.finish(
+        Value::Array(array.with_element_type_oid(original.element_type_oid())),
+        memory,
+    )?)
 }
 
 fn concatenate(
@@ -385,6 +411,13 @@ fn concatenate(
     right: &ArrayValue,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    if matches!((left.element_type_oid(), right.element_type_oid()), (Some(left), Some(right)) if left != right)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "cannot concatenate arrays of different element types".into(),
+        });
+    }
     if left.dimensions().is_empty() {
         return rebuild_array(right, copy_elements(right.elements(), control)?, control);
     }
@@ -433,7 +466,7 @@ fn concatenate(
             right.dimensions().len(),
         ))));
     };
-    finish_array(
+    let output = finish_array(
         ArrayValue::with_lower_bounds_with_control(
             elements.finish()?,
             bounds(lower_bounds, control)?,
@@ -441,7 +474,16 @@ fn concatenate(
         )?,
         control,
         || incompatible_array_concat(None),
-    )
+    )?;
+    let (Value::Array(array), memory) = output.into_parts() else {
+        unreachable!();
+    };
+    Ok(control.finish(
+        Value::Array(
+            array.with_element_type_oid(left.element_type_oid().or(right.element_type_oid())),
+        ),
+        memory,
+    )?)
 }
 
 fn incompatible_array_concat(detail: Option<String>) -> SQLError {

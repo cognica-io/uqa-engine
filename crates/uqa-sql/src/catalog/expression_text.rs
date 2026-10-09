@@ -35,7 +35,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             unreachable!("executor-only column {column:?} reached catalog SQL rendering")
         }
         Expr::Literal(value) => schema_literal_text(value)?,
-        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", schema_literal_text(value)?),
+        Expr::TypedLiteral { value, ty, .. } => format!("({})::{ty}", schema_literal_text(value)?),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             name,
@@ -291,6 +291,7 @@ fn schema_literal_text(value: &Value) -> Result<String, SQLError> {
         Value::Json(value) => format!("'{}'::json", value.replace('\'', "''")),
         Value::JsonB(value) => format!("'{}'::jsonb", value.replace('\'', "''")),
         Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
+        Value::Datum(value) => return schema_literal_text(&crate::expr::datums::read(value)?),
         Value::LegacyVector(vector) => crate::render::legacy_vector_expression(vector)
             .expect("stored SQL vector has SQL-produced bounds"),
         Value::Array(array)

@@ -15,14 +15,22 @@ fn label(type_oid: u32, key: &[u8]) -> Value {
     ))
 }
 
+fn physical_label(type_oid: u32, key: &[u8], oid: u32) -> Value {
+    let Value::Enum(value) = label(type_oid, key) else {
+        unreachable!()
+    };
+    Value::Enum(value.with_label_oid(Some(oid)))
+}
+
 #[test]
 fn enum_values_round_trip_in_batches_and_indexed_records() {
     let nested = Value::Array(
-        ArrayValue::with_lower_bounds(vec![label(9, &[1]), Value::Null], vec![0]).unwrap(),
+        ArrayValue::with_lower_bounds(vec![physical_label(9, &[1], 23), Value::Null], vec![0])
+            .unwrap(),
     );
     let row = PhysicalRow::from_values(vec![
         label(16_390, &[64]),
-        label(u32::MAX, &[0, 255, 7]),
+        physical_label(u32::MAX, &[0, 255, 7], u32::MAX),
         nested,
     ]);
     let encoded = encode_physical_row_record(&row, 3).unwrap();
@@ -51,7 +59,7 @@ fn enum_values_round_trip_in_batches_and_indexed_records() {
 
 #[test]
 fn enum_spill_rejects_truncated_records_and_invalid_keys() {
-    let row = PhysicalRow::from_values(vec![label(7, &[5, 9])]);
+    let row = PhysicalRow::from_values(vec![physical_label(7, &[5, 9], 9)]);
     let encoded = encode_physical_row_record(&row, 1).unwrap();
     for length in 0..encoded.len() {
         assert!(decode_physical_row_record(&encoded[..length], 1).is_err());

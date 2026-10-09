@@ -19,6 +19,7 @@ struct BorrowedGroupProbe<'probe, Row> {
     hash: u64,
     columns: &'probe [super::super::projected::ProjectedGroupColumn],
     row: &'probe Row,
+    enums: Option<&'probe dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 }
 
 impl AdaptiveAggregateSet {
@@ -30,7 +31,11 @@ impl AdaptiveAggregateSet {
     ) -> Result<(), SQLError> {
         debug_assert!(self.statement.subqueries.is_empty());
         if self.projected_aggregate_plans.all_direct()
-            && self.consume_direct_projected(row, params)?
+            && self.consume_direct_projected(
+                row,
+                params,
+                uqa_sql::expr::EngineHook::enum_labels(context),
+            )?
         {
             return Ok(());
         }
@@ -48,6 +53,7 @@ impl AdaptiveAggregateSet {
         &mut self,
         row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     ) -> Result<bool, SQLError> {
         if self.statement.group_by.is_empty() {
             if self.groups.len() == 1 {
@@ -58,6 +64,7 @@ impl AdaptiveAggregateSet {
                     &mut self.groups[0],
                     row,
                     params,
+                    enums,
                 )?;
                 return Ok(true);
             }
@@ -66,12 +73,12 @@ impl AdaptiveAggregateSet {
                     "ungrouped aggregate retained more than one group".into(),
                 ));
             }
-            let hash = self.group_hash(&[])?;
-            if !self.observe_direct_key(hash, &[], row, params)? {
+            let hash = self.group_hash(&[], None)?;
+            if !self.observe_direct_key(hash, &[], row, params, enums)? {
                 if !self.insert_group(&[], hash)? {
                     return Ok(true);
                 }
-                if !self.observe_direct_key(hash, &[], row, params)? {
+                if !self.observe_direct_key(hash, &[], row, params, enums)? {
                     return Err(uninitialized_group());
                 }
             }
@@ -87,7 +94,7 @@ impl AdaptiveAggregateSet {
             row,
         );
         if let Some(compact_key) = compact_key {
-            if !self.observe_direct_compact_text(compact_key, row, params)? {
+            if !self.observe_direct_compact_text(compact_key, row, params, enums)? {
                 let null = Value::Null;
                 let key = super::super::projected::group_key(
                     self.projected_group_columns
@@ -99,7 +106,7 @@ impl AdaptiveAggregateSet {
                 if !self.insert_group(&key, compact_key)? {
                     return Ok(true);
                 }
-                if !self.observe_direct_compact_text(compact_key, row, params)? {
+                if !self.observe_direct_compact_text(compact_key, row, params, enums)? {
                     return Err(uninitialized_group());
                 }
             }
@@ -110,8 +117,9 @@ impl AdaptiveAggregateSet {
             .projected_group_columns
             .as_ref()
             .expect("projected group columns disappeared");
-        let hash = super::super::projected::group_hash(columns, row, self.group_index.hasher())
-            .map_err(super::super::sort_fallback::exec_to_sql_error)?;
+        let hash =
+            super::super::projected::group_hash(columns, row, self.group_index.hasher(), enums)
+                .map_err(super::super::sort_fallback::exec_to_sql_error)?;
         let observed = Self::observe_direct_borrowed(
             &mut self.groups,
             BorrowedGroupProbe {
@@ -119,6 +127,7 @@ impl AdaptiveAggregateSet {
                 hash,
                 columns,
                 row,
+                enums,
             },
             &self.projected_aggregate_plans,
             self.variable_state,
@@ -131,7 +140,7 @@ impl AdaptiveAggregateSet {
             if !self.insert_group(&key, hash)? {
                 return Ok(true);
             }
-            if !self.observe_direct_key(hash, &key, row, params)? {
+            if !self.observe_direct_key(hash, &key, row, params, enums)? {
                 return Err(uninitialized_group());
             }
         }
@@ -144,6 +153,7 @@ impl AdaptiveAggregateSet {
         key: u64,
         row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     ) -> Result<bool, SQLError> {
         let index = self.compact_text_group_index.as_ref().ok_or_else(|| {
             SQLError::Internal("compact text aggregate group index is unavailable".into())
@@ -161,6 +171,7 @@ impl AdaptiveAggregateSet {
             entry,
             row,
             params,
+            enums,
         )?;
         Ok(true)
     }
@@ -179,7 +190,9 @@ impl AdaptiveAggregateSet {
             probe.hash,
             probe.columns,
             probe.row,
-        ) else {
+            probe.enums,
+        )?
+        else {
             return Ok(false);
         };
         let entry = &mut groups[index];
@@ -190,6 +203,7 @@ impl AdaptiveAggregateSet {
             entry,
             probe.row,
             params,
+            probe.enums,
         )?;
         Ok(true)
     }
@@ -200,8 +214,10 @@ impl AdaptiveAggregateSet {
         key: &[Value],
         row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     ) -> Result<bool, SQLError> {
-        let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)
+        let Some(index) =
+            super::matching_group_index(&self.group_index, &self.groups, hash, key, enums)?
         else {
             return Ok(false);
         };
@@ -213,6 +229,7 @@ impl AdaptiveAggregateSet {
             entry,
             row,
             params,
+            enums,
         )?;
         Ok(true)
     }
@@ -229,8 +246,12 @@ impl AdaptiveAggregateSet {
         else {
             return Ok(false);
         };
-        let hash = super::super::projected::group_hash(columns, row, self.group_index.hasher())
-            .map_err(super::super::sort_fallback::exec_to_sql_error)?;
+        let enums = context
+            .function_hook()
+            .and_then(uqa_sql::expr::EngineHook::enum_labels);
+        let hash =
+            super::super::projected::group_hash(columns, row, self.group_index.hasher(), enums)
+                .map_err(super::super::sort_fallback::exec_to_sql_error)?;
         if !Self::observe_projected_borrowed(
             &mut self.groups,
             BorrowedGroupProbe {
@@ -238,6 +259,7 @@ impl AdaptiveAggregateSet {
                 hash,
                 columns,
                 row,
+                enums,
             },
             &self.projected_aggregate_plans,
             &self.aggregate_targets,
@@ -262,7 +284,7 @@ impl AdaptiveAggregateSet {
         groups: &mut [super::GroupEntry],
         probe: BorrowedGroupProbe<'_, Row>,
         plans: &super::super::projected_input::ProjectedAggregatePlans,
-        aggregate_targets: &[crate::ScalarExpr],
+        aggregate_targets: &crate::scalar::PreparedExpressions<Vec<crate::ScalarExpr>>,
         variable_state: bool,
         retained_bytes: &mut usize,
         context: &ScalarEvalContext<'_>,
@@ -273,7 +295,9 @@ impl AdaptiveAggregateSet {
             probe.hash,
             probe.columns,
             probe.row,
-        ) else {
+            probe.enums,
+        )?
+        else {
             return Ok(false);
         };
         let entry = &mut groups[index];
@@ -284,7 +308,7 @@ impl AdaptiveAggregateSet {
             retained_bytes,
             entry,
             probe.row,
-            context,
+            &(*context).with_function_states(aggregate_targets.calls()),
         )?;
         Ok(true)
     }
@@ -296,7 +320,15 @@ impl AdaptiveAggregateSet {
         row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<bool, SQLError> {
-        let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)
+        let Some(index) = super::matching_group_index(
+            &self.group_index,
+            &self.groups,
+            hash,
+            key,
+            context
+                .function_hook()
+                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+        )?
         else {
             return Ok(false);
         };
@@ -308,7 +340,7 @@ impl AdaptiveAggregateSet {
             &mut self.retained_bytes,
             entry,
             row,
-            context,
+            &(*context).with_function_states(self.aggregate_targets.calls()),
         )?;
         Ok(true)
     }
@@ -318,13 +350,18 @@ impl AdaptiveAggregateSet {
         row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<(), SQLError> {
+        let group_context = (*context).with_function_states(self.group_expressions.calls());
         let key = self
-            .statement
-            .group_by
+            .group_expressions
             .iter()
-            .map(|expression| eval_scalar(expression, context))
+            .map(|expression| eval_scalar(expression, &group_context))
             .collect::<Result<Vec<_>, _>>()?;
-        let hash = self.group_hash(&key)?;
+        let hash = self.group_hash(
+            &key,
+            context
+                .function_hook()
+                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+        )?;
         if !self.observe_projected_key(hash, &key, row, context)? {
             if !self.insert_group(&key, hash)? {
                 return Ok(());
@@ -343,13 +380,17 @@ fn borrowed_group_index<Row: RowLookup>(
     hash: u64,
     columns: &[super::super::projected::ProjectedGroupColumn],
     row: &Row,
-) -> Option<usize> {
-    group_index.get(&hash).and_then(|bucket| {
-        bucket
-            .iter()
-            .copied()
-            .find(|index| super::super::projected::group_matches(columns, &groups[*index].key, row))
-    })
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+) -> Result<Option<usize>, SQLError> {
+    let Some(bucket) = group_index.get(&hash) else {
+        return Ok(None);
+    };
+    for index in bucket {
+        if super::super::projected::group_matches(columns, &groups[*index].key, row, enums)? {
+            return Ok(Some(*index));
+        }
+    }
+    Ok(None)
 }
 
 fn observe_direct_entry(
@@ -359,10 +400,11 @@ fn observe_direct_entry(
     entry: &mut super::GroupEntry,
     row: &ProjectedRow<'_, '_>,
     params: &[SQLParam],
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> Result<(), SQLError> {
     let state = &mut entry.state;
     let previous_bytes = state.retained_bytes;
-    plans.observe_direct(&mut state.accumulators, row, params)?;
+    plans.observe_direct(&mut state.accumulators, row, params, enums)?;
     update_entry_size(variable_state, retained_bytes, entry, previous_bytes)
 }
 

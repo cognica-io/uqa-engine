@@ -1,0 +1,457 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE read_enum_a AS ENUM ('first','last'); CREATE TYPE read_enum_b AS ENUM ('other'); CREATE TYPE read_enum_bad AS (a integer,b integer); CREATE VIEW read_enum_bad_value AS SELECT '(1,19)'::read_enum_bad AS v; CREATE TYPE read_enum_good AS (a read_enum_a,b integer); CREATE VIEW read_enum_good_value AS SELECT '(first,23)'::read_enum_good AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "ALTER TYPE read_enum_bad ALTER ATTRIBUTE a TYPE read_enum_a; ALTER TYPE read_enum_good ALTER ATTRIBUTE a TYPE read_enum_b",
+      "command_tags": [
+        "ALTER TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "change"
+    },
+    {
+      "sql": "SELECT (v).a FROM read_enum_bad_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P03",
+        "message": "invalid internal value for enum: 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_field"
+    },
+    {
+      "sql": "SELECT v FROM read_enum_bad_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P03",
+        "message": "invalid internal value for enum: 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_record"
+    },
+    {
+      "sql": "SELECT (v).a::text FROM read_enum_bad_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P03",
+        "message": "invalid internal value for enum: 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_text"
+    },
+    {
+      "sql": "SELECT (v).b,(v).a IS NULL,(v).a IS NOT NULL FROM read_enum_bad_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "b",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "19",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "unused_field"
+    },
+    {
+      "sql": "SELECT v FROM read_enum_bad_value LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19163
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unused_row"
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN (v).a ELSE NULL END FROM read_enum_bad_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            19152
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "unused_case"
+    },
+    {
+      "sql": "SELECT v,(v).a,(v).a::text FROM read_enum_good_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "a",
+            "a"
+          ],
+          "type_oids": [
+            19170,
+            19158,
+            25
+          ],
+          "rows": [
+            [
+              "(first,23)",
+              "first",
+              "first"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "foreign_enum_label"
+    },
+    {
+      "sql": "ALTER TYPE read_enum_a RENAME VALUE 'first' TO 'renamed'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rename"
+    },
+    {
+      "sql": "SELECT v,(v).a,(v).a::text FROM read_enum_good_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "a",
+            "a"
+          ],
+          "type_oids": [
+            19170,
+            19158,
+            25
+          ],
+          "rows": [
+            [
+              "(renamed,23)",
+              "renamed",
+              "renamed"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "renamed_label"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE read_enum_bad ALTER ATTRIBUTE a TYPE integer; SELECT v FROM read_enum_bad_value; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE",
+        "SELECT 1",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19163
+          ],
+          "rows": [
+            [
+              "(1,19)"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "rollback"
+    },
+    {
+      "sql": "SELECT v FROM read_enum_bad_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P03",
+        "message": "invalid internal value for enum: 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_after_rollback"
+    },
+    {
+      "sql": "SELECT v FROM read_enum_bad_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P03",
+        "message": "invalid internal value for enum: 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "reopened_invalid",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT v,(v).a,(v).a::text FROM read_enum_good_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "a",
+            "a"
+          ],
+          "type_oids": [
+            19170,
+            19158,
+            25
+          ],
+          "rows": [
+            [
+              "(renamed,23)",
+              "renamed",
+              "renamed"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopened_label",
+      "reopen": true
+    },
+    {
+      "sql": "ALTER TYPE read_enum_a RENAME VALUE 'renamed' TO 'first'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "reopened_rename",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT v FROM read_enum_good_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19170
+          ],
+          "rows": [
+            [
+              "(first,23)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopened_original",
+      "reopen": true
+    },
+    {
+      "sql": "DROP VIEW read_enum_bad_value,read_enum_good_value; DROP TYPE read_enum_bad,read_enum_good; DROP TYPE read_enum_a,read_enum_b",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ]
+}

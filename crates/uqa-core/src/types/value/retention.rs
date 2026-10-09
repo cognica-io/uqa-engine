@@ -109,6 +109,7 @@ impl Value {
                     | Self::Json(text)
                     | Self::JsonB(text) => (text.capacity(), None),
                     Self::Bytes(bytes) => (bytes.capacity(), None),
+                    Self::Datum(value) => (value.retained_bytes(), None),
                     Self::Enum(value) => (value.retained_bytes(), None),
                     Self::Decimal(decimal) => (decimal.retained_bytes(), None),
                     Self::Array(array) => (
@@ -128,7 +129,7 @@ impl Value {
                         (!row.is_empty()).then(|| Children::Values(row.iter())),
                     ),
                     Self::Record(fields) => (
-                        buffer_bytes::<(String, Value)>(fields.capacity())?,
+                        fields.retained_buffer_bytes()?,
                         (!fields.is_empty()).then(|| Children::Record(fields.iter())),
                     ),
                     Self::Map(fields) => (

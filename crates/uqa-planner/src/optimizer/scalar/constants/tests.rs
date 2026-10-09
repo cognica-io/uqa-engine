@@ -12,6 +12,7 @@ fn typed_row_constructors_require_the_live_catalog_even_with_constant_arguments(
         bound_type: None,
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: uqa_sql::ast::CompositeRowBinding {
+            argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
         },
@@ -108,6 +109,33 @@ fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls()
 }
 
 #[test]
+fn computed_strings_retain_text_type_instead_of_becoming_unknown_literals() {
+    let call = bound_call(
+        "upper",
+        vec![ScalarExpr::Literal(Value::Str("label".into()))],
+    );
+    let folded =
+        fold_literal_expression(call, uqa_execution::scalar::eval_constant_scalar).unwrap();
+    assert!(matches!(
+        &folded,
+        ScalarExpr::TypedLiteral {
+            value: Value::Str(value),
+            bound_type: Some(ColumnType::Text),
+            ..
+        } if value == "LABEL"
+    ));
+    let bound = uqa_sql::bind_type_introspection(
+        bound_call("pg_typeof", vec![folded]),
+        &RowSchema::default(),
+        &[],
+    );
+    assert!(matches!(
+        bound, ScalarExpr::Cast { expr, .. }
+            if matches!(*expr, ScalarExpr::Literal(Value::Str(ref name)) if name == "text")
+    ));
+}
+
+#[test]
 fn named_arguments_keep_their_call_context_during_constant_planning() {
     let uqa_sql::Statement::Select(mut select) = uqa_sql::compile(
         "SELECT json_strip_nulls(strip_in_arrays => true, target => '{\"keep\":1,\"drop\":null}'::json)",
@@ -189,12 +217,14 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         nonnull,
         |_| panic!("denied function ran"),
         Some(&DeniedBuiltin),
+        None,
     )
     .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     let null = bound_call(
         "lower",
         vec![ScalarExpr::TypedLiteral {
+            composite_source: None,
             value: Value::Null,
             ty: "text".into(),
             bound_type: Some(ColumnType::Text),
@@ -205,6 +235,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         null,
         |_| panic!("strict NULL function ran"),
         Some(&DeniedBuiltin),
+        None,
     )
     .unwrap();
     assert_eq!(literal_value(&output), Some(&Value::Null));
@@ -235,6 +266,7 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         "replace",
         vec![
             ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Null,
                 ty: "text".into(),
                 bound_type: Some(ColumnType::Text),
@@ -255,6 +287,7 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         expression,
         |_| panic!("strict NULL evaluated a sibling"),
         Some(&DeniedBuiltin),
+        None,
     )
     .unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Null));
@@ -330,6 +363,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         let expression = ScalarExpr::Cast {
             implicit: false,
             expr: Box::new(ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value,
                 ty: ty.catalog_name(),
                 bound_type: Some(ty),
@@ -346,6 +380,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
     let integer = ScalarExpr::Cast {
         implicit: false,
         expr: Box::new(ScalarExpr::TypedLiteral {
+            composite_source: None,
             value: Value::Int(7),
             ty: "integer".into(),
             bound_type: Some(ColumnType::Integer),
@@ -392,7 +427,8 @@ fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
             ty: ty.into(),
         };
         let result =
-            fold_authorized_literal(expression, |_| panic!("a NULL cast evaluated"), None).unwrap();
+            fold_authorized_literal(expression, |_| panic!("a NULL cast evaluated"), None, None)
+                .unwrap();
         assert_eq!(literal_value(&result), Some(&Value::Null));
         assert_eq!(
             uqa_sql::scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
@@ -411,7 +447,8 @@ fn composites_retained_in_constants_are_not_evaluated_without_the_catalog() {
         relation_oid: 20_003,
     });
     let literal = ScalarExpr::TypedLiteral {
-        value: Value::Record(vec![("a".into(), Value::Int(4))]),
+        composite_source: None,
+        value: Value::Record(vec![("a".into(), Value::Int(4))].into()),
         ty: ty.catalog_name(),
         bound_type: Some(ty),
         parameter_index: None,
@@ -437,7 +474,8 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         array_oid: 20003,
     });
     let literal = ScalarExpr::TypedLiteral {
-        value: Value::Record(vec![("b".into(), Value::Str("x".into()))]),
+        composite_source: None,
+        value: Value::Record(vec![("b".into(), Value::Str("x".into()))].into()),
         ty: ty.catalog_name(),
         bound_type: Some(ty.clone()),
         parameter_index: None,
@@ -464,8 +502,44 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
             number: 2,
             result_type: ColumnType::Text,
             dropped: false,
+            changed_type: None,
         }));
     }
+    let mut incompatible = call.clone();
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut incompatible
+    {
+        binding.composite_field.as_mut().unwrap().changed_type = Some(ColumnType::Varchar(Some(8)));
+    }
+    let error =
+        fold_literal_expression(incompatible, |_| panic!("field must check its descriptor"))
+            .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(error.to_string(), "attribute 2 has wrong type");
+    let mut retained = call.clone();
+    if let ScalarExpr::Func { args, .. } = &mut retained {
+        if let ScalarExpr::Cast { expr, .. } = &mut args[0] {
+            if let ScalarExpr::TypedLiteral {
+                composite_source,
+                value,
+                ..
+            } = expr.as_mut()
+            {
+                *composite_source = Some(Box::new(
+                    uqa_sql::expr::composites::CompositeConstantSource {
+                        value: value.clone(),
+                        descriptors: Vec::new(),
+                    },
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        fold_literal_expression(retained.clone(), |_| panic!("retained field position")).unwrap(),
+        retained
+    );
     let folded =
         fold_literal_expression(call.clone(), |_| panic!("already-read constant")).unwrap();
     assert_eq!(literal_value(&folded), Some(&Value::Str("x".into())));
@@ -473,6 +547,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         fold_literal_expression(literal.clone(), |_| panic!("whole record")).unwrap(),
         literal
     );
+    assert_malformed_constant_field_copy(&call);
     if let ScalarExpr::Func {
         binding: Some(binding),
         args,
@@ -486,4 +561,179 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         fold_literal_expression(call.clone(), |_| panic!("base must still execute")).unwrap(),
         call
     );
+}
+
+fn assert_malformed_constant_field_copy(call: &ScalarExpr) {
+    let mut physical = call.clone();
+    if let ScalarExpr::Func { args, .. } = &mut physical {
+        if let ScalarExpr::Cast { expr, .. } = &mut args[0] {
+            if let ScalarExpr::TypedLiteral { value, .. } = expr.as_mut() {
+                *value = Value::Record(
+                    vec![(
+                        "b".into(),
+                        Value::Datum(uqa_core::DatumValue::new(
+                            25,
+                            0,
+                            vec![2, 0, 0, 0, 3, 0, 0, 0],
+                        )),
+                    )]
+                    .into(),
+                );
+            }
+        }
+    }
+    let error = fold_literal_expression(physical, |_| panic!("field copy precedes evaluation"))
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX001"));
+    assert_eq!(error.to_string(), "compressed pglz data is corrupt");
+}
+
+#[test]
+fn strict_null_folding_keeps_the_selected_fixed_return_type() {
+    let mut call = bound_call(
+        "get_byte",
+        vec![
+            ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                ty: "catalog_bytea_domain".into(),
+                bound_type: None,
+                parameter_index: None,
+                composite_source: None,
+            },
+            ScalarExpr::Literal(Value::Null),
+        ],
+    );
+    if let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &mut call
+    {
+        *binding = uqa_sql::resolve_fixed_builtin_call(
+            "get_byte",
+            None,
+            &[None, None],
+            &[Some(ColumnType::Bytea), Some(ColumnType::Integer)],
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .selected
+        .binding;
+    }
+    let folded =
+        fold_literal_expression(call, |_| panic!("strict NULL does not invoke the function"))
+            .unwrap();
+    assert!(matches!(
+        folded,
+        ScalarExpr::TypedLiteral {
+            value: Value::Null,
+            bound_type: Some(ColumnType::Integer),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn strict_comparison_null_folding_skips_volatile_operands() {
+    use uqa_sql::ast::BinaryOp;
+    for op in [
+        BinaryOp::Equal,
+        BinaryOp::NotEqual,
+        BinaryOp::Less,
+        BinaryOp::LessEqual,
+        BinaryOp::Greater,
+        BinaryOp::GreaterEqual,
+    ] {
+        for reverse in [false, true] {
+            let value = ScalarExpr::Func {
+                name: "nextval".into(),
+                binding: None,
+                args: vec![ScalarExpr::Literal(Value::Str("seq".into()))],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
+            };
+            let null = ScalarExpr::TypedLiteral {
+                composite_source: None,
+                value: Value::Null,
+                ty: "bigint".into(),
+                bound_type: Some(ColumnType::BigInteger),
+                parameter_index: None,
+            };
+            let (lhs, rhs) = if reverse {
+                (null, value)
+            } else {
+                (value, null)
+            };
+            let result = fold_literal_expression(
+                ScalarExpr::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+                |_| panic!("strict NULL comparison evaluated a volatile operand"),
+            )
+            .unwrap();
+            assert_eq!(literal_value(&result), Some(&Value::Null));
+            assert_eq!(
+                scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
+                Some(ColumnType::Boolean)
+            );
+        }
+    }
+}
+
+#[test]
+fn strict_comparison_null_folding_does_not_resolve_discarded_catalog_types() {
+    let expression = ScalarExpr::Binary {
+        op: uqa_sql::ast::BinaryOp::Equal,
+        lhs: Box::new(ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Str("(1)".into()))),
+            ty: "retained_composite".into(),
+            implicit: false,
+        }),
+        rhs: Box::new(ScalarExpr::Literal(Value::Null)),
+    };
+    let result = fold_literal_expression(expression, |_| panic!("discarded catalog read")).unwrap();
+    assert_eq!(literal_value(&result), Some(&Value::Null));
+    assert_eq!(
+        scalar_type(&result, &RowSchema::default(), &[]).unwrap(),
+        Some(ColumnType::Boolean)
+    );
+}
+
+#[test]
+fn physical_record_comparisons_keep_their_runtime_catalog() {
+    let value = Value::Datum(uqa_core::DatumValue::new(20_001, 0, vec![0; 24]));
+    let literal = ScalarExpr::TypedLiteral {
+        composite_source: None,
+        value: value.clone(),
+        ty: "composite#20001".into(),
+        bound_type: Some(ColumnType::Composite(
+            uqa_sql::ast::CompositeTypeReference {
+                schema: "public".into(),
+                name: "pair".into(),
+                oid: 20_001,
+                array_oid: 20_002,
+                relation_oid: 20_003,
+            },
+        )),
+        parameter_index: None,
+    };
+    for left in [literal, ScalarExpr::Literal(value)] {
+        let expression = ScalarExpr::Binary {
+            op: uqa_sql::ast::BinaryOp::Equal,
+            lhs: Box::new(left.clone()),
+            rhs: Box::new(left),
+        };
+        assert_eq!(
+            fold_literal_expression(expression.clone(), |_| panic!(
+                "physical comparison requires its catalog"
+            ))
+            .unwrap(),
+            expression
+        );
+    }
 }

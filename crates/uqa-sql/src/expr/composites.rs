@@ -18,13 +18,17 @@ use crate::ast::ColumnType;
 mod changes;
 pub mod constants;
 pub mod constructor;
+pub(crate) mod datum;
+pub(super) mod fields;
 mod input;
 pub mod literal;
+pub(crate) mod retained;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
+pub use retained::CompositeConstantSource;
 
 /// One live attribute of a composite type in attribute-number order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompositeAttribute {
     pub name: String,
     pub ty: ColumnType,
@@ -33,11 +37,32 @@ pub struct CompositeAttribute {
 }
 
 /// The live attributes of one composite type in the statement's catalog generation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompositeTypeDescriptor {
+    /// Physical slots left by removed attributes, without retaining a type dependency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<DroppedCompositeAttribute>,
     pub type_oid: u32,
     pub relation_oid: u32,
     pub attributes: Vec<CompositeAttribute>,
+}
+
+/// Width and alignment remain necessary when a retained tuple contains a removed field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DroppedCompositeAttribute {
+    pub number: i16,
+    pub length: i64,
+    pub alignment: u8,
+}
+
+impl DroppedCompositeAttribute {
+    pub fn from_type(number: i16, ty: &ColumnType) -> Self {
+        Self {
+            number,
+            length: crate::catalog::type_metadata::pg_type_len(ty),
+            alignment: crate::catalog::type_metadata::pg_type_align(ty).as_bytes()[0],
+        }
+    }
 }
 
 impl CompositeTypeDescriptor {
@@ -68,6 +93,35 @@ pub fn descriptor(
             sqlstate: "42704".into(),
             message: format!("type with OID {type_oid} does not exist"),
         })
+}
+
+/// `ExecEvalFieldSelect` checks the current attribute OID against the prepared result type. Call only after evaluating a non-NULL record and checking the dropped marker.
+pub fn validate_field_result(field: &crate::ast::CompositeFieldBinding) -> Result<()> {
+    let Some(current) = &field.changed_type else {
+        return Ok(());
+    };
+    validate_field_type(field, current)
+}
+
+pub(super) fn validate_field_type(
+    field: &crate::ast::CompositeFieldBinding,
+    current: &ColumnType,
+) -> Result<()> {
+    if crate::catalog::type_metadata::pg_type_oid(current)
+        == crate::catalog::type_metadata::pg_type_oid(&field.result_type)
+    {
+        return Ok(());
+    }
+    Err(SQLError::Diagnostic {
+        sqlstate: "42804".into(),
+        message: format!("attribute {} has wrong type", field.number),
+        detail: Some(format!(
+            "Table has type {}, but query expects {}.",
+            current.display_name(),
+            field.result_type.display_name(),
+        )),
+        hint: None,
+    })
 }
 
 fn cannot_cast(source: &str, target: &str, detail: Option<String>) -> SQLError {
@@ -124,7 +178,10 @@ pub fn composite_from_text(engine: &dyn EngineHook, text: &str, type_oid: u32) -
         ));
         Ok(())
     })?;
-    Ok(Value::Record(fields))
+    Ok(Value::Record(uqa_core::RecordValue::from_parts(
+        fields,
+        Some(type_oid),
+    )))
 }
 
 /// Coerce the fields of an anonymous row to a composite type position by position, as `coerce_record_to_complex` does. The field count must match the live attributes.
@@ -155,7 +212,12 @@ fn composite_from_fields(
             Ok((attribute.name.clone(), converted))
         })
         .collect::<Result<Vec<_>>>()
-        .map(Value::Record)
+        .map(|fields| {
+            Value::Record(uqa_core::RecordValue::from_parts(
+                fields,
+                Some(descriptor.type_oid),
+            ))
+        })
 }
 
 /// Cast a value to a composite type: the identity for a value of the same type, `record_in` for unknown literals and string-category sources, and attribute-wise coercion for anonymous rows and records. Returns `None` when the target is not a composite type.
@@ -176,7 +238,14 @@ pub fn cast_to_composite(
         {
             composite_from_text(engine, text, reference.oid).map(Some)
         }
-        (Value::Record(_), Some(ColumnType::Composite(source))) if source.oid == reference.oid => {
+        (Value::Record(fields), Some(ColumnType::Composite(source)))
+            if source.oid == reference.oid =>
+        {
+            Ok(Some(Value::Record(fields.clone().with_type_oid(Some(
+                fields.type_oid().unwrap_or(source.oid),
+            )))))
+        }
+        (Value::Datum(_), Some(ColumnType::Composite(source))) if source.oid == reference.oid => {
             Ok(Some(value.clone()))
         }
         (Value::Record(_) | Value::Row(_), Some(source @ ColumnType::Composite(_))) => {

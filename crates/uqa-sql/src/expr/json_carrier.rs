@@ -44,6 +44,7 @@ pub fn core_value_to_json(value: &Value) -> crate::error::Result<serde_json::Val
             serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
         }
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
+        Value::Datum(value) => return core_value_to_json(&super::datums::read(value)?),
         Value::Array(array) => serde_json::Value::Array(
             array
                 .elements()
@@ -101,6 +102,12 @@ pub fn value_to_text_with_control(
     Ok(match value {
         Value::Null | Value::Void => control.copy_text("")?,
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
+        Value::Datum(value) => {
+            return value_to_text_with_control(
+                &*super::datums::read_with_control(value, control)?,
+                control,
+            )
+        }
         Value::Bool(value) => control.format(format_args!("{value}"))?,
         Value::Int(value) => control.format(format_args!("{value}"))?,
         Value::Float(value) => control.format(format_args!("{value}"))?,

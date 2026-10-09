@@ -61,6 +61,7 @@ fn composite_constructor_sites_preserve_children_and_rebinding_is_idempotent() {
             bound_type: None,
             items: items.clone(),
             binding: crate::ast::CompositeRowBinding {
+                argument_types: None,
                 ty: "composite#20001".into(),
                 attributes: vec![1, 3],
             },
@@ -98,6 +99,7 @@ fn stored_expression_receives_function_order_and_typed_inputs_at_their_own_sites
         resolved_order(node);
         if matches!(node, ScalarExpr::Literal(Value::Str(text)) if text == "0.5") {
             *node = ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: Value::Float(0.5),
                 ty: "double precision".into(),
                 bound_type: None,
@@ -200,6 +202,7 @@ fn canonical_window_input_sites_preserve_each_stored_copy_without_raw_orphan_que
         if let ScalarExpr::Literal(Value::Str(text)) = node {
             if let Ok(value) = text.parse::<i64>() {
                 *node = ScalarExpr::TypedLiteral {
+                    composite_source: None,
                     value: Value::Int(value),
                     ty: "integer".into(),
                     bound_type: None,

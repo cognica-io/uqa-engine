@@ -1,0 +1,85 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE read_enum_a AS ENUM ('first','last'); CREATE TYPE read_enum_b AS ENUM ('other'); CREATE TYPE read_enum_bad AS (a integer,b integer); CREATE VIEW read_enum_bad_value AS SELECT '(1,19)'::read_enum_bad AS v; CREATE TYPE read_enum_good AS (a read_enum_a,b integer); CREATE VIEW read_enum_good_value AS SELECT '(first,23)'::read_enum_good AS v"
+    },
+    {
+      "id": "change",
+      "sql": "ALTER TYPE read_enum_bad ALTER ATTRIBUTE a TYPE read_enum_a; ALTER TYPE read_enum_good ALTER ATTRIBUTE a TYPE read_enum_b"
+    },
+    {
+      "id": "invalid_field",
+      "sql": "SELECT (v).a FROM read_enum_bad_value"
+    },
+    {
+      "id": "invalid_record",
+      "sql": "SELECT v FROM read_enum_bad_value"
+    },
+    {
+      "id": "invalid_text",
+      "sql": "SELECT (v).a::text FROM read_enum_bad_value"
+    },
+    {
+      "id": "unused_field",
+      "sql": "SELECT (v).b,(v).a IS NULL,(v).a IS NOT NULL FROM read_enum_bad_value"
+    },
+    {
+      "id": "unused_row",
+      "sql": "SELECT v FROM read_enum_bad_value LIMIT 0"
+    },
+    {
+      "id": "unused_case",
+      "sql": "SELECT CASE WHEN false THEN (v).a ELSE NULL END FROM read_enum_bad_value"
+    },
+    {
+      "id": "foreign_enum_label",
+      "sql": "SELECT v,(v).a,(v).a::text FROM read_enum_good_value"
+    },
+    {
+      "id": "rename",
+      "sql": "ALTER TYPE read_enum_a RENAME VALUE 'first' TO 'renamed'"
+    },
+    {
+      "id": "renamed_label",
+      "sql": "SELECT v,(v).a,(v).a::text FROM read_enum_good_value"
+    },
+    {
+      "id": "rollback",
+      "sql": "BEGIN; ALTER TYPE read_enum_bad ALTER ATTRIBUTE a TYPE integer; SELECT v FROM read_enum_bad_value; ROLLBACK"
+    },
+    {
+      "id": "invalid_after_rollback",
+      "sql": "SELECT v FROM read_enum_bad_value"
+    },
+    {
+      "id": "reopened_invalid",
+      "sql": "SELECT v FROM read_enum_bad_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_label",
+      "sql": "SELECT v,(v).a,(v).a::text FROM read_enum_good_value",
+      "reopen": true
+    },
+    {
+      "id": "reopened_rename",
+      "sql": "ALTER TYPE read_enum_a RENAME VALUE 'renamed' TO 'first'",
+      "reopen": true
+    },
+    {
+      "id": "reopened_original",
+      "sql": "SELECT v FROM read_enum_good_value",
+      "reopen": true
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW read_enum_bad_value,read_enum_good_value; DROP TYPE read_enum_bad,read_enum_good; DROP TYPE read_enum_a,read_enum_b",
+      "reopen": true
+    }
+  ]
+}

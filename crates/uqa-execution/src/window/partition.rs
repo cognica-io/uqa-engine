@@ -11,8 +11,6 @@ use crate::{
     PhysicalRow, RowSchema, RowSchemaExecution, ScalarEvalContext, ScalarOrder,
     ScalarSubqueryRunner,
 };
-use std::cmp::Ordering;
-use uqa_core::memory::ProductionControl;
 use uqa_core::Value;
 use uqa_sql::{SQLError, SQLParam, ScalarExpr};
 
@@ -114,7 +112,7 @@ impl<'a> PartitionRows<'a> {
         body(&context)
     }
 
-    /// The catalog that renders enum labels in finalized aggregates.
+    /// The catalog used by SQL equality and finalized aggregate output.
     pub(super) fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
         self.hook.enum_labels()
     }
@@ -122,18 +120,15 @@ impl<'a> PartitionRows<'a> {
     /// Evaluate an expression on the row at `position`.
     pub(super) fn evaluate(
         &mut self,
-        expression: &ScalarExpr,
+        expression: &crate::scalar::PreparedExpressions<ScalarExpr>,
         position: i64,
     ) -> Result<Value, SQLError> {
-        let row = self.row(position)?;
-        super::evaluate_on_row(
-            expression,
-            &self.schema,
-            &row,
-            self.params,
-            self.hook,
-            self.subqueries,
-        )
+        self.with_context(position, |context| {
+            crate::eval_scalar(
+                expression,
+                &(*context).with_function_states(expression.calls()),
+            )
+        })
     }
 
     fn order_key(&mut self, position: i64) -> Result<Vec<Value>, SQLError> {
@@ -176,17 +171,8 @@ impl<'a> PartitionRows<'a> {
         }
         let left = self.order_key(left)?;
         let right = self.order_key(right)?;
-        for (left, right) in left.iter().zip(&right) {
-            let ordering = uqa_sql::expr::compare_typed_values_with_control(
-                left,
-                right,
-                &ProductionControl::uncontrolled(),
-            )?;
-            if ordering != Ordering::Equal {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        crate::relational::equal_sort_key_values(&left, &right, self.enum_labels())
+            .map_err(super::exec_to_sql_error)
     }
 }
 

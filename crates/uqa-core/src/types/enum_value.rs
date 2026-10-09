@@ -13,7 +13,11 @@
 //! the new label's neighbors and never changes an existing key, so key order is
 //! the enum's declaration order for the whole lifetime of the type.
 
-use std::fmt;
+use std::{
+    cmp::Ordering,
+    fmt,
+    hash::{Hash, Hasher},
+};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -169,18 +173,24 @@ pub enum EnumLabelKeyParseError {
 }
 
 /// A value of one user-defined enum type. SQL binding never compares values of
-/// different enum types; the derived order sorts them by type OID only so that
+/// different enum types; the order sorts them by type OID only so that
 /// internal ordered containers remain total.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnumValue {
     type_oid: u32,
     key: EnumLabelKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label_oid: Option<u32>,
 }
 
 impl EnumValue {
     pub fn new(type_oid: u32, key: EnumLabelKey) -> Self {
-        Self { type_oid, key }
+        Self {
+            type_oid,
+            key,
+            label_oid: None,
+        }
     }
 
     pub fn type_oid(&self) -> u32 {
@@ -191,9 +201,48 @@ impl EnumValue {
         &self.key
     }
 
+    /// Opaque physical label identity supplied by SQL, independent of the native order key.
+    pub fn label_oid(&self) -> Option<u32> {
+        self.label_oid
+    }
+
+    pub fn with_label_oid(mut self, oid: Option<u32>) -> Self {
+        self.label_oid = oid;
+        self
+    }
+
     /// Heap bytes owned by this value beyond its inline layout.
     pub fn retained_bytes(&self) -> usize {
         self.key.0.len()
+    }
+}
+
+impl PartialEq for EnumValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_oid == other.type_oid && self.key == other.key
+    }
+}
+
+impl Eq for EnumValue {}
+
+impl PartialOrd for EnumValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for EnumValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.type_oid
+            .cmp(&other.type_oid)
+            .then_with(|| self.key.cmp(&other.key))
+    }
+}
+
+impl Hash for EnumValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_oid.hash(state);
+        self.key.hash(state);
     }
 }
 

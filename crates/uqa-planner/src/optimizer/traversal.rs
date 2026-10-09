@@ -106,7 +106,17 @@ pub(super) fn optimize_query_block(
     if let Some(source) = &mut block.from {
         optimize_source(source, config, aggregates)?;
     }
-    super::source_constants::propagate_source_constants(block);
+    super::source_constants::propagate_source_constants(
+        block,
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.types),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.volatility),
+    )?;
     super::optimize_projections(&mut block.projections, config)?;
     if let Some(predicate) = &mut block.r#where {
         optimize_scalar_slot(predicate, config)?;
@@ -145,6 +155,13 @@ pub(super) fn optimize_query_block(
         }
     }
 
+    super::source_constants::simplify_constant_group(
+        block,
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.types),
+    );
     let live_subqueries = super::subqueries::live_slots(block.expressions())?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 

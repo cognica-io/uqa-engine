@@ -7,18 +7,26 @@
 //! Enum label input and output, ordered label functions and I/O casts through the statement's catalog.
 //!
 //! Values carry an immutable label key; the catalog supplies the current label text, so
-//! `ALTER TYPE ... RENAME VALUE` never rewrites stored values. Comparisons use the key order and
-//! need no catalog access.
+//! `ALTER TYPE ... RENAME VALUE` never rewrites stored values. Native comparisons use key order;
+//! physical enum support functions observe raw OIDs and consult catalog order only when needed.
 
 use std::sync::Arc;
 
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_core::{ArrayValue, EnumLabelKey, EnumValue, Value};
 
 use super::{Result, SQLError};
 use crate::ast::ColumnType;
 
 mod functions;
-pub use functions::enum_function_value;
+mod physical;
+pub use functions::{
+    enum_function_value, enum_function_value_with_control, enum_function_value_with_state,
+};
+pub(in crate::expr) use physical::comparison_order;
+pub use physical::{
+    comparison_identity, eval_comparison, EnumComparisonState, EnumTypeComparisonStates,
+};
 
 /// One label of an enum type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,23 +56,37 @@ impl EnumTypeLabels {
     }
 
     fn value(&self, label: &EnumTypeLabel) -> Value {
-        Value::Enum(EnumValue::new(self.type_oid, label.key.clone()))
+        Value::Enum(
+            EnumValue::new(self.type_oid, label.key.clone()).with_label_oid(Some(label.oid)),
+        )
+    }
+
+    fn value_with_control(
+        &self,
+        label: &EnumTypeLabel,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        let memory = control.reserve(label.key.as_bytes().len())?;
+        Ok(control.finish(self.value(label), memory)?)
     }
 }
 
-/// Catalog access for enum label input and output, supplied by the statement's execution context and by catalog-aware binding.
-pub trait EnumLabelCatalog {
-    /// The labels of one enum type in the statement's catalog generation, or `None` when the catalog has no such type.
-    fn enum_type_labels(&self, type_oid: u32) -> Result<Option<Arc<EnumTypeLabels>>>;
+/// The enum-facing name of the shared SQL value catalog.
+pub use super::SQLValueCatalog as EnumLabelCatalog;
 
-    /// Whether the current transaction added this label to a type that it did not create. `PostgreSQL` rejects such a label until the transaction commits.
-    fn enum_label_uncommitted(&self, label_oid: u32) -> bool;
-
-    /// `format_type_be` of the type, which qualifies a type hidden by the search path.
-    fn enum_type_name(&self, type_oid: u32) -> Result<Option<String>>;
-
-    /// Whether the statement catalog defines any enum type; binding skips enum literal validation otherwise.
-    fn has_enum_types(&self) -> bool;
+pub(crate) fn enum_value_from_oid(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    label_oid: u32,
+) -> Result<Value> {
+    catalog
+        .map(|catalog| catalog.enum_value_by_oid(label_oid))
+        .transpose()?
+        .flatten()
+        .map(Value::Enum)
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "22P03".into(),
+            message: format!("invalid internal value for enum: {label_oid}"),
+        })
 }
 
 fn catalog_unavailable(type_oid: u32) -> SQLError {
@@ -168,6 +190,17 @@ pub fn enum_endpoint(
     type_oid: u32,
     last: bool,
 ) -> Result<Value> {
+    enum_endpoint_with_control(catalog, type_oid, last, &ProductionControl::uncontrolled())
+        .map(|value| value.into_uncontrolled().expect("ordinary enum endpoint"))
+}
+
+fn enum_endpoint_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    last: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let labels = labels(catalog, type_oid)?;
     let label = if last {
         labels.labels.last()
@@ -181,7 +214,7 @@ pub fn enum_endpoint(
         });
     };
     check_safe(catalog, &labels, label)?;
-    Ok(labels.value(label))
+    labels.value_with_control(label, control)
 }
 
 /// `enum_range(lower, upper)`: labels from `lower` through `upper` inclusive, where a missing bound is open. A lower bound after the upper bound yields an empty array. Every returned label must be usable.
@@ -191,54 +224,119 @@ pub fn enum_range(
     lower: Option<&EnumValue>,
     upper: Option<&EnumValue>,
 ) -> Result<Value> {
+    let lower = lower
+        .map(|value| enum_label_oid(catalog, value))
+        .transpose()?;
+    let upper = upper
+        .map(|value| enum_label_oid(catalog, value))
+        .transpose()?;
+    range_by_oid(catalog, type_oid, lower, upper)
+}
+
+fn range_by_oid(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    lower: Option<u32>,
+    upper: Option<u32>,
+) -> Result<Value> {
+    range_by_oid_with_control(
+        catalog,
+        type_oid,
+        lower,
+        upper,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|value| value.into_uncontrolled().expect("ordinary enum range"))
+}
+
+fn range_by_oid_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    lower: Option<u32>,
+    upper: Option<u32>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let labels = labels(catalog, type_oid)?;
-    let mut elements = Vec::new();
+    let mut elements = ProductionVec::new(*control);
+    let mut include = lower.is_none_or(|oid| oid == 0);
     for label in &labels.labels {
-        if lower.is_some_and(|lower| &label.key < lower.key()) {
-            continue;
+        control.check()?;
+        if lower == Some(label.oid) {
+            include = true;
         }
-        if upper.is_some_and(|upper| &label.key > upper.key()) {
+        if include {
+            check_safe(catalog, &labels, label)?;
+            elements.push_produced(labels.value_with_control(label, control)?)?;
+        }
+        if upper == Some(label.oid) {
             break;
         }
-        check_safe(catalog, &labels, label)?;
-        elements.push(labels.value(label));
     }
-    ArrayValue::try_new(elements)
-        .map(Value::Array)
-        .ok_or_else(|| SQLError::Internal("enum range array has invalid dimensions".into()))
+    let array = ArrayValue::try_new_with_control(elements.finish()?, control)?
+        .ok_or_else(|| SQLError::Internal("enum range array has invalid dimensions".into()))?;
+    let (array, memory) = array.into_parts();
+    Ok(control.finish(
+        Value::Array(array.with_element_type_oid(Some(type_oid))),
+        memory,
+    )?)
 }
 
 /// Replace every enum carrier inside a value by its label text, as the output functions of containers do.
 pub fn render_enum_labels(catalog: Option<&dyn EnumLabelCatalog>, value: &Value) -> Result<Value> {
+    map_enum_values(value, &mut |label| {
+        enum_label_text(catalog, label).map(Value::Str)
+    })
+}
+
+/// Retain physical identities without repeating enum input checks or changing admitted values. Legacy carriers resolve their missing OID once; existing identities remain usable after catalog changes.
+pub(crate) fn retain_enum_oids(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+) -> Result<Value> {
+    map_enum_values(value, &mut |label| {
+        let oid = match label.label_oid() {
+            Some(oid) => oid,
+            None => enum_label_oid(catalog, label)?,
+        };
+        Ok(Value::Enum(label.clone().with_label_oid(Some(oid))))
+    })
+}
+
+fn map_enum_values(
+    value: &Value,
+    convert: &mut dyn FnMut(&EnumValue) -> Result<Value>,
+) -> Result<Value> {
     Ok(match value {
-        Value::Enum(label) => Value::Str(enum_label_text(catalog, label)?),
+        Value::Enum(label) => convert(label)?,
         Value::Array(array) => Value::Array(map_array(array, |element| {
-            render_enum_labels(catalog, element)
+            map_enum_values(element, convert)
         })?),
         Value::List(values) => Value::List(
             values
                 .iter()
-                .map(|element| render_enum_labels(catalog, element))
+                .map(|element| map_enum_values(element, convert))
                 .collect::<Result<_>>()?,
         ),
         Value::Row(values) => Value::Row(
             values.clone().with_values(
                 values
                     .iter()
-                    .map(|element| render_enum_labels(catalog, element))
+                    .map(|element| map_enum_values(element, convert))
                     .collect::<Result<_>>()?,
             )?,
         ),
-        Value::Record(fields) => Value::Record(
+        Value::Record(fields) => Value::Record(uqa_core::RecordValue::from_parts(
             fields
                 .iter()
-                .map(|(name, element)| Ok((name.clone(), render_enum_labels(catalog, element)?)))
+                .map(|(name, element)| Ok((name.clone(), map_enum_values(element, convert)?)))
                 .collect::<Result<_>>()?,
-        ),
+            fields.type_oid(),
+        )),
         Value::Map(fields) => Value::Map(
             fields
                 .iter()
-                .map(|(name, element)| Ok((name.clone(), render_enum_labels(catalog, element)?)))
+                .map(|(name, element)| Ok((name.clone(), map_enum_values(element, convert)?)))
                 .collect::<Result<_>>()?,
         ),
         other => other.clone(),
@@ -265,18 +363,38 @@ fn map_array(
     let elements = leaves(array.elements(), &mut convert)?;
     ArrayValue::with_lower_bounds(elements, array.lower_bounds().to_vec())
         .filter(|converted| converted.dimensions() == array.dimensions())
+        .map(|converted| converted.with_element_type_oid(array.element_type_oid()))
         .ok_or_else(|| SQLError::Internal("enum array conversion changed array dimensions".into()))
 }
 
 /// Whether a value contains an enum carrier anywhere.
 pub fn contains_enum_carrier(value: &Value) -> bool {
+    enum_carrier_matches(value, &|_| true)
+}
+
+pub(crate) fn has_missing_enum_oid(value: &Value) -> bool {
+    enum_carrier_matches(value, &|label| label.label_oid().is_none())
+}
+
+fn enum_carrier_matches(value: &Value, predicate: &dyn Fn(&EnumValue) -> bool) -> bool {
     match value {
-        Value::Enum(_) => true,
-        Value::Array(array) => array.elements().iter().any(contains_enum_carrier),
-        Value::List(values) => values.iter().any(contains_enum_carrier),
-        Value::Row(values) => values.iter().any(contains_enum_carrier),
-        Value::Record(fields) => fields.iter().any(|(_, value)| contains_enum_carrier(value)),
-        Value::Map(fields) => fields.values().any(contains_enum_carrier),
+        Value::Enum(label) => predicate(label),
+        Value::Array(array) => array
+            .elements()
+            .iter()
+            .any(|value| enum_carrier_matches(value, predicate)),
+        Value::List(values) => values
+            .iter()
+            .any(|value| enum_carrier_matches(value, predicate)),
+        Value::Row(values) => values
+            .iter()
+            .any(|value| enum_carrier_matches(value, predicate)),
+        Value::Record(fields) => fields
+            .iter()
+            .any(|(_, value)| enum_carrier_matches(value, predicate)),
+        Value::Map(fields) => fields
+            .values()
+            .any(|value| enum_carrier_matches(value, predicate)),
         _ => false,
     }
 }
@@ -370,7 +488,11 @@ pub fn fold_unknown_literal(
                     "array literal parsing produced a non-text element {other:?}"
                 ))),
             })
-            .map(|array| Some(Value::Array(array)))
+            .map(|array| {
+                Some(Value::Array(
+                    array.with_element_type_oid(Some(reference.oid)),
+                ))
+            })
         }
         _ => Ok(None),
     }
@@ -417,6 +539,7 @@ pub fn cast_to_enum(
     match value {
         Value::Null => Ok(Some(Value::Null)),
         Value::Enum(label) if label.type_oid() == reference.oid => Ok(Some(value.clone())),
+        Value::Datum(datum) if datum.type_oid() == reference.oid => Ok(Some(value.clone())),
         Value::Str(text) | Value::FixedChar(text) if source.is_none_or(string_category) => {
             enum_value_from_text(catalog, reference.oid, text).map(Some)
         }

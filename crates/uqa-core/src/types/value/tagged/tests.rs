@@ -203,30 +203,33 @@ fn invalid_composite_tags_preserve_the_original_map() {
 
 #[test]
 fn nested_tagged_documents_round_trip_with_bounds_names_and_bytes() {
-    let value = Value::Record(vec![
-        (
-            "mixed".into(),
-            Value::Row(
-                vec![
-                    Value::FixedChar("a  ".into()),
-                    Value::Json(" {\"a\": 1} ".into()),
-                    Value::JsonB("{\"a\":1}".into()),
-                    Value::Bytes(vec![0, 255]),
-                ]
-                .into(),
+    let value = Value::Record(
+        vec![
+            (
+                "mixed".into(),
+                Value::Row(
+                    vec![
+                        Value::FixedChar("a  ".into()),
+                        Value::Json(" {\"a\": 1} ".into()),
+                        Value::JsonB("{\"a\":1}".into()),
+                        Value::Bytes(vec![0, 255]),
+                    ]
+                    .into(),
+                ),
             ),
-        ),
-        (
-            "mixed".into(),
-            Value::Array(
-                ArrayValue::with_lower_bounds(
-                    vec![Value::List(vec![Value::Int(1), Value::Null])],
-                    vec![-2, 4],
-                )
-                .unwrap(),
+            (
+                "mixed".into(),
+                Value::Array(
+                    ArrayValue::with_lower_bounds(
+                        vec![Value::List(vec![Value::Int(1), Value::Null])],
+                        vec![-2, 4],
+                    )
+                    .unwrap(),
+                ),
             ),
-        ),
-    ]);
+        ]
+        .into(),
+    );
     let encoded = serde_json::to_vec(&value).unwrap();
     let decoded: Value = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(decoded, value);
@@ -289,7 +292,7 @@ fn array_normalization_preserves_arrays_inside_composite_values() {
     let inner = Value::Array(ArrayValue::with_lower_bounds(vec![Value::Int(7)], vec![-5]).unwrap());
     let composites = vec![
         Value::Row(vec![inner.clone()].into()),
-        Value::Record(vec![("array".into(), inner.clone())]),
+        Value::Record(vec![("array".into(), inner.clone())].into()),
         Value::Map(BTreeMap::from([("array".into(), inner)])),
     ];
     let array = ArrayValue::with_lower_bounds(composites.clone(), vec![3]).unwrap();

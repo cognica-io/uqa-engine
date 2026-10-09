@@ -8,7 +8,7 @@
 
 use std::hash::BuildHasher;
 
-use crate::{hash_canonical_row, try_pack_compact_text_pair, ExecResult, RowSchema, ScalarExpr};
+use crate::{try_pack_compact_text_pair, ExecResult, RowSchema, ScalarExpr};
 use uqa_core::Value;
 use uqa_sql::expr::RowLookup;
 
@@ -51,11 +51,16 @@ pub(super) fn group_hash<S: BuildHasher, Row: RowLookup>(
     columns: &[ProjectedGroupColumn],
     row: &Row,
     build_hasher: &S,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<u64> {
     if let Some(key) = compact_text_pair(columns, row) {
         return Ok(key);
     }
-    hash_canonical_row(build_hasher, columns.iter().map(|column| column.value(row)))
+    crate::distinct::hash_canonical_row_with_enum_catalog(
+        build_hasher,
+        columns.iter().map(|column| column.value(row)),
+        enums,
+    )
 }
 
 pub(super) fn compact_text_pair<Row: RowLookup>(
@@ -76,19 +81,31 @@ pub(super) fn group_matches<Row: RowLookup>(
     columns: &[ProjectedGroupColumn],
     key: &[Value],
     row: &Row,
-) -> bool {
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+) -> Result<bool, uqa_sql::SQLError> {
     let null = Value::Null;
-    key.len() == columns.len()
-        && key.iter().zip(columns).all(|(stored, column)| {
-            let value = column.value(row);
-            match (column, stored, value) {
-                (ProjectedGroupColumn::Text(_), Value::Str(stored), Some(Value::Str(value))) => {
-                    stored == value
-                }
-                (ProjectedGroupColumn::Text(_), Value::Null, None | Some(Value::Null)) => true,
-                _ => stored == value.unwrap_or(&null),
+    if key.len() != columns.len() {
+        return Ok(false);
+    }
+    for (stored, column) in key.iter().zip(columns) {
+        let value = column.value(row);
+        let equal = match (column, stored, value) {
+            (ProjectedGroupColumn::Text(_), Value::Str(stored), Some(Value::Str(value))) => {
+                stored == value
             }
-        })
+            (ProjectedGroupColumn::Text(_), Value::Null, None | Some(Value::Null)) => true,
+            _ => uqa_sql::expr::equal_typed_values_with_enum_catalog(
+                stored,
+                value.unwrap_or(&null),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+                enums,
+            )?,
+        };
+        if !equal {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub(super) fn group_key<Row: RowLookup>(

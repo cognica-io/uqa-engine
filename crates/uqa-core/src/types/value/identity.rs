@@ -22,7 +22,10 @@ impl Value {
             | (Self::Json(left), Self::Json(right))
             | (Self::JsonB(left), Self::JsonB(right)) => left == right,
             (Self::Bytes(left), Self::Bytes(right)) => left == right,
-            (Self::Enum(left), Self::Enum(right)) => left == right,
+            (Self::Enum(left), Self::Enum(right)) => {
+                left == right && left.label_oid() == right.label_oid()
+            }
+            (Self::Datum(left), Self::Datum(right)) => left == right,
             (Self::Temporal(left), Self::Temporal(right)) => same_temporal(left, right),
             (Self::Array(left), Self::Array(right)) => same_array(left, right),
             (Self::LegacyVector(left), Self::LegacyVector(right)) => {
@@ -33,7 +36,8 @@ impl Value {
                 left.field_types() == right.field_types() && same_elements(left, right)
             }
             (Self::Record(left), Self::Record(right)) => {
-                left.len() == right.len()
+                left.type_oid() == right.type_oid()
+                    && left.len() == right.len()
                     && left.iter().zip(right).all(|((a, left), (b, right))| {
                         a == b && left.has_same_representation(right)
                     })
@@ -60,6 +64,7 @@ fn same_elements(left: &[Value], right: &[Value]) -> bool {
 fn same_array(left: &ArrayValue, right: &ArrayValue) -> bool {
     left.dimensions() == right.dimensions()
         && left.lower_bounds() == right.lower_bounds()
+        && left.element_type_oid() == right.element_type_oid()
         && same_elements(left.elements(), right.elements())
 }
 
@@ -148,7 +153,7 @@ mod tests {
             let wrappers: [fn(Value) -> Value; 4] = [
                 |value| Value::Array(ArrayValue::try_new(vec![value]).unwrap()),
                 |value| Value::Row(vec![value].into()),
-                |value| Value::Record(vec![("key".into(), value)]),
+                |value| Value::Record(vec![("key".into(), value)].into()),
                 |value| Value::Map(std::collections::BTreeMap::from([("key".into(), value)])),
             ];
             for wrap in wrappers {

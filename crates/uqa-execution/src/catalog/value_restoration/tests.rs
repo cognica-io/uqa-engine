@@ -163,6 +163,7 @@ impl ValueRestorationSession for Rebuild<'_> {
             catalog: self.fixture,
             reads: self.fixture,
             expressions: crate::mutation::constraints::index_keys::IndexExpressionContext {
+                values: None,
                 catalog: self.fixture,
                 expressions: self.fixture,
             },

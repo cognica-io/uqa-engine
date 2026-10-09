@@ -156,6 +156,7 @@ impl RoutineInliningContext<'_> {
             let layout = super::result_check::declared_sql_function_result(self.types, definition)?;
             if definition.strict && arguments.iter().any(is_null_constant) {
                 return Ok(Some(ScalarExpr::TypedLiteral {
+                    composite_source: None,
                     value: uqa_core::Value::Null,
                     ty: layout.declared_type.catalog_name(),
                     bound_type: Some(layout.declared_type),
@@ -176,6 +177,7 @@ impl RoutineInliningContext<'_> {
                 };
                 let value = self.expressions.evaluate_constant_routine(&call)?;
                 return Ok(Some(ScalarExpr::TypedLiteral {
+                    composite_source: None,
                     value,
                     ty: layout.declared_type.catalog_name(),
                     bound_type: Some(layout.declared_type),

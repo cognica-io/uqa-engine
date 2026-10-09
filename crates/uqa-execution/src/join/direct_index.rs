@@ -83,21 +83,25 @@ impl DirectHashIndex {
         rows: &HybridRowStore,
         schema: &RowSchema,
         positions: &[usize],
-    ) -> bool {
-        self.is_available()
-            && self.buckets.values().all(|bucket| {
-                bucket.iter().enumerate().all(|(offset, left_index)| {
-                    bucket[offset + 1..].iter().all(|right_index| {
-                        let Some(left) = rows.memory_row(*left_index) else {
-                            return false;
-                        };
-                        let Some(right) = rows.memory_row(*right_index) else {
-                            return false;
-                        };
-                        !positional_keys_equal(schema, left, positions, schema, right, positions)
-                    })
-                })
-            })
+    ) -> ExecResult<bool> {
+        if !self.is_available() {
+            return Ok(false);
+        }
+        for bucket in self.buckets.values() {
+            for (offset, left_index) in bucket.iter().enumerate() {
+                for right_index in &bucket[offset + 1..] {
+                    let (Some(left), Some(right)) =
+                        (rows.memory_row(*left_index), rows.memory_row(*right_index))
+                    else {
+                        return Ok(false);
+                    };
+                    if positional_keys_equal(schema, left, positions, schema, right, positions)? {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -128,24 +132,29 @@ fn positional_keys_equal(
     right_schema: &RowSchema,
     right_row: &PhysicalRow,
     right_positions: &[usize],
-) -> bool {
+) -> ExecResult<bool> {
     if left_positions.len() != right_positions.len() {
-        return false;
+        return Ok(false);
     }
     let left = left_schema.view(left_row);
     let right = right_schema.view(right_row);
-    left_positions
-        .iter()
-        .zip(right_positions)
-        .all(|(left_position, right_position)| {
-            let Some(left) = left.value_at(*left_position) else {
-                return false;
-            };
-            let Some(right) = right.value_at(*right_position) else {
-                return false;
-            };
-            !matches!(left, Value::Null) && !matches!(right, Value::Null) && left == right
-        })
+    for (left_position, right_position) in left_positions.iter().zip(right_positions) {
+        let (Some(left), Some(right)) = (
+            left.value_at(*left_position),
+            right.value_at(*right_position),
+        ) else {
+            return Ok(false);
+        };
+        if uqa_sql::expr::values_equal_nullable_with_control(
+            left,
+            right,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )? != Some(true)
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub(super) fn direct_unique_match(
@@ -160,16 +169,57 @@ pub(super) fn direct_unique_match(
     else {
         return Ok(None);
     };
-    Ok(index.candidates(hash).iter().copied().find(|row_index| {
-        build_rows.memory_row(*row_index).is_some_and(|build_row| {
-            positional_keys_equal(
+    for row_index in index.candidates(hash) {
+        if let Some(build_row) = build_rows.memory_row(*row_index) {
+            if positional_keys_equal(
                 &build_rows.schema,
                 build_row,
                 build_positions,
                 probe_schema,
                 probe_row,
                 probe_positions,
-            )
-        })
-    }))
+            )? {
+                return Ok(Some(*row_index));
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positional_join_datum_keys_use_sql_equality_and_preserve_errors() {
+        let schema = RowSchema::new(vec!["key".into()]);
+        let old = PhysicalRow::from_values(vec![Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(17, 0, vec![5, b'x'])),
+            )]
+            .into(),
+        )]);
+        let fresh = PhysicalRow::from_values(vec![Value::Record(
+            vec![("a".into(), Value::Bytes(b"x".to_vec()))].into(),
+        )]);
+        assert!(positional_keys_equal(&schema, &old, &[0], &schema, &fresh, &[0]).unwrap());
+        let bad = PhysicalRow::from_values(vec![Value::Record(
+            vec![(
+                "a".into(),
+                Value::Datum(uqa_core::DatumValue::new(
+                    1700,
+                    0,
+                    vec![2, 0, 0, 0, 3, b'x'],
+                )),
+            )]
+            .into(),
+        )]);
+        assert!(
+            positional_keys_equal(&schema, &bad, &[0], &schema, &bad, &[0])
+                .unwrap_err()
+                .to_string()
+                .contains("compressed pglz data is corrupt")
+        );
+    }
 }

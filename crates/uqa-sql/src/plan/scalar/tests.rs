@@ -39,6 +39,8 @@ fn controlled_column_lowering_preserves_existing_scalar_shapes_and_input() {
         "SELECT a OR b OR c",
         "SELECT a IS NOT NULL",
         "SELECT a BETWEEN 1 AND 2",
+        "SELECT a BETWEEN SYMMETRIC 1 AND 2",
+        "SELECT a NOT BETWEEN SYMMETRIC 1 AND 2",
         "SELECT a NOT IN (1, 2, 3)",
         "SELECT CASE a WHEN 1 THEN 'first' ELSE 'last' END",
         "SELECT CASE WHEN a THEN 'yes' END",
@@ -182,10 +184,14 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
                         "app.result".into(),
                     ))),
                     dropped: true,
+                    changed_type: Some(crate::ColumnType::Array(Box::new(
+                        crate::ColumnType::Named("app.changed".into()),
+                    ))),
                 })),
                 resolution_error: Some(Box::new(error)),
             }),
             args: vec![Expr::TypedLiteral {
+                composite_source: None,
                 value: Value::Str("value".into()),
                 ty: "text".into(),
             }],

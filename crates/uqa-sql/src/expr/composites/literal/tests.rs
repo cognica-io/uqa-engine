@@ -44,6 +44,7 @@ impl CompositeTypeCatalog for Catalog {
             });
         }
         Ok(Some(Arc::new(CompositeTypeDescriptor {
+            dropped: Vec::new(),
             type_oid: oid,
             relation_oid: 20_003,
             attributes,
@@ -84,7 +85,7 @@ impl EngineHook for Catalog {
 #[test]
 fn retained_constant_observes_addition_and_rollback_without_mutating_its_input() {
     let catalog = Catalog(Cell::new(false));
-    let value = Value::Record(vec![("a".into(), Value::Int(4))]);
+    let value = Value::Record(vec![("a".into(), Value::Int(4))].into());
     let original = value.clone();
     let memory = MemoryBudget::new(4096);
     let token = CancellationToken::new();
@@ -98,7 +99,7 @@ fn retained_constant_observes_addition_and_rollback_without_mutating_its_input()
         if added {
             expected.push(("b".into(), Value::Null));
         }
-        assert_eq!(*output, Value::Record(expected));
+        assert_eq!(*output, Value::Record(expected.into()));
         assert_eq!(value, original);
         assert!(memory.used() > 0);
         drop(output);
@@ -112,7 +113,7 @@ fn retained_array_preserves_bounds_and_releases_memory_on_admission_or_cancellat
     let value = Value::Array(
         ArrayValue::with_lower_bounds(
             vec![
-                Value::Record(vec![("a".into(), Value::Int(4))]),
+                Value::Record(vec![("a".into(), Value::Int(4))].into()),
                 Value::Null,
             ],
             vec![-2],
@@ -131,7 +132,7 @@ fn retained_array_preserves_bounds_and_releases_memory_on_admission_or_cancellat
     assert_eq!(
         array.elements(),
         [
-            Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)]),
+            Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)].into()),
             Value::Null
         ]
     );

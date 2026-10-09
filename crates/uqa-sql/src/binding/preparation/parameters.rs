@@ -307,6 +307,7 @@ impl<'a> ParameterTypes<'a> {
                 constants.0.insert(
                     origin,
                     ScalarExpr::TypedLiteral {
+                        composite_source: None,
                         value,
                         ty: input_type.catalog_name(),
                         bound_type: Some(input_type),

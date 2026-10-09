@@ -55,6 +55,9 @@ pub struct CompositeAttributeRemoval {
 pub struct CompositeRowBinding {
     pub ty: String,
     pub attributes: Vec<i16>,
+    /// Types of the admitted arguments; absent only in predecessor definitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument_types: Option<Vec<ColumnType>>,
 }
 
 /// A composite type bound by catalog identity: a standalone composite type or the row type of a relation. The schema and name are the catalog's current names; equality compares the type identity only.

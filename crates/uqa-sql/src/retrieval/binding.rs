@@ -176,6 +176,9 @@ pub fn lower_where_bound(
     }
     match expression {
         ScalarExpr::And(parts) => {
+            if let Some(range) = super::predicates::lower_range(parts, constants) {
+                return Ok(Some(range));
+            }
             let mut children = Vec::with_capacity(parts.len());
             for part in parts {
                 let Some(child) = lower_where_bound(source, part, constants)? else {

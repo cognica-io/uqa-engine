@@ -310,6 +310,7 @@ pub(super) struct SessionContext {
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
     /// The sequence catalog as this session last read it from the latest commit, kept while nothing it was read from has changed.
     pub(super) sequence_snapshot: Mutex<Option<crate::sequence_snapshot::SequenceSnapshotMemo>>,
+    pub(super) enum_type_comparison_states: uqa_sql::expr::enums::EnumTypeComparisonStates,
     /// How many times this session read the sequence catalog instead of reusing its last read.
     #[cfg(test)]
     pub(super) sequence_snapshot_reads: std::sync::atomic::AtomicU64,
@@ -378,6 +379,7 @@ impl SessionContext {
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),
+            enum_type_comparison_states: uqa_sql::expr::enums::EnumTypeComparisonStates::default(),
             #[cfg(test)]
             sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),

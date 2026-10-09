@@ -64,7 +64,8 @@ pub(super) fn record(
     }
     let (fields, retained) = fields.into_parts();
     memory.absorb(retained);
-    Ok(Budgeted::new(Value::Record(fields), memory))
+    memory.grow(uqa_core::RecordValue::retained_header_bytes())?;
+    Ok(Budgeted::new(Value::Record(fields.into()), memory))
 }
 
 pub(super) fn sql_array(
@@ -74,10 +75,11 @@ pub(super) fn sql_array(
     buffered: bool,
 ) -> Result<Budgeted<Value>, JsonReadError> {
     let mut container = Container::new(input, control, depth)?;
-    let (mut elements, mut bounds) = (None, None);
+    let (mut elements, mut bounds, mut element_type_oid) = (None, None, None);
     if container.kind == Kind::Array {
         elements = Some(container.next()?.ok_or(JsonReadError::InvalidJson)?.value);
         bounds = Some(container.next()?.ok_or(JsonReadError::InvalidJson)?.value);
+        element_type_oid = container.next()?.map(|item| item.value);
         if container.next()?.is_some() {
             return Err(JsonReadError::InvalidJson);
         }
@@ -87,6 +89,7 @@ pub(super) fn sql_array(
             let slot = match name.as_str() {
                 "elements" => &mut elements,
                 "lower_bounds" => &mut bounds,
+                "element_type_oid" => &mut element_type_oid,
                 _ => continue,
             };
             if slot.replace(item.value).is_some() {
@@ -129,6 +132,14 @@ pub(super) fn sql_array(
         literal("lower_bounds", control)?,
         bounds,
     )?;
+    if let Some(oid) = element_type_oid {
+        insert(
+            &mut fields,
+            &mut memory,
+            literal("element_type_oid", control)?,
+            modern(oid, control, depth - 1)?,
+        )?;
+    }
     let result =
         Value::from_json_fields_budgeted(Budgeted::new(fields, memory), control.cancellation())?;
     if !matches!(&*result, Value::Array(_)) {
@@ -247,7 +258,7 @@ fn temporal_number(
     ))
 }
 
-/// Typed enum payloads carry the type OID and hexadecimal label key. The hexadecimal text's reservation covers the decoded key, and invalid keys are malformed stored carriers.
+/// Typed enum payloads carry the type OID, hexadecimal label key and optional opaque label OID. The hexadecimal text's reservation covers the decoded key, and invalid keys are malformed stored carriers.
 pub(super) fn enum_value(
     input: &[u8],
     control: &StorageReadControl,
@@ -256,12 +267,14 @@ pub(super) fn enum_value(
     let mut container = Container::new(input, control, depth)?;
     let mut type_oid = None;
     let mut key = None;
+    let mut label_oid = None;
     if container.kind == Kind::Array {
         type_oid = Some(container.next()?.ok_or(JsonReadError::InvalidJson)?.value);
         key = Some(string(
             container.next()?.ok_or(JsonReadError::InvalidJson)?.value,
             control,
         )?);
+        label_oid = container.next()?.map(|item| item.value);
         if container.next()?.is_some() {
             return Err(JsonReadError::InvalidJson);
         }
@@ -271,6 +284,7 @@ pub(super) fn enum_value(
             match name.as_str() {
                 "type_oid" if type_oid.is_none() => type_oid = Some(item.value),
                 "key" if key.is_none() => key = Some(string(item.value, control)?),
+                "label_oid" if label_oid.is_none() => label_oid = Some(item.value),
                 _ => return Err(JsonReadError::InvalidJson),
             }
         }
@@ -284,11 +298,18 @@ pub(super) fn enum_value(
     };
     let type_oid = u32::try_from(super::unsigned(type_oid, control, false)?)
         .map_err(|_| malformed("type OID out of range".into()))?;
+    let label_oid = label_oid
+        .filter(|value| *value != b"null")
+        .map(|value| {
+            u32::try_from(super::unsigned(value, control, false)?)
+                .map_err(|_| malformed("label OID out of range".into()))
+        })
+        .transpose()?;
     let (key, memory) = key.into_parts();
     let key =
         uqa_core::EnumLabelKey::from_hex(&key).map_err(|error| malformed(error.to_string()))?;
     super::finish(
-        Value::Enum(uqa_core::EnumValue::new(type_oid, key)),
+        Value::Enum(uqa_core::EnumValue::new(type_oid, key).with_label_oid(label_oid)),
         memory,
         control,
     )

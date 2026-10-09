@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE SEQUENCE range_schema_seq; CREATE TABLE range_schema_default (result boolean DEFAULT (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100)); CREATE TABLE range_schema_check (id integer CHECK (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100)); CREATE FUNCTION range_schema_function() RETURNS boolean LANGUAGE SQL RETURN (SELECT nextval('range_schema_seq')) BETWEEN SYMMETRIC 1 AND 1; CREATE FUNCTION range_schema_parameter(result boolean DEFAULT (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100)) RETURNS boolean LANGUAGE SQL RETURN result; CREATE DOMAIN range_schema_default_domain AS boolean DEFAULT (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100); CREATE TABLE range_schema_domain_default (result range_schema_default_domain); CREATE DOMAIN range_schema_check_domain AS integer CHECK (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100); CREATE TABLE range_schema_domain_check (id range_schema_check_domain); CREATE TABLE range_schema_rule_input (id integer); CREATE TABLE range_schema_rule_log (result boolean); CREATE RULE range_schema_rule AS ON INSERT TO range_schema_rule_input DO ALSO INSERT INTO range_schema_rule_log VALUES (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100); CREATE TABLE range_schema_trigger_input (id integer); CREATE FUNCTION range_schema_trigger_function() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER range_schema_trigger BEFORE INSERT ON range_schema_trigger_input FOR EACH ROW WHEN (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100) EXECUTE FUNCTION range_schema_trigger_function(); CREATE TABLE range_schema_guard_input(id integer); CREATE RULE range_schema_guard_rule AS ON INSERT TO range_schema_guard_input WHERE (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100) DO ALSO INSERT INTO range_schema_rule_log VALUES (true); CREATE TABLE range_schema_generated(id integer, result boolean GENERATED ALWAYS AS (id BETWEEN SYMMETRIC 3 AND 1) STORED); CREATE INDEX range_schema_key ON range_schema_generated ((id BETWEEN SYMMETRIC 3 AND 1)); CREATE INDEX range_schema_partial ON range_schema_generated(id) WHERE id BETWEEN SYMMETRIC 3 AND 1; CREATE TABLE range_schema_partitioned(id integer) PARTITION BY LIST ((id BETWEEN SYMMETRIC 1 AND 3)); CREATE TABLE range_schema_true PARTITION OF range_schema_partitioned FOR VALUES IN (true); CREATE TABLE range_schema_false PARTITION OF range_schema_partitioned FOR VALUES IN (false); CREATE FOREIGN DATA WRAPPER range_schema_fdw; CREATE SERVER range_schema_server FOREIGN DATA WRAPPER range_schema_fdw; CREATE FOREIGN TABLE range_schema_foreign(id integer CHECK (id BETWEEN SYMMETRIC 3 AND 1), result boolean DEFAULT (nextval('range_schema_seq') BETWEEN SYMMETRIC NULL::bigint AND 100)) SERVER range_schema_server"
+    },
+    {
+      "id": "default",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; INSERT INTO range_schema_default DEFAULT VALUES RETURNING result; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "check",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; INSERT INTO range_schema_check VALUES (1) RETURNING id; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "routine",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; SELECT range_schema_function() AS result; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "parameter",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; SELECT range_schema_parameter() AS result; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "domain_default",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; INSERT INTO range_schema_domain_default DEFAULT VALUES RETURNING result; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "domain_check",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; INSERT INTO range_schema_domain_check VALUES (1) RETURNING id; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "rule",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; DELETE FROM range_schema_rule_log; INSERT INTO range_schema_rule_input VALUES (1); SELECT result FROM range_schema_rule_log; SELECT nextval('range_schema_seq') AS next; DELETE FROM range_schema_rule_log"
+    },
+    {
+      "id": "trigger",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; INSERT INTO range_schema_trigger_input VALUES (1) RETURNING id; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "rule_condition",
+      "sql": "ALTER SEQUENCE range_schema_seq RESTART WITH 1; INSERT INTO range_schema_guard_input VALUES (1); SELECT result FROM range_schema_rule_log; SELECT nextval('range_schema_seq') AS next"
+    },
+    {
+      "id": "generated_and_indexes",
+      "sql": "INSERT INTO range_schema_generated(id) VALUES (0),(2),(4) RETURNING id,result; DELETE FROM range_schema_generated"
+    },
+    {
+      "id": "partition_key",
+      "sql": "INSERT INTO range_schema_partitioned VALUES (0),(2),(4) RETURNING id; SELECT id FROM range_schema_true; SELECT id FROM range_schema_false ORDER BY id; DELETE FROM range_schema_partitioned"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP FOREIGN TABLE range_schema_foreign; DROP SERVER range_schema_server; DROP FOREIGN DATA WRAPPER range_schema_fdw; DROP TABLE range_schema_guard_input,range_schema_generated,range_schema_partitioned; DROP TABLE range_schema_default,range_schema_check,range_schema_domain_default,range_schema_domain_check,range_schema_rule_input,range_schema_rule_log,range_schema_trigger_input; DROP FUNCTION range_schema_function(),range_schema_parameter(boolean),range_schema_trigger_function(); DROP DOMAIN range_schema_default_domain,range_schema_check_domain; DROP SEQUENCE range_schema_seq"
+    }
+  ]
+}

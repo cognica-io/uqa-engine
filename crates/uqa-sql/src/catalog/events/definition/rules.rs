@@ -265,84 +265,79 @@ impl EventAnalysisContext<'_> {
                 message: format!("rule WHERE condition cannot refer to relation \"{reference}\""),
             });
         }
-        if has_subquery {
-            let (mut plan, binding, reused) =
-                if let Some((plan, binding)) = stored_plan.zip(stored_binding) {
-                    let mut plan = plan.clone();
-                    let binding = binding.reallocate_plan_relations(&mut plan);
-                    (plan, binding, true)
-                } else {
-                    let plan = crate::plan::ExpressionPlan::lower_with(
-                        condition.clone(),
-                        &|name: &str| self.routines.has_registered_aggregate_function(name),
-                    );
-                    let column_names = columns
-                        .iter()
-                        .map(|(name, _)| name.clone())
-                        .collect::<Vec<_>>();
-                    (
-                        plan,
-                        RuleConditionBinding::for_event(&column_names, event),
-                        false,
-                    )
-                };
-            if !reused {
-                for subquery in &mut plan.subqueries {
-                    self.bind_rule_condition_subquery_relations(subquery)?;
-                }
-            }
-            let schema = rule_condition_row_schema(columns, &binding);
-            let ty = self
-                .stored_routines
-                .bind_expression(&mut plan, &[], &schema)?;
-            if let Some(ty) = ty {
-                if !is_boolean_type(&ty) {
+        if !has_subquery {
+            let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
+            let lowered = crate::plan::ExpressionPlan::lower(bound);
+            match crate::common_context_expression_type(
+                &lowered.scalar,
+                &crate::RowSchema::default(),
+                &[],
+                Some(self.routines),
+            )? {
+                Some(ty) if !is_boolean_type(&ty) => {
                     return Err(SQLError::TypeMismatch(format!(
                         "argument of WHERE must be type boolean, not type {}",
                         ty.sql_name()
-                    )));
+                    )))
                 }
+                None => {
+                    if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition
+                    {
+                        *value = crate::expr::cast_value(value, "boolean")?;
+                    } else {
+                        *condition = Expr::Cast {
+                            implicit: true,
+                            expr: Box::new(condition.clone()),
+                            ty: "boolean".into(),
+                        };
+                    }
+                }
+                Some(_) => {}
             }
-            crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
-                self.regroles,
-                condition,
-                None,
-            )?;
-            return Ok(Some((plan, binding)));
         }
-        let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
-        let lowered = crate::plan::ExpressionPlan::lower(bound);
-        match crate::common_context_expression_type(
-            &lowered.scalar,
-            &crate::RowSchema::default(),
-            &[],
-            Some(self.routines),
-        )? {
-            Some(ty) if !is_boolean_type(&ty) => {
+        let (mut plan, binding, reused) = if let Some((plan, binding)) =
+            stored_plan.zip(stored_binding)
+        {
+            let mut plan = plan.clone();
+            let binding = binding.reallocate_plan_relations(&mut plan);
+            (plan, binding, true)
+        } else {
+            let plan = crate::plan::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
+                self.routines.has_registered_aggregate_function(name)
+            });
+            let column_names = columns
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>();
+            (
+                plan,
+                RuleConditionBinding::for_event(&column_names, event),
+                false,
+            )
+        };
+        if !reused {
+            for subquery in &mut plan.subqueries {
+                self.bind_rule_condition_subquery_relations(subquery)?;
+            }
+        }
+        let schema = rule_condition_row_schema(columns, &binding);
+        let ty = self
+            .stored_routines
+            .bind_expression(&mut plan, &[], &schema)?;
+        if let Some(ty) = ty {
+            if !is_boolean_type(&ty) {
                 return Err(SQLError::TypeMismatch(format!(
                     "argument of WHERE must be type boolean, not type {}",
                     ty.sql_name()
-                )))
+                )));
             }
-            None => {
-                if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
-                    *value = crate::expr::cast_value(value, "boolean")?;
-                } else {
-                    *condition = Expr::Cast {
-                        implicit: true,
-                        expr: Box::new(condition.clone()),
-                        ty: "boolean".into(),
-                    };
-                }
-            }
-            Some(_) => {}
         }
         crate::catalog::regrole_dependencies::reject_stored_regrole_constants_with(
             self.regroles,
             condition,
             None,
         )?;
-        Ok(None)
+        Ok(Some((plan, binding)))
     }
 
     fn bind_rule_condition_subquery_relations(

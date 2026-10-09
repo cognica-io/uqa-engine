@@ -66,7 +66,11 @@ pub fn normalize_legacy_vector_carrier_with_control(
             }
             .ok_or_else(invalid_array)?;
             let (array, memory) = array.into_parts();
-            Ok(Some(control.finish(Value::Array(array), memory)?))
+            let oid = value.array_view().and_then(ArrayValue::element_type_oid);
+            Ok(Some(control.finish(
+                Value::Array(array.with_element_type_oid(oid)),
+                memory,
+            )?))
         }
         _ => Ok(None),
     }

@@ -12,6 +12,9 @@ use crate::SQLError;
 
 use super::oids::stable_oid;
 
+mod builtins;
+pub use builtins::{builtin_array_element, builtin_scalar_type};
+
 pub fn catalog_type_name(oid: i64) -> &'static str {
     match oid {
         16 => "boolean",
@@ -54,10 +57,6 @@ pub fn catalog_regtype_name(oid: i64) -> Option<&'static str> {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves catalog column and OID order"
-)]
 pub fn pg_type_oid(ty: &ColumnType) -> i64 {
     match ty {
         ColumnType::Named(name) => {
@@ -113,70 +112,8 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             RangeSubtype::BigInteger => 4536,
         },
         ColumnType::Array(element) => match element.as_ref() {
-            ColumnType::Named(name) => {
-                unreachable!("unresolved declaration type {name} reached catalog projection")
-            }
-            ColumnType::SmallInteger => 1005,
-            ColumnType::Integer => 1007,
-            ColumnType::BigInteger => 1016,
-            ColumnType::Oid => 1028,
-            ColumnType::Xid => 1011,
-            ColumnType::Boolean => 1000,
-            ColumnType::Void => 0,
-            ColumnType::Text => 1009,
-            ColumnType::RefCursor => 2201,
-            ColumnType::Name => 1003,
-            ColumnType::Uuid => 2951,
-            ColumnType::Varchar(_) => 1015,
-            ColumnType::Bpchar | ColumnType::Character(_) => 1014,
-            ColumnType::Real => 1021,
-            ColumnType::DoublePrecision => 1022,
-            ColumnType::Numeric { .. } => 1231,
-            ColumnType::Json => 199,
-            ColumnType::JsonB => 3807,
-            ColumnType::Bytea => 1001,
-            ColumnType::InternalChar => 1002,
-            ColumnType::Regproc => 1008,
-            ColumnType::Regprocedure => 2207,
-            ColumnType::Regclass => 2210,
-            ColumnType::Regcollation => 4192,
-            ColumnType::Regnamespace => 4090,
-            ColumnType::Regrole => 4097,
-            ColumnType::Regtype => 2211,
-            ColumnType::PgNodeTree => 0,
-            ColumnType::AclItem => 1034,
-            ColumnType::Int2Vector => 1006,
-            ColumnType::OidVector => 1013,
-            ColumnType::AnyArray => 0,
-            ColumnType::Record => 2287,
-            ColumnType::Date => 1182,
-            ColumnType::Time | ColumnType::TimePrecision(_) => 1183,
-            ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 1270,
-            ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => 1115,
-            ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => 1185,
-            ColumnType::Interval | ColumnType::IntervalWithFields { .. } => 1187,
-            ColumnType::Vector(_) => 380_002,
-            ColumnType::Tensor(_) => 380_003,
-            ColumnType::Domain { oid, array_oid, .. } => pg_domain_array_oid(*oid, *array_oid),
-            ColumnType::Enum(reference) => i64::from(reference.array_oid),
-            ColumnType::Composite(reference) => i64::from(reference.array_oid),
-            ColumnType::Range(subtype) => match subtype {
-                RangeSubtype::Integer => 3905,
-                RangeSubtype::Numeric => 3907,
-                RangeSubtype::Timestamp => 3909,
-                RangeSubtype::TimestampTz => 3911,
-                RangeSubtype::Date => 3913,
-                RangeSubtype::BigInteger => 3927,
-            },
-            ColumnType::Multirange(subtype) => match subtype {
-                RangeSubtype::Integer => 6150,
-                RangeSubtype::Numeric => 6151,
-                RangeSubtype::Timestamp => 6152,
-                RangeSubtype::TimestampTz => 6153,
-                RangeSubtype::Date => 6155,
-                RangeSubtype::BigInteger => 6157,
-            },
             ColumnType::Array(_) => pg_type_oid(element),
+            element => pg_type_array_oid(element),
         },
         ColumnType::Date => 1082,
         ColumnType::Time | ColumnType::TimePrecision(_) => 1083,
@@ -434,9 +371,67 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
         ColumnType::Named(name) => {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
-        ColumnType::Array(_) => 0,
+        ColumnType::SmallInteger => 1005,
+        ColumnType::Integer => 1007,
+        ColumnType::BigInteger => 1016,
+        ColumnType::Oid => 1028,
+        ColumnType::Xid => 1011,
+        ColumnType::Boolean => 1000,
+        ColumnType::Void => 0,
+        ColumnType::Text => 1009,
+        ColumnType::RefCursor => 2201,
+        ColumnType::Name => 1003,
+        ColumnType::Uuid => 2951,
+        ColumnType::Varchar(_) => 1015,
+        ColumnType::Bpchar | ColumnType::Character(_) => 1014,
+        ColumnType::Real => 1021,
+        ColumnType::DoublePrecision => 1022,
+        ColumnType::Numeric { .. } => 1231,
+        ColumnType::Json => 199,
+        ColumnType::JsonB => 3807,
+        ColumnType::Bytea => 1001,
+        ColumnType::InternalChar => 1002,
+        ColumnType::Regproc => 1008,
+        ColumnType::Regprocedure => 2207,
+        ColumnType::Regclass => 2210,
+        ColumnType::Regcollation => 4192,
+        ColumnType::Regnamespace => 4090,
+        ColumnType::Regrole => 4097,
+        ColumnType::Regtype => 2211,
+        ColumnType::PgNodeTree => 0,
+        ColumnType::AclItem => 1034,
+        ColumnType::Int2Vector => 1006,
+        ColumnType::OidVector => 1013,
+        ColumnType::AnyArray => 0,
+        ColumnType::Record => 2287,
+        ColumnType::Date => 1182,
+        ColumnType::Time | ColumnType::TimePrecision(_) => 1183,
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 1270,
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => 1115,
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => 1185,
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => 1187,
+        ColumnType::Vector(_) => 380_002,
+        ColumnType::Tensor(_) => 380_003,
         ColumnType::Domain { oid, array_oid, .. } => pg_domain_array_oid(*oid, *array_oid),
-        other => pg_type_oid(&ColumnType::Array(Box::new(other.clone()))),
+        ColumnType::Enum(reference) => i64::from(reference.array_oid),
+        ColumnType::Composite(reference) => i64::from(reference.array_oid),
+        ColumnType::Range(subtype) => match subtype {
+            RangeSubtype::Integer => 3905,
+            RangeSubtype::Numeric => 3907,
+            RangeSubtype::Timestamp => 3909,
+            RangeSubtype::TimestampTz => 3911,
+            RangeSubtype::Date => 3913,
+            RangeSubtype::BigInteger => 3927,
+        },
+        ColumnType::Multirange(subtype) => match subtype {
+            RangeSubtype::Integer => 6150,
+            RangeSubtype::Numeric => 6151,
+            RangeSubtype::Timestamp => 6152,
+            RangeSubtype::TimestampTz => 6153,
+            RangeSubtype::Date => 6155,
+            RangeSubtype::BigInteger => 6157,
+        },
+        ColumnType::Array(_) => 0,
     }
 }
 

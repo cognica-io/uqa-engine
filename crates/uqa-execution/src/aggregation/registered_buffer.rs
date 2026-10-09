@@ -6,7 +6,10 @@
 
 //! Spillable ordered input buffering for registered aggregates.
 
-use super::ordering::{compare_sort_keys, minimum_by, sort_records};
+use super::ordering::{
+    compare_sort_keys, compare_sort_keys_with_catalog, minimum_by, sort_records,
+};
+use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
 
 use super::{
     read_bounded_json_spill_record, write_json_spill_record, BufReader, BufWriter, File,
@@ -27,6 +30,7 @@ pub struct RegisteredAggregateBuffer {
     pub(super) next_sequence: u64,
     pub(super) budget_bytes: usize,
     pub(super) memory_bytes: usize,
+    pub(super) comparison_states: Option<std::sync::Arc<[EnumComparisonState]>>,
 }
 
 impl Default for RegisteredAggregateBuffer {
@@ -43,6 +47,7 @@ impl RegisteredAggregateBuffer {
             next_sequence: 0,
             budget_bytes: budget_bytes.max(1),
             memory_bytes: 0,
+            comparison_states: None,
         }
     }
 
@@ -54,7 +59,18 @@ impl RegisteredAggregateBuffer {
         &mut self,
         values: Vec<Value>,
         sort_keys: Vec<super::ordering::AggregateSortKey>,
+        enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
+        if !sort_keys.is_empty()
+            && self.comparison_states.is_none()
+            && enums.is_some_and(EnumLabelCatalog::has_enum_types)
+        {
+            self.comparison_states = Some(
+                (0..sort_keys.len())
+                    .map(|_| EnumComparisonState::default())
+                    .collect(),
+            );
+        }
         let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
             SQLError::Internal("registered aggregate value sequence overflow".into())
         })?;
@@ -78,7 +94,7 @@ impl RegisteredAggregateBuffer {
                 .checked_add(bytes)
                 .is_none_or(|total| total > self.budget_bytes)
         {
-            self.flush_run()?;
+            self.flush_run(enums)?;
         }
         let next_memory_bytes = self
             .memory_bytes
@@ -88,7 +104,7 @@ impl RegisteredAggregateBuffer {
         self.memory_bytes = next_memory_bytes;
         self.next_sequence = next_sequence;
         if self.memory_bytes > self.budget_bytes {
-            self.flush_run()?;
+            self.flush_run(enums)?;
         }
         Ok(())
     }
@@ -96,10 +112,18 @@ impl RegisteredAggregateBuffer {
     pub(super) fn observe_ordered_into(
         &self,
         state: &mut dyn SQLAggregateState,
+        enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         if self.runs.is_empty() {
             let mut rows = self.rows.clone();
-            sort_records(&mut rows, compare_registered_aggregate_records)?;
+            sort_records(&mut rows, |left, right| {
+                compare_registered_aggregate_records_with_catalog(
+                    left,
+                    right,
+                    enums,
+                    self.comparison_states.as_deref().unwrap_or_default(),
+                )
+            })?;
             for row in rows {
                 state.observe(&row.values)?;
             }
@@ -107,7 +131,14 @@ impl RegisteredAggregateBuffer {
         }
 
         let mut rows = self.rows.clone();
-        sort_records(&mut rows, compare_registered_aggregate_records)?;
+        sort_records(&mut rows, |left, right| {
+            compare_registered_aggregate_records_with_catalog(
+                left,
+                right,
+                enums,
+                self.comparison_states.as_deref().unwrap_or_default(),
+            )
+        })?;
         let mut readers = Vec::with_capacity(self.runs.len() + usize::from(!rows.is_empty()));
         if !rows.is_empty() {
             readers.push(RegisteredAggregateRunReader::memory(rows));
@@ -121,7 +152,14 @@ impl RegisteredAggregateBuffer {
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, reader)| reader.current().map(|record| (idx, record))),
-            |(_, a), (_, b)| compare_registered_aggregate_records(a, b),
+            |(_, a), (_, b)| {
+                compare_registered_aggregate_records_with_catalog(
+                    a,
+                    b,
+                    enums,
+                    self.comparison_states.as_deref().unwrap_or_default(),
+                )
+            },
         )? {
             let record = readers[idx].take_current()?;
             state.observe(&record.values)?;
@@ -129,11 +167,21 @@ impl RegisteredAggregateBuffer {
         Ok(())
     }
 
-    pub(super) fn flush_run(&mut self) -> Result<(), SQLError> {
+    pub(super) fn flush_run(
+        &mut self,
+        enums: Option<&dyn EnumLabelCatalog>,
+    ) -> Result<(), SQLError> {
         if self.rows.is_empty() {
             return Ok(());
         }
-        sort_records(&mut self.rows, compare_registered_aggregate_records)?;
+        sort_records(&mut self.rows, |left, right| {
+            compare_registered_aggregate_records_with_catalog(
+                left,
+                right,
+                enums,
+                self.comparison_states.as_deref().unwrap_or_default(),
+            )
+        })?;
         let mut run = uqa_storage::temporary_file::TemporaryFile::new().map_err(|err| {
             SQLError::Internal(format!(
                 "failed to create registered aggregate spill file: {err}"
@@ -168,7 +216,11 @@ impl RegisteredAggregateBuffer {
                 .runs
                 .drain(..AGGREGATE_MERGE_FAN_IN)
                 .collect::<Vec<_>>();
-            self.runs.push(merge_registered_aggregate_runs(inputs)?);
+            self.runs.push(merge_registered_aggregate_runs_with_catalog(
+                inputs,
+                enums,
+                self.comparison_states.as_deref().unwrap_or_default(),
+            )?);
         }
         Ok(())
     }
@@ -255,6 +307,14 @@ pub fn read_registered_aggregate_record(
 }
 
 pub fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRun, SQLError> {
+    merge_registered_aggregate_runs_with_catalog(runs, None, &[])
+}
+
+fn merge_registered_aggregate_runs_with_catalog(
+    runs: Vec<JsonSpillRun>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    states: &[EnumComparisonState],
+) -> Result<JsonSpillRun, SQLError> {
     let mut readers = runs
         .iter()
         .map(RegisteredAggregateRunReader::file)
@@ -272,7 +332,9 @@ pub fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSp
                 .iter()
                 .enumerate()
                 .filter_map(|(index, reader)| reader.current().map(|record| (index, record))),
-            |(_, left), (_, right)| compare_registered_aggregate_records(left, right),
+            |(_, left), (_, right)| {
+                compare_registered_aggregate_records_with_catalog(left, right, enums, states)
+            },
         )? {
             let record = readers[index].take_current()?;
             let record_bytes =
@@ -304,5 +366,15 @@ pub fn compare_registered_aggregate_records(
     b: &RegisteredAggregateRecord,
 ) -> Result<Ordering, SQLError> {
     let ordering = compare_sort_keys(&a.sort_keys, &b.sort_keys)?;
+    Ok(ordering.then_with(|| a.sequence.cmp(&b.sequence)))
+}
+
+fn compare_registered_aggregate_records_with_catalog(
+    a: &RegisteredAggregateRecord,
+    b: &RegisteredAggregateRecord,
+    enums: Option<&dyn EnumLabelCatalog>,
+    states: &[EnumComparisonState],
+) -> Result<Ordering, SQLError> {
+    let ordering = compare_sort_keys_with_catalog(&a.sort_keys, &b.sort_keys, enums, states)?;
     Ok(ordering.then_with(|| a.sequence.cmp(&b.sequence)))
 }

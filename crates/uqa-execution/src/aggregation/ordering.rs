@@ -8,17 +8,29 @@
 
 use std::cmp::Ordering;
 use uqa_core::{memory::ProductionControl, Value};
+use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
 use uqa_sql::SQLError;
 
 pub fn compare_extrema(left: &Value, right: &Value) -> Result<Ordering, SQLError> {
+    compare_extrema_with_catalog(left, right, None, None)
+}
+
+pub(super) fn compare_extrema_with_catalog(
+    left: &Value,
+    right: &Value,
+    enums: Option<&dyn EnumLabelCatalog>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Ordering, SQLError> {
     // PostgreSQL MIN/MAX select array_smaller/array_larger for catalog vectors, independently of oidvector's scalar operators.
     if let (Value::LegacyVector(left), Value::LegacyVector(right)) = (left, right) {
         return Ok(left.compare_as_array(right));
     }
-    uqa_sql::expr::compare_typed_values_with_control(
+    uqa_sql::expr::compare_typed_values_with_enum_catalog(
         left,
         right,
         &ProductionControl::uncontrolled(),
+        enums,
+        state,
     )
 }
 
@@ -61,7 +73,16 @@ pub(super) fn compare_sort_keys(
     left: &[AggregateSortKey],
     right: &[AggregateSortKey],
 ) -> Result<Ordering, SQLError> {
-    for (left, right) in left.iter().zip(right) {
+    compare_sort_keys_with_catalog(left, right, None, &[])
+}
+
+pub(super) fn compare_sort_keys_with_catalog(
+    left: &[AggregateSortKey],
+    right: &[AggregateSortKey],
+    enums: Option<&dyn EnumLabelCatalog>,
+    states: &[EnumComparisonState],
+) -> Result<Ordering, SQLError> {
+    for (index, (left, right)) in left.iter().zip(right).enumerate() {
         let ordering = match (
             matches!(left.value, Value::Null),
             matches!(right.value, Value::Null),
@@ -72,10 +93,12 @@ pub(super) fn compare_sort_keys(
             (false, true) if left.nulls_first => Ordering::Greater,
             (false, true) => Ordering::Less,
             (false, false) => {
-                let ordering = uqa_sql::expr::compare_typed_values_with_control(
+                let ordering = uqa_sql::expr::compare_typed_values_with_enum_catalog(
                     &left.value,
                     &right.value,
                     &ProductionControl::uncontrolled(),
+                    enums,
+                    states.get(index),
                 )?;
                 if left.descending {
                     ordering.reverse()

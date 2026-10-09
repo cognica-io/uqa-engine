@@ -99,7 +99,7 @@ enum Sequence<'a> {
 
 enum Output<'a> {
     Values(BudgetedVec<Value>, Sequence<'a>),
-    Record(BudgetedVec<(String, Value)>),
+    Record(BudgetedVec<(String, Value)>, Option<u32>),
     Map(BTreeMap<String, Value>),
 }
 
@@ -154,7 +154,10 @@ impl<'a> Frame<'a> {
             Value::Record(fields) => {
                 let mut output = BudgetedVec::new(copier.budget);
                 output.reserve(fields.len())?;
-                (Input::Record(fields.iter()), Output::Record(output))
+                (
+                    Input::Record(fields.iter()),
+                    Output::Record(output, fields.type_oid()),
+                )
             }
             Value::Map(fields) => (Input::Map(fields.iter()), Output::Map(BTreeMap::new())),
             _ => return Ok(None),
@@ -192,7 +195,7 @@ impl<'a> Frame<'a> {
                 values.push(value)?;
                 self.memory.absorb(memory);
             }
-            Output::Record(fields) => {
+            Output::Record(fields, _) => {
                 fields.reserve(1)?;
                 let (name, name_memory) = self.key.take().expect("copied record name").into_parts();
                 let (value, memory) = value.into_parts();
@@ -242,7 +245,8 @@ impl<'a> Frame<'a> {
                         self.memory.absorb(dimensions_memory);
                         self.memory.absorb(lower_memory);
                         (copier.check)()?;
-                        let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds);
+                        let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds)
+                            .with_element_type_oid(source.element_type_oid());
                         match legacy_kind {
                             Some(kind) => Value::LegacyVector(
                                 LegacyVectorValue::from_validated_array(kind, array),
@@ -252,10 +256,13 @@ impl<'a> Frame<'a> {
                     }
                 }
             }
-            Output::Record(fields) => {
+            Output::Record(fields, type_oid) => {
                 let (fields, memory) = fields.into_parts();
                 self.memory.absorb(memory);
-                Value::Record(fields)
+                self.memory
+                    .grow(crate::RecordValue::retained_header_bytes())?;
+                (copier.check)()?;
+                Value::Record(crate::RecordValue::from_parts(fields, type_oid))
             }
             Output::Map(fields) => Value::Map(fields),
         };
@@ -325,6 +332,10 @@ impl Copier<'_> {
             Value::Decimal(value) => {
                 memory.grow(value.retained_bytes())?;
                 Value::Decimal(value.clone())
+            }
+            Value::Datum(value) => {
+                memory.grow(value.retained_bytes())?;
+                Value::Datum(value.clone())
             }
             Value::Enum(value) => {
                 memory.grow(value.retained_bytes())?;

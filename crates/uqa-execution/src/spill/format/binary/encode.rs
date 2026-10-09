@@ -214,12 +214,32 @@ fn encoded_column_type(ty: Option<&uqa_sql::ast::ColumnType>) -> ExecResult<Stri
     )
 }
 
+fn add_record_size(
+    total: &mut usize,
+    fields: &uqa_core::RecordValue,
+    depth: usize,
+) -> ExecResult<()> {
+    add_size(total, 8, "record length")?;
+    if fields.type_oid().is_some() {
+        add_size(total, 4, "record type OID")?;
+    }
+    for (name, value) in fields {
+        add_string_size(total, name, "record field name")?;
+        add_value_size(total, value, depth + 1)?;
+    }
+    Ok(())
+}
+
 fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
     }
     add_size(total, 1, "value tag")?;
     match value {
+        Value::Datum(value) => {
+            add_size(total, 16, "datum identity, offset and length")?;
+            add_size(total, value.bytes().len(), "datum bytes")
+        }
         Value::Null | Value::Void => Ok(()),
         Value::Bool(_) => add_size(total, 1, "boolean value"),
         Value::Int(_) | Value::Float(_) => add_size(total, 8, "numeric value"),
@@ -237,6 +257,9 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         Value::Json(value) | Value::JsonB(value) => add_string_size(total, value, "JSON value"),
         Value::Enum(value) => {
             add_size(total, 4, "enum type OID")?;
+            if value.label_oid().is_some() {
+                add_size(total, 4, "enum label OID")?;
+            }
             add_size(total, 8, "enum label key length")?;
             add_size(total, value.key().as_bytes().len(), "enum label key")
         }
@@ -254,6 +277,9 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             Ok(())
         }
         Value::Array(array) => {
+            if array.element_type_oid().is_some() {
+                add_size(total, 4, "array element type OID")?;
+            }
             add_size(total, 8, "array lower-bound count")?;
             add_size(
                 total,
@@ -280,29 +306,14 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         Value::Row(values) => {
             add_size(total, 8, "row length")?;
             if let Some(fields) = values.field_types() {
-                add_size(total, 8, "row descriptor length")?;
-                add_size(
-                    total,
-                    fields
-                        .len()
-                        .checked_mul(8)
-                        .ok_or_else(|| spill_error("row descriptor size overflow"))?,
-                    "row descriptor",
-                )?;
+                add_row_descriptor_size(total, fields.len())?;
             }
             for value in values {
                 add_value_size(total, value, depth + 1)?;
             }
             Ok(())
         }
-        Value::Record(fields) => {
-            add_size(total, 8, "record length")?;
-            for (name, value) in fields {
-                add_string_size(total, name, "record field name")?;
-                add_value_size(total, value, depth + 1)?;
-            }
-            Ok(())
-        }
+        Value::Record(fields) => add_record_size(total, fields, depth),
         Value::Map(values) => {
             add_size(total, 8, "map length")?;
             for (key, value) in values {
@@ -312,6 +323,17 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             Ok(())
         }
     }
+}
+
+fn add_row_descriptor_size(total: &mut usize, fields: usize) -> ExecResult<()> {
+    add_size(total, 8, "row descriptor length")?;
+    add_size(
+        total,
+        fields
+            .checked_mul(8)
+            .ok_or_else(|| spill_error("row descriptor size overflow"))?,
+        "row descriptor",
+    )
 }
 
 fn temporal_payload_size(value: &TemporalValue) -> usize {
@@ -480,16 +502,44 @@ fn write_slot(writer: &mut impl Write, slot: Option<usize>) -> ExecResult<()> {
     }
 }
 
+fn encode_record(
+    writer: &mut impl Write,
+    fields: &uqa_core::RecordValue,
+    depth: usize,
+) -> ExecResult<()> {
+    if let Some(oid) = fields.type_oid() {
+        write_tag(writer, 23)?;
+        write_raw(writer, &oid.to_le_bytes(), "record type OID")?;
+    } else {
+        write_tag(writer, 14)?;
+    }
+    write_u64(writer, fields.len())?;
+    for (name, value) in fields {
+        write_bytes(writer, name.as_bytes())?;
+        encode_value(writer, value, depth + 1)?;
+    }
+    Ok(())
+}
+
 fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
     }
     match value {
+        Value::Datum(value) => {
+            write_tag(writer, 20)?;
+            write_raw(writer, &value.type_oid().to_le_bytes(), "datum type OID")?;
+            write_raw(writer, &value.offset().to_le_bytes(), "datum offset")?;
+            write_bytes(writer, value.bytes())
+        }
         Value::Null => write_tag(writer, 0),
         Value::Void => write_tag(writer, 16),
         Value::Enum(value) => {
-            write_tag(writer, 18)?;
+            write_tag(writer, if value.label_oid().is_some() { 22 } else { 18 })?;
             write_raw(writer, &value.type_oid().to_le_bytes(), "enum type OID")?;
+            if let Some(oid) = value.label_oid() {
+                write_raw(writer, &oid.to_le_bytes(), "enum label OID")?;
+            }
             write_bytes(writer, value.key().as_bytes())
         }
         Value::LegacyVector(vector) => encode_legacy_vector(writer, vector, depth),
@@ -536,7 +586,12 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             write_bytes(writer, value.as_bytes())
         }
         Value::Array(array) => {
-            write_tag(writer, 15)?;
+            if let Some(oid) = array.element_type_oid() {
+                write_tag(writer, 21)?;
+                write_raw(writer, &oid.to_le_bytes(), "array element type OID")?;
+            } else {
+                write_tag(writer, 15)?;
+            }
             write_u64(writer, array.lower_bounds().len())?;
             for lower_bound in array.lower_bounds() {
                 write_raw(writer, &lower_bound.to_le_bytes(), "array lower bound")?;
@@ -548,15 +603,7 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             encode_values(writer, values, depth)
         }
         Value::Row(values) => encode_row(writer, values, depth),
-        Value::Record(fields) => {
-            write_tag(writer, 14)?;
-            write_u64(writer, fields.len())?;
-            for (name, value) in fields {
-                write_bytes(writer, name.as_bytes())?;
-                encode_value(writer, value, depth + 1)?;
-            }
-            Ok(())
-        }
+        Value::Record(fields) => encode_record(writer, fields, depth),
         Value::Map(values) => {
             write_tag(writer, 9)?;
             write_u64(writer, values.len())?;

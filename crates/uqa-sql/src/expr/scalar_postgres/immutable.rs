@@ -106,6 +106,9 @@ fn bit_length(args: &[Value], control: &ProductionControl<'_>) -> Result<Produce
     let [value] = args else {
         return Err(SQLError::TypeMismatch("bit_length takes 1 arg".into()));
     };
+    if let Some(length) = crate::expr::datums::binary_length(value, control)? {
+        return inline(Value::Int(length * 8), control);
+    }
     let octets = match value {
         Value::Null => return inline(Value::Null, control),
         Value::Str(text) => text.len(),

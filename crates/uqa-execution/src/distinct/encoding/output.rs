@@ -9,6 +9,9 @@
 use super::{encode_bytes, BudgetedVec, ExecError, ExecResult, StorageReadControl};
 
 pub(super) trait KeyOutput {
+    fn enum_catalog(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        None
+    }
     fn push_byte(&mut self, value: u8) -> ExecResult<()>;
     fn extend_bytes(&mut self, values: &[u8]) -> ExecResult<()>;
 

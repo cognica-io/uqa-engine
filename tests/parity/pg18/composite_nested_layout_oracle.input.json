@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE nested_leaf AS (a integer,b integer); CREATE TYPE nested_parent AS (lead smallint, item nested_leaf, tail integer); CREATE VIEW nested_value AS SELECT '(9,\"(1065353216,17)\",23)'::nested_parent AS v; CREATE TYPE nested_array_parent AS (items nested_leaf[], tail integer); CREATE VIEW nested_array_value AS SELECT '(\"{\"\"(1065353216,17)\"\",NULL,\"\"(1073741824,19)\"\"}\",29)'::nested_array_parent AS v"
+    },
+    {
+      "id": "before",
+      "sql": "SELECT v FROM nested_value; SELECT v FROM nested_array_value"
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "child_to_bytes",
+      "sql": "ALTER TYPE nested_parent ALTER ATTRIBUTE item TYPE bytea"
+    },
+    {
+      "id": "nested_bytes",
+      "sql": "SELECT length((v).item),encode(substr((v).item,1,4),'hex'),encode(substr((v).item,9),'hex'),(get_byte((v).item,4)+256*get_byte((v).item,5)+65536*get_byte((v).item,6)+16777216::bigint*get_byte((v).item,7))='nested_leaf'::regtype::oid::bigint,(v).tail FROM nested_value"
+    },
+    {
+      "id": "restore_child",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "after_child_rollback",
+      "sql": "SELECT v FROM nested_value"
+    },
+    {
+      "id": "alter_nested_leaf",
+      "sql": "BEGIN; ALTER TYPE nested_leaf ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "project_nested_leaf",
+      "sql": "SELECT v FROM nested_value; SELECT v FROM nested_array_value"
+    },
+    {
+      "id": "restore_leaf",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "array_to_bytes",
+      "sql": "BEGIN; ALTER TYPE nested_array_parent ALTER ATTRIBUTE items TYPE bytea"
+    },
+    {
+      "id": "array_bytes",
+      "sql": "SELECT length((v).items),encode(substr((v).items,1,8),'hex'),encode(substr((v).items,13,24),'hex'),(get_byte((v).items,8)+256*get_byte((v).items,9)+65536*get_byte((v).items,10)+16777216::bigint*get_byte((v).items,11))='nested_leaf'::regtype::oid::bigint,(v).tail FROM nested_array_value"
+    },
+    {
+      "id": "array_to_text",
+      "sql": "ALTER TYPE nested_array_parent ALTER ATTRIBUTE items TYPE text[]"
+    },
+    {
+      "id": "array_original_output",
+      "sql": "SELECT v FROM nested_array_value"
+    },
+    {
+      "id": "array_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW nested_value,nested_array_value; DROP TYPE nested_parent,nested_array_parent; DROP TYPE nested_leaf"
+    }
+  ]
+}

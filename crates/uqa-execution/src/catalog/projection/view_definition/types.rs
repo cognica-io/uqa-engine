@@ -386,6 +386,7 @@ mod tests {
             let expression = Expr::Cast {
                 implicit: false,
                 expr: Box::new(Expr::TypedLiteral {
+                    composite_source: None,
                     value,
                     ty: source.into(),
                 }),

@@ -14,13 +14,17 @@ mod comparison;
 #[cfg(test)]
 mod production_tests;
 
+#[cfg(test)]
+pub(super) use comparison::eval_comparison_op;
 pub use comparison::{
-    compare_nullable_with_control, compare_typed_values_with_control, compare_with_control,
-    eval_comparison_truth, eval_comparison_truth_with_control, type_comparison_can_fail,
+    compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
+    compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
+    compare_with_control, equal_typed_values_with_enum_catalog, eval_comparison_truth,
+    eval_comparison_truth_with_control, eval_comparison_truth_with_engine,
+    eval_comparison_truth_with_enum_catalog, type_comparison_can_fail,
     validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
 };
-pub(super) use comparison::{eval_comparison_op, values_equal, values_equal_nullable};
 
 pub(super) fn eval_binary(
     op: BinaryOp,
@@ -33,6 +37,34 @@ pub(super) fn eval_binary(
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
+    if matches!(
+        op,
+        BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::Less
+            | BinaryOp::LessEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEqual
+    ) {
+        return eval_comparison_truth_with_engine(
+            op,
+            &l,
+            &r,
+            &ProductionControl::uncontrolled(),
+            ctx.engine,
+            None,
+        )
+        .map(|value| value.map_or(Value::Null, Value::Bool));
+    }
+    if let Some(value) = super::enums::eval_comparison(
+        op,
+        &l,
+        &r,
+        ctx.engine.and_then(super::EngineHook::enum_labels),
+        None,
+    )? {
+        return Ok(value);
+    }
     if is_arithmetic(op) && real_expr(lhs, ctx.params) && real_expr(rhs, ctx.params) {
         return super::eval_float_arithmetic(op, &l, &r, super::FloatWidth::Real);
     }
@@ -153,6 +185,25 @@ pub fn eval_binary_values_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Ok(control.finish(Value::Null, control.empty_reservation())?);
+    }
+    if let (true, Value::Datum(datum)) = (is_arithmetic(op), l) {
+        return eval_binary_values_with_control(
+            op,
+            &*super::datums::read_with_control(datum, control)?,
+            r,
+            control,
+        );
+    }
+    if let (true, Value::Datum(datum)) = (is_arithmetic(op), r) {
+        return eval_binary_values_with_control(
+            op,
+            l,
+            &*super::datums::read_with_control(datum, control)?,
+            control,
+        );
+    }
     match op {
         BinaryOp::Equal
         | BinaryOp::NotEqual
@@ -266,7 +317,15 @@ pub(super) fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
-    Ok(Some(eval_comparison_op(op, l, r)?))
+    eval_comparison_truth_with_engine(
+        op,
+        l,
+        r,
+        &ProductionControl::uncontrolled(),
+        ctx.engine,
+        None,
+    )
+    .map(|value| Some(value.map_or(Value::Null, Value::Bool)))
 }
 
 pub(super) fn eval_operand_borrowed<'a>(

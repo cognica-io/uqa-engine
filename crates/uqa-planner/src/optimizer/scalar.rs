@@ -228,10 +228,21 @@ fn optimize_scalar(
             }
         }
     }
+    let optimized = constants::fold_composite_constructor(
+        optimized,
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.types),
+    )?;
     let optimized = fold_authorized_literal(
         optimized,
         config.constant_evaluator,
         config.builtin_permissions.as_deref(),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.types),
     )?;
     Ok(if integer_syntax {
         optimized

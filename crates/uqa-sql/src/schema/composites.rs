@@ -11,6 +11,8 @@ use crate::catalog::composite_type::StoredCompositeAttribute;
 use crate::type_resolution::{resolve_declared_column_type, FunctionTypeResolver};
 use crate::SQLError;
 
+pub mod type_changes;
+
 /// `renameatt_internal` checks the source before the destination; standalone composites have no system attributes.
 pub fn validate_renamed_attribute(
     definition: &crate::catalog::composite_type::StoredComposite,
@@ -85,10 +87,24 @@ pub fn prepare_added_attribute(
         ColumnType::Named(name) => crate::compiler::compile_retained_type_reference(name)?,
         other => other.clone(),
     };
-    let ty = resolve_declared_column_type(types, &declared)?;
+    prepare_attribute(
+        types, composites, definition, attribute, &declared, number, true,
+    )
+}
+
+fn prepare_attribute(
+    types: &dyn FunctionTypeResolver,
+    composites: &dyn crate::expr::composites::CompositeTypeCatalog,
+    definition: &crate::catalog::composite_type::StoredComposite,
+    attribute: &CompositeAttributeDefinition,
+    declared: &ColumnType,
+    number: i16,
+    check_setof: bool,
+) -> Result<StoredCompositeAttribute, SQLError> {
+    let ty = resolve_declared_column_type(types, declared)?;
     types.require_type_usage(&ty)?;
     let collation = attribute_collation(&ty, attribute.collation.as_deref())?;
-    if attribute.setof {
+    if check_setof && attribute.setof {
         return Err(SQLError::Routine {
             sqlstate: "42P16".into(),
             message: format!("column \"{}\" cannot be declared SETOF", attribute.name),

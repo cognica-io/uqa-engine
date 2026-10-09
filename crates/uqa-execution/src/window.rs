@@ -280,10 +280,16 @@ fn execute_window_pass(
                     hook,
                     &subquery_arena,
                 )?;
-                if partition_key
-                    .as_ref()
-                    .is_some_and(|current| current != &key)
-                {
+                let same_partition = match &partition_key {
+                    Some(current) => crate::relational::equal_sort_key_values(
+                        current,
+                        &key,
+                        uqa_sql::expr::EngineHook::enum_labels(hook),
+                    )
+                    .map_err(exec_to_sql_error)?,
+                    None => true,
+                };
+                if !same_partition {
                     emit_partition(
                         pass,
                         &mut slots,
@@ -430,7 +436,14 @@ fn window_function(
     budget_bytes: usize,
 ) -> Result<WindowFunction, SQLError> {
     let name = uqa_sql::semantics::builtin_function_dispatch_name(&slot.name);
-    let argument = |position: usize| slot.args.get(position).cloned();
+    let bind = |expression: &ScalarExpr| {
+        crate::bind_type_introspection_with_resolver(expression.clone(), schema, params, context)
+    };
+    let argument = |position: usize| {
+        slot.args
+            .get(position)
+            .map(|expression| crate::scalar::PreparedExpressions::scalar(bind(expression)))
+    };
     let required = |position: usize| {
         argument(position).ok_or_else(|| SQLError::BadArity {
             name: name.clone(),
@@ -462,7 +475,7 @@ fn window_function(
                 order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
                 name: slot.name.clone(),
                 binding: None,
-                args: slot.args.clone(),
+                args: slot.args.iter().map(bind).collect(),
                 distinct: false,
                 order_by: Vec::new(),
                 filter: None,
@@ -475,8 +488,12 @@ fn window_function(
             )?
             .pop()
             .ok_or_else(|| SQLError::Internal("window aggregate lost its accumulator".into()))?;
+            let ScalarExpr::Func { args, .. } = call else {
+                unreachable!()
+            };
+            let filter = slot.filter.as_ref().map(bind);
             WindowFunction::Aggregate(Box::new(aggregates::WindowAggregate::new(
-                (&slot.name, &slot.args, slot.filter.as_ref()),
+                (&slot.name, &args, filter.as_ref()),
                 template,
                 budget_bytes,
             )))

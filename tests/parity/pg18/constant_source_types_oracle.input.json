@@ -1,0 +1,55 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "SELECT pg_typeof(NULL), pg_typeof('label');"
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x) AS s;"
+    },
+    {
+      "sql": "SELECT pg_typeof(s.x), s.x IS NULL FROM (SELECT NULL AS original) AS s(x);"
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (VALUES (NULL)) AS s(x);"
+    },
+    {
+      "sql": "SELECT pg_typeof(x), x FROM (SELECT 'label' AS x) AS s;"
+    },
+    {
+      "sql": "SELECT pg_typeof(x), x FROM (VALUES ('label')) AS s(x);"
+    },
+    {
+      "sql": "SELECT pg_typeof(x), pg_typeof(y) FROM (SELECT NULL::integer AS x, NULL::varchar(4) AS y) AS s;"
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT x FROM (SELECT NULL AS x) AS inner_s) AS outer_s;"
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x WHERE false) AS s;"
+    },
+    {
+      "sql": "SELECT pg_typeof(x), count(*) FROM (SELECT NULL AS x WHERE false) AS s GROUP BY x;"
+    },
+    {
+      "sql": "SELECT pg_typeof(x) FROM (SELECT NULL AS x UNION ALL SELECT 1) AS s ORDER BY x NULLS FIRST;"
+    },
+    {
+      "sql": "CREATE VIEW constant_source_null AS SELECT NULL AS x;"
+    },
+    {
+      "sql": "SELECT pg_typeof(x), x IS NULL FROM constant_source_null;"
+    },
+    {
+      "sql": "DROP VIEW constant_source_null;"
+    },
+    {
+      "sql": "SELECT pg_typeof(upper('label')), pg_typeof('a' || 'b'), pg_typeof(COALESCE(NULL, NULL)), pg_typeof(CASE WHEN true THEN 'label' END), pg_typeof(concat('a','b'));"
+    },
+    {
+      "sql": "SELECT pg_typeof('label'::text), pg_typeof(NULL::text), pg_typeof((SELECT NULL));"
+    }
+  ]
+}

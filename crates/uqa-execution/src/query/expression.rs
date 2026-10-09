@@ -53,15 +53,19 @@ impl<'a> ScopedExpressionEvaluator<'a> {
         expression: &ScalarExpr,
         schema: &crate::RowSchema,
         row: &crate::PhysicalRow,
+        states: Option<&crate::scalar::FunctionCallStates>,
     ) -> ExecResult<Value> {
         self.cancellation.check().map_err(SQLError::from)?;
         let view = schema.view(row);
         let hook = self.context.as_ref();
-        let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
+        let mut context = PhysicalEvalContext::from_row_lookup(&view, self.params)
             .with_row_schema(schema)
             .with_function_hook(hook)
             .with_subquery_runner(hook)
             .with_physical_outer_row(schema, row);
+        if let Some(states) = states {
+            context = context.with_function_states(states);
+        }
         if let ScalarExpr::Func {
             binding: Some(binding),
             ..
@@ -89,6 +93,10 @@ impl<'a> ScopedExpressionEvaluator<'a> {
 }
 
 impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        uqa_sql::expr::EngineHook::enum_labels(self.context.as_ref())
+    }
+
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value> {
         self.cancellation.check().map_err(SQLError::from)?;
         let hook = self.context.as_ref();
@@ -126,7 +134,17 @@ impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
         schema: &crate::RowSchema,
         row: &crate::PhysicalRow,
     ) -> ExecResult<Value> {
-        self.evaluate_physical_scoped(expression, schema, row)
+        self.evaluate_physical_scoped(expression, schema, row, None)
+    }
+
+    fn evaluate_physical_with_function_states(
+        &self,
+        expression: &ScalarExpr,
+        schema: &crate::RowSchema,
+        row: &crate::PhysicalRow,
+        states: &crate::scalar::FunctionCallStates,
+    ) -> ExecResult<Value> {
+        self.evaluate_physical_scoped(expression, schema, row, Some(states))
     }
 
     fn parameters(&self) -> &[SQLParam] {

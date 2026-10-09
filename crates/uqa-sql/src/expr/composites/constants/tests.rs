@@ -26,6 +26,7 @@ impl CompositeTypeCatalog for Catalog {
     fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
         Ok((oid == 20_001).then(|| {
             Arc::new(CompositeTypeDescriptor {
+                dropped: Vec::new(),
                 type_oid: oid,
                 relation_oid: 20_003,
                 attributes: vec![CompositeAttribute {
@@ -70,7 +71,39 @@ fn change(change: &AttributeChange) -> CompositeConstantChange<'_> {
 }
 
 fn value() -> Value {
-    Value::Record(vec![("a".into(), Value::Int(4))])
+    Value::Record(vec![("a".into(), Value::Int(4))].into())
+}
+
+#[test]
+fn stored_input_datums_reinterpret_bits_without_rebinding_or_reapplying_input() {
+    let array = ColumnType::Array(Box::new(pair_type()));
+    let mut value = Value::Array(
+        ArrayValue::with_lower_bounds(
+            vec![
+                Value::Record(vec![("a".into(), Value::Int(1_065_353_216))].into()),
+                Value::Null,
+            ],
+            vec![-2],
+        )
+        .unwrap(),
+    );
+    let type_change = AttributeChange::Type {
+        name: "a".into(),
+        from: Box::new(ColumnType::Integer),
+        to: Box::new(ColumnType::Real),
+    };
+    assert!(change(&type_change).value(&mut value, &array).unwrap());
+    let Value::Array(value) = value else {
+        panic!("array carrier")
+    };
+    assert_eq!(value.lower_bounds(), &[-2]);
+    assert_eq!(
+        value.elements(),
+        &[
+            Value::Record(vec![("a".into(), Value::Float(1.0))].into()),
+            Value::Null,
+        ]
+    );
 }
 
 #[test]
@@ -81,6 +114,7 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
     crate::catalog::stored_ast::visit_stored_statement_expressions(&mut statement, &mut |node| {
         if *node == Expr::Literal(Value::Int(4)) {
             *node = Expr::TypedLiteral {
+                composite_source: None,
                 value: value(),
                 ty: pair_type().catalog_name(),
             };
@@ -104,7 +138,7 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
             assert_eq!(*ty, pair_type().catalog_name());
             assert_eq!(
                 *value,
-                Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)])
+                Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)].into())
             );
         }
     });
@@ -112,10 +146,39 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
 }
 
 #[test]
+fn removing_a_field_preserves_its_original_datum_and_descriptor_through_serialization() {
+    let mut expression = Expr::TypedLiteral {
+        composite_source: None,
+        value: value(),
+        ty: pair_type().catalog_name(),
+    };
+    assert!(change(&AttributeChange::Drop("a".into()))
+        .expression(&mut expression)
+        .unwrap());
+    let encoded = serde_json::to_string(&expression).unwrap();
+    let restored: Expr = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(expression, restored);
+    let Expr::TypedLiteral {
+        value: projected,
+        composite_source: Some(source),
+        ..
+    } = restored
+    else {
+        panic!("retained composite datum")
+    };
+    assert_eq!(projected, Value::Record(Vec::new().into()));
+    assert_eq!(source.value, value());
+    assert_eq!(source.descriptors.len(), 1);
+    assert_eq!(source.descriptors[0].attributes[0].number, 1);
+    assert_eq!(source.descriptors[0].attributes[0].ty, ColumnType::Integer);
+}
+
+#[test]
 fn array_constants_keep_bounds_nulls_and_existing_fields() {
     let added = AttributeChange::Add("b".into());
     let change = change(&added);
     let mut expression = Expr::TypedLiteral {
+        composite_source: None,
         value: Value::Array(
             ArrayValue::with_lower_bounds(vec![value(), Value::Null], vec![-3]).unwrap(),
         ),
@@ -134,7 +197,7 @@ fn array_constants_keep_bounds_nulls_and_existing_fields() {
     assert_eq!(
         array.elements(),
         [
-            Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)]),
+            Value::Record(vec![("a".into(), Value::Int(4)), ("b".into(), Value::Null)].into()),
             Value::Null
         ]
     );
@@ -143,6 +206,7 @@ fn array_constants_keep_bounds_nulls_and_existing_fields() {
 #[test]
 fn missing_durable_type_identity_is_rejected_without_discarding_the_value() {
     let mut expression = Expr::TypedLiteral {
+        composite_source: None,
         value: value(),
         ty: "composite#99999".into(),
     };

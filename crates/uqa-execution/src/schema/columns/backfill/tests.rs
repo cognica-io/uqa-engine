@@ -288,6 +288,7 @@ fn backfill_preserves_input_identity_without_skipping_new_domain_coercion() {
     for (source, expected_checks) in [(None, 0), (Some("integer[]"), 2)] {
         let fixture = Fixture::new();
         let expression = Expr::TypedLiteral {
+            composite_source: None,
             value: array(),
             ty: source.map_or_else(|| fixture.target().catalog_name(), str::to_string),
         };
@@ -310,6 +311,7 @@ fn text_default_cast_checks_elements_once_before_backfill_assignment() {
     let expression = Expr::Cast {
         implicit: false,
         expr: Box::new(Expr::TypedLiteral {
+            composite_source: None,
             value: Value::Str("[-1:0]={1,2}".into()),
             ty: "text".into(),
         }),
@@ -328,6 +330,7 @@ fn deferred_defaults_retain_types_for_constant_and_volatile_results() {
     let fixture = Fixture::new();
     let pending = AddedColumnRows::default();
     let constant = Expr::TypedLiteral {
+        composite_source: None,
         value: array(),
         ty: fixture.target().catalog_name(),
     };

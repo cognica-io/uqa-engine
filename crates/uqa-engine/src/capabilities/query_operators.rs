@@ -32,6 +32,13 @@ impl Engine {
 }
 
 impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
+    fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
+        uqa_planner::statement_planning::schema_expressions::optimize_catalog_scalar(
+            &self.statement_planning_context(),
+            expression,
+        )
+    }
+
     fn bind_scope(&self, scope: CteScope) -> Arc<dyn SetFunctionRuntime + '_> {
         Arc::new(ScopedEngineHook::owned(self, scope))
     }

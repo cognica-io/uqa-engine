@@ -110,6 +110,7 @@ impl CompositeTypeCatalog for Types {
         type_oid: u32,
     ) -> Result<Option<std::sync::Arc<CompositeTypeDescriptor>>, SQLError> {
         Ok(Some(std::sync::Arc::new(CompositeTypeDescriptor {
+            dropped: Vec::new(),
             type_oid,
             relation_oid: type_oid + 20,
             attributes: vec![

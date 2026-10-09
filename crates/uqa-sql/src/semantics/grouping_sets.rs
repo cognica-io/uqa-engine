@@ -320,6 +320,7 @@ fn normalize_expression(
                 let input = normalize_expression(
                     engine,
                     ScalarExpr::TypedLiteral {
+                        composite_source: None,
                         value,
                         ty: input_type.sql_name(),
                         bound_type: Some(input_type.clone()),
@@ -339,6 +340,7 @@ fn normalize_expression(
                 }
             } else if let ScalarExpr::Literal(Value::Null) = expression {
                 ScalarExpr::TypedLiteral {
+                    composite_source: None,
                     value: Value::Null,
                     ty: target_type.sql_name(),
                     bound_type: Some(target_type),
@@ -366,6 +368,7 @@ fn normalize_expression(
             ty,
             bound_type,
             parameter_index,
+            composite_source,
         } => {
             let literal = ScalarExpr::Literal(value.clone());
             let declared = match bound_type {
@@ -376,11 +379,13 @@ fn normalize_expression(
                 )?,
             };
             if parameter_index.is_none()
+                && composite_source.is_none()
                 && expression_type(engine, &literal, schema, params)?.as_ref() == Some(&declared)
             {
                 literal
             } else {
                 ScalarExpr::TypedLiteral {
+                    composite_source,
                     value,
                     ty: declared.sql_name(),
                     bound_type: Some(declared),
@@ -404,6 +409,8 @@ fn input_requires_catalog(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Named(_)
         | ColumnType::Domain { .. }
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_)
         | ColumnType::Regproc
         | ColumnType::Regprocedure
         | ColumnType::Regclass

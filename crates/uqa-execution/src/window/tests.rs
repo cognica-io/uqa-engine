@@ -5,9 +5,10 @@
 //
 
 use super::*;
-use crate::aggregation::{AggregateAccumulatorTemplate, AggregateStatePlan};
+use crate::aggregation::AggregateAccumulatorTemplate;
 use uqa_sql::expr::RowLookup as _;
 
+mod enums;
 mod source_layout;
 
 struct NoSequences;
@@ -149,7 +150,7 @@ fn results(
 fn sum() -> WindowFunction {
     WindowFunction::Aggregate(Box::new(aggregates::WindowAggregate::new(
         ("sum", &[ScalarExpr::Column("v".into())], None),
-        AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Sum),
+        AggregateAccumulatorTemplate::builtin("sum", None),
         1 << 20,
     )))
 }
@@ -157,7 +158,7 @@ fn sum() -> WindowFunction {
 fn count() -> WindowFunction {
     WindowFunction::Aggregate(Box::new(aggregates::WindowAggregate::new(
         ("count", &[ScalarExpr::Column("v".into())], None),
-        AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Count),
+        AggregateAccumulatorTemplate::builtin("count", None),
         1 << 20,
     )))
 }
@@ -227,7 +228,9 @@ fn peers_share_the_default_frame_and_ranks() {
         WindowFunction::DenseRank,
         WindowFunction::RowNumber,
         WindowFunction::CumeDist,
-        WindowFunction::LastValue(ScalarExpr::Column("v".into())),
+        WindowFunction::LastValue(crate::scalar::PreparedExpressions::scalar(
+            ScalarExpr::Column("v".into()),
+        )),
     ];
     let (output, columns) = evaluate(&rows, by_k(), functions, 1 << 20);
     let results = results(output, &columns);

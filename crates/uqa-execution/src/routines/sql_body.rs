@@ -233,7 +233,8 @@ fn result_value(
                             .iter()
                             .map(|column| column.name.clone())
                             .zip(fields)
-                            .collect(),
+                            .collect::<Vec<_>>()
+                            .into(),
                     ));
                 }
             }
@@ -261,7 +262,9 @@ fn result_value(
             } else {
                 last.columns.clone()
             };
-            Ok(Value::Record(columns.into_iter().zip(values).collect()))
+            Ok(Value::Record(
+                columns.into_iter().zip(values).collect::<Vec<_>>().into(),
+            ))
         }
     }
 }

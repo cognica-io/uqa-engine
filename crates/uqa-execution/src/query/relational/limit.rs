@@ -99,23 +99,16 @@ fn attach_ordered_slice<'a, S: Clone + 'static>(
     };
     let mut tie_keys = None;
     if !statement.order_by.is_empty() {
-        let keys = resolved_sort_keys(statement, output_columns, Some(operator.row_schema()))?;
+        let keys = resolved_sort_keys(
+            statement,
+            output_columns,
+            Some(operator.row_schema()),
+            evaluator.as_ref(),
+        )?;
         if with_ties {
             tie_keys = Some(keys.clone());
         }
-        let keep = if let Some(limit) = limit {
-            let keep = offset
-                .unwrap_or(0)
-                .checked_add(limit)
-                .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))?;
-            Some(usize::try_from(keep).map_err(|_| {
-                SQLError::TypeMismatch(format!(
-                    "OFFSET + LIMIT {keep} exceeds the platform row-count range"
-                ))
-            })?)
-        } else {
-            None
-        };
+        let keep = ordered_keep(limit, offset)?;
         let required_ordering = keys
             .iter()
             .map(|key| {
@@ -190,6 +183,7 @@ pub fn resolved_sort_keys(
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     hidden_schema: Option<&crate::RowSchema>,
+    evaluator: &dyn crate::ExpressionEvaluator,
 ) -> Result<Vec<crate::SortKey>, SQLError> {
     statement
         .order_by
@@ -197,7 +191,7 @@ pub fn resolved_sort_keys(
         .try_fold(Vec::<crate::SortKey>::new(), |mut keys, order| {
             let expr = resolve_order_expression(&order.expr, output_columns)?;
             if let Some(schema) = hidden_schema {
-                if let Some(ty) = crate::scalar_type(&expr, schema, &[])? {
+                if let Some(ty) = evaluator.expression_type(&expr, schema)? {
                     crate::require_ordering_operator(&ty)?;
                 }
             }
@@ -215,4 +209,20 @@ pub fn resolved_sort_keys(
             }
             Ok(keys)
         })
+}
+
+fn ordered_keep(limit: Option<u64>, offset: Option<u64>) -> Result<Option<usize>, SQLError> {
+    limit
+        .map(|limit| {
+            let keep = offset
+                .unwrap_or(0)
+                .checked_add(limit)
+                .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))?;
+            usize::try_from(keep).map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "OFFSET + LIMIT {keep} exceeds the platform row-count range"
+                ))
+            })
+        })
+        .transpose()
 }

@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE cr_life AS(a integer,b text); CREATE SEQUENCE cr_seq; PREPARE cr_early AS SELECT ROW(1065353216,'tail')::cr_life AS v; EXECUTE cr_early; PREPARE cr_late AS SELECT ROW(1065353216,'tail')::cr_life AS v; SET plan_cache_mode=force_generic_plan; PREPARE cr_param(integer) AS SELECT ROW($1,'tail')::cr_life AS v; EXECUTE cr_param(1); PREPARE cr_volatile AS SELECT ROW(nextval('cr_seq')::integer,'tail')::cr_life AS v; EXECUTE cr_volatile; PREPARE cr_filtered AS SELECT ROW(nextval('cr_seq')::integer,'tail')::cr_life AS v WHERE false; EXECUTE cr_filtered; PREPARE cr_pruned AS SELECT CASE WHEN false THEN ROW(nextval('cr_seq')::integer,'tail')::cr_life ELSE NULL::cr_life END AS v; EXECUTE cr_pruned"
+    },
+    {
+      "id": "alter",
+      "sql": "BEGIN; ALTER TYPE cr_life ALTER ATTRIBUTE a TYPE real"
+    },
+    {
+      "id": "early",
+      "sql": "SAVEPOINT observe; EXECUTE cr_early"
+    },
+    {
+      "id": "early_recover",
+      "sql": "ROLLBACK TO SAVEPOINT observe; RELEASE SAVEPOINT observe"
+    },
+    {
+      "id": "late",
+      "sql": "SAVEPOINT observe; EXECUTE cr_late"
+    },
+    {
+      "id": "late_recover",
+      "sql": "ROLLBACK TO SAVEPOINT observe; RELEASE SAVEPOINT observe"
+    },
+    {
+      "id": "param",
+      "sql": "SAVEPOINT observe; EXECUTE cr_param(1)"
+    },
+    {
+      "id": "param_recover",
+      "sql": "ROLLBACK TO SAVEPOINT observe; RELEASE SAVEPOINT observe"
+    },
+    {
+      "id": "volatile",
+      "sql": "SAVEPOINT observe; EXECUTE cr_volatile"
+    },
+    {
+      "id": "volatile_recover",
+      "sql": "ROLLBACK TO SAVEPOINT observe; RELEASE SAVEPOINT observe"
+    },
+    {
+      "id": "filtered",
+      "sql": "SAVEPOINT observe; EXECUTE cr_filtered"
+    },
+    {
+      "id": "filtered_recover",
+      "sql": "ROLLBACK TO SAVEPOINT observe; RELEASE SAVEPOINT observe"
+    },
+    {
+      "id": "pruned",
+      "sql": "SAVEPOINT observe; EXECUTE cr_pruned"
+    },
+    {
+      "id": "pruned_recover",
+      "sql": "ROLLBACK TO SAVEPOINT observe; RELEASE SAVEPOINT observe"
+    },
+    {
+      "id": "effects",
+      "sql": "SELECT currval('cr_seq')"
+    },
+    {
+      "id": "undo",
+      "sql": "ROLLBACK; EXECUTE cr_early; EXECUTE cr_late; EXECUTE cr_param(3); EXECUTE cr_volatile; RESET plan_cache_mode"
+    }
+  ]
+}

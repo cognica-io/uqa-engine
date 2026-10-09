@@ -8,6 +8,46 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue, TemporalValue};
 
 #[test]
+fn array_element_identity_errors_precede_shape_and_follow_outer_null_short_circuit() {
+    let array = |values, oid| {
+        Value::Array(
+            ArrayValue::try_new(values)
+                .unwrap()
+                .with_element_type_oid(Some(oid)),
+        )
+    };
+    let control = ProductionControl::uncontrolled();
+    for (left, right) in [
+        (array(vec![], 23), array(vec![], 25)),
+        (
+            array(vec![Value::Null, Value::Null], 23),
+            array(vec![Value::Null], 25),
+        ),
+    ] {
+        assert_eq!(
+            values_equal_nullable_with_control(&left, &Value::Null, &control).unwrap(),
+            None
+        );
+        for error in [
+            values_equal_with_control(&left, &right, &control).unwrap_err(),
+            compare_with_control(&left, &right, &control).unwrap_err(),
+        ] {
+            assert_eq!(error.sqlstate(), Some("42804"));
+            assert_eq!(
+                error.to_string(),
+                "cannot compare arrays of different element types"
+            );
+        }
+        let left = Value::Record(vec![("a".into(), Value::Int(1)), ("b".into(), left)].into());
+        let right = Value::Record(vec![("a".into(), Value::Int(2)), ("b".into(), right)].into());
+        assert!(!values_equal_with_control(&left, &right, &control).unwrap());
+        assert!(compare_with_control(&left, &right, &control)
+            .unwrap()
+            .is_lt());
+    }
+}
+
+#[test]
 fn legacy_vector_errors_follow_array_shape_null_and_element_short_circuit() {
     use uqa_core::{LegacyVectorKind, LegacyVectorValue};
     let invalid = Value::LegacyVector(
@@ -51,7 +91,7 @@ fn legacy_vector_errors_follow_array_shape_null_and_element_short_circuit() {
         assert!(compare_with_control(&first, &second, &control)
             .unwrap()
             .is_lt());
-        let record = Value::Record(vec![("v".into(), invalid.clone())]);
+        let record = Value::Record(vec![("v".into(), invalid.clone())].into());
         assert_eq!(
             values_equal_with_control(&record, &record, &control)
                 .unwrap_err()
@@ -134,7 +174,7 @@ fn row_unknowns_and_total_container_equality_keep_distinct_semantics() {
     for value in [
         Value::Array(ArrayValue::try_new(vec![Value::Null, Value::Int(1)]).unwrap()),
         Value::List(vec![Value::Null, Value::Int(1)]),
-        Value::Record(vec![("x".into(), Value::Null), ("y".into(), Value::Int(1))]),
+        Value::Record(vec![("x".into(), Value::Null), ("y".into(), Value::Int(1))].into()),
     ] {
         assert_eq!(
             values_equal_nullable_with_control(&value, &value, &control).unwrap(),

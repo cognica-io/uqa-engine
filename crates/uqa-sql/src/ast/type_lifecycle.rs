@@ -40,9 +40,11 @@ pub enum AlterTypeObjectAction {
     },
     /// Append attributes to a standalone composite relation in written order.
     AddAttributes(Vec<super::CompositeAttributeAddition>),
-    /// `PostgreSQL` executes removals before additions, preserving written order within each group.
+    /// `PostgreSQL` prepares types against the original descriptor, then executes DROP, TYPE and ADD groups in order.
     AlterAttributes {
         removals: Vec<super::CompositeAttributeRemoval>,
+        #[serde(default)]
+        type_changes: Vec<super::CompositeAttributeDefinition>,
         additions: Vec<super::CompositeAttributeAddition>,
     },
 }

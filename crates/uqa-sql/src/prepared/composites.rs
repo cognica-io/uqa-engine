@@ -7,15 +7,13 @@
 //! Creation-time composite descriptors for retained input constants and immutable executable caches.
 
 use crate::{
-    expr::composites::{descriptor, CompositeTypeDescriptor},
+    expr::composites::retained::{capture_descriptor, capture_type, project_value, Descriptors},
     plan::UnifiedPlan,
     type_resolution::FunctionTypeResolver,
     ColumnType, SQLError, ScalarExpr,
 };
-use std::{collections::BTreeMap, sync::Arc};
-use uqa_core::{ArrayValue, Value};
-
-type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
+use std::sync::Arc;
+use uqa_core::Value;
 
 /// Logical and optimized inputs retain their own descriptors and values across rollback. Reading either plan projects a copy without rerunning already-folded expressions.
 #[derive(Clone, Debug, Default)]
@@ -68,17 +66,19 @@ impl CompositeInputs {
                         bound_type,
                         ..
                     } => match bound_type {
-                        Some(ty) => capture_type(ty, types, &mut original),
+                        Some(ty) => capture_type(ty, types.composite_types(), &mut original),
                         None => types.resolve_type_name(ty).and_then(|ty| {
-                            ty.map_or(Ok(()), |ty| capture_type(&ty, types, &mut original))
+                            ty.map_or(Ok(()), |ty| {
+                                capture_type(&ty, types.composite_types(), &mut original)
+                            })
                         }),
                     },
                     ScalarExpr::Func {
                         binding: Some(binding),
                         ..
                     } => binding.composite_field.as_ref().map_or(Ok(()), |field| {
-                        capture_descriptor(field.type_oid, types, &mut original)?;
-                        capture_type(&field.result_type, types, &mut original)
+                        capture_descriptor(field.type_oid, types.composite_types(), &mut original)?;
+                        capture_type(&field.result_type, types.composite_types(), &mut original)
                     }),
                     _ => Ok(()),
                 };
@@ -103,18 +103,42 @@ impl CompositeInputs {
         plan: &UnifiedPlan,
         types: &dyn FunctionTypeResolver,
     ) -> Result<Option<UnifiedPlan>, SQLError> {
-        project_plan(plan, types, &self.original)
+        project_plan(plan, types, &self.original, true, None)
     }
 
-    /// Record descriptors of the actual generic plan. Folded scalar results have no remaining composite dependency.
+    /// Update attribute names and field bindings for optimization while retaining the original scalar datums in the reusable executable. Interpreting a raw byte as boolean is not reversible, so an interpreted value cannot replace its source in a cache.
+    pub fn project_for_generic(
+        &self,
+        plan: &UnifiedPlan,
+        types: &dyn FunctionTypeResolver,
+    ) -> Result<Option<UnifiedPlan>, SQLError> {
+        project_plan(plan, types, &self.original, false, None)
+    }
+
+    /// Record the names and attribute numbers of the actual generic plan with the types of its retained scalar datums. Folded scalar results have no remaining composite dependency.
     pub fn with_generic(
         &self,
         plan: &UnifiedPlan,
         types: &dyn FunctionTypeResolver,
     ) -> Result<Self, SQLError> {
+        let mut planned = Self::capture(plan, types)?.original.as_ref().clone();
+        for (oid, descriptor) in &mut planned {
+            let Some(original) = self.original.get(oid) else {
+                continue;
+            };
+            for attribute in &mut Arc::make_mut(descriptor).attributes {
+                if let Some(source) = original
+                    .attributes
+                    .iter()
+                    .find(|source| source.number == attribute.number)
+                {
+                    attribute.ty.clone_from(&source.ty);
+                }
+            }
+        }
         Ok(Self {
             original: self.original.clone(),
-            planned: Some(Self::capture(plan, types)?.original),
+            planned: Some(Arc::new(planned)),
             planned_scope: Some(Arc::new(current_descriptors(&self.original, types)?)),
         })
     }
@@ -157,9 +181,9 @@ impl CompositeInputs {
         plan: &UnifiedPlan,
         types: &dyn FunctionTypeResolver,
     ) -> Result<Option<UnifiedPlan>, SQLError> {
-        self.planned
-            .as_ref()
-            .map_or(Ok(None), |original| project_plan(plan, types, original))
+        self.planned.as_ref().map_or(Ok(None), |original| {
+            project_plan(plan, types, original, true, self.planned_scope.as_deref())
+        })
     }
 }
 
@@ -167,12 +191,20 @@ fn project_plan(
     plan: &UnifiedPlan,
     types: &dyn FunctionTypeResolver,
     original: &Descriptors,
+    interpret_datums: bool,
+    binding_scope: Option<&Descriptors>,
 ) -> Result<Option<UnifiedPlan>, SQLError> {
     if original.is_empty() {
         return Ok(None);
     }
     let current = current_descriptors(original, types)?;
-    if *original == current {
+    let values_changed = *original != current;
+    let bindings_changed = binding_scope.is_some_and(|scope| {
+        current
+            .iter()
+            .any(|(oid, descriptor)| scope.get(oid) != Some(descriptor))
+    });
+    if !values_changed && !bindings_changed {
         return Ok(None);
     }
     let mut projected = plan.clone();
@@ -186,15 +218,28 @@ fn project_plan(
             ty,
             parameter_index: None,
             bound_type,
+            composite_source,
         } = node
         {
+            if !values_changed {
+                return;
+            }
             let result = bound_type
                 .clone()
                 .map_or_else(|| types.resolve_type_name(ty), |ty| Ok(Some(ty)))
                 .and_then(|ty| {
                     ty.map_or_else(
                         || Ok(value.clone()),
-                        |ty| project(value, &ty, original, &current),
+                        |ty| {
+                            project_literal(
+                                value,
+                                &ty,
+                                composite_source,
+                                original,
+                                types,
+                                interpret_datums,
+                            )
+                        },
                     )
                 });
             match result {
@@ -215,6 +260,12 @@ fn project_plan(
                         .iter()
                         .find(|attribute| attribute.number == field.number);
                     field.dropped = attribute.is_none();
+                    field.changed_type = attribute
+                        .filter(|attribute| {
+                            crate::catalog::type_metadata::pg_type_oid(&attribute.ty)
+                                != crate::catalog::type_metadata::pg_type_oid(&field.result_type)
+                        })
+                        .map(|attribute| attribute.ty.clone());
                     if let (Some(attribute), Some(ScalarExpr::Literal(Value::Str(name)))) =
                         (attribute, args.get_mut(1))
                     {
@@ -225,6 +276,43 @@ fn project_plan(
         }
     });
     failure.map_or(Ok(Some(projected)), Err)
+}
+
+fn project_literal(
+    value: &Value,
+    ty: &ColumnType,
+    source: &mut Option<Box<crate::expr::composites::CompositeConstantSource>>,
+    original: &Descriptors,
+    types: &dyn FunctionTypeResolver,
+    interpret_datums: bool,
+) -> Result<Value, SQLError> {
+    if !crate::expr::composites::literal::contains_records(value) {
+        return Ok(value.clone());
+    }
+    if source.is_none() {
+        *source = Some(Box::new(crate::expr::composites::CompositeConstantSource {
+            value: crate::expr::enums::retain_enum_oids(types.enum_labels(), value)?,
+            descriptors: original
+                .values()
+                .map(|value| value.as_ref().clone())
+                .collect(),
+        }));
+    }
+    let source = source.as_mut().expect("captured composite source");
+    source.retain_enum_oids(types.enum_labels())?;
+    let source_descriptors = source
+        .descriptors
+        .iter()
+        .map(|descriptor| (descriptor.type_oid, Arc::new(descriptor.clone())))
+        .collect::<Descriptors>();
+    let live = current_descriptors(&source_descriptors, types)?;
+    project_value(
+        &source.value,
+        ty,
+        &source_descriptors,
+        &live,
+        interpret_datums,
+    )
 }
 
 fn current_descriptors(
@@ -247,98 +335,14 @@ fn current_descriptors(
     Ok(current)
 }
 
-fn capture_type(
-    ty: &ColumnType,
-    types: &dyn FunctionTypeResolver,
-    output: &mut Descriptors,
-) -> Result<(), SQLError> {
-    match ty {
-        ColumnType::Domain { base, .. } | ColumnType::Array(base) => {
-            capture_type(base, types, output)
-        }
-        ColumnType::Composite(reference) => capture_descriptor(reference.oid, types, output),
-        _ => Ok(()),
-    }
-}
-
-fn capture_descriptor(
-    oid: u32,
-    types: &dyn FunctionTypeResolver,
-    output: &mut Descriptors,
-) -> Result<(), SQLError> {
-    if output.contains_key(&oid) {
-        return Ok(());
-    }
-    let descriptor = descriptor(types.composite_types(), oid)?;
-    output.insert(oid, descriptor.clone());
-    for attribute in &descriptor.attributes {
-        capture_type(&attribute.ty, types, output)?;
-    }
-    Ok(())
-}
-
+#[cfg(test)]
 fn project(
     value: &Value,
     ty: &ColumnType,
     original: &Descriptors,
     current: &Descriptors,
 ) -> Result<Value, SQLError> {
-    match (ty, value) {
-        (_, Value::Null) => Ok(Value::Null),
-        (ColumnType::Domain { base, .. }, _) => project(value, base, original, current),
-        (ColumnType::Composite(reference), Value::Record(fields)) => {
-            let (Some(before), Some(after)) =
-                (original.get(&reference.oid), current.get(&reference.oid))
-            else {
-                return Ok(value.clone());
-            };
-            after
-                .attributes
-                .iter()
-                .map(|attribute| {
-                    let retained = before
-                        .attributes
-                        .iter()
-                        .find(|old| old.number == attribute.number)
-                        .and_then(|old| fields.iter().find(|(name, _)| *name == old.name));
-                    let value = retained.map_or(Ok(Value::Null), |(_, value)| {
-                        project(value, &attribute.ty, original, current)
-                    })?;
-                    Ok((attribute.name.clone(), value))
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::Record)
-        }
-        (ColumnType::Array(element), Value::Array(array)) => {
-            let values = array
-                .elements()
-                .iter()
-                .map(|value| project_array_element(value, element, original, current))
-                .collect::<Result<Vec<_>, _>>()?;
-            ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
-                .map(Value::Array)
-                .ok_or_else(|| {
-                    SQLError::Internal("prepared composite projection changed array shape".into())
-                })
-        }
-        _ => Ok(value.clone()),
-    }
-}
-
-fn project_array_element(
-    value: &Value,
-    element: &ColumnType,
-    original: &Descriptors,
-    current: &Descriptors,
-) -> Result<Value, SQLError> {
-    match value {
-        Value::List(values) => values
-            .iter()
-            .map(|value| project_array_element(value, element, original, current))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::List),
-        value => project(value, element, original, current),
-    }
+    project_value(value, ty, original, current, true)
 }
 
 #[cfg(test)]

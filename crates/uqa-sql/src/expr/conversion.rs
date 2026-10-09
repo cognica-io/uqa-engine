@@ -50,6 +50,12 @@ pub fn value_to_string_with_control(
             composite_value_to_string(fields.iter().map(|(_, value)| value), control)?
         }
         Value::Enum(value) => return Err(catalog_output_required(value)),
+        Value::Datum(value) => {
+            return value_to_string_with_control(
+                &*super::datums::read_with_control(value, control)?,
+                control,
+            )
+        }
         Value::Bytes(values) => {
             const HEX: &[u8; 16] = b"0123456789abcdef";
             let mut text = ProductionString::new(*control);
@@ -232,6 +238,9 @@ pub(super) fn to_i64(v: &Value) -> Result<i64> {
 }
 
 pub(super) fn to_i64_with_control(v: &Value, control: &ProductionControl<'_>) -> Result<i64> {
+    if let Value::Datum(datum) = v {
+        return to_i64_with_control(&*super::datums::read_with_control(datum, control)?, control);
+    }
     control.check()?;
     match v {
         Value::Int(n) => Ok(*n),
@@ -269,6 +278,9 @@ pub(crate) fn to_f64(v: &Value) -> Result<f64> {
 }
 
 pub(crate) fn to_f64_with_control(v: &Value, control: &ProductionControl<'_>) -> Result<f64> {
+    if let Value::Datum(datum) = v {
+        return to_f64_with_control(&*super::datums::read_with_control(datum, control)?, control);
+    }
     super::floating::to_float_with_control(v, super::FloatWidth::DoublePrecision, control)
 }
 
@@ -293,6 +305,9 @@ pub(super) fn to_decimal_with_control(
 ) -> Result<Produced<DecimalValue>> {
     control.check()?;
     match value {
+        Value::Datum(datum) => {
+            to_decimal_with_control(&*super::datums::read_with_control(datum, control)?, control)
+        }
         Value::Decimal(value) => Ok(value.clone_with_control(control)?),
         Value::Int(value) => Ok(DecimalValue::from_i64_with_control(*value, control)?),
         Value::Bool(value) => Ok(DecimalValue::from_i64_with_control(

@@ -7,8 +7,9 @@
 //! Dynamic document values, serialization, and cross-numeric ordering.
 
 use super::{
-    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DecimalValue, Deserialize, Deserializer,
-    EnumValue, LegacyVectorValue, RowValue, Serialize, Serializer, TemporalValue,
+    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DatumValue, DecimalValue, Deserialize,
+    Deserializer, EnumValue, LegacyVectorValue, RecordValue, RowValue, Serialize, Serializer,
+    TemporalValue,
 };
 
 pub(super) mod comparison_control;
@@ -59,12 +60,14 @@ pub enum Value {
     /// row comparisons retain SQL three-valued NULL semantics.
     Row(RowValue),
     /// Named composite/record value in physical field order.
-    Record(Vec<(String, Value)>),
+    Record(RecordValue),
     /// JSON/document object value. This is not a SQL composite record.
     Map(BTreeMap<String, Value>),
     /// Label of a user-defined enum type. The immutable label key orders
     /// values in declaration order; label text is resolved from the catalog.
     Enum(EnumValue),
+    /// A retained SQL field that has not been physically interpreted. SQL must read it before value-based operations; NULL tests and type inspection do not read its bytes.
+    Datum(DatumValue),
 }
 
 impl Value {
@@ -104,6 +107,8 @@ struct TaggedArray<'a> {
     kind: &'static str,
     lower_bounds: &'a [i32],
     values: &'a [Value],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    element_type_oid: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -112,13 +117,17 @@ struct TaggedEnum<'a> {
     kind: &'static str,
     type_oid: u32,
     key: &'a super::EnumLabelKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label_oid: Option<u32>,
 }
 
 #[derive(Serialize)]
-struct TaggedRecord<'a> {
+struct TaggedDatum<'a> {
     #[serde(rename = "$uqa_type")]
     kind: &'static str,
-    fields: &'a [(String, Value)],
+    type_oid: u32,
+    offset: u32,
+    hex: &'a str,
 }
 
 impl Serialize for Value {
@@ -158,14 +167,18 @@ impl Serialize for Value {
                 kind: "array",
                 lower_bounds: value.lower_bounds(),
                 values: value.elements(),
+                element_type_oid: value.element_type_oid(),
             }
             .serialize(serializer),
             Self::LegacyVector(value) => value.serialize(serializer),
             Self::List(value) => value.serialize(serializer),
             Self::Row(values) => values.serialize(serializer),
-            Self::Record(fields) => TaggedRecord {
-                kind: "record",
-                fields,
+            Self::Record(fields) => fields.serialize(serializer),
+            Self::Datum(value) => TaggedDatum {
+                kind: "datum",
+                type_oid: value.type_oid(),
+                offset: value.offset(),
+                hex: &hex_text::<S::Error>(value.bytes())?,
             }
             .serialize(serializer),
             Self::Map(value) => value.serialize(serializer),
@@ -173,6 +186,7 @@ impl Serialize for Value {
                 kind: "enum",
                 type_oid: value.type_oid(),
                 key: value.key(),
+                label_oid: value.label_oid(),
             }
             .serialize(serializer),
         }
@@ -464,6 +478,7 @@ impl Ord for Value {
             (Value::Record(a), Value::Record(b)) => compare_postgres_record_values(a, b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
             (Value::Enum(a), Value::Enum(b)) => a.cmp(b),
+            (Value::Datum(a), Value::Datum(b)) => a.cmp(b),
             _ => discriminant(self).cmp(&discriminant(other)),
         }
     }
@@ -487,6 +502,7 @@ fn discriminant(v: &Value) -> u8 {
         Value::Map(_) => 13,
         Value::LegacyVector(_) => 14,
         Value::Enum(_) => 15,
+        Value::Datum(_) => 16,
     }
 }
 

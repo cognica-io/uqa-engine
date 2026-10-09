@@ -159,6 +159,7 @@ pub fn format_raise_message(format: &str, args: &[Value]) -> Result<String, SQLE
 pub fn raise_text(value: &Value) -> Result<String, SQLError> {
     Ok(match value {
         Value::Null => "<NULL>".into(),
+        Value::Datum(value) => return raise_text(&crate::expr::datums::read(value)?),
         Value::Void => String::new(),
         Value::Bool(b) => (if *b { "t" } else { "f" }).into(),
         Value::Int(v) => v.to_string(),

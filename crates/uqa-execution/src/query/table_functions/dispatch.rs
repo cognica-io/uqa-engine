@@ -43,9 +43,12 @@ pub(super) fn build_table_function_rows_with_row(
             .with_physical_outer_row(&row.schema, &row.row),
         None => ScalarEvalContext::new(None, context.params),
     };
-    let ctx = ctx
+    let mut ctx = ctx
         .with_function_hook(context.eval_hook)
         .with_subquery_runner(&subquery_arena);
+    if let Some(states) = call.function_states {
+        ctx = ctx.with_function_states(states);
+    }
     let identity = name.to_ascii_lowercase();
     let lower = uqa_sql::semantics::builtin_function_dispatch_name(&identity);
     if binding.is_none_or(|binding| binding.builtin)

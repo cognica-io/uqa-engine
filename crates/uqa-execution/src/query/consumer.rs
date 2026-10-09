@@ -49,6 +49,6 @@ pub enum QueryConsumerControl {
 pub enum QueryOutputMode<'a> {
     Rows,
     SharedSpill,
-    ExistsKeySet,
+    ExistsKeySet(Option<&'a dyn uqa_sql::expr::SQLValueCatalog>),
     RowConsumer(std::rc::Rc<dyn QueryRowConsumer + 'a>),
 }

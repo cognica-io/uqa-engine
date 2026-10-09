@@ -47,7 +47,12 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
                 "void values have no Flight SQL literal".into(),
             ));
         }
-        // Label text is owned by the SQL catalog, which the wrapper cannot consult.
+        // Physical interpretation belongs to SQL, outside the wrapper's dependency boundary.
+        Value::Datum(_) => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                "encoded SQL datums need physical interpretation before Flight SQL output".into(),
+            ));
+        }
         Value::Enum(_) => {
             return Err(ArrowFlightPrepareError::UnsupportedLiteral(
                 "enum values have no catalog-independent Flight SQL literal".into(),
@@ -81,27 +86,7 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
             };
             format!("CAST('{escaped}' AS {type_name})")
         }
-        Value::Bytes(b) => {
-            let capacity = b.len().checked_mul(2).ok_or_else(|| {
-                ArrowFlightPrepareError::UnsupportedLiteral(
-                    "binary literal length overflows usize".into(),
-                )
-            })?;
-            let mut hex = String::new();
-            hex.try_reserve_exact(capacity).map_err(|error| {
-                ArrowFlightPrepareError::UnsupportedLiteral(format!(
-                    "failed to allocate binary literal: {error}"
-                ))
-            })?;
-            for byte in b {
-                write!(hex, "{byte:02X}").map_err(|error| {
-                    ArrowFlightPrepareError::UnsupportedLiteral(format!(
-                        "failed to encode binary literal: {error}"
-                    ))
-                })?;
-            }
-            format!("X'{hex}'")
-        }
+        Value::Bytes(bytes) => quote_binary(bytes)?,
         Value::Temporal(t) => {
             let escaped = t.to_sql_string().replace('\'', "''");
             format!("'{escaped}'")
@@ -142,6 +127,26 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
             ));
         }
     })
+}
+
+fn quote_binary(bytes: &[u8]) -> Result<String, ArrowFlightPrepareError> {
+    let capacity = bytes.len().checked_mul(2).ok_or_else(|| {
+        ArrowFlightPrepareError::UnsupportedLiteral("binary literal length overflows usize".into())
+    })?;
+    let mut hex = String::new();
+    hex.try_reserve_exact(capacity).map_err(|error| {
+        ArrowFlightPrepareError::UnsupportedLiteral(format!(
+            "failed to allocate binary literal: {error}"
+        ))
+    })?;
+    for byte in bytes {
+        write!(hex, "{byte:02X}").map_err(|error| {
+            ArrowFlightPrepareError::UnsupportedLiteral(format!(
+                "failed to encode binary literal: {error}"
+            ))
+        })?;
+    }
+    Ok(format!("X'{hex}'"))
 }
 
 /// Render a Flight-SQL `WHERE` fragment from pushdown predicates. Flight SQL

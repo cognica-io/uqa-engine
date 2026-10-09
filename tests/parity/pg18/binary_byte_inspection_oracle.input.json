@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT oid,proname,prorettype,proargtypes::text,proisstrict,provolatile,proparallel,proleakproof,prosrc FROM pg_proc WHERE oid='get_byte(bytea,integer)'::regprocedure"
+    },
+    {
+      "id": "bytes",
+      "sql": "SELECT get_byte('\\x0080ff'::bytea,0),get_byte('\\x0080ff'::bytea,1),get_byte('\\x0080ff'::bytea,2),pg_typeof(get_byte('\\x0080ff'::bytea,0))"
+    },
+    {
+      "id": "qualified",
+      "sql": "SELECT pg_catalog.get_byte('abc'::bytea,1::smallint)"
+    },
+    {
+      "id": "negative",
+      "sql": "SELECT get_byte('abc'::bytea,-1)"
+    },
+    {
+      "id": "upper",
+      "sql": "SELECT get_byte('abc'::bytea,3)"
+    },
+    {
+      "id": "empty",
+      "sql": "SELECT get_byte(''::bytea,0)"
+    },
+    {
+      "id": "empty_negative",
+      "sql": "SELECT get_byte(''::bytea,-1)"
+    },
+    {
+      "id": "nulls",
+      "sql": "SELECT get_byte(NULL::bytea,-1),get_byte('abc'::bytea,NULL::integer),get_byte(NULL::bytea,NULL::integer)"
+    },
+    {
+      "id": "bigint",
+      "sql": "SELECT get_byte('abc'::bytea,1::bigint)"
+    },
+    {
+      "id": "decimal",
+      "sql": "SELECT get_byte('abc'::bytea,1.0)"
+    },
+    {
+      "id": "text",
+      "sql": "SELECT get_byte('abc'::text,1)"
+    },
+    {
+      "id": "arity",
+      "sql": "SELECT get_byte('abc'::bytea)"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE get_byte_parameter(bytea,integer) AS SELECT get_byte($1,$2) AS n"
+    },
+    {
+      "id": "execute",
+      "sql": "EXECUTE get_byte_parameter('\\x0080ff'::bytea,2)"
+    },
+    {
+      "id": "execute_error",
+      "sql": "EXECUTE get_byte_parameter('\\x0080ff'::bytea,3)"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DEALLOCATE get_byte_parameter"
+    }
+  ]
+}

@@ -130,6 +130,7 @@ fn coerce(
         && !matches!(target, ColumnType::Domain { .. })
     {
         Ok(ScalarExpr::TypedLiteral {
+            composite_source: None,
             value: uqa_core::Value::Null,
             ty: target.catalog_name(),
             bound_type: Some(target),

@@ -41,7 +41,7 @@ pub(crate) fn rewrite_expression_with_arena(
     result
 }
 
-fn query_nodes(query: &mut QueryPlan, rewrite: Rewrite<'_>) -> Result<(), SQLError> {
+pub(crate) fn query_nodes(query: &mut QueryPlan, rewrite: Rewrite<'_>) -> Result<(), SQLError> {
     cte_nodes(&mut query.ctes, rewrite)?;
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {

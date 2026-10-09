@@ -54,6 +54,10 @@ pub(super) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
 
 pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
     match value {
+        Value::Datum(datum) => value_to_py(
+            py,
+            &uqa_sql::expr::datums::read(datum).map_err(super::errors::runtime_error)?,
+        ),
         Value::Null => Ok(py.None()),
         Value::Void => String::new().into_py_any(py),
         Value::Bool(value) => value.into_py_any(py),

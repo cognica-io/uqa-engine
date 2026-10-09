@@ -32,6 +32,7 @@ impl RoutineResolution for Types {}
 impl CompositeTypeCatalog for Types {
     fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
         Ok(Some(Arc::new(CompositeTypeDescriptor {
+            dropped: Vec::new(),
             type_oid: oid,
             relation_oid: oid + 2,
             attributes: vec![CompositeAttribute {

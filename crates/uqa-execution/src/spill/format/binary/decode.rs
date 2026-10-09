@@ -427,7 +427,14 @@ impl<'a> BinaryReader<'a> {
                 };
                 Ok(Value::Row(row))
             }
-            14 => {
+            tag @ (14 | 23) => {
+                let type_oid = if tag == 23 {
+                    Some(u32::from_le_bytes(
+                        self.read_i32("record type OID")?.to_le_bytes(),
+                    ))
+                } else {
+                    None
+                };
                 let count = self.read_count("record length", 9)?;
                 let mut fields = Vec::new();
                 fields.try_reserve_exact(count).map_err(|error| {
@@ -438,9 +445,18 @@ impl<'a> BinaryReader<'a> {
                     let value = self.read_value(depth + 1)?;
                     fields.push((name, value));
                 }
-                Ok(Value::Record(fields))
+                Ok(Value::Record(uqa_core::RecordValue::from_parts(
+                    fields, type_oid,
+                )))
             }
-            15 => {
+            tag @ (15 | 21) => {
+                let element_type_oid = if tag == 21 {
+                    Some(u32::from_le_bytes(
+                        self.read_i32("array element type OID")?.to_le_bytes(),
+                    ))
+                } else {
+                    None
+                };
                 let bound_count = self.read_count("array lower-bound count", 4)?;
                 let mut lower_bounds = Vec::new();
                 lower_bounds
@@ -460,15 +476,35 @@ impl<'a> BinaryReader<'a> {
                     elements.push(self.read_value(depth + 1)?);
                 }
                 ArrayValue::with_lower_bounds(elements, lower_bounds)
+                    .map(|array| array.with_element_type_oid(element_type_oid))
                     .map(Value::Array)
                     .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
             }
+            20 => {
+                let type_oid = u32::from_le_bytes(self.read_i32("datum type OID")?.to_le_bytes());
+                let offset = u32::from_le_bytes(self.read_i32("datum offset")?.to_le_bytes());
+                let bytes = self.read_bytes("datum bytes")?.to_vec();
+                Ok(Value::Datum(uqa_core::DatumValue::new(
+                    type_oid, offset, bytes,
+                )))
+            }
             16 => Ok(Value::Void),
-            18 => {
+            tag @ (18 | 22) => {
                 let type_oid = u32::from_le_bytes(self.read_i32("enum type OID")?.to_le_bytes());
+                let label_oid = if tag == 22 {
+                    Some(u32::from_le_bytes(
+                        self.read_i32("enum label OID")?.to_le_bytes(),
+                    ))
+                } else {
+                    None
+                };
                 let key = self.read_bytes("enum label key")?.to_vec();
                 uqa_core::EnumLabelKey::from_bytes(key)
-                    .map(|key| Value::Enum(uqa_core::EnumValue::new(type_oid, key)))
+                    .map(|key| {
+                        Value::Enum(
+                            uqa_core::EnumValue::new(type_oid, key).with_label_oid(label_oid),
+                        )
+                    })
                     .map_err(|error| {
                         spill_error(format!("invalid enum label key in spill file: {error}"))
                     })

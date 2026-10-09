@@ -8,6 +8,7 @@ use super::{SQLError, Value};
 
 pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {
     let rendered = match value {
+        Value::Datum(datum) => return render_value(&uqa_sql::expr::datums::read(datum)?),
         Value::Null => "NULL".into(),
         Value::Void => "''::void".into(),
         Value::Bool(b) => b.to_string(),

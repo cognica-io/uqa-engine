@@ -7,7 +7,7 @@
 //! Value comparisons preserve the native ordering while owning decimal, JSONB and array traversal workspace.
 
 use super::{ArrayValue, DecimalValue, Value};
-use crate::{memory::ProductionControl, ValueRetentionError};
+use crate::{memory::ProductionControl, DatumValue, ValueRetentionError};
 use std::cmp::Ordering;
 
 impl Value {
@@ -54,6 +54,7 @@ impl Value {
                 control,
             )?,
             (Self::Bytes(left), Self::Bytes(right)) => compare_bytes(left, right, control)?,
+            (Self::Datum(left), Self::Datum(right)) => compare_datums(left, right, control)?,
             (Self::Enum(left), Self::Enum(right)) => match left.type_oid().cmp(&right.type_oid()) {
                 Ordering::Equal => {
                     compare_bytes(left.key().as_bytes(), right.key().as_bytes(), control)?
@@ -115,6 +116,19 @@ impl Value {
         };
         control.check()?;
         Ok(ordering)
+    }
+}
+
+fn compare_datums(
+    left: &DatumValue,
+    right: &DatumValue,
+    control: &ProductionControl<'_>,
+) -> Result<Ordering, ValueRetentionError> {
+    let identity = (left.type_oid(), left.offset()).cmp(&(right.type_oid(), right.offset()));
+    if identity.is_eq() {
+        compare_bytes(left.bytes(), right.bytes(), control)
+    } else {
+        Ok(identity)
     }
 }
 

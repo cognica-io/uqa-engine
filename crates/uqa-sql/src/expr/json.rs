@@ -17,9 +17,11 @@ mod production;
 #[cfg(test)]
 pub(super) use production::json_delete_with_control;
 pub(super) use production::{
-    cast_json_value_with_control, evaluate, format_core_value_as_json_with_control,
-    format_value_as_json_with_control, json_concat_with_control, json_delete_values_with_control,
-    json_extract_operator_with_control, quote_with_control, utf8_lossy_with_control,
+    cast_json_value_with_control, compare_jsonb_datums_with_control,
+    decode_jsonb_datum_with_control, encode_jsonb_datum, evaluate,
+    format_core_value_as_json_with_control, format_value_as_json_with_control,
+    json_concat_with_control, json_delete_values_with_control, json_extract_operator_with_control,
+    quote_with_control, utf8_lossy_with_control, JsonbInput,
 };
 
 pub(super) use path::{jsonpath_candidate, jsonpath_match};
@@ -127,15 +129,9 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
         Value::Temporal(value) => serde_json::Value::String(value.to_sql_string()).to_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
+        Value::Datum(value) => return value_to_json_text(&super::datums::read(value)?),
         Value::LegacyVector(vector) => legacy_vector_json(vector).to_string(),
-        Value::Array(array) => {
-            let values = array
-                .elements()
-                .iter()
-                .map(value_to_json_text)
-                .collect::<Result<Vec<_>>>()?;
-            format!("[{}]", values.join(","))
-        }
+        Value::Array(array) => array_json_text(array.elements(), array.element_type_oid())?,
         Value::List(values) => {
             let values = values
                 .iter()
@@ -163,6 +159,20 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
             format!("{{{}}}", values.join(","))
         }
     })
+}
+
+fn array_json_text(values: &[Value], oid: Option<u32>) -> Result<String> {
+    let fields = values
+        .iter()
+        .map(|value| match value {
+            Value::List(values) => array_json_text(values, oid),
+            Value::Float(value) if oid == Some(700) && value.is_finite() => {
+                Ok(super::format_real(*value as f32))
+            }
+            value => value_to_json_text(value),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(format!("[{}]", fields.join(",")))
 }
 
 fn legacy_vector_json(vector: &uqa_core::LegacyVectorValue) -> serde_json::Value {
@@ -276,6 +286,9 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
 #[cfg(test)]
 pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
+        Value::Datum(datum) => {
+            value_to_json(&super::datums::read(datum).expect("test datum output"))
+        }
         Value::Null => serde_json::Value::Null,
         Value::Void => serde_json::Value::String(String::new()),
         Value::Bool(b) => serde_json::Value::Bool(*b),

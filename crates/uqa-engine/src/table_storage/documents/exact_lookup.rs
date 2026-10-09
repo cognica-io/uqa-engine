@@ -106,7 +106,13 @@ impl ExactLookupOverlay for QueryOverlay<'_> {
             if !present || self.commands.masks(id)? {
                 continue;
             }
-            if self.fixed.row_matches(id, columns, values, presence)? {
+            if self.fixed.row_matches_with_catalog(
+                id,
+                columns,
+                values,
+                presence,
+                Some(self.commands.engine),
+            )? {
                 return Ok(Some(id));
             }
         }
@@ -125,6 +131,7 @@ impl Engine {
             let overlay = QueryOverlay::new(engine, name)?;
             let read = engine.serializable_table_state_read(table)?;
             ExactLookup {
+                catalog: Some(engine),
                 table: table.as_ref(),
                 overlay: &overlay,
                 read: read.as_ref(),
@@ -152,6 +159,7 @@ impl Engine {
             table: self.command_overlay_table_name(table)?,
         };
         ExactLookup {
+            catalog: Some(self),
             table: table_state.as_ref(),
             overlay: &overlay,
             read: None,
@@ -205,6 +213,7 @@ impl Engine {
     ) -> Result<Option<DocId>, SQLError> {
         let schema_columns = table.columns.snapshot();
         ExactLookup {
+            catalog: Some(self),
             table: table.as_ref(),
             overlay,
             read,

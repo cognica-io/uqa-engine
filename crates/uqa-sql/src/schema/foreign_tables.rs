@@ -106,6 +106,17 @@ impl ForeignSchemaContext<'_> {
         allocate: &mut CatalogIdentityAllocator<'_>,
     ) -> Result<(), SQLError> {
         validate_foreign_table_schema_envelope(columns)?;
+        for column in columns.iter_mut() {
+            for expression in [column.default.as_mut(), column.check.as_mut()]
+                .into_iter()
+                .flatten()
+            {
+                expression.upgrade_legacy_serialized_dispatches();
+            }
+        }
+        for check in checks.iter_mut() {
+            check.expr.upgrade_legacy_serialized_dispatches();
+        }
         self.prepare_foreign_table_schema_inner(
             table_name,
             columns,

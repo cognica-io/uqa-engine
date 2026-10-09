@@ -14,6 +14,12 @@ use uqa_sql::{expr::EngineHook, ColumnType, SQLError};
 pub struct CatalogOutput<'a>(pub CatalogContext<'a>);
 
 impl EngineHook for CatalogOutput<'_> {
+    fn resolve_type_oid(&self, oid: u32) -> Result<Option<ColumnType>, String> {
+        Ok(uqa_sql::catalog::type_metadata::builtin_scalar_type(oid)
+            .cloned()
+            .or_else(|| super::resolve_catalog_user_type_by_oid(&self.0, oid)))
+    }
+
     fn resolve_regtype_output(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>, String> {
         super::resolve_regtype_output(&self.0, ty, oid)
     }

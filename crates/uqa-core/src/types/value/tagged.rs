@@ -14,6 +14,7 @@ use crate::{
 
 mod allocation;
 use allocation::Workspace;
+mod record;
 mod row;
 
 fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
@@ -114,7 +115,10 @@ fn convert(
                 }
             }
         }
-        "array" if map.len() == 3 => {
+        "datum" if map.len() == 4 => {
+            return decoded_datum(&map, workspace).map(Value::Datum);
+        }
+        "array" if map.len() == 3 || (map.len() == 4 && map.contains_key("element_type_oid")) => {
             if let Some(array) = decoded_array(&mut map, workspace)? {
                 return Ok(Value::Array(array));
             }
@@ -129,7 +133,7 @@ fn convert(
                 return Ok(Value::LegacyVector(vector));
             }
         }
-        "enum" if map.len() == 3 && map.contains_key("type_oid") && map.contains_key("key") => {
+        "enum" if enum_carrier_fields(&map) => {
             return decoded_enum(&map, workspace).map(Value::Enum);
         }
         "row" if map.len() == 2 || (map.len() == 3 && map.contains_key("field_types")) => {
@@ -137,34 +141,38 @@ fn convert(
                 return Ok(Value::Row(row));
             }
         }
-        "record" if map.len() == 2 => {
-            let Some(Value::List(encoded_fields)) = map.get("fields") else {
-                return Ok(Value::Map(map));
-            };
-            for encoded in encoded_fields {
-                workspace.check()?;
-                if !matches!(encoded, Value::List(pair) if matches!(pair.as_slice(), [Value::Str(_), _]))
-                {
-                    return Ok(Value::Map(map));
-                }
+        "record" if map.len() == 2 || (map.len() == 3 && map.contains_key("type_oid")) => {
+            if let Some(record) = record::decoded(&mut map, workspace)? {
+                return Ok(Value::Record(record));
             }
-            let mut fields = workspace.vector(encoded_fields.len())?;
-            for encoded in take_list(&mut map, "fields") {
-                workspace.check()?;
-                let Value::List(mut pair) = encoded else {
-                    unreachable!("record pair was validated");
-                };
-                let value = pair.pop().expect("validated record value");
-                let Some(Value::Str(name)) = pair.pop() else {
-                    unreachable!("record name was validated");
-                };
-                fields.push((name, value));
-            }
-            return Ok(Value::Record(fields));
         }
         _ => {}
     }
     Ok(Value::Map(map))
+}
+
+fn decoded_datum(
+    map: &BTreeMap<String, Value>,
+    workspace: &mut Workspace<'_>,
+) -> Result<crate::DatumValue, ValueRetentionError> {
+    let malformed = || ValueRetentionError::Malformed {
+        kind: "datum",
+        reason: "invalid type OID, byte offset or backing bytes".into(),
+    };
+    let type_oid = int_field::<u32>(map, "type_oid").ok_or_else(malformed)?;
+    let offset = int_field::<u32>(map, "offset").ok_or_else(malformed)?;
+    let Some(Value::Str(hex)) = map.get("hex") else {
+        return Err(malformed());
+    };
+    let bytes = decode_hex_bytes(hex, workspace)?.ok_or_else(malformed)?;
+    workspace.reserve(size_of::<Vec<u8>>() + 2 * size_of::<usize>())?;
+    Ok(crate::DatumValue::new(type_oid, offset, bytes))
+}
+
+fn enum_carrier_fields(map: &BTreeMap<String, Value>) -> bool {
+    (map.len() == 3 || (map.len() == 4 && map.contains_key("label_oid")))
+        && map.contains_key("type_oid")
+        && map.contains_key("key")
 }
 
 /// Enum carriers are recognized by their exact field set and then validated strictly; a stored label key that does not satisfy the key invariant is corruption rather than a document map.
@@ -182,6 +190,13 @@ fn decoded_enum(
         }
         _ => return Err(malformed("type OID is not an integer")),
     };
+    let label_oid = match map.get("label_oid") {
+        None | Some(Value::Null) => None,
+        Some(Value::Int(oid)) => {
+            Some(u32::try_from(*oid).map_err(|_| malformed("label OID out of range"))?)
+        }
+        _ => return Err(malformed("label OID is not an integer")),
+    };
     let Some(Value::Str(hex)) = map.get("key") else {
         return Err(malformed("label key is not hexadecimal text"));
     };
@@ -190,7 +205,7 @@ fn decoded_enum(
     }
     workspace.reserve(hex.len() / 2)?;
     let key = EnumLabelKey::from_hex(hex).map_err(|error| malformed(&error.to_string()))?;
-    Ok(EnumValue::new(type_oid, key))
+    Ok(EnumValue::new(type_oid, key).with_label_oid(label_oid))
 }
 
 fn decoded_legacy_vector(
@@ -233,6 +248,14 @@ fn decoded_array(
     map: &mut BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
 ) -> Result<Option<ArrayValue>, ValueRetentionError> {
+    let element_type_oid = match map.get("element_type_oid") {
+        None | Some(Value::Null) => None,
+        Some(Value::Int(oid)) => match u32::try_from(*oid) {
+            Ok(oid) => Some(oid),
+            Err(_) => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
     let (Some(Value::List(bounds)), Some(Value::List(values))) =
         (map.get("lower_bounds"), map.get("values"))
     else {
@@ -260,11 +283,10 @@ fn decoded_array(
     }
     workspace.reserve(ArrayValue::decoded_header_bytes())?;
     let values = take_list(map, "values");
-    Ok(Some(ArrayValue::from_decoded_parts(
-        values,
-        dimensions,
-        decoded_bounds,
-    )))
+    Ok(Some(
+        ArrayValue::from_decoded_parts(values, dimensions, decoded_bounds)
+            .with_element_type_oid(element_type_oid),
+    ))
 }
 
 fn take_list(map: &mut BTreeMap<String, Value>, key: &str) -> Vec<Value> {

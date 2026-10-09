@@ -83,6 +83,17 @@ impl<Owner> StoredComposite<Owner> {
 
     pub fn descriptor(&self) -> CompositeTypeDescriptor {
         CompositeTypeDescriptor {
+            dropped: self
+                .attributes
+                .iter()
+                .filter(|attribute| attribute.dropped)
+                .map(|attribute| {
+                    crate::expr::composites::DroppedCompositeAttribute::from_type(
+                        attribute.number,
+                        &attribute.ty,
+                    )
+                })
+                .collect(),
             type_oid: self.oid,
             relation_oid: self.relation_oid,
             attributes: self

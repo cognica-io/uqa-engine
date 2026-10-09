@@ -193,3 +193,47 @@ fn generated_dispatch_quota_and_cancellation_preserve_earlier_results() {
     drop(held);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn retained_field_type_errors_follow_record_nullness_and_release_argument_memory() {
+    let budget = MemoryBudget::new(64 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut binding = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
+    binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+        type_oid: 20_001,
+        number: 2,
+        result_type: crate::ColumnType::Text,
+        dropped: false,
+        changed_type: Some(crate::ColumnType::Varchar(Some(8))),
+    }));
+    for dropped in [false, true] {
+        binding.composite_field.as_mut().unwrap().dropped = dropped;
+        for base in [
+            Value::Null,
+            Value::Record(vec![("b".into(), Value::Null)].into()),
+        ] {
+            let result = eval_generated_function_call_with_control(
+                "field",
+                Some(&binding),
+                args(&[base.clone(), Value::Str("b".into())], &control),
+                &control,
+            );
+            if dropped || matches!(base, Value::Null) {
+                assert_eq!(*result.unwrap(), Value::Null);
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.sqlstate(), Some("42804"));
+                assert_eq!(error.to_string(), "attribute 2 has wrong type");
+                let SQLError::Diagnostic { detail, .. } = error else {
+                    panic!("type detail")
+                };
+                assert_eq!(
+                    detail.as_deref(),
+                    Some("Table has type character varying, but query expects text.")
+                );
+            }
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}

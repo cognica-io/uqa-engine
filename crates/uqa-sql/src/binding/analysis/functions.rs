@@ -647,6 +647,7 @@ fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
         ) | ("uuidv7", 0..=1)
             | ("setseed", 1)
             | ("crc32" | "crc32c", 1)
+            | ("get_byte", 2)
             | ("div", 2)
             | ("generate_series", 2..=3)
             | ("unnest", 1..)

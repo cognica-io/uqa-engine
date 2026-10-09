@@ -1,0 +1,62 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE enum_generated_label AS ENUM ('first','last'); ALTER TYPE enum_generated_label ADD VALUE 'middle' BEFORE 'last'"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE enum_generated_values (id integer PRIMARY KEY, l enum_generated_label, r enum_generated_label, cmp integer GENERATED ALWAYS AS (enum_cmp(l,r)) STORED, same boolean GENERATED ALWAYS AS (enum_eq(l,r)) STORED, small enum_generated_label GENERATED ALWAYS AS (enum_smaller(l,r)) STORED, high enum_generated_label GENERATED ALWAYS AS (greatest(l,r)) STORED, array_less boolean GENERATED ALWAYS AS (ARRAY[l] < ARRAY[r]) STORED, hash_same boolean GENERATED ALWAYS AS (hashenum(l)=hashenum(r)) STORED)"
+    },
+    {
+      "id": "insert",
+      "sql": "INSERT INTO enum_generated_values (id,l,r) VALUES (1,'middle','last'),(2,'last','first'),(3,NULL,'first'),(4,'middle','middle')"
+    },
+    {
+      "id": "read",
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id"
+    },
+    {
+      "id": "update",
+      "sql": "UPDATE enum_generated_values SET l='first',r='middle' WHERE id=2"
+    },
+    {
+      "id": "updated",
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id"
+    },
+    {
+      "id": "rename",
+      "sql": "ALTER TYPE enum_generated_label RENAME VALUE 'middle' TO 'between'"
+    },
+    {
+      "id": "renamed",
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id"
+    },
+    {
+      "id": "transaction",
+      "sql": "BEGIN; UPDATE enum_generated_values SET l='last',r='between' WHERE id=1"
+    },
+    {
+      "id": "inside",
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id"
+    },
+    {
+      "id": "rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "reopen",
+      "sql": "SELECT * FROM enum_generated_values ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP TABLE enum_generated_values; DROP TYPE enum_generated_label",
+      "reopen": true
+    }
+  ]
+}

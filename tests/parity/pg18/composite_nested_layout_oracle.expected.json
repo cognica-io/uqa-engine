@@ -1,0 +1,433 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE nested_leaf AS (a integer,b integer); CREATE TYPE nested_parent AS (lead smallint, item nested_leaf, tail integer); CREATE VIEW nested_value AS SELECT '(9,\"(1065353216,17)\",23)'::nested_parent AS v; CREATE TYPE nested_array_parent AS (items nested_leaf[], tail integer); CREATE VIEW nested_array_value AS SELECT '(\"{\"\"(1065353216,17)\"\",NULL,\"\"(1073741824,19)\"\"}\",29)'::nested_array_parent AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE TYPE",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "SELECT v FROM nested_value; SELECT v FROM nested_array_value",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19119
+          ],
+          "rows": [
+            [
+              "(9,\"(1065353216,17)\",23)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19126
+          ],
+          "rows": [
+            [
+              "(\"{\"\"(1065353216,17)\"\",NULL,\"\"(1073741824,19)\"\"}\",29)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "begin"
+    },
+    {
+      "sql": "ALTER TYPE nested_parent ALTER ATTRIBUTE item TYPE bytea",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "child_to_bytes"
+    },
+    {
+      "sql": "SELECT length((v).item),encode(substr((v).item,1,4),'hex'),encode(substr((v).item,9),'hex'),(get_byte((v).item,4)+256*get_byte((v).item,5)+65536*get_byte((v).item,6)+16777216::bigint*get_byte((v).item,7))='nested_leaf'::regtype::oid::bigint,(v).tail FROM nested_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length",
+            "encode",
+            "encode",
+            "?column?",
+            "tail"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "28",
+              "ffffffff",
+              "ffffffff00000200000018000000803f11000000",
+              "t",
+              "23"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_bytes"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "restore_child"
+    },
+    {
+      "sql": "SELECT v FROM nested_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19119
+          ],
+          "rows": [
+            [
+              "(9,\"(1065353216,17)\",23)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_child_rollback"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE nested_leaf ALTER ATTRIBUTE a TYPE real",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "alter_nested_leaf"
+    },
+    {
+      "sql": "SELECT v FROM nested_value; SELECT v FROM nested_array_value",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19119
+          ],
+          "rows": [
+            [
+              "(9,\"(1,17)\",23)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19126
+          ],
+          "rows": [
+            [
+              "(\"{\"\"(1,17)\"\",NULL,\"\"(2,19)\"\"}\",29)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "project_nested_leaf"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "restore_leaf"
+    },
+    {
+      "sql": "BEGIN; ALTER TYPE nested_array_parent ALTER ATTRIBUTE items TYPE bytea",
+      "command_tags": [
+        "BEGIN",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_to_bytes"
+    },
+    {
+      "sql": "SELECT length((v).items),encode(substr((v).items,1,8),'hex'),encode(substr((v).items,13,24),'hex'),(get_byte((v).items,8)+256*get_byte((v).items,9)+65536*get_byte((v).items,10)+16777216::bigint*get_byte((v).items,11))='nested_leaf'::regtype::oid::bigint,(v).tail FROM nested_array_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "length",
+            "encode",
+            "encode",
+            "?column?",
+            "tail"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "92",
+              "0100000020000000",
+              "0300000001000000050000000000000080000000ffffffff",
+              "t",
+              "29"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_bytes"
+    },
+    {
+      "sql": "ALTER TYPE nested_array_parent ALTER ATTRIBUTE items TYPE text[]",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_to_text"
+    },
+    {
+      "sql": "SELECT v FROM nested_array_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            19126
+          ],
+          "rows": [
+            [
+              "(\"{\"\"(1065353216,17)\"\",NULL,\"\"(1073741824,19)\"\"}\",29)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_original_output"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_rollback"
+    },
+    {
+      "sql": "DROP VIEW nested_value,nested_array_value; DROP TYPE nested_parent,nested_array_parent; DROP TYPE nested_leaf",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup"
+    }
+  ]
+}

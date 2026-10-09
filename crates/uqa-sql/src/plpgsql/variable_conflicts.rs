@@ -172,7 +172,7 @@ fn ambiguous_variable_error(reference: &Expr) -> SQLError {
 /// The typed parameter that stands for a site's value while the binder resolves the statement.
 pub(super) fn site_parameter(binding: &Expr, resolver: &dyn VariableResolver) -> SQLParam {
     match binding {
-        Expr::TypedLiteral { value, ty } => resolver.parameter_type(ty).map_or_else(
+        Expr::TypedLiteral { value, ty, .. } => resolver.parameter_type(ty).map_or_else(
             || SQLParam::scalar(value.clone()),
             |ty| SQLParam::typed_scalar(value.clone(), ty),
         ),

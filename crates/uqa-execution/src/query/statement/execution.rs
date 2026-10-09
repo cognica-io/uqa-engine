@@ -123,7 +123,11 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
             block,
             params,
             ctes,
-            bind_output_mode(context.generation, output_mode)?,
+            bind_output_mode(
+                context.generation,
+                output_mode,
+                context.source.types.enum_labels(),
+            )?,
         ),
         RelationalPlan::SetOp { .. } => {
             execute_set_operation(context, plan, params, ctes, output_mode)
@@ -149,7 +153,11 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
                 subqueries,
                 params,
                 ctes,
-                bind_output_mode(context.generation, output_mode)?,
+                bind_output_mode(
+                    context.generation,
+                    output_mode,
+                    context.source.types.enum_labels(),
+                )?,
             )
         }
     }
@@ -352,13 +360,14 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
     let left: Box<dyn crate::PhysicalOperator + '_> = lhs.into_public_operator();
     let right: Box<dyn crate::PhysicalOperator + '_> = rhs.into_public_operator();
     let operation: Box<dyn crate::PhysicalOperator + '_> = Box::new(
-        crate::ExternalSetOperation::new_with_types(
+        crate::ExternalSetOperation::new_with_types_and_evaluator(
             left,
             right,
             *kind,
             *all,
             set_schema.column_types().to_vec(),
             physical_work_mem_bytes(context.source.relational.runtime)?,
+            context.source.relational.evaluator(params, ctes),
         )
         .map_err(physical_exec_error)?,
     );
@@ -413,6 +422,10 @@ pub fn collect_query_operator<'a, S: Clone + Send + Sync + 'static>(
         context.source.relational.runtime,
         columns,
         operator,
-        bind_output_mode(context.generation, output_mode)?,
+        bind_output_mode(
+            context.generation,
+            output_mode,
+            context.source.types.enum_labels(),
+        )?,
     )
 }

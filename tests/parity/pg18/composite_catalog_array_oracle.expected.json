@@ -1,0 +1,1226 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE decode_enum AS ENUM ('first','last'); ALTER TYPE decode_enum ADD VALUE 'middle' BEFORE 'last'; CREATE DOMAIN decode_domain AS integer CHECK (VALUE>0); CREATE TYPE decode_record AS (n integer,t text)",
+      "command_tags": [
+        "CREATE TYPE",
+        "ALTER TYPE",
+        "CREATE DOMAIN",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "CREATE TYPE decode_enum_source AS (a decode_enum[]); CREATE VIEW decode_enum_bytes AS SELECT '(\"{middle,NULL,last}\")'::decode_enum_source AS v; ALTER TYPE decode_enum_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE decode_enum_target AS (a bytea)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "ALTER TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_source"
+    },
+    {
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM decode_enum_bytes; EXECUTE format('CREATE VIEW decode_enum_value AS SELECT %L::decode_enum_target AS v',r); END $$; ALTER TYPE decode_enum_target ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "DO",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_physical"
+    },
+    {
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "isnull",
+            "ty"
+          ],
+          "type_oids": [
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "f",
+              "text[]"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_shape"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{middle,NULL,last}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_output"
+    },
+    {
+      "sql": "SELECT (v).a AS value FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{middle,NULL,last}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_direct"
+    },
+    {
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_equal"
+    },
+    {
+      "sql": "SELECT cardinality((v).a) AS n,array_lower((v).a,1) AS lo FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "lo"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_cardinality"
+    },
+    {
+      "sql": "SELECT array_dims((v).a) AS dims,array_ndims((v).a) AS ndims,array_length((v).a,1) AS n,array_upper((v).a,1) AS hi FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "dims",
+            "ndims",
+            "n",
+            "hi"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "[1:3]",
+              "1",
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_dimensions"
+    },
+    {
+      "sql": "SELECT ((v).a<(v).a)::text AS lt,((v).a>(v).a)::text AS gt,((v).a<=(v).a)::text AS le FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lt",
+            "gt",
+            "le"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "false",
+              "false",
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_order"
+    },
+    {
+      "sql": "SELECT count(DISTINCT a) AS n FROM (SELECT (v).a AS a FROM decode_enum_value UNION ALL SELECT (v).a FROM decode_enum_value) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT (v).a AS a FROM decode_enum_value UNION ALL SELECT (v).a FROM decode_enum_value) s GROUP BY a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_group"
+    },
+    {
+      "sql": "ALTER TYPE decode_enum RENAME VALUE 'middle' TO 'center'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_rename"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_enum_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{center,NULL,last}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_renamed_output"
+    },
+    {
+      "sql": "DROP VIEW decode_enum_value,decode_enum_bytes; DROP TYPE decode_enum_target,decode_enum_source",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE decode_domain_source AS (a decode_domain[]); CREATE VIEW decode_domain_bytes AS SELECT '(\"{1,NULL,7}\")'::decode_domain_source AS v; ALTER TYPE decode_domain_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE decode_domain_target AS (a bytea)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "ALTER TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_source"
+    },
+    {
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM decode_domain_bytes; EXECUTE format('CREATE VIEW decode_domain_value AS SELECT %L::decode_domain_target AS v',r); END $$; ALTER TYPE decode_domain_target ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "DO",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_physical"
+    },
+    {
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "isnull",
+            "ty"
+          ],
+          "type_oids": [
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "f",
+              "text[]"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_shape"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,NULL,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_output"
+    },
+    {
+      "sql": "SELECT (v).a AS value FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{1,NULL,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_direct"
+    },
+    {
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_equal"
+    },
+    {
+      "sql": "SELECT cardinality((v).a) AS n,array_lower((v).a,1) AS lo FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "lo"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_cardinality"
+    },
+    {
+      "sql": "SELECT array_dims((v).a) AS dims,array_ndims((v).a) AS ndims,array_length((v).a,1) AS n,array_upper((v).a,1) AS hi FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "dims",
+            "ndims",
+            "n",
+            "hi"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "[1:3]",
+              "1",
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_dimensions"
+    },
+    {
+      "sql": "SELECT ((v).a<(v).a)::text AS lt,((v).a>(v).a)::text AS gt,((v).a<=(v).a)::text AS le FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lt",
+            "gt",
+            "le"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "false",
+              "false",
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_order"
+    },
+    {
+      "sql": "SELECT count(DISTINCT a) AS n FROM (SELECT (v).a AS a FROM decode_domain_value UNION ALL SELECT (v).a FROM decode_domain_value) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT (v).a AS a FROM decode_domain_value UNION ALL SELECT (v).a FROM decode_domain_value) s GROUP BY a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_group"
+    },
+    {
+      "sql": "ALTER DOMAIN decode_domain ADD CONSTRAINT new_value CHECK (VALUE>10)",
+      "command_tags": [
+        "ALTER DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_constraint"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,NULL,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "domain_admitted_output"
+    },
+    {
+      "sql": "DROP VIEW decode_domain_value,decode_domain_bytes; DROP TYPE decode_domain_target,decode_domain_source",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domain_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE decode_record_source AS (a decode_record[]); CREATE VIEW decode_record_bytes AS SELECT '(\"{\\\"(1,one)\\\",NULL,\\\"(2,two)\\\"}\")'::decode_record_source AS v; ALTER TYPE decode_record_source ALTER ATTRIBUTE a TYPE bytea; CREATE TYPE decode_record_target AS (a bytea)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "ALTER TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "record_source"
+    },
+    {
+      "sql": "DO $$ DECLARE r text; BEGIN SELECT ROW((v).a)::text INTO r FROM decode_record_bytes; EXECUTE format('CREATE VIEW decode_record_value AS SELECT %L::decode_record_target AS v',r); END $$; ALTER TYPE decode_record_target ALTER ATTRIBUTE a TYPE text[]",
+      "command_tags": [
+        "DO",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "record_physical"
+    },
+    {
+      "sql": "SELECT (v).a IS NULL AS isnull,pg_typeof((v).a)::text AS ty FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "isnull",
+            "ty"
+          ],
+          "type_oids": [
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "f",
+              "text[]"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_shape"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,one)\",NULL,\"(2,two)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_output"
+    },
+    {
+      "sql": "SELECT (v).a AS value FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"(1,one)\",NULL,\"(2,two)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_direct"
+    },
+    {
+      "sql": "SELECT ((v).a=(v).a)::text AS equal FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_equal"
+    },
+    {
+      "sql": "SELECT cardinality((v).a) AS n,array_lower((v).a,1) AS lo FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "lo"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_cardinality"
+    },
+    {
+      "sql": "SELECT array_dims((v).a) AS dims,array_ndims((v).a) AS ndims,array_length((v).a,1) AS n,array_upper((v).a,1) AS hi FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "dims",
+            "ndims",
+            "n",
+            "hi"
+          ],
+          "type_oids": [
+            25,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "[1:3]",
+              "1",
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_dimensions"
+    },
+    {
+      "sql": "SELECT ((v).a<(v).a)::text AS lt,((v).a>(v).a)::text AS gt,((v).a<=(v).a)::text AS le FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lt",
+            "gt",
+            "le"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "false",
+              "false",
+              "true"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_order"
+    },
+    {
+      "sql": "SELECT count(DISTINCT a) AS n FROM (SELECT (v).a AS a FROM decode_record_value UNION ALL SELECT (v).a FROM decode_record_value) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT (v).a AS a FROM decode_record_value UNION ALL SELECT (v).a FROM decode_record_value) s GROUP BY a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_group"
+    },
+    {
+      "sql": "ALTER TYPE decode_record RENAME ATTRIBUTE t TO word; ALTER TYPE decode_record ADD ATTRIBUTE extra integer",
+      "command_tags": [
+        "ALTER TYPE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "record_descriptor_change"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,one,)\",NULL,\"(2,two,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_current_output"
+    },
+    {
+      "sql": "SELECT (v).a AS value FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            1009
+          ],
+          "rows": [
+            [
+              "{\"(1,one,)\",NULL,\"(2,two,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_current_direct"
+    },
+    {
+      "sql": "ALTER TYPE decode_record DROP ATTRIBUTE n",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "record_drop_attribute"
+    },
+    {
+      "sql": "SELECT (v).a::text AS value FROM decode_record_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(one,)\",NULL,\"(two,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_dropped_output"
+    },
+    {
+      "sql": "DROP VIEW decode_record_value,decode_record_bytes; DROP TYPE decode_record_target,decode_record_source",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "record_cleanup"
+    },
+    {
+      "sql": "DROP TYPE decode_record; DROP DOMAIN decode_domain; DROP TYPE decode_enum",
+      "command_tags": [
+        "DROP TYPE",
+        "DROP DOMAIN",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup"
+    }
+  ]
+}

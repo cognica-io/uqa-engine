@@ -9,6 +9,12 @@ use super::{bind_query_plan_relations, canonical_virtual_relation_reference};
 use crate::{ast::FunctionBinding, plan::QueryPlan};
 use uqa_core::RelationIdentity;
 
+/// Upgrade stored expression identities and compound range predicates before a restored view can be planned or evaluated.
+pub fn upgrade_legacy_view_expressions(plan: &mut QueryPlan) -> Result<bool, crate::SQLError> {
+    let dispatches = upgrade_legacy_view_dispatches(plan);
+    Ok(crate::type_resolution::between::restore_query(plan)? || dispatches)
+}
+
 pub fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
     let mut changed = false;
     plan.rewrite_scalar_expressions(&mut |expression| {

@@ -291,6 +291,9 @@ pub(super) fn history_path() -> Option<PathBuf> {
 
 pub(super) fn value_to_display(v: Option<&Value>) -> Result<String, SQLError> {
     Ok(match v {
+        Some(Value::Datum(datum)) => {
+            return value_to_display(Some(&uqa_sql::expr::datums::read(datum)?))
+        }
         Some(Value::Null) | None => "NULL".to_string(),
         Some(Value::Void) => String::new(),
         Some(Value::Bool(b)) => b.to_string(),
@@ -356,6 +359,7 @@ pub(super) fn pg_array_display(items: &[Value]) -> Result<String, SQLError> {
 /// for nested nulls - the same shape psql prints for `jsonb`.
 pub(super) fn json_value_display(v: &Value) -> Result<String, SQLError> {
     Ok(match v {
+        Value::Datum(datum) => return json_value_display(&uqa_sql::expr::datums::read(datum)?),
         Value::Null => "null".to_string(),
         Value::Void => serde_json::Value::String(String::new()).to_string(),
         Value::Bool(b) => b.to_string(),

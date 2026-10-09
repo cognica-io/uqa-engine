@@ -38,6 +38,7 @@ pub fn specialize_parameters(plan: &mut crate::UnifiedPlan, parameters: &[uqa_sq
         };
         *expression = match parameter {
             SQLParam::TypedScalar { value, ty } => ScalarExpr::TypedLiteral {
+                composite_source: None,
                 value: value.clone(),
                 ty: ty.sql_name(),
                 bound_type: Some(ty.clone()),

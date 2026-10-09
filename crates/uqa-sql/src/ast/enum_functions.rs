@@ -27,6 +27,21 @@ pub enum EnumFunctionOperation {
 }
 
 impl EnumFunctionOperation {
+    /// Ordering support calls retain the actual enum type selected on their first slow comparison.
+    #[must_use]
+    pub const fn uses_comparison_state(self) -> bool {
+        matches!(
+            self,
+            Self::Compare
+                | Self::Less
+                | Self::Greater
+                | Self::LessEqual
+                | Self::GreaterEqual
+                | Self::Smaller
+                | Self::Larger
+        )
+    }
+
     /// Resolve a local `pg_catalog` routine name and argument count to its operation.
     #[must_use]
     pub fn from_call(name: &str, argument_count: usize) -> Option<Self> {

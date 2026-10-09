@@ -6,6 +6,35 @@
 
 use super::*;
 
+#[test]
+fn physical_label_identity_keeps_native_equality_order_and_hash() {
+    let base = EnumValue::new(16_500, EnumLabelKey::from_bytes(vec![64]).unwrap());
+    let labels = [
+        base.clone(),
+        base.clone().with_label_oid(Some(16_502)),
+        base.clone().with_label_oid(Some(u32::MAX)),
+    ];
+    let hash = |value: &EnumValue| {
+        let mut state = std::collections::hash_map::DefaultHasher::new();
+        value.hash(&mut state);
+        state.finish()
+    };
+    for label in &labels {
+        assert_eq!(label, &base);
+        assert_eq!(label.cmp(&base), Ordering::Equal);
+        assert_eq!(hash(label), hash(&base));
+        let restored: EnumValue =
+            serde_json::from_str(&serde_json::to_string(label).unwrap()).unwrap();
+        assert_eq!(restored.label_oid(), label.label_oid());
+    }
+    let plain = crate::Value::Enum(base);
+    let physical = crate::Value::Enum(labels[1].clone());
+    assert_eq!(plain, physical);
+    assert!(!plain.has_same_representation(&physical));
+    assert!(!physical.has_same_representation(&crate::Value::Enum(labels[2].clone())));
+    assert!(physical.has_same_representation(&physical.clone()));
+}
+
 fn assert_strictly_increasing(keys: &[EnumLabelKey]) {
     for pair in keys.windows(2) {
         assert!(

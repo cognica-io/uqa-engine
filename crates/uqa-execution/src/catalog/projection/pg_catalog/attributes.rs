@@ -466,53 +466,11 @@ fn index_attributes(
         let table = catalog
             .table(resolution, &index.table_name)?
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
-        for (position, key) in index.columns.iter().enumerate() {
-            let source = key
-                .column()
-                .and_then(|name| table.columns.iter().find(|column| column.name == name));
-            let name = index
-                .definition
-                .key_names
-                .get(position)
-                .map(String::as_str)
-                .or_else(|| key.column())
-                .unwrap_or("expr");
-            let ty = index
-                .definition
-                .key_types
-                .get(position)
-                .or_else(|| source.map(|column| &column.ty))
-                .cloned()
-                .ok_or_else(|| {
-                    SQLError::Internal("missing expression index attribute type".into())
-                })?;
-            let mut column = sequence_attribute_column(name, ty);
-            column.not_null = false;
-            column.not_null_explicit = false;
+        for (position, column) in index.attributes(&table.columns)?.iter().enumerate() {
             rows.push(pg_attribute_row(
                 index.oid(),
-                catalog_ordinal(position, "index key attribute")?,
-                &column,
-            ));
-        }
-        for (position, name) in index.definition.included_columns.iter().enumerate() {
-            let source = table
-                .columns
-                .iter()
-                .find(|column| column.name == *name)
-                .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
-            let attribute_name = index
-                .definition
-                .key_names
-                .get(index.columns.len() + position)
-                .map_or(name.as_str(), String::as_str);
-            let mut column = sequence_attribute_column(attribute_name, source.ty.clone());
-            column.not_null = false;
-            column.not_null_explicit = false;
-            rows.push(pg_attribute_row(
-                index.oid(),
-                catalog_ordinal(position + index.columns.len(), "index included attribute")?,
-                &column,
+                catalog_ordinal(position, "index attribute")?,
+                column,
             ));
         }
     }

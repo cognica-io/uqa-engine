@@ -35,6 +35,7 @@ fn expression(sql: &str) -> Expr {
 fn converted_role_constants_keep_dependencies_without_rereading() {
     for oid in [0, 23] {
         let converted = Expr::TypedLiteral {
+            composite_source: None,
             value: Value::Int(oid),
             ty: "regrole".into(),
         };
@@ -99,6 +100,7 @@ fn query_dependency_collection_distinguishes_typed_null_and_role_constants() {
             unreachable!()
         };
         query.projections[0].expr = Expr::TypedLiteral {
+            composite_source: None,
             value,
             ty: "regrole".into(),
         };

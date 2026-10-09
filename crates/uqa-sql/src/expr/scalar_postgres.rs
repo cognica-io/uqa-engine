@@ -11,6 +11,7 @@ use crate::ast::FunctionDispatch;
 
 mod arrays;
 mod comparison;
+pub(super) use comparison::evaluate_with_context as eval_comparison_with_context;
 mod immutable;
 pub(super) use immutable::{
     eval_postgres_immutable_with_control, eval_postgres_integer_base_with_control,

@@ -4141,6 +4141,7 @@ dependencies = [
  "icu_casemap",
  "libc",
  "libm",
+ "lz4_flex",
  "proptest",
  "regex",
  "regex-automata",

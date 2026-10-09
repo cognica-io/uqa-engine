@@ -14,6 +14,7 @@
 use crate::RowSchemaExecution;
 mod encoding;
 mod memory;
+pub(crate) mod ordered;
 mod spill;
 
 use std::path::{Path, PathBuf};
@@ -24,9 +25,10 @@ use crate::{
 };
 
 pub(crate) use encoding::canonical_row_lock_keys;
-use encoding::encode_key_borrowed;
+use encoding::encode_key_with_enum_catalog;
 pub use encoding::{
-    canonical_row_key, canonical_row_key_budgeted, hash_canonical_row, try_pack_compact_text_pair,
+    canonical_row_key, canonical_row_key_budgeted, hash_canonical_row,
+    hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
 };
 pub(crate) use encoding::{encode_key, encode_non_null_key, EncodedKey};
 pub use memory::{CanonicalRowHashSet, ExactRowSet};
@@ -46,7 +48,7 @@ pub const DEFAULT_DISTINCT_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 /// first row for each evaluated key in child order.
 pub struct Distinct<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
-    keys: Option<Vec<ScalarExpr>>,
+    keys: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
     evaluator: Option<SharedExpressionEvaluator<'a>>,
     schema: RowSchema,
     work_mem_bytes: usize,
@@ -75,6 +77,12 @@ impl<'a> Distinct<'a> {
         }
     }
 
+    /// Retain expression/catalog services for full-row equality as well as explicit keys.
+    pub fn with_evaluator(mut self, evaluator: SharedExpressionEvaluator<'a>) -> Self {
+        self.evaluator = Some(evaluator);
+        self
+    }
+
     /// Construct a bounded `DISTINCT ON` with the compatibility default
     /// work-memory budget.
     pub fn on(
@@ -95,7 +103,7 @@ impl<'a> Distinct<'a> {
         let schema = child.row_schema().clone();
         Self {
             child,
-            keys: Some(keys),
+            keys: Some(crate::scalar::PreparedExpressions::scalars(keys)),
             evaluator: Some(evaluator),
             schema,
             work_mem_bytes,
@@ -139,12 +147,24 @@ impl<'a> Distinct<'a> {
             })?;
             let values = keys
                 .iter()
-                .map(|expression| evaluator.evaluate_physical(expression, schema, row))
+                .map(|expression| {
+                    evaluator.evaluate_physical_with_function_states(
+                        expression,
+                        schema,
+                        row,
+                        keys.calls(),
+                    )
+                })
                 .collect::<ExecResult<Vec<_>>>()?;
-            return encode_key(&values);
+            return encode_key_with_enum_catalog(values.iter().map(Some), evaluator.enum_labels());
         }
         let row = schema.view(row);
-        encode_key_borrowed((0..self.schema.len()).map(|index| row.value_at(index)))
+        encode_key_with_enum_catalog(
+            (0..self.schema.len()).map(|index| row.value_at(index)),
+            self.evaluator
+                .as_ref()
+                .and_then(|evaluator| evaluator.enum_labels()),
+        )
     }
 }
 
