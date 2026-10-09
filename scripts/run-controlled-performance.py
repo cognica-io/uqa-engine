@@ -156,12 +156,15 @@ def execute(host, revision):
         raise QualificationError("analytical baseline protocol changed; operator review and calibration are required")
     if json.loads((head_source / "benchmarks/regressions/claim-timing.json").read_text()) != claims:
         raise QualificationError("claim baseline protocol changed; operator review and calibration are required")
-    source, artifacts = host.build(REFERENCE, "reference", False)
+    source = host.source(REFERENCE, "reference")
+    artifacts = host.build(REFERENCE, "reference", False)
     if json.loads((source / "benchmarks/analytical/manifest.json").read_text()) != analytical:
         raise QualificationError("immutable analytical reference workload differs")
     reference = (source, artifacts["analytical_comparison"])
-    claim_source, claim_artifacts = host.build(claims["reference_revision"], "claims-reference", True)
-    head_source, head_artifacts = host.build(revision, "head", True)
+    claim_artifacts = host.build(claims["reference_revision"], "claims-reference", True)
+    # A claim-reference cache miss may have used the shared candidate checkout.
+    head_source = host.source(revision, "head")
+    head_artifacts = host.build(revision, "head", True)
     control = host.isolate()
     environment = digest(control)
     analytical_protocol = controlled_analytical_protocol(analytical["regression_protocol"])
@@ -173,8 +176,8 @@ def execute(host, revision):
     workloads = [
         ("analytical", (head_source, head_artifacts["analytical_comparison"]), reference,
          analytical, digest(analytical_identity(analytical)), analytical_protocol, analytical_limits),
-        ("claims", (head_source, head_artifacts["row_claim_contention"]),
-         (claim_source, claim_artifacts["row_claim_contention"]), claims, digest(claims), claim_protocol, claim_limits)]
+        ("claims", (None, head_artifacts["row_claim_contention"]),
+         (None, claim_artifacts["row_claim_contention"]), claims, digest(claims), claim_protocol, claim_limits)]
     calibrations = {kind: calibrate(host, kind, base, manifest, identity, protocol, limits, environment)
                     for kind, head, base, manifest, identity, protocol, limits in workloads}
     reports = {kind: compare(host, kind, head, base, manifest, identity, protocol, calibrations[kind], environment)

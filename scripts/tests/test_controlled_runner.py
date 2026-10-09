@@ -6,12 +6,13 @@
 
 import copy
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from performance_qualification import QualificationError
@@ -29,6 +30,61 @@ ci = load("run-ec2-performance")
 
 
 class ControlledRunnerTest(unittest.TestCase):
+    def test_runtime_sources_remain_exact_when_claim_reference_build_reuses_candidate_checkout(self):
+        repository = Path(__file__).resolve().parents[2]
+        analytical = json.loads((repository / "benchmarks/analytical/manifest.json").read_text())
+        claims = json.loads((repository / "benchmarks/regressions/claim-timing.json").read_text())
+        analytical_identity = controller.analytical_identity(analytical)
+        for cached in (False, True):
+            with self.subTest(cached_claim_reference=cached), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                installed, reference, candidate = (root / name for name in ("controller", "reference", "candidate"))
+                installed.mkdir()
+                (installed / "analytical-manifest.json").write_text(json.dumps(analytical))
+                (installed / "claim-timing.json").write_text(json.dumps(claims))
+                (installed / "adapter.py").write_text("# installed controller\n")
+                (candidate / "scripts").mkdir(parents=True)
+                (candidate / "scripts/adapter.py").write_text((installed / "adapter.py").read_text())
+                for path in (reference, candidate):
+                    (path / "benchmarks/analytical").mkdir(parents=True)
+                    (path / "benchmarks/analytical/manifest.json").write_text(json.dumps(analytical))
+                (candidate / "benchmarks/regressions").mkdir()
+                (candidate / "benchmarks/regressions/claim-timing.json").write_text(json.dumps(claims))
+                head = "a" * 40
+                shared_revision = None
+
+                def source(revision, role):
+                    nonlocal shared_revision
+                    if role == "reference":
+                        self.assertEqual(revision, controller.REFERENCE)
+                        return reference
+                    shared_revision = revision
+                    return candidate
+
+                def build(revision, role, include_claims):
+                    if role == "claims-reference" and not cached:
+                        source(revision, role)
+                    return {name: {"revision": revision} for name in ("analytical_comparison", "row_claim_contention")}
+
+                def compare(host, kind, current, baseline, *args):
+                    self.assertEqual(shared_revision, head)
+                    self.assertEqual(current[0], candidate if kind == "analytical" else None)
+                    self.assertEqual(baseline[0], reference if kind == "analytical" else None)
+                    self.assertEqual(current[1]["revision"], head)
+                    self.assertEqual(baseline[1]["revision"], controller.REFERENCE if kind == "analytical"
+                                     else claims["reference_revision"])
+                    (root / (kind + "-report.json")).write_text("{}")
+                    return {"acceptance_status": "accepted"}
+
+                host = Mock(source=Mock(side_effect=source), build=Mock(side_effect=build),
+                            isolate=Mock(return_value={}), output=root, run_id="test", config={"instance_id": "test"})
+                with patch.object(controller, "HERE", installed), patch.object(controller, "calibrate", return_value={}), \
+                        patch.object(controller, "analytical_identity", return_value=analytical_identity), \
+                        patch.object(controller, "compare", side_effect=compare):
+                    result = controller.execute(host, head)
+                self.assertEqual(result["head_revision"], head)
+                self.assertEqual(set(result["reports"]), {"analytical", "claims"})
+
     def test_instance_is_stopped_when_execution_or_artifact_collection_fails(self):
         for upload_failed in [False, True]:
             calls = []

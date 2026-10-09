@@ -125,9 +125,8 @@ class ControlledHost:
                 raise QualificationError(f"{label} failed ({result.returncode}); see retained stderr")
         return stdout
 
-    def build(self, revision: str, role: str, claims: bool) -> tuple[Path, dict]:
+    def build(self, revision: str, role: str, claims: bool) -> dict:
         self.progress("build", role=role, revision=revision)
-        source = self.source(revision, role)
         expected = {"analytical_comparison", "row_claim_contention"} if claims else {"analytical_comparison"}
         for record in BINARY_ROOT.glob("*/artifacts.json"):
             cached = json.loads(record.read_text())
@@ -135,7 +134,8 @@ class ControlledHost:
                     and item.get("build_environment") == self.build_environment
                     and file_hash(Path(item["path"])) == item["sha256"] for item in cached.values()):
                 (self.output / (role + "-build.json")).write_text(json.dumps(cached, indent=2) + "\n")
-                return source, cached
+                return cached
+        source = self.source(revision, role)
         args = [str(self.rust_bin / "cargo"), "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
                 "--bench", "analytical_comparison", "--message-format=json-render-diagnostics"]
         if claims:
@@ -168,7 +168,7 @@ class ControlledHost:
             raise QualificationError("Cargo omitted a required controlled workload")
         (BINARY_ROOT / role / "artifacts.json").write_text(json.dumps(artifacts, indent=2) + "\n")
         (self.output / (role + "-build.json")).write_text(json.dumps(artifacts, indent=2) + "\n")
-        return source, artifacts
+        return artifacts
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")
@@ -232,7 +232,9 @@ class ControlledHost:
         if (group / "cgroup.procs").read_text().strip() or list(group.glob("*.service")):
             raise QualificationError("unexpected process or unit in the measurement partition")
 
-    def measure(self, kind: str, artifact: dict, source: Path, label: str, manifest: dict) -> dict:
+    def measure(self, kind: str, artifact: dict, source: Path | None, label: str, manifest: dict) -> dict:
+        if kind == "analytical" and source is None:
+            raise QualificationError("analytical workload requires its exact runtime source")
         self.verify_control()
         if file_hash(Path(artifact["path"])) != artifact["sha256"]:
             raise QualificationError("workload executable changed after calibration selection")
