@@ -8,6 +8,7 @@ use super::*;
 use crate::aggregation::{AggregateAccumulatorTemplate, AggregateStatePlan};
 use uqa_sql::expr::RowLookup as _;
 
+mod enums;
 mod source_layout;
 
 struct NoSequences;

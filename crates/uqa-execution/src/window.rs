@@ -280,10 +280,16 @@ fn execute_window_pass(
                     hook,
                     &subquery_arena,
                 )?;
-                if partition_key
-                    .as_ref()
-                    .is_some_and(|current| current != &key)
-                {
+                let same_partition = match &partition_key {
+                    Some(current) => crate::relational::equal_sort_key_values(
+                        current,
+                        &key,
+                        uqa_sql::expr::EngineHook::enum_labels(hook),
+                    )
+                    .map_err(exec_to_sql_error)?,
+                    None => true,
+                };
+                if !same_partition {
                     emit_partition(
                         pass,
                         &mut slots,
