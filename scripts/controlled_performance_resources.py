@@ -143,14 +143,20 @@ class MeasurementResources:
             self.hardware.start()
             self.thread.start()
         except BaseException:
-            self.hardware.finish()
+            try:
+                self.hardware.finish()
+            except Exception:
+                pass  # Preserve the observer-start failure.
             raise
         return self
 
     def __exit__(self, *exception):
         self.stopped.set()
         self.thread.join()
-        hardware = self.hardware.finish()
+        try:
+            hardware = self.hardware.finish()
+        except Exception as error:
+            hardware = {'sampling_error': f'hardware counter cleanup failed: {error}'}
         self.error = self.error or hardware['sampling_error']
         record = {'schema_version': 1, 'allowed_cpus': self.cpus, 'before': self.before,
                   'after': snapshot(), 'sample_interval_seconds': 0.25,

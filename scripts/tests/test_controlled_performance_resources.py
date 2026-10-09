@@ -170,6 +170,27 @@ class ResourceEvidenceTest(unittest.TestCase):
                 self.assertEqual(record['hardware_counters']['sampling_error'], 'missing hardware counter')
                 self.assertEqual(record['sampling_error'], 'missing hardware counter')
 
+    def test_cleanup_exception_cannot_replace_observer_start_or_workload_failure(self):
+        def cleanup_failure():
+            raise OSError('cleanup failure')
+
+        self.hardware.finish = cleanup_failure
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+            with patch.object(monitor, 'sample'), self.assertRaisesRegex(RuntimeError, 'workload failure'):
+                with monitor:
+                    raise RuntimeError('workload failure')
+            record = json.loads((root / 'result.json').read_text())
+            self.assertEqual(record['sampling_error'], 'hardware counter cleanup failed: cleanup failure')
+            def start_failure():
+                raise RuntimeError('start failure')
+            self.hardware.start = start_failure
+            monitor = resources.MeasurementResources(root, root / 'startup.json', '8')
+            with self.assertRaisesRegex(RuntimeError, 'start failure'):
+                with monitor:
+                    self.fail('failed observer must not start the workload')
+
 
 if __name__ == '__main__':
     unittest.main()
