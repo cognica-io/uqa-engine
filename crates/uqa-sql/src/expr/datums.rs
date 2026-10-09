@@ -48,6 +48,35 @@ pub fn read_with_control(
     read_payload(datum.type_oid(), payload.bytes(), control)
 }
 
+pub(super) fn compare_jsonb_with_control(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Option<std::cmp::Ordering>, SQLError> {
+    let physical = |value: &Value| matches!(value, Value::Datum(datum) if datum.type_oid() == 3802);
+    let jsonb = |value: &Value| physical(value) || matches!(value, Value::JsonB(_));
+    if !(jsonb(left) && jsonb(right) && (physical(left) || physical(right))) {
+        return Ok(None);
+    }
+    let left_bytes = match left {
+        Value::Datum(datum) => Some(payload(datum, control)?),
+        _ => None,
+    };
+    let right_bytes = match right {
+        Value::Datum(datum) => Some(payload(datum, control)?),
+        _ => None,
+    };
+    let left = match left {
+        Value::JsonB(text) => super::json::JsonbInput::Text(text),
+        _ => super::json::JsonbInput::Bytes(left_bytes.as_ref().expect("physical JSONB").bytes()),
+    };
+    let right = match right {
+        Value::JsonB(text) => super::json::JsonbInput::Text(text),
+        _ => super::json::JsonbInput::Bytes(right_bytes.as_ref().expect("physical JSONB").bytes()),
+    };
+    super::json::compare_jsonb_datums_with_control(left, right, control).map(Some)
+}
+
 fn read_payload(
     oid: u32,
     bytes: &[u8],

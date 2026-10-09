@@ -156,7 +156,7 @@ pub fn eval_binary_values_with_control(
     if matches!(l, Value::Null) || matches!(r, Value::Null) {
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
-    if let Value::Datum(datum) = l {
+    if let (true, Value::Datum(datum)) = (is_arithmetic(op), l) {
         return eval_binary_values_with_control(
             op,
             &*super::datums::read_with_control(datum, control)?,
@@ -164,7 +164,7 @@ pub fn eval_binary_values_with_control(
             control,
         );
     }
-    if let Value::Datum(datum) = r {
+    if let (true, Value::Datum(datum)) = (is_arithmetic(op), r) {
         return eval_binary_values_with_control(
             op,
             l,

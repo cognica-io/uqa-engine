@@ -69,6 +69,9 @@ pub fn values_equal_nullable_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<bool>> {
     control.check()?;
+    if let Some(order) = super::super::datums::compare_jsonb_with_control(a, b, control)? {
+        return Ok(Some(order.is_eq()));
+    }
     let equal = match (a, b) {
         (Value::Null, _) | (_, Value::Null) => None,
         (Value::Datum(datum), _) => {
@@ -136,6 +139,9 @@ pub fn compare_nullable_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Ordering>> {
     control.check()?;
+    if let Some(order) = super::super::datums::compare_jsonb_with_control(a, b, control)? {
+        return Ok(Some(order));
+    }
     match (a, b) {
         (Value::Null, _) | (_, Value::Null) => Ok(None),
         (Value::Datum(datum), _) => compare_nullable_with_control(
@@ -230,6 +236,9 @@ pub fn compare_typed_values_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Ordering> {
     control.check()?;
+    if let Some(order) = super::super::datums::compare_jsonb_with_control(left, right, control)? {
+        return Ok(order);
+    }
     match (left, right) {
         (Value::Null, Value::Null) => return Ok(Ordering::Equal),
         (Value::Null, _) => return Ok(Ordering::Greater),

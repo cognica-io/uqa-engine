@@ -9,8 +9,11 @@
 use crate::error::{Result, SQLError};
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod compare;
 mod decode;
 mod encode;
+mod walk;
+pub(in crate::expr) use compare::{compare_jsonb_datums_with_control, JsonbInput};
 #[cfg(test)]
 mod tests;
 

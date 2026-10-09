@@ -104,3 +104,110 @@ fn jsonb_physical_read_uses_an_admitted_stack_for_deep_containers() {
     drop(text);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn jsonb_physical_comparison_preserves_postgresql_object_entry_order() {
+    let payload = bytes("02000020010000000200008000000030000000207a61");
+    let mut encoded = ((payload.len() as u32 + 4) << 2).to_le_bytes().to_vec();
+    encoded.extend_from_slice(&payload);
+    let retained = uqa_core::Value::Datum(uqa_core::DatumValue::new(3802, 0, encoded));
+    let fresh = uqa_core::Value::JsonB(r#"{"a": false, "z": true}"#.into());
+    assert_eq!(
+        crate::expr::binary::compare_typed_values_with_control(
+            &retained,
+            &fresh,
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap(),
+        std::cmp::Ordering::Greater,
+    );
+}
+
+#[test]
+fn jsonb_physical_comparisons_keep_numeric_order_and_delayed_reads() {
+    use crate::ast::BinaryOp;
+    use crate::expr::binary::{compare_typed_values_with_control, eval_binary_values_with_control};
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    use uqa_core::{DatumValue, Value};
+
+    for (hex, text, expected) in [
+        (
+            "02000020010000800100000000000040000000306161",
+            r#"{"a":true}"#,
+            Greater,
+        ),
+        ("01000050060000901800000000c0", "null", Greater),
+        ("01000050060000901800000000f0", "-1", Less),
+        ("01000050080000902000000000810100", "1", Equal),
+        ("00000040", "false", Less),
+        ("01000050000000b0", "[]", Greater),
+        ("02000040040000d00000004000000000", "[]", Greater),
+        ("02000040000000b00400005000000000", "[false, []]", Greater),
+    ] {
+        let payload = bytes(hex);
+        let mut encoded = ((payload.len() as u32 + 4) << 2).to_le_bytes().to_vec();
+        encoded.extend_from_slice(&payload);
+        let retained = Value::Datum(DatumValue::new(3802, 0, encoded));
+        let fresh = Value::JsonB(text.into());
+        let memory = MemoryBudget::new(8192);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &token, &token);
+        for control in [ProductionControl::uncontrolled(), control] {
+            assert_eq!(
+                compare_typed_values_with_control(&retained, &fresh, &control).unwrap(),
+                expected
+            );
+            assert_eq!(
+                compare_typed_values_with_control(&fresh, &retained, &control).unwrap(),
+                expected.reverse()
+            );
+            let equal =
+                eval_binary_values_with_control(BinaryOp::Equal, &retained, &fresh, &control)
+                    .unwrap();
+            assert_eq!(*equal, Value::Bool(expected.is_eq()));
+            drop(equal);
+            assert_eq!(memory.used(), 0);
+        }
+        let small = MemoryBudget::new(16);
+        assert!(compare_typed_values_with_control(
+            &retained,
+            &fresh,
+            &ProductionControl::new(&small, &token, &token)
+        )
+        .is_err());
+        assert_eq!(small.used(), 0);
+        token.cancel();
+        assert_eq!(
+            compare_typed_values_with_control(&retained, &fresh, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn jsonb_physical_comparison_reports_only_reached_invalid_containers() {
+    use super::compare::{compare_jsonb_datums_with_control, JsonbInput};
+    let physical = bytes("02000040000000b00400005000000000");
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let error = compare_jsonb_datums_with_control(
+        JsonbInput::Bytes(&physical),
+        JsonbInput::Text("[true, []]"),
+        &control,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "XX000" && message == "unknown type of jsonb container")
+    );
+    assert_eq!(memory.used(), 0);
+    let wrong_key = bytes("010000200000003000000020");
+    let error = decode_jsonb_datum_with_control(&wrong_key, &control).unwrap_err();
+    assert!(
+        matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "XX000" && message == "unexpected jsonb type as object key")
+    );
+    assert_eq!(memory.used(), 0);
+}

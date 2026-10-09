@@ -6484,6 +6484,962 @@
       ],
       "notices": [],
       "id": "jsonb_read_numeric_nan_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_unordered AS(a bytea,b integer); PREPARE jsonb_compare_unordered_p(jsonb_compare_unordered) AS SELECT '(\"\\\\x02000020010000000200008000000030000000207a61\",7)'::jsonb_compare_unordered = $1 AS equal, '(\"\\\\x02000020010000000200008000000030000000207a61\",7)'::jsonb_compare_unordered < $1 AS less, '(\"\\\\x02000020010000000200008000000030000000207a61\",7)'::jsonb_compare_unordered > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_unordered_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_unordered ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_unordered_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_unordered_p('(\"{\"\"a\"\":false,\"\"z\"\":true}\",7)'::jsonb_compare_unordered)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_unordered_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_unordered_p; DROP TYPE jsonb_compare_unordered",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_unordered_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_duplicate AS(a bytea,b integer); PREPARE jsonb_compare_duplicate_p(jsonb_compare_duplicate) AS SELECT '(\"\\\\x02000020010000800100000000000040000000306161\",7)'::jsonb_compare_duplicate = $1 AS equal, '(\"\\\\x02000020010000800100000000000040000000306161\",7)'::jsonb_compare_duplicate < $1 AS less, '(\"\\\\x02000020010000800100000000000040000000306161\",7)'::jsonb_compare_duplicate > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_duplicate_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_duplicate ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_duplicate_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_duplicate_p('(\"{\"\"a\"\":true}\",7)'::jsonb_compare_duplicate)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_duplicate_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_duplicate_p; DROP TYPE jsonb_compare_duplicate",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_duplicate_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_nan AS(a bytea,b integer); PREPARE jsonb_compare_nan_p(jsonb_compare_nan) AS SELECT '(\"\\\\x01000050060000901800000000c0\",7)'::jsonb_compare_nan = $1 AS equal, '(\"\\\\x01000050060000901800000000c0\",7)'::jsonb_compare_nan < $1 AS less, '(\"\\\\x01000050060000901800000000c0\",7)'::jsonb_compare_nan > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_nan_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_nan ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_nan_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_nan_p('(\"null\",7)'::jsonb_compare_nan)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_nan_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_nan_p; DROP TYPE jsonb_compare_nan",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_nan_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_negative_infinity AS(a bytea,b integer); PREPARE jsonb_compare_negative_infinity_p(jsonb_compare_negative_infinity) AS SELECT '(\"\\\\x01000050060000901800000000f0\",7)'::jsonb_compare_negative_infinity = $1 AS equal, '(\"\\\\x01000050060000901800000000f0\",7)'::jsonb_compare_negative_infinity < $1 AS less, '(\"\\\\x01000050060000901800000000f0\",7)'::jsonb_compare_negative_infinity > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_negative_infinity_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_negative_infinity ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_negative_infinity_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_negative_infinity_p('(\"-1\",7)'::jsonb_compare_negative_infinity)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_negative_infinity_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_negative_infinity_p; DROP TYPE jsonb_compare_negative_infinity",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_negative_infinity_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_scale AS(a bytea,b integer); PREPARE jsonb_compare_scale_p(jsonb_compare_scale) AS SELECT '(\"\\\\x01000050080000902000000000810100\",7)'::jsonb_compare_scale = $1 AS equal, '(\"\\\\x01000050080000902000000000810100\",7)'::jsonb_compare_scale < $1 AS less, '(\"\\\\x01000050080000902000000000810100\",7)'::jsonb_compare_scale > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_scale_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_scale ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_scale_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_scale_p('(\"1\",7)'::jsonb_compare_scale)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_scale_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_scale_p; DROP TYPE jsonb_compare_scale",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_scale_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_empty AS(a bytea,b integer); PREPARE jsonb_compare_empty_p(jsonb_compare_empty) AS SELECT '(\"\\\\x00000040\",7)'::jsonb_compare_empty = $1 AS equal, '(\"\\\\x00000040\",7)'::jsonb_compare_empty < $1 AS less, '(\"\\\\x00000040\",7)'::jsonb_compare_empty > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_empty_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_empty ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_empty_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_empty_p('(\"false\",7)'::jsonb_compare_empty)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_empty_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_empty_p; DROP TYPE jsonb_compare_empty",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_empty_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_true AS(a bytea,b integer); PREPARE jsonb_compare_true_p(jsonb_compare_true) AS SELECT '(\"\\\\x01000050000000b0\",7)'::jsonb_compare_true = $1 AS equal, '(\"\\\\x01000050000000b0\",7)'::jsonb_compare_true < $1 AS less, '(\"\\\\x01000050000000b0\",7)'::jsonb_compare_true > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_true_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_true ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_true_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_true_p('(\"[]\",7)'::jsonb_compare_true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_true_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_true_p; DROP TYPE jsonb_compare_true",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_true_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_count_skips_bad_child AS(a bytea,b integer); PREPARE jsonb_compare_count_skips_bad_child_p(jsonb_compare_count_skips_bad_child) AS SELECT '(\"\\\\x02000040040000d00000004000000000\",7)'::jsonb_compare_count_skips_bad_child = $1 AS equal, '(\"\\\\x02000040040000d00000004000000000\",7)'::jsonb_compare_count_skips_bad_child < $1 AS less, '(\"\\\\x02000040040000d00000004000000000\",7)'::jsonb_compare_count_skips_bad_child > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_count_skips_bad_child_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_count_skips_bad_child ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_count_skips_bad_child_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_count_skips_bad_child_p('(\"[]\",7)'::jsonb_compare_count_skips_bad_child)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_count_skips_bad_child_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_count_skips_bad_child_p; DROP TYPE jsonb_compare_count_skips_bad_child",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_count_skips_bad_child_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_first_skips_bad_child AS(a bytea,b integer); PREPARE jsonb_compare_first_skips_bad_child_p(jsonb_compare_first_skips_bad_child) AS SELECT '(\"\\\\x02000040000000b00400005000000000\",7)'::jsonb_compare_first_skips_bad_child = $1 AS equal, '(\"\\\\x02000040000000b00400005000000000\",7)'::jsonb_compare_first_skips_bad_child < $1 AS less, '(\"\\\\x02000040000000b00400005000000000\",7)'::jsonb_compare_first_skips_bad_child > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_first_skips_bad_child_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_first_skips_bad_child ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_first_skips_bad_child_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_first_skips_bad_child_p('(\"[false, []]\",7)'::jsonb_compare_first_skips_bad_child)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "equal",
+            "less",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_first_skips_bad_child_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_first_skips_bad_child_p; DROP TYPE jsonb_compare_first_skips_bad_child",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_first_skips_bad_child_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_equal_reaches_bad_child AS(a bytea,b integer); PREPARE jsonb_compare_equal_reaches_bad_child_p(jsonb_compare_equal_reaches_bad_child) AS SELECT '(\"\\\\x02000040000000b00400005000000000\",7)'::jsonb_compare_equal_reaches_bad_child = $1 AS equal, '(\"\\\\x02000040000000b00400005000000000\",7)'::jsonb_compare_equal_reaches_bad_child < $1 AS less, '(\"\\\\x02000040000000b00400005000000000\",7)'::jsonb_compare_equal_reaches_bad_child > $1 AS greater",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_equal_reaches_bad_child_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_equal_reaches_bad_child ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_equal_reaches_bad_child_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_equal_reaches_bad_child_p('(\"[true, []]\",7)'::jsonb_compare_equal_reaches_bad_child)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "unknown type of jsonb container",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "jsonb_compare_equal_reaches_bad_child_compare"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_equal_reaches_bad_child_p; DROP TYPE jsonb_compare_equal_reaches_bad_child",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_equal_reaches_bad_child_cleanup"
+    },
+    {
+      "sql": "CREATE TYPE jsonb_compare_bad_key AS(a bytea,b integer); PREPARE jsonb_compare_bad_key_p AS SELECT '(\"\\\\x010000200000003000000020\",7)'::jsonb_compare_bad_key",
+      "command_tags": [
+        "CREATE TYPE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_bad_key_setup"
+    },
+    {
+      "sql": "ALTER TYPE jsonb_compare_bad_key ALTER ATTRIBUTE a TYPE jsonb",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_bad_key_alter"
+    },
+    {
+      "sql": "EXECUTE jsonb_compare_bad_key_p",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "unexpected jsonb type as object key",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "jsonb_compare_bad_key_output"
+    },
+    {
+      "sql": "DEALLOCATE jsonb_compare_bad_key_p; DROP TYPE jsonb_compare_bad_key",
+      "command_tags": [
+        "DEALLOCATE",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_compare_bad_key_cleanup"
     }
   ]
 }
