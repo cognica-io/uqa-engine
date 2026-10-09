@@ -166,7 +166,7 @@ This implemented surface is limited to PostgreSQL's six built-in range families 
 
 ## Enum types
 
-An enum type is a catalog-defined list of labels. A value's text is exactly one of its type's labels: input is case-sensitive, keeps surrounding spaces, and reports `22P02` for any other text. Values order by the labels' declaration order, not by their spelling, and every comparison operator, `ORDER BY`, `DISTINCT`, grouping, joins, `min` and `max` use that order. Distinct enum types never compare with each other or with text; such comparisons report `42883` like PostgreSQL. A string literal or untyped parameter compared with an enum value, listed in `IN`, used as a `BETWEEN` bound or passed where a function expects the enum type is converted to that type once, as PostgreSQL's parse analysis converts it, so an unknown label is rejected even when no row is read.
+An enum type is a catalog-defined list of labels. A value's text is exactly one of its type's labels: input is case-sensitive, keeps surrounding spaces, and reports `22P02` for any other text. Ordered comparisons, `ORDER BY`, `min` and `max` use the labels' declaration order, not their spelling. Equality, `DISTINCT`, grouping, joins and set operations compare label identities. Distinct enum types never compare with each other or with text; such comparisons report `42883` like PostgreSQL. A string literal or untyped parameter compared with an enum value, listed in `IN`, used as a `BETWEEN` bound or passed where a function expects the enum type is converted to that type once, as PostgreSQL's parse analysis converts it, so an unknown label is rejected even when no row is read.
 
 ```sql execute
 CREATE TYPE ticket_state AS ENUM ('new', 'triaged', 'closed');

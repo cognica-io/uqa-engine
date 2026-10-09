@@ -357,11 +357,57 @@ pub fn compare_typed_values_with_enum_catalog(
     compare_typed_values_with_catalog(left, right, control, enums)
 }
 
+/// Order internal equality groups by physical enum identity, including nested keys. This ordering is not exposed as SQL ORDER BY and never observes an enum label merely to eliminate duplicates.
+pub fn compare_grouping_values_with_enum_catalog(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
+) -> Result<Ordering> {
+    compare_typed_values_for_purpose(left, right, control, enums, EnumKeyOrder::Identity)
+}
+
+#[derive(Clone, Copy)]
+enum EnumKeyOrder {
+    Declaration,
+    Identity,
+}
+
+fn enum_key_order(
+    left: &Value,
+    right: &Value,
+    enums: Option<&dyn EnumLabelCatalog>,
+    order: EnumKeyOrder,
+) -> Result<Option<Ordering>> {
+    if matches!(order, EnumKeyOrder::Identity) {
+        if let Some(enums) = enums {
+            if let (Some(left), Some(right)) = (
+                super::super::enums::comparison_identity(enums, left)?,
+                super::super::enums::comparison_identity(enums, right)?,
+            ) {
+                return Ok(Some(left.cmp(&right)));
+            }
+        }
+        return Ok(None);
+    }
+    super::super::enums::comparison_order(left, right, enums, None, true)
+}
+
 fn compare_typed_values_with_catalog(
     left: &Value,
     right: &Value,
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
+) -> Result<Ordering> {
+    compare_typed_values_for_purpose(left, right, control, enums, EnumKeyOrder::Declaration)
+}
+
+fn compare_typed_values_for_purpose(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn EnumLabelCatalog>,
+    enum_order: EnumKeyOrder,
 ) -> Result<Ordering> {
     control.check()?;
     if let Some(order) = super::super::datums::compare_jsonb_with_control(left, right, control)? {
@@ -373,30 +419,32 @@ fn compare_typed_values_with_catalog(
         (_, Value::Null) => return Ok(Ordering::Less),
         _ => {}
     }
-    if let Some(order) = super::super::enums::comparison_order(left, right, enums, None, true)? {
+    if let Some(order) = enum_key_order(left, right, enums, enum_order)? {
         return Ok(order);
     }
     match (left, right) {
         (Value::Datum(datum), _) => {
-            return compare_typed_values_with_catalog(
+            return compare_typed_values_for_purpose(
                 &*super::super::datums::read_with_control(datum, control)?,
                 right,
                 control,
                 enums,
+                enum_order,
             )
         }
         (_, Value::Datum(datum)) => {
-            return compare_typed_values_with_catalog(
+            return compare_typed_values_for_purpose(
                 left,
                 &*super::super::datums::read_with_control(datum, control)?,
                 control,
                 enums,
+                enum_order,
             )
         }
         (Value::Array(left), Value::Array(right)) => {
             validate_array_element_types(left, right)?;
             return left.cmp_by_with_control(right, control, |left, right, control| {
-                compare_typed_values_with_catalog(left, right, control, enums)
+                compare_typed_values_for_purpose(left, right, control, enums, enum_order)
             });
         }
         (Value::Record(left), Value::Record(right)) => {
@@ -405,20 +453,33 @@ fn compare_typed_values_with_catalog(
                 right.iter().map(|(_, v)| v),
                 control,
                 enums,
+                enum_order,
             );
         }
         // A composite value compared with an anonymous row uses the record operators, which order NULL fields after all others.
         (Value::Record(left), Value::Row(right)) => {
-            return compare_sequence(left.iter().map(|(_, v)| v), right.iter(), control, enums);
+            return compare_sequence(
+                left.iter().map(|(_, v)| v),
+                right.iter(),
+                control,
+                enums,
+                enum_order,
+            );
         }
         (Value::Row(left), Value::Record(right)) => {
-            return compare_sequence(left.iter(), right.iter().map(|(_, v)| v), control, enums);
+            return compare_sequence(
+                left.iter(),
+                right.iter().map(|(_, v)| v),
+                control,
+                enums,
+                enum_order,
+            );
         }
         (Value::Row(left), Value::Row(right)) => {
-            return compare_sequence(left.iter(), right.iter(), control, enums);
+            return compare_sequence(left.iter(), right.iter(), control, enums, enum_order);
         }
         (Value::List(left), Value::List(right)) => {
-            return compare_sequence(left.iter(), right.iter(), control, enums);
+            return compare_sequence(left.iter(), right.iter(), control, enums, enum_order);
         }
         // Enum operators are declared on one enum type; binding coerces every other operand to it.
         (Value::Enum(left), Value::Enum(right)) if left.type_oid() == right.type_oid() => {
@@ -614,12 +675,13 @@ fn compare_sequence<'a>(
     mut right: impl Iterator<Item = &'a Value>,
     control: &ProductionControl<'_>,
     enums: Option<&dyn EnumLabelCatalog>,
+    enum_order: EnumKeyOrder,
 ) -> Result<Ordering> {
     loop {
         control.check()?;
         let ordering = match (left.next(), right.next()) {
             (Some(left), Some(right)) => {
-                compare_typed_values_with_catalog(left, right, control, enums)?
+                compare_typed_values_for_purpose(left, right, control, enums, enum_order)?
             }
             (Some(_), None) => Ordering::Greater,
             (None, Some(_)) => Ordering::Less,

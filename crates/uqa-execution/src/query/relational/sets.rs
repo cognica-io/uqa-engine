@@ -74,12 +74,13 @@ pub fn combine_set_spills_with_order_output<'a, S: Clone + 'static>(
         public_positions(),
     ));
     let mut operation: Box<dyn PhysicalOperator + '_> = Box::new(
-        ExternalSetOperation::new(
+        ExternalSetOperation::new_with_evaluator(
             left,
             right,
             execution.kind,
             execution.all,
             physical_work_mem_bytes(context.runtime)?,
+            context.evaluator(params, ctes),
         )
         .map_err(physical_exec_error)?,
     );

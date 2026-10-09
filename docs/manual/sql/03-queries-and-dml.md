@@ -224,6 +224,8 @@ SELECT id FROM archived_items;
 
 Operands must have compatible column counts and coercible types. Apply final ordering and limiting to the combined query when result order matters.
 
+Duplicate elimination and `ALL` multiplicities use SQL equality, including corresponding NULLs and enum label identities nested in arrays and records. Retained enum identities need not be valid for label output to participate in a set operation. Internal spill grouping does not impose an observable result order or invoke enum label output; an explicit final `ORDER BY` retains the type's ordinary ordering behavior.
+
 ## Grouping sets
 
 UQA Engine expands `GROUPING SETS`, `ROLLUP`, and `CUBE`:

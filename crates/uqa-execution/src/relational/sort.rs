@@ -134,6 +134,7 @@ pub(crate) fn compare_sort_key_values_by<'a>(
         keys,
         enums: None,
         states: &[],
+        equality_keys: false,
     }
     .compare_by(values)
 }
@@ -144,6 +145,7 @@ pub(crate) struct SortComparison<'a> {
     pub(crate) keys: &'a [SortKey],
     pub(crate) enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     pub(crate) states: &'a [uqa_sql::expr::enums::EnumComparisonState],
+    pub(crate) equality_keys: bool,
 }
 
 impl SortComparison<'_> {
@@ -176,13 +178,22 @@ impl SortComparison<'_> {
                 }
                 continue;
             }
-            let ord = uqa_sql::expr::compare_typed_values_with_enum_catalog(
-                a,
-                b,
-                &uqa_core::memory::ProductionControl::uncontrolled(),
-                self.enums,
-                self.states.get(i),
-            )?;
+            let ord = if self.equality_keys {
+                uqa_sql::expr::compare_grouping_values_with_enum_catalog(
+                    a,
+                    b,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    self.enums,
+                )?
+            } else {
+                uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                    a,
+                    b,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    self.enums,
+                    self.states.get(i),
+                )?
+            };
             let ord = if k.descending { ord.reverse() } else { ord };
             if ord != Ordering::Equal {
                 return Ok(ord);

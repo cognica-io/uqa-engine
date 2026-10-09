@@ -21,7 +21,7 @@ use crate::batch::DEFAULT_BATCH_SIZE;
 use crate::{
     BackwardScanSupport, Batch, ExecError, ExecResult, ExpressionEvaluator, ExternalSort,
     PhysicalOperator, PhysicalRow, PhysicalScanDirection, RowProjectionValue, RowSchema,
-    ScalarExpr, SortKey,
+    ScalarExpr, SharedExpressionEvaluator, SortKey,
 };
 
 struct ColumnEvaluator;
@@ -291,7 +291,11 @@ impl<'a> RowCursor<'a> {
         self.operator.rewind()
     }
 
-    fn take_group(&mut self, schema: &RowSchema) -> ExecResult<Option<RowGroup>> {
+    fn take_group(
+        &mut self,
+        schema: &RowSchema,
+        enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+    ) -> ExecResult<Option<RowGroup>> {
         let first = match self.lookahead.take() {
             Some(row) => row,
             None => match self.next_row()? {
@@ -301,7 +305,7 @@ impl<'a> RowCursor<'a> {
         };
         let mut count = 1_usize;
         while let Some(row) = self.next_row()? {
-            if compare_rows(&first, &row, schema)? == Ordering::Equal {
+            if compare_rows(&first, &row, schema, enums)? == Ordering::Equal {
                 count = count
                     .checked_add(1)
                     .ok_or_else(|| ExecError::Other("set-operation group count overflow".into()))?;
@@ -333,6 +337,7 @@ fn compare_rows(
     left: &PhysicalRow,
     right: &PhysicalRow,
     schema: &RowSchema,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<Ordering> {
     let left = schema.view(left);
     let right = schema.view(right);
@@ -344,10 +349,11 @@ fn compare_rows(
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Null, _) => Ordering::Less,
             (_, Value::Null) => Ordering::Greater,
-            _ => uqa_sql::expr::compare_typed_values_with_control(
+            _ => uqa_sql::expr::compare_grouping_values_with_enum_catalog(
                 left,
                 right,
                 &uqa_core::memory::ProductionControl::uncontrolled(),
+                enums,
             )?,
         };
         if ordering != Ordering::Equal {
@@ -365,6 +371,7 @@ fn compare_rows(
 pub struct ExternalSetOperation<'a> {
     left: RowCursor<'a>,
     right: RowCursor<'a>,
+    evaluator: SharedExpressionEvaluator<'a>,
     kind: SetOpKind,
     all: bool,
     schema: RowSchema,
@@ -389,6 +396,26 @@ impl<'a> ExternalSetOperation<'a> {
         Self::new_with_types(left, right, kind, all, output_types, work_mem_bytes)
     }
 
+    pub fn new_with_evaluator(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: SetOpKind,
+        all: bool,
+        work_mem_bytes: usize,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> ExecResult<Self> {
+        let output_types = set_operation_types(left.row_schema(), right.row_schema())?;
+        Self::new_with_types_and_evaluator(
+            left,
+            right,
+            kind,
+            all,
+            output_types,
+            work_mem_bytes,
+            evaluator,
+        )
+    }
+
     pub fn new_with_types(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
@@ -397,7 +424,15 @@ impl<'a> ExternalSetOperation<'a> {
         output_types: Vec<Option<ColumnType>>,
         work_mem_bytes: usize,
     ) -> ExecResult<Self> {
-        Self::new_with_types_and_mode(left, right, kind, all, output_types, work_mem_bytes, false)
+        Self::new_with_types_and_evaluator(
+            left,
+            right,
+            kind,
+            all,
+            output_types,
+            work_mem_bytes,
+            Arc::new(ColumnEvaluator),
+        )
     }
 
     /// Construct a set operation whose ordinary forward pulls remain one-row incremental when a scroll materialization boundary wraps the complete operation.
@@ -409,17 +444,20 @@ impl<'a> ExternalSetOperation<'a> {
         output_types: Vec<Option<ColumnType>>,
         work_mem_bytes: usize,
     ) -> ExecResult<Self> {
-        Self::new_with_types_and_mode(left, right, kind, all, output_types, work_mem_bytes, true)
+        let mut operation =
+            Self::new_with_types(left, right, kind, all, output_types, work_mem_bytes)?;
+        operation.incremental_union_all = true;
+        Ok(operation)
     }
 
-    fn new_with_types_and_mode(
+    pub fn new_with_types_and_evaluator(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
         kind: SetOpKind,
         all: bool,
         output_types: Vec<Option<ColumnType>>,
         work_mem_bytes: usize,
-        incremental_union_all: bool,
+        evaluator: SharedExpressionEvaluator<'a>,
     ) -> ExecResult<Self> {
         let output = left.schema().to_vec();
         let left: Box<dyn PhysicalOperator + 'a> =
@@ -437,25 +475,24 @@ impl<'a> ExternalSetOperation<'a> {
                     nulls_first: Some(true),
                 })
                 .collect::<Vec<_>>();
-            let evaluator = Arc::new(ColumnEvaluator);
             // Both merge inputs are live concurrently. Split the configured
             // budget so their encoded in-memory runs cannot each claim it.
             let per_input = (work_mem_bytes / 2).max(1);
             (
-                Box::new(ExternalSort::new(
-                    left,
-                    keys.clone(),
-                    evaluator.clone(),
-                    None,
-                    per_input,
-                )) as Box<dyn PhysicalOperator + 'a>,
-                Box::new(ExternalSort::new(right, keys, evaluator, None, per_input))
-                    as Box<dyn PhysicalOperator + 'a>,
+                Box::new(
+                    ExternalSort::new(left, keys.clone(), evaluator.clone(), None, per_input)
+                        .with_equality_keys(),
+                ) as Box<dyn PhysicalOperator + 'a>,
+                Box::new(
+                    ExternalSort::new(right, keys, Arc::clone(&evaluator), None, per_input)
+                        .with_equality_keys(),
+                ) as Box<dyn PhysicalOperator + 'a>,
             )
         };
         Ok(Self {
             left: RowCursor::new(left),
             right: RowCursor::new(right),
+            evaluator,
             kind,
             all,
             schema: RowSchema::with_types(output, output_types),
@@ -464,7 +501,7 @@ impl<'a> ExternalSetOperation<'a> {
             pending_row: None,
             pending_count: 0,
             union_all_left_done: false,
-            incremental_union_all,
+            incremental_union_all: false,
             directional_position: DirectionalAppendPosition::BeforeFirst,
         })
     }
@@ -559,10 +596,14 @@ impl<'a> ExternalSetOperation<'a> {
 
     fn load_groups(&mut self) -> ExecResult<()> {
         if self.left_group.is_none() && !self.left.exhausted {
-            self.left_group = self.left.take_group(&self.schema)?;
+            self.left_group = self
+                .left
+                .take_group(&self.schema, self.evaluator.enum_labels())?;
         }
         if self.right_group.is_none() && !self.right.exhausted {
-            self.right_group = self.right.take_group(&self.schema)?;
+            self.right_group = self
+                .right
+                .take_group(&self.schema, self.evaluator.enum_labels())?;
         }
         Ok(())
     }
@@ -582,7 +623,12 @@ impl<'a> ExternalSetOperation<'a> {
     fn choose_group(&mut self) -> ExecResult<Option<(PhysicalRow, usize)>> {
         self.load_groups()?;
         let ordering = match (&self.left_group, &self.right_group) {
-            (Some(left), Some(right)) => Some(compare_rows(&left.row, &right.row, &self.schema)?),
+            (Some(left), Some(right)) => Some(compare_rows(
+                &left.row,
+                &right.row,
+                &self.schema,
+                self.evaluator.enum_labels(),
+            )?),
             (Some(_), None) => Some(Ordering::Less),
             (None, Some(_)) => Some(Ordering::Greater),
             (None, None) => None,
@@ -752,6 +798,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
 
 #[cfg(test)]
 mod tests {
+    mod enums;
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;

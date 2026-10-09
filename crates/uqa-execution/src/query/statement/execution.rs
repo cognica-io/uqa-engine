@@ -352,13 +352,14 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
     let left: Box<dyn crate::PhysicalOperator + '_> = lhs.into_public_operator();
     let right: Box<dyn crate::PhysicalOperator + '_> = rhs.into_public_operator();
     let operation: Box<dyn crate::PhysicalOperator + '_> = Box::new(
-        crate::ExternalSetOperation::new_with_types(
+        crate::ExternalSetOperation::new_with_types_and_evaluator(
             left,
             right,
             *kind,
             *all,
             set_schema.column_types().to_vec(),
             physical_work_mem_bytes(context.source.relational.runtime)?,
+            context.source.relational.evaluator(params, ctes),
         )
         .map_err(physical_exec_error)?,
     );

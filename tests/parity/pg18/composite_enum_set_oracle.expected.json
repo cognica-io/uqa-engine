@@ -108,7 +108,7 @@
       "id": "setup"
     },
     {
-      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS b UNION SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS b) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input UNION SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
       "command_tags": [
         "CREATE FUNCTION",
         "SELECT 1",
@@ -130,7 +130,7 @@
           ],
           "rows": [
             [
-              "2"
+              "3"
             ]
           ]
         },
@@ -141,10 +141,10 @@
         }
       ],
       "notices": [],
-      "id": "source_union"
+      "id": "source_scalar_union"
     },
     {
-      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS b UNION SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS b) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input UNION ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
       "command_tags": [
         "CREATE FUNCTION",
         "SELECT 1",
@@ -166,7 +166,7 @@
           ],
           "rows": [
             [
-              "2"
+              "7"
             ]
           ]
         },
@@ -177,10 +177,10 @@
         }
       ],
       "notices": [],
-      "id": "invalid_union"
+      "id": "source_scalar_union_all"
     },
     {
-      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS b UNION SELECT e FROM (SELECT n AS id,CASE WHEN n % 2=0 THEN (v).a ELSE (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS b) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input INTERSECT SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
       "command_tags": [
         "CREATE FUNCTION",
         "SELECT 1",
@@ -213,7 +213,1843 @@
         }
       ],
       "notices": [],
-      "id": "even_union"
+      "id": "source_scalar_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input INTERSECT ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_scalar_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input EXCEPT SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_scalar_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input EXCEPT ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_scalar_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input UNION SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_array_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input UNION ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_array_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input INTERSECT SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_array_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input INTERSECT ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_array_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input EXCEPT SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_array_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input EXCEPT ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_array_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input UNION SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_record_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input UNION ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_record_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input INTERSECT SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_record_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input INTERSECT ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_record_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input EXCEPT SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_record_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_source) AS input EXCEPT ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_source) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "source_record_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input UNION SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_scalar_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input UNION ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_scalar_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input INTERSECT SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_scalar_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input INTERSECT ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_scalar_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input EXCEPT SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_scalar_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input EXCEPT ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_scalar_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input UNION SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_array_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input UNION ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_array_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input INTERSECT SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_array_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input INTERSECT ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_array_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input EXCEPT SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_array_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input EXCEPT ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_array_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input UNION SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_record_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input UNION ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_record_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input INTERSECT SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_record_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input INTERSECT ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_record_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input EXCEPT SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_record_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_invalid) AS input EXCEPT ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_invalid) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "invalid_record_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input UNION SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_scalar_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input UNION ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_scalar_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input INTERSECT SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_scalar_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input INTERSECT ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_scalar_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input EXCEPT SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_scalar_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input EXCEPT ALL SELECT e AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_scalar_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input UNION SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_array_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input UNION ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_array_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input INTERSECT SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_array_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input INTERSECT ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_array_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input EXCEPT SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_array_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input EXCEPT ALL SELECT ARRAY[e] AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_array_except_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input UNION SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_record_union"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input UNION ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_record_union_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input INTERSECT SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_record_intersect"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input INTERSECT ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_record_intersect_all"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input EXCEPT SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_record_except"
+    },
+    {
+      "sql": "CREATE FUNCTION enum_sort_probe() RETURNS text LANGUAGE plpgsql AS $$ DECLARE result text; BEGIN EXECUTE 'SELECT count(*)::text FROM (SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a WHEN 2 THEN (v).a WHEN 3 THEN (v).b END AS e FROM generate_series(1,4) AS g(n) CROSS JOIN enum_sort_even) AS input EXCEPT ALL SELECT ROW(e,0)::enum_sort_record AS e FROM (SELECT CASE n WHEN 1 THEN (v).a END AS e FROM generate_series(1,3) AS g(n) CROSS JOIN enum_sort_even) AS input) AS result' INTO result; RETURN result; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || regexp_replace(SQLERRM, '[0-9]+', 'OID', 'g'); END $$; SELECT enum_sort_probe(); DROP FUNCTION enum_sort_probe()",
+      "command_tags": [
+        "CREATE FUNCTION",
+        "SELECT 1",
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "enum_sort_probe"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "even_record_except_all"
     },
     {
       "sql": "DROP VIEW enum_sort_source,enum_sort_invalid,enum_sort_even; DROP TYPE enum_sort_holder,enum_sort_raw,enum_sort_record,enum_sort_a,enum_sort_b",

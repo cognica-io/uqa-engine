@@ -138,6 +138,7 @@ fn ordering_call_state_is_private_while_tie_equality_reads_raw_oids() {
         keys: &keys,
         enums: Some(&catalog),
         states: &states,
+        equality_keys: false,
     };
     let first_left = physical(5);
     let first_right = physical(4);

@@ -18,7 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve retained enum comparison semantics through external sorting, Top-K, DISTINCT and FETCH WITH TIES, including disk-spilled keys. Recognize matching array and row constructors in DISTINCT ON ordering.
+- Preserve retained enum comparison semantics through external sorting, Top-K, DISTINCT and FETCH WITH TIES, including disk-spilled keys. UNION, INTERSECT and EXCEPT group enum identities without reading labels, preserving NULLs and ALL multiplicities. Recognize matching array and row constructors in DISTINCT ON ordering.
 
 - Preserve enum catalog and comparison state in budgeted built-in calls, admitting selected values and enum ranges before allocation and releasing partial results on quota failure or cancellation.
 

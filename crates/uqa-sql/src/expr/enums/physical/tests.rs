@@ -26,6 +26,56 @@ fn nested(kind: usize, first: Value, second: Value) -> Value {
 }
 
 #[test]
+fn internal_group_order_agrees_with_enum_identity_and_skips_unreached_fields() {
+    use crate::expr::{
+        compare_grouping_values_with_enum_catalog as compare,
+        equal_typed_values_with_enum_catalog as equal,
+    };
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let catalog = Catalog::new();
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for kind in 0..3 {
+        let values = [1, 3, 5].map(|oid| nested(kind, physical(oid), Value::Null));
+        for (i, left) in values.iter().enumerate() {
+            for (j, right) in values.iter().enumerate() {
+                let order = compare(left, right, &control, Some(&catalog)).unwrap();
+                assert_eq!(order, i.cmp(&j));
+                assert_eq!(
+                    order.is_eq(),
+                    equal(left, right, &control, Some(&catalog)).unwrap()
+                );
+            }
+        }
+        let malformed = Value::Datum(DatumValue::new(16_384, 0, vec![1]));
+        let left = nested(kind, physical(1), malformed.clone());
+        let right = nested(kind, physical(3), malformed);
+        assert_eq!(
+            compare(&left, &right, &control, Some(&catalog)).unwrap(),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare(&left, &left, &control, Some(&catalog))
+                .unwrap_err()
+                .sqlstate(),
+            Some("XX001")
+        );
+    }
+    token.cancel();
+    assert_eq!(
+        compare(&physical(1), &physical(1), &control, Some(&catalog))
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn nested_enum_equality_preserves_raw_identity_nulls_and_lazy_fields() {
     use crate::expr::binary::eval_comparison_truth_with_enum_catalog as compare;
     use uqa_core::{memory::MemoryBudget, memory::ProductionControl, CancellationToken};

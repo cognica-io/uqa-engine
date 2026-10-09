@@ -48,6 +48,7 @@ pub struct ExternalSort<'a> {
     keys: crate::scalar::PreparedExpressions<Vec<SortKey>>,
     evaluator: SharedExpressionEvaluator<'a>,
     comparison_states: Vec<EnumComparisonState>,
+    equality_keys: bool,
     keep: Option<usize>,
     work_mem_bytes: usize,
     spill_directory: Option<PathBuf>,
@@ -102,6 +103,7 @@ impl<'a> ExternalSort<'a> {
             },
             keys: crate::scalar::PreparedExpressions::sort_keys(keys),
             evaluator,
+            equality_keys: false,
             keep,
             work_mem_bytes,
             spill_directory: None,
@@ -120,7 +122,16 @@ impl<'a> ExternalSort<'a> {
             keys: &self.keys,
             enums: self.evaluator.enum_labels(),
             states: &self.comparison_states,
+            equality_keys: self.equality_keys,
         }
+    }
+
+    /// Internal set grouping requires equality classes, without exposing this identity order as SQL ORDER BY.
+    pub(crate) fn with_equality_keys(mut self) -> Self {
+        self.equality_keys = true;
+        self.comparison_states = Vec::new();
+        self.ordering.clear();
+        self
     }
 
     /// Place sort runs in a caller-selected temporary-data directory.
@@ -811,6 +822,7 @@ mod tests {
                 keys: &keys,
                 enums: None,
                 states: &[],
+                equality_keys: false,
             },
             None,
             SpillBuffer::new(0),
