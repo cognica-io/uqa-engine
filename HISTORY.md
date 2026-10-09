@@ -18,7 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve PostgreSQL BETWEEN operand coercions, strict-NULL folding and volatile/subquery evaluation counts, while keeping simple inclusive ranges on their existing access path.
+- Preserve PostgreSQL BETWEEN operand coercions, strict-NULL folding and volatile/subquery evaluation counts, while keeping simple inclusive ranges on their existing access path. Normalize predecessor view expressions during initial restoration and optimize executable view copies so NULL simplification and independent subquery initialization also apply after reopening. Eligible volatile views and derived tables now stop evaluating rows when a parent LIMIT has enough results.
 
 - Avoid unnecessary maintenance-thread wakeups when opening sessions, committing statistics changes or updating DiskANN policy, and skip idle statistics table passes until committed state changes or pending statistics reach their refresh deadline.
 

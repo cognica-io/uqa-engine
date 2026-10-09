@@ -45,6 +45,9 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
 }
 
 pub trait QueryOutputRewriter: Sync {
+    /// Optimize a catalog-retained query before assembling either its streaming or materialized execution path.
+    fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError>;
+
     /// Return a plan that applies the complete output predicate, or `None` when the caller must retain it.
     fn push_output_filter(
         &self,

@@ -10,6 +10,7 @@ use super::{
     bind_source_plan_schema_for_execution, build_join_operator_with_ctes, AccessPathPlan,
     ComputePlan, CteScope, RelationalPlan, SQLError, SQLParam, SourceContext,
 };
+use crate::query::row_at_a_time::RowAtATime;
 
 #[expect(
     clippy::too_many_lines,
@@ -23,13 +24,7 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
 ) -> Result<Option<Box<dyn crate::PhysicalOperator + 'a>>, SQLError> {
     let mut relation_lookup = ctes.enter_relation_lookup_mode(body.relations_bound)?;
     let ctes = &mut *relation_lookup;
-    if !body.ctes.is_empty()
-        || (!ctes.streams_command_progress()
-            && uqa_sql::semantics::volatility::query_contains_volatile_function(
-                context.volatility,
-                body,
-            )?)
-    {
+    if !body.ctes.is_empty() {
         return Ok(None);
     }
     let RelationalPlan::QueryBlock(block) = &body.root else {
@@ -49,6 +44,12 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
     {
         return Ok(None);
     }
+
+    let scalar_demand = !ctes.streams_command_progress()
+        && uqa_sql::semantics::volatility::query_contains_volatile_function(
+            context.volatility,
+            body,
+        )?;
 
     // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
@@ -121,6 +122,12 @@ pub(super) fn try_build_streaming_subquery_operator<'a, S: Clone + Send + Sync +
                 column_prune.as_ref(),
                 qualifier_filters.as_ref(),
             )?
+        };
+        // A volatile projection or filter observes only rows demanded by its parent, even when the underlying scan returns a larger batch.
+        let operator: Box<dyn crate::PhysicalOperator + 'a> = if scalar_demand {
+            Box::new(RowAtATime::new(operator))
+        } else {
+            operator
         };
         let residual =
             context

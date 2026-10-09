@@ -589,45 +589,25 @@ fn compile_between(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
         a.kind(),
         AExprKind::AexprNotBetween | AExprKind::AexprNotBetweenSym
     );
-    let pair = |low, high| {
-        let items = vec![
-            Expr::Binary {
-                op: if negated {
-                    BinaryOp::Less
-                } else {
-                    BinaryOp::GreaterEqual
-                },
+    crate::type_resolution::between::expand(
+        matches!(
+            a.kind(),
+            AExprKind::AexprBetweenSym | AExprKind::AexprNotBetweenSym
+        ),
+        negated,
+        |op, upper| {
+            Ok(Expr::Binary {
+                op,
                 lhs: Box::new(compile_expr(value)?),
-                rhs: Box::new(compile_expr(low)?),
-            },
-            Expr::Binary {
-                op: if negated {
-                    BinaryOp::Greater
-                } else {
-                    BinaryOp::LessEqual
-                },
-                lhs: Box::new(compile_expr(value)?),
-                rhs: Box::new(compile_expr(high)?),
-            },
-        ];
-        Ok::<_, SQLError>(if negated {
-            Expr::Or(items)
-        } else {
-            Expr::And(items)
-        })
-    };
-    let forward = pair(low, high)?;
-    if matches!(
-        a.kind(),
-        AExprKind::AexprBetweenSym | AExprKind::AexprNotBetweenSym
-    ) {
-        let pairs = vec![forward, pair(high, low)?];
-        Ok(if negated {
-            Expr::And(pairs)
-        } else {
-            Expr::Or(pairs)
-        })
-    } else {
-        Ok(forward)
-    }
+                rhs: Box::new(compile_expr(if upper { high } else { low })?),
+            })
+        },
+        |and, items| {
+            if and {
+                Expr::And(items)
+            } else {
+                Expr::Or(items)
+            }
+        },
+    )
 }

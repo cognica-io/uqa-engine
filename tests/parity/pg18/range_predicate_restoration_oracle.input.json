@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE SEQUENCE range_restore_seq; CREATE VIEW range_restore_ordinary AS SELECT nextval('range_restore_seq') BETWEEN 0 AND 1 AS result; CREATE VIEW range_restore_null AS SELECT nextval('range_restore_seq') BETWEEN SYMMETRIC NULL::bigint AND 100 AS result; CREATE VIEW range_restore_subquery AS SELECT (SELECT nextval('range_restore_seq')) BETWEEN SYMMETRIC 1 AND 1 AS result; CREATE VIEW range_restore_negated AS SELECT nextval('range_restore_seq') NOT BETWEEN SYMMETRIC 0 AND NULL::bigint AS result; CREATE TABLE range_restore_inputs (id integer); INSERT INTO range_restore_inputs VALUES (1),(2); CREATE VIEW range_restore_streamed AS SELECT id, nextval('range_restore_seq') BETWEEN SYMMETRIC NULL::bigint AND 100 AS result FROM range_restore_inputs"
+    },
+    {
+      "id": "ordinary",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT result FROM range_restore_ordinary; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "null",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT result FROM range_restore_null; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "subquery",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT result FROM range_restore_subquery; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "negated",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT result FROM range_restore_negated; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "streamed",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT id,result FROM range_restore_streamed ORDER BY id; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "limited",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT result FROM range_restore_streamed LIMIT 1; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "derived_limit",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; SELECT result FROM (SELECT nextval('range_restore_seq') BETWEEN SYMMETRIC NULL::bigint AND 100 AS result FROM range_restore_inputs) AS derived LIMIT 1; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "shared_cte",
+      "sql": "ALTER SEQUENCE range_restore_seq RESTART WITH 1; WITH shared AS (SELECT nextval('range_restore_seq') AS n FROM range_restore_inputs) SELECT a.n AS a,b.n AS b FROM shared a CROSS JOIN shared b ORDER BY a,b; SELECT nextval('range_restore_seq') AS next"
+    },
+    {
+      "id": "cleanup",
+      "sql": "DROP VIEW range_restore_ordinary,range_restore_null,range_restore_subquery,range_restore_negated,range_restore_streamed; DROP TABLE range_restore_inputs; DROP SEQUENCE range_restore_seq"
+    }
+  ]
+}

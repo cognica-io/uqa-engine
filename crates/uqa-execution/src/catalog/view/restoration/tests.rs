@@ -352,3 +352,71 @@ fn load_only_view_restore_rejects_legacy_security_before_allocating_or_publishin
     assert!(fixture.saved.borrow().is_empty());
     assert_eq!(fixture.snapshot(), before);
 }
+
+fn retained_ranges(failure: Failure) -> Fixture {
+    let mut fixture = Fixture::new(failure);
+    for (identity, row) in (1..).zip(&mut fixture.rows) {
+        let mut stored = view(identity, RelationPersistence::Permanent);
+        let uqa_sql::plan::RelationalPlan::QueryBlock(block) = &mut stored.query.root else {
+            panic!("query fixture");
+        };
+        block.projections[0].expr = uqa_sql::ScalarExpr::Between {
+            expr: Box::new(uqa_sql::ScalarExpr::Literal(uqa_core::Value::Int(1))),
+            low: Box::new(uqa_sql::ScalarExpr::Literal(uqa_core::Value::Int(0))),
+            high: Box::new(uqa_sql::ScalarExpr::Literal(uqa_core::Value::Int(2))),
+        };
+        row.security = stored.security.row().into();
+        row.definition_json = serde_json::to_string(&stored.definition).unwrap();
+    }
+    fixture
+}
+
+#[test]
+fn retained_range_migration_persists_without_reallocating_identities_or_rebinding_routines() {
+    let fixture = retained_ranges(Failure::None);
+    restore_views_from_catalog(&fixture.context(), &fixture, true).unwrap();
+    assert_eq!(fixture.identities.get(), 0);
+    assert_eq!(fixture.bindings.get(), 0);
+    assert_eq!(fixture.schemas.get(), 0);
+    assert_eq!(fixture.saved.borrow().len(), 2);
+    for row in fixture.saved.borrow().iter() {
+        let definition: uqa_sql::catalog::stored_view::StoredViewDefinition =
+            serde_json::from_str(&row.definition_json).unwrap();
+        let uqa_sql::plan::RelationalPlan::QueryBlock(block) = &definition.query.root else {
+            panic!("query fixture");
+        };
+        assert!(matches!(
+            block.projections[0].expr,
+            uqa_sql::ScalarExpr::And(_)
+        ));
+        assert_eq!(
+            definition.object_id,
+            fixture.registry.borrow()[&row.relation].object_id
+        );
+    }
+}
+
+#[test]
+fn retained_range_migration_rejects_load_only_restore_before_publication() {
+    let fixture = retained_ranges(Failure::None);
+    let before = fixture.snapshot();
+    let error = restore_views_from_catalog(&fixture.context(), &fixture, false).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("initial-open metadata migration"));
+    assert_eq!(fixture.identities.get(), 0);
+    assert_eq!(fixture.writes.get(), 0);
+    assert!(fixture.saved.borrow().is_empty());
+    assert_eq!(fixture.snapshot(), before);
+}
+
+#[test]
+fn failed_retained_range_persistence_keeps_the_previous_registry() {
+    let fixture = retained_ranges(Failure::Persistence);
+    let before = fixture.snapshot();
+    let error = restore_views_from_catalog(&fixture.context(), &fixture, true).unwrap_err();
+    assert!(error.to_string().contains("injected persistence failure"));
+    assert_eq!(fixture.saved.borrow().len(), 1);
+    assert_eq!(fixture.writes.get(), 0);
+    assert_eq!(fixture.snapshot(), before);
+}

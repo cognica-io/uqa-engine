@@ -12,7 +12,10 @@ use std::collections::BTreeMap;
 use super::{CommandPlan, QueryPlan, RelationalPlan, SourcePlan};
 
 mod transform;
-pub(crate) use transform::{copy_occurrences, rewrite_expression_with_arena, rewrite_with_arenas};
+pub(crate) use transform::{
+    copy_occurrences, query_nodes as rewrite_query_with_arenas, rewrite_expression_with_arena,
+    rewrite_with_arenas,
+};
 
 /// Drop unreferenced query children and remap local command expressions without evaluating them.
 pub fn prune_command(command: &mut CommandPlan) {

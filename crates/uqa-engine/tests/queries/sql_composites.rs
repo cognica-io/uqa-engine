@@ -11,6 +11,8 @@ use uqa_engine::Engine;
 #[path = "sql_composites/addition.rs"]
 mod addition;
 
+#[path = "sql_composites/range_restoration.rs"]
+mod range_restoration;
 #[path = "sql_composites/removal.rs"]
 mod removal;
 #[path = "sql_composites/renaming.rs"]

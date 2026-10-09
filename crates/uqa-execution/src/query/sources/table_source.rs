@@ -93,13 +93,21 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let streamed = {
                     let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
                     match plan.body.query() {
-                        Some(query) => try_build_streaming_subquery_operator(
-                            context,
-                            query,
-                            params,
-                            &mut scoped_ctes,
-                        )?,
-                        None => None,
+                        Some(query)
+                            if scoped_ctes.streams_command_progress()
+                                || !uqa_sql::semantics::volatility::query_contains_volatile_function(
+                                    context.volatility,
+                                    query,
+                                )? =>
+                        {
+                            try_build_streaming_subquery_operator(
+                                context,
+                                query,
+                                params,
+                                &mut scoped_ctes,
+                            )?
+                        }
+                        _ => None,
                     }
                 };
                 if let Some(operator) = streamed {
@@ -269,6 +277,11 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .as_ref()
                     .or(specialized_plan.as_ref())
                     .unwrap_or(plan);
+                let optimized = context
+                    .ctes
+                    .rewrites
+                    .optimize_retained_query(execution_plan)?;
+                let execution_plan = &optimized;
                 if let Some(operator) =
                     try_build_streaming_subquery_operator(context, execution_plan, params, ctes)?
                 {
