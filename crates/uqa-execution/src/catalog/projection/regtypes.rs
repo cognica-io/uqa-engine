@@ -483,6 +483,11 @@ struct RegtypeCatalogEntry {
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+thread_local! {
+    static OUTPUT_METADATA_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// One immutable catalog snapshot shared by every `reg*` value formatted until catalog state changes.
 #[derive(Debug)]
 pub struct RegtypeOutputCatalog {
@@ -527,11 +532,16 @@ impl RegtypeOutputCatalog {
     pub(crate) fn without_relations(
         catalog: &CatalogReadView,
         resolution: &RelationNameResolution,
-    ) -> Result<Self, SQLError> {
-        let catalog = catalog.metadata_view();
-        let mut resolution = resolution.clone();
-        resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-        Self::assemble(&catalog, &resolution, BTreeMap::new())
+    ) -> Result<Arc<Self>, SQLError> {
+        catalog
+            .alias_output
+            .get_or_try_init(|| {
+                let catalog = catalog.metadata_view();
+                let mut resolution = resolution.clone();
+                resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+                Self::assemble(&catalog, &resolution, BTreeMap::new()).map(Arc::new)
+            })
+            .cloned()
     }
 
     fn assemble(
@@ -539,6 +549,8 @@ impl RegtypeOutputCatalog {
         resolution: &RelationNameResolution,
         classes: BTreeMap<i64, RegtypeCatalogEntry>,
     ) -> Result<Self, SQLError> {
+        #[cfg(test)]
+        OUTPUT_METADATA_BUILDS.set(OUTPUT_METADATA_BUILDS.get() + 1);
         let namespaces = build_pg_namespace(catalog)?
             .into_iter()
             .filter_map(|row| {
@@ -652,7 +664,7 @@ impl OutputVisibility {
 
 /// The output of `regtype`, `regproc`, `regprocedure` and `regnamespace` constants in reconstructed SQL, built from a catalog view and the session's name resolution when a deparser first prints one.
 pub(crate) struct AliasConstantOutput {
-    catalog: RegtypeOutputCatalog,
+    catalog: Arc<RegtypeOutputCatalog>,
     visibility: OutputVisibility,
 }
 
