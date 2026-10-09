@@ -797,6 +797,33 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "information_schema_filter_catalog_captures_do_not_scale_with_rows",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/capabilities/tests.rs",
+      "capability": "Catalog type resolution",
+      "workload": "Memory and native SQLite catalogs with one or 32 three-column tables; parameterized information-schema filter.",
+      "invariant": "The same three correct column/type rows are returned without increasing full catalog captures as unrelated rows grow.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "scoped_type_resolution_reuses_retained_catalog",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests.rs",
+      "capability": "Retained type metadata",
+      "workload": "32 repetitions of scalar and function type resolution for catalog domains, user domains and arrays, enums, row types and builtins.",
+      "invariant": "All types resolve from the retained scope with zero additional full catalog captures.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

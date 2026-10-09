@@ -18,6 +18,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Avoid unnecessary maintenance-thread wakeups when opening sessions, committing statistics changes or updating DiskANN policy, and skip idle statistics table passes until committed state changes or pending statistics reach their refresh deadline.
+
+- Reuse the retained query catalog for scalar type resolution instead of recapturing all table metadata for each row, preserving the selected domain identity across later catalog changes.
+
 - Apply binary substring positions and retained bytea scalar operations to raw bytes, preserving result types, bounds, encoding, hashes, lengths, NULL behavior and PostgreSQL planning/runtime error order.
 
 - Retain catalog-dependent composite and enum input casts during grouping analysis, including their array forms, instead of evaluating them through builtin-only conversion.

@@ -46,7 +46,7 @@ impl Engine {
             self.settle_statistics_changes(committed.statistics_settlement.clone());
             // A commit that wrote no maintenance record changed nothing the worker decides by.
             if recorded {
-                self.wake_automatic_statistics();
+                self.start_automatic_statistics();
             }
             let notification_result = notification_commit.map_or(Ok(()), |notification_commit| {
                 self.commit_notification_state(notification_commit, &committed)

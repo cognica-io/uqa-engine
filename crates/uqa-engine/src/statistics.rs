@@ -96,10 +96,10 @@ impl Engine {
         *self.statistics.diskann_policy.lock()
     }
 
-    /// Wake the existing worker and revisit pending changes under this policy. Current builds retain their admitted policy and resource limits; this setting is not persisted.
+    /// Revisit pending changes under this policy at the next maintenance poll. Current builds retain their admitted policy and resource limits; this setting is not persisted.
     pub fn set_diskann_rebuild_policy(&self, policy: crate::DiskANNRebuildPolicy) {
         *self.statistics.diskann_policy.lock() = policy;
-        self.wake_automatic_statistics();
+        self.start_automatic_statistics();
     }
 
     pub(crate) fn record_statistics_change(
@@ -150,7 +150,7 @@ impl Engine {
         )]);
         let settlement = self.persist_statistics_changes(&changes)?;
         self.settle_statistics_changes(settlement);
-        self.wake_automatic_statistics();
+        self.start_automatic_statistics();
         Ok(())
     }
 
@@ -298,7 +298,9 @@ impl Engine {
         }
         let mut control = automatic.control.lock();
         if let Some(worker) = control.as_ref() {
-            if worker.sender.try_send(()) != Err(mpsc::TrySendError::Disconnected(())) {
+            // Session admission only retains the worker. Sending a liveness
+            // probe wakes its wait without advancing the maintenance deadline.
+            if !worker.thread.is_finished() {
                 return;
             }
             *control = None;
@@ -330,18 +332,6 @@ impl Engine {
             Err(error) => {
                 automatic.status.lock().last_error = Some(error.to_string());
             }
-        }
-    }
-
-    pub(crate) fn wake_automatic_statistics(&self) {
-        if self.session.statistics_worker.load(Ordering::Acquire) {
-            return;
-        }
-        self.start_automatic_statistics();
-        if let Some(worker) = self.statistics.automatic_statistics.control.lock().as_ref() {
-            // One pending wake-up is enough: the durable counter is the
-            // source of truth, so coalescing never loses committed changes.
-            let _ = worker.sender.try_send(());
         }
     }
 

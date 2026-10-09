@@ -17,8 +17,12 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        let catalog = self.ctes.catalog_read_view()?;
         uqa_execution::catalog::projection::resolve_catalog_column_type_name(
-            &self.engine.catalog_execution(),
+            &uqa_execution::catalog::context::CatalogContext {
+                catalog: &catalog,
+                ..self.engine.catalog_execution()
+            },
             name,
         )
         .map(Some)
