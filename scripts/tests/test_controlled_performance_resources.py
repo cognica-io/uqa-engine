@@ -92,6 +92,48 @@ class ResourceEvidenceTest(unittest.TestCase):
                 self.assertNotIn('/usr/bin/setarch', run.call_args.args[0])
                 self.assertEqual(capture.call_count, 1)
 
+    def test_unit_retains_workload_status_and_stderr_when_diagnostics_fail(self):
+        for returncode, cleanup_raises in ((0, False), (23, False), (0, True), (23, True)):
+            with self.subTest(returncode=returncode, cleanup_raises=cleanup_raises), \
+                    tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(resources, 'snapshot', return_value={}), \
+                    patch.object(resources.MeasurementResources, 'sample'):
+                root = Path(temporary)
+                host = runner.ControlledHost.__new__(runner.ControlledHost)
+                host.output, host.run_id, host.counter, host.rust_bin = root, 'test', 0, root
+
+                def finish():
+                    if cleanup_raises:
+                        raise OSError('counter failure')
+                    return {'sampling_error': 'counter failure'}
+
+                def run(*args, **kwargs):
+                    kwargs['stderr'].write(b'original workload diagnostic\n')
+                    return SimpleNamespace(returncode=returncode)
+
+                self.hardware.finish = finish
+                diagnostic = ('hardware counter cleanup failed: ' if cleanup_raises else '') + 'counter failure'
+                expected = r'workload failed \(23\); see retained stderr' if returncode else diagnostic
+                with patch.object(runner.subprocess, 'run', side_effect=run), \
+                        self.assertRaisesRegex(QualificationError, expected):
+                    host.unit('workload', ['/program'], root, measurement=True, writable=root)
+                self.assertEqual((root / 'workload.stderr').read_text(), 'original workload diagnostic\n')
+                record = json.loads((root / 'workload.resources.json').read_text())
+                self.assertEqual(record['sampling_error'], diagnostic)
+                self.assertEqual(record['hardware_counters']['sampling_error'], diagnostic)
+
+    def test_failed_build_retains_exit_status_without_a_resource_observer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            host = runner.ControlledHost.__new__(runner.ControlledHost)
+            host.output, host.run_id, host.counter, host.rust_bin = root, 'test', 0, root
+            with patch.object(runner, 'MeasurementResources') as observer, \
+                    patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=23)), \
+                    self.assertRaisesRegex(QualificationError, r'build failed \(23\)'):
+                host.unit('build', ['/compiler'], root)
+            observer.assert_not_called()
+            self.assertFalse((root / 'build.resources.json').exists())
+
     def test_kernel_work_is_excluded_and_a_restored_broad_mask_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             mask = Path(temporary) / 'mask'
