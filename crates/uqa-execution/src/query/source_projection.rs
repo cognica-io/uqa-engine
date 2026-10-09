@@ -43,6 +43,31 @@ pub fn bound_source_operator<'a>(
 
 use uqa_sql::plan::source_projection::ColumnPrune;
 
+fn source_column_requested(column: &str, qualifier: &str, prune: Option<&ColumnPrune>) -> bool {
+    qualifier.is_empty()
+        || prune
+            .and_then(|prune| prune.get(qualifier))
+            .is_none_or(|wanted| wanted.contains(column))
+}
+
+pub(crate) fn catalog_request(
+    source_columns: &[String],
+    aliases: &[String],
+    qualifier: &str,
+    prune: Option<&ColumnPrune>,
+) -> crate::catalog::projection::CatalogRequest {
+    crate::catalog::projection::CatalogRequest::columns(
+        source_columns
+            .iter()
+            .enumerate()
+            .filter(|(index, source)| {
+                let column = aliases.get(*index).map_or(source.as_str(), String::as_str);
+                source_column_requested(column, qualifier, prune)
+            })
+            .map(|(_, source)| source.clone()),
+    )
+}
+
 pub fn qualify_source_operator_with_columns<'a>(
     operator: Box<dyn crate::PhysicalOperator + 'a>,
     source_columns: &[String],
@@ -57,11 +82,7 @@ pub fn qualify_source_operator_with_columns<'a>(
         .filter_map(|(index, source)| {
             let source_base = operator.row_schema().public_name(index).unwrap_or(source);
             let column = aliases.get(index).map_or(source_base, String::as_str);
-            if !qualifier.is_empty()
-                && prune
-                    .and_then(|prune| prune.get(qualifier))
-                    .is_some_and(|wanted| !wanted.contains(column))
-            {
+            if !source_column_requested(column, qualifier, prune) {
                 return None;
             }
             let identity = if qualifier.is_empty() {

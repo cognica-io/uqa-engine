@@ -359,16 +359,21 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 };
                 let projection = context.catalog;
                 let name = name.clone();
+                let aliases = table_source_aliases(&columns, &[], column_aliases);
+                let request = crate::query::source_projection::catalog_request(
+                    &columns, &aliases, &qualifier, prune,
+                );
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(crate::query::scored_input::DeferredTableScan::new(
                         schema.clone(),
                         Box::new(move || {
-                            let rows = crate::catalog::projection::build_info_schema_rows(
+                            let rows = crate::catalog::projection::build_requested_catalog_rows(
                                 &projection,
                                 &catalog,
                                 &resolution,
                                 projection.session,
                                 &name,
+                                &request,
                             )?
                             .ok_or_else(|| {
                                 SQLError::Internal(format!(
@@ -380,7 +385,6 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                             )))
                         }),
                     ));
-                let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,

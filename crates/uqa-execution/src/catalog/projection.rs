@@ -22,6 +22,9 @@ pub use identity_claims::{
 };
 pub(crate) use identity_claims::{legacy_relation_claims, relation_claims};
 
+mod request;
+pub(crate) use request::CatalogRequest;
+
 pub fn is_virtual_catalog_relation(resolution: &RelationNameResolution, name: &str) -> bool {
     resolve_virtual_relation(resolution, name).is_some()
 }
@@ -32,6 +35,24 @@ pub fn build_info_schema_rows(
     resolution: &RelationNameResolution,
     session: &dyn CatalogSession,
     name: &str,
+) -> Result<Option<Vec<ResultRow>>, SQLError> {
+    build_requested_catalog_rows(
+        context,
+        catalog,
+        resolution,
+        session,
+        name,
+        &CatalogRequest::default(),
+    )
+}
+
+pub(crate) fn build_requested_catalog_rows(
+    context: &CatalogContext<'_>,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    session: &dyn CatalogSession,
+    name: &str,
+    request: &CatalogRequest,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let Some(relation) = catalog.virtual_relation_resolved(resolution, name)? else {
         return ag_catalog::build_age_label_relation_rows(catalog, resolution, name);
@@ -49,7 +70,9 @@ pub fn build_info_schema_rows(
         VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
         VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
         VirtualRelation::InformationTables => build_info_tables(context, catalog, resolution)?,
-        VirtualRelation::InformationColumns => build_info_columns(context, catalog, resolution)?,
+        VirtualRelation::InformationColumns => {
+            build_info_columns(context, catalog, resolution, request)?
+        }
         VirtualRelation::InformationColumnPrivileges => {
             build_info_column_privileges(context, catalog, resolution, false)?
         }
@@ -81,10 +104,22 @@ pub fn build_info_schema_rows(
         VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
         VirtualRelation::PgViews => build_pg_views(output, catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(output, catalog, resolution)?,
-        VirtualRelation::PgType => build_pg_type(output, catalog, resolution)?,
+        VirtualRelation::PgType => {
+            if request.includes("typdefault") || request.includes("typdefaultbin") {
+                build_pg_type(output, catalog, resolution)?
+            } else {
+                pg_catalog::build_pg_type_without_defaults(catalog, resolution)?
+            }
+        }
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
-        VirtualRelation::PgProc => build_pg_proc(output, catalog, resolution)?,
+        VirtualRelation::PgProc => {
+            if request.includes("proargdefaults") {
+                build_pg_proc(output, catalog, resolution)?
+            } else {
+                pg_proc::build_pg_proc_without_defaults(catalog, resolution)?
+            }
+        }
         VirtualRelation::PgLanguage => build_pg_language(),
         VirtualRelation::PgForeignDataWrapper => pg_catalog::foreign::wrappers(catalog)?,
         VirtualRelation::PgForeignServer => pg_catalog::foreign::servers(catalog)?,

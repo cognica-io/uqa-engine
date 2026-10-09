@@ -236,7 +236,11 @@ fn describe_column_type(catalog: &CatalogReadView, ty: &ColumnType) -> ColumnTyp
 )]
 fn information_schema_column_row(
     output: Option<&dyn uqa_sql::expr::EngineHook>,
-    (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
+    (catalog, resolution, request): (
+        &CatalogReadView,
+        &RelationNameResolution,
+        &super::CatalogRequest,
+    ),
     (schema, table): (String, String),
     index: usize,
     column: &SQLColumnDef,
@@ -256,7 +260,11 @@ fn information_schema_column_row(
         ),
         (
             "column_default",
-            match column.default.as_ref() {
+            match column
+                .default
+                .as_ref()
+                .filter(|_| request.includes("column_default"))
+            {
                 Some(default) => str_value(super::view_definition::stored_expression_text(
                     output, catalog, resolution, default,
                 )?),
@@ -369,7 +377,11 @@ fn information_schema_column_row(
         ),
         (
             "generation_expression",
-            match column.generated.as_ref() {
+            match column
+                .generated
+                .as_ref()
+                .filter(|_| request.includes("generation_expression"))
+            {
                 Some(generated) => str_value(super::view_definition::stored_expression_text(
                     output,
                     catalog,
@@ -386,10 +398,11 @@ fn information_schema_column_row(
     ]))
 }
 
-pub fn build_info_columns(
+pub(super) fn build_info_columns(
     context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
+    request: &super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let sequences = catalog
@@ -416,7 +429,7 @@ pub fn build_info_columns(
             }
             out.push(information_schema_column_row(
                 Some(&crate::catalog::projection::CatalogOutput(*context)),
-                (catalog, resolution),
+                (catalog, resolution, request),
                 (schema.clone(), table.clone()),
                 idx,
                 col,
@@ -441,7 +454,7 @@ pub fn build_info_columns(
             }
             out.push(information_schema_column_row(
                 Some(&crate::catalog::projection::CatalogOutput(*context)),
-                (catalog, resolution),
+                (catalog, resolution, request),
                 (schema.clone(), view.clone()),
                 idx,
                 column,
@@ -469,7 +482,7 @@ pub fn build_info_columns(
             }
             out.push(information_schema_column_row(
                 Some(&crate::catalog::projection::CatalogOutput(*context)),
-                (catalog, resolution),
+                (catalog, resolution, request),
                 (schema.clone(), table.clone()),
                 idx,
                 column,
