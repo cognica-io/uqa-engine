@@ -166,6 +166,19 @@ pub(super) fn eval_scalar_inner(
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar_inner(lhs, context, control)?;
             let right = eval_scalar_inner(rhs, context, control)?;
+            if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+                let value = uqa_sql::expr::eval_comparison_truth_with_enum_catalog(
+                    *op,
+                    &left,
+                    &right,
+                    control,
+                    context
+                        .function_hook()
+                        .and_then(uqa_sql::expr::EngineHook::enum_labels),
+                    None,
+                )?;
+                return plain(value.map_or(Value::Null, Value::Bool), control);
+            }
             if matches!(*left, Value::Enum(_) | Value::Datum(_))
                 || matches!(*right, Value::Enum(_) | Value::Datum(_))
             {

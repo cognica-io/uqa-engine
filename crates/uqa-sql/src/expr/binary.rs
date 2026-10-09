@@ -34,6 +34,17 @@ pub(super) fn eval_binary(
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
+    if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+        return eval_comparison_truth_with_enum_catalog(
+            op,
+            &l,
+            &r,
+            &ProductionControl::uncontrolled(),
+            ctx.engine.and_then(super::EngineHook::enum_labels),
+            None,
+        )
+        .map(|value| value.map_or(Value::Null, Value::Bool));
+    }
     if let Some(value) = super::enums::eval_comparison(
         op,
         &l,
@@ -295,6 +306,17 @@ pub(super) fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
+    if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+        return eval_comparison_truth_with_enum_catalog(
+            op,
+            l,
+            r,
+            &ProductionControl::uncontrolled(),
+            ctx.engine.and_then(super::EngineHook::enum_labels),
+            None,
+        )
+        .map(|value| Some(value.map_or(Value::Null, Value::Bool)));
+    }
     if let Some(value) = super::enums::eval_comparison(
         op,
         l,

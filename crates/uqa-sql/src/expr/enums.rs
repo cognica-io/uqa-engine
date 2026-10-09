@@ -512,6 +512,7 @@ pub fn cast_to_enum(
     match value {
         Value::Null => Ok(Some(Value::Null)),
         Value::Enum(label) if label.type_oid() == reference.oid => Ok(Some(value.clone())),
+        Value::Datum(datum) if datum.type_oid() == reference.oid => Ok(Some(value.clone())),
         Value::Str(text) | Value::FixedChar(text) if source.is_none_or(string_category) => {
             enum_value_from_text(catalog, reference.oid, text).map(Some)
         }

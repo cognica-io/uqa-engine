@@ -46,8 +46,7 @@ pub fn eval_comparison_truth_with_control(
     Ok(out)
 }
 
-/// Observe scalar enum identities with the caller's catalog and comparison
-/// state, preserving the ordinary three-valued rules for every other carrier.
+/// Observe scalar and nested enum equality with the caller's catalog, and scalar enum ordering with its comparison state, preserving ordinary three-valued rules.
 pub fn eval_comparison_truth_with_enum_catalog(
     op: BinaryOp,
     left: &Value,
@@ -57,6 +56,10 @@ pub fn eval_comparison_truth_with_enum_catalog(
     state: Option<&super::super::enums::EnumComparisonState>,
 ) -> Result<Option<bool>> {
     control.check()?;
+    if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+        return values_equal_nullable_with_catalog(left, right, control, enums)
+            .map(|equal| equal.map(|equal| if op == BinaryOp::Equal { equal } else { !equal }));
+    }
     match super::super::enums::eval_comparison(op, left, right, enums, state)? {
         Some(Value::Bool(value)) => Ok(Some(value)),
         Some(Value::Null) => Ok(None),
@@ -89,24 +92,42 @@ pub fn values_equal_nullable_with_control(
     b: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<bool>> {
+    values_equal_nullable_with_catalog(a, b, control, None)
+}
+
+fn values_equal_nullable_with_catalog(
+    a: &Value,
+    b: &Value,
+    control: &ProductionControl<'_>,
+    enums: Option<&dyn super::super::enums::EnumLabelCatalog>,
+) -> Result<Option<bool>> {
     control.check()?;
+    if let Some(value) = super::super::enums::eval_comparison(BinaryOp::Equal, a, b, enums, None)? {
+        return match value {
+            Value::Null => Ok(None),
+            Value::Bool(value) => Ok(Some(value)),
+            _ => unreachable!("equality returns boolean or NULL"),
+        };
+    }
     if let Some(order) = super::super::datums::compare_jsonb_with_control(a, b, control)? {
         return Ok(Some(order.is_eq()));
     }
     let equal = match (a, b) {
         (Value::Null, _) | (_, Value::Null) => None,
         (Value::Datum(datum), _) => {
-            return values_equal_nullable_with_control(
+            return values_equal_nullable_with_catalog(
                 &*super::super::datums::read_with_control(datum, control)?,
                 b,
                 control,
+                enums,
             )
         }
         (_, Value::Datum(datum)) => {
-            return values_equal_nullable_with_control(
+            return values_equal_nullable_with_catalog(
                 a,
                 &*super::super::datums::read_with_control(datum, control)?,
                 control,
+                enums,
             )
         }
         (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => Some(
@@ -128,7 +149,7 @@ pub fn values_equal_nullable_with_control(
             }
             let mut unknown = false;
             for (x, y) in xs.iter().zip(ys) {
-                match values_equal_nullable_with_control(x, y, control)? {
+                match values_equal_nullable_with_catalog(x, y, control, enums)? {
                     Some(false) => return Ok(Some(false)),
                     Some(true) => {}
                     None => unknown = true,
@@ -140,7 +161,7 @@ pub fn values_equal_nullable_with_control(
                 Some(true)
             }
         }
-        _ => Some(equal_sql_values(a, b, control)?),
+        _ => Some(equal_values(a, b, control, enums, false)?),
     };
     Ok(equal)
 }
@@ -372,10 +393,6 @@ pub fn value_comparison_can_fail(value: &Value) -> bool {
             .any(|(_, value)| value_comparison_can_fail(value)),
         _ => false,
     }
-}
-
-fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>) -> Result<bool> {
-    equal_values(left, right, control, None, false)
 }
 
 /// Compare already-bound group/hash keys without enum output. Physical enum

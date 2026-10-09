@@ -15,6 +15,98 @@ fn physical(oid: u32) -> Value {
     Value::Datum(DatumValue::new(16_384, 0, oid.to_le_bytes().to_vec()))
 }
 
+fn nested(kind: usize, first: Value, second: Value) -> Value {
+    match kind {
+        0 => Value::Array(uqa_core::ArrayValue::try_new(vec![first, second]).unwrap()),
+        1 => Value::Record(vec![("e".into(), first), ("n".into(), second)]),
+        2 => Value::Row(vec![first, second].into()),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn nested_enum_equality_preserves_raw_identity_nulls_and_lazy_fields() {
+    use crate::expr::binary::eval_comparison_truth_with_enum_catalog as compare;
+    use uqa_core::{memory::MemoryBudget, memory::ProductionControl, CancellationToken};
+
+    let catalog = Catalog::new();
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let malformed = Value::Datum(DatumValue::new(16_384, 0, vec![1]));
+    for kind in 0..3 {
+        let apply = |op, left: &Value, right: &Value| {
+            compare(op, left, right, &control, Some(&catalog), None)
+        };
+        let same = nested(kind, physical(1), Value::Null);
+        let different = nested(kind, physical(3), Value::Null);
+        assert_eq!(
+            apply(BinaryOp::Equal, &same, &same).unwrap(),
+            (kind != 2).then_some(true)
+        );
+        assert_eq!(
+            apply(BinaryOp::Equal, &same, &different).unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            apply(BinaryOp::NotEqual, &same, &different).unwrap(),
+            Some(true)
+        );
+        let left = nested(kind, physical(1), malformed.clone());
+        let right = nested(kind, physical(3), malformed.clone());
+        assert_eq!(apply(BinaryOp::Equal, &left, &right).unwrap(), Some(false));
+        assert_eq!(
+            apply(BinaryOp::Equal, &left, &left).unwrap_err().sqlstate(),
+            Some("XX001")
+        );
+        assert_eq!(budget.used(), 0);
+    }
+    token.cancel();
+    assert_eq!(
+        compare(
+            BinaryOp::Equal,
+            &physical(1),
+            &physical(1),
+            &control,
+            Some(&catalog),
+            None
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
+fn syntax_nested_enum_equality_covers_borrowed_and_evaluated_operands() {
+    let catalog = Catalog::new();
+    let context = crate::expr::EvalContext::new(None, &[]).with_engine(&catalog);
+    for kind in 0..3 {
+        let operand = crate::ast::Expr::Literal(nested(kind, physical(1), Value::Int(0)));
+        for left in [
+            operand.clone(),
+            crate::ast::Expr::Case {
+                base: None,
+                when: vec![(
+                    crate::ast::Expr::Literal(Value::Bool(true)),
+                    operand.clone(),
+                )],
+                else_branch: None,
+            },
+        ] {
+            let expression = crate::ast::Expr::Binary {
+                op: BinaryOp::Equal,
+                lhs: Box::new(left),
+                rhs: Box::new(operand.clone()),
+            };
+            assert_eq!(
+                crate::expr::eval(&expression, &context).unwrap(),
+                Value::Bool(true)
+            );
+        }
+    }
+}
+
 #[test]
 fn scalar_operators_use_oid_identity_and_the_same_order_cache() {
     let catalog = Catalog::new();

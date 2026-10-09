@@ -12,6 +12,48 @@ use uqa_core::{EnumLabelKey, EnumValue};
 struct EnumCatalog;
 
 #[test]
+fn same_type_enum_cast_preserves_unread_physical_identity() {
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for bytes in [1_u32.to_le_bytes().to_vec(), vec![1]] {
+        let input = Value::Datum(uqa_core::DatumValue::new(16_384, 0, bytes));
+        for source in [None, Some("color")] {
+            let value = cast_value_with_type_resolution_with_control(
+                &input,
+                source,
+                "color",
+                Some(&EnumCatalog),
+                &control,
+            )
+            .unwrap();
+            assert!(value.has_same_representation(&input));
+            assert_eq!(budget.used(), value.reserved_bytes());
+            drop(value);
+            assert_eq!(budget.used(), 0);
+        }
+    }
+    let different = Value::Datum(uqa_core::DatumValue::new(
+        16_400,
+        0,
+        1_u32.to_le_bytes().to_vec(),
+    ));
+    assert_eq!(
+        cast_value_with_type_resolution_with_control(
+            &different,
+            None,
+            "color",
+            Some(&EnumCatalog),
+            &control,
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("42846")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn retained_enum_oids_fill_legacy_carriers_and_preserve_unread_values() {
     let catalog = Some(&EnumCatalog as &dyn EnumLabelCatalog);
     let fresh = crate::expr::enums::enum_value_from_text(catalog, 16_384, "renamed").unwrap();
