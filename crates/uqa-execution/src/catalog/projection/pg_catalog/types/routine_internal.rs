@@ -6,11 +6,9 @@
 
 //! Catalog-only argument types used by builtin input, output and support routines.
 
-use super::{
-    schema_oid, special_pg_type_catalog_row, PgTypeCatalogMetadata, PgTypeRoutineOids, ResultRow,
-};
+use super::{schema_oid, PgTypeCatalogMetadata, PgTypeRoutineOids};
 
-pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
+pub(super) fn metadata() -> impl Iterator<Item = PgTypeCatalogMetadata<'static>> {
     [
         (
             3115,
@@ -56,7 +54,7 @@ pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
             align,
             storage,
         )| {
-            special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            PgTypeCatalogMetadata {
                 oid,
                 name: name.into(),
                 namespace_oid: schema_oid("pg_catalog"),
@@ -83,7 +81,7 @@ pub(super) fn rows() -> impl Iterator<Item = ResultRow> {
                 base_oid: 0,
                 type_modifier: -1,
                 collation_oid: 0,
-            })
+            }
         },
     )
 }

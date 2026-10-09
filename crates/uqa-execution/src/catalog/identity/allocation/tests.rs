@@ -617,3 +617,36 @@ fn relation_oids_follow_heap_create_with_catalog_order() {
         }
     );
 }
+
+#[test]
+fn type_reservations_check_both_catalog_generations_without_projecting_type_rows() {
+    use crate::catalog::projection::TYPE_PROJECTION_BUILDS;
+    for after_refresh in [false, true] {
+        let session = Session::new();
+        let candidate = 16_384;
+        let mut snapshot = domain_occupied(50_001).snapshot().clone();
+        let domain = std::sync::Arc::make_mut(&mut snapshot.definitions.domains)
+            .get_mut("hidden_schema.peer")
+            .unwrap();
+        domain.oid = candidate;
+        domain.array_oid = Some(candidate + 1);
+        let occupied = CatalogReadView::new(snapshot);
+        if after_refresh {
+            *session.refresh.lock() = Some(occupied);
+        } else {
+            *session.current.write() = occupied;
+        }
+        let before = TYPE_PROJECTION_BUILDS.get();
+        let oid = session
+            .allocator()
+            .allocate_catalog_oid(CatalogOidClass::Type, &[12; 16])
+            .unwrap();
+        assert_eq!(oid, i64::from(candidate + 2));
+        assert_eq!(TYPE_PROJECTION_BUILDS.get(), before);
+        assert!(session.available_class(CatalogOidClass::Type, i64::from(candidate)));
+        assert!(session.available_class(CatalogOidClass::Type, i64::from(candidate + 1)));
+        assert!(!session.available_class(CatalogOidClass::Type, oid));
+        session.locks.release_mark_above(1, 2);
+        assert!(session.available_class(CatalogOidClass::Type, oid));
+    }
+}

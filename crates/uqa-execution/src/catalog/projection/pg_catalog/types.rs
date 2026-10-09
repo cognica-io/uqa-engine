@@ -6,8 +6,16 @@
 
 //! Static `pg_type` and `pg_range` projection.
 
+mod builtins;
 mod polymorphic;
+mod special;
+pub(in crate::catalog::projection) use builtins::builtin_type_oid_in_use;
 mod routine_internal;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TYPE_PROJECTION_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, RangeSubtype};
@@ -49,97 +57,9 @@ fn build_pg_type_rows(
     resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
-    let catalog_types = [
-        (ColumnType::Boolean, "B", true, "b"),
-        (ColumnType::Bytea, "U", false, "b"),
-        (ColumnType::InternalChar, "Z", false, "b"),
-        (ColumnType::Name, "S", false, "b"),
-        (ColumnType::BigInteger, "N", false, "b"),
-        (ColumnType::Int2Vector, "A", false, "b"),
-        (ColumnType::SmallInteger, "N", false, "b"),
-        (ColumnType::Integer, "N", false, "b"),
-        (ColumnType::Regproc, "N", false, "b"),
-        (ColumnType::Regprocedure, "N", false, "b"),
-        (ColumnType::Regclass, "N", false, "b"),
-        (ColumnType::Text, "S", true, "b"),
-        (ColumnType::RefCursor, "U", false, "b"),
-        (ColumnType::Oid, "N", true, "b"),
-        (ColumnType::Xid, "U", false, "b"),
-        (ColumnType::OidVector, "A", false, "b"),
-        (ColumnType::Json, "U", false, "b"),
-        (ColumnType::PgNodeTree, "Z", false, "b"),
-        (ColumnType::Real, "N", false, "b"),
-        (ColumnType::DoublePrecision, "N", true, "b"),
-        (ColumnType::AclItem, "U", false, "b"),
-        (ColumnType::Bpchar, "S", false, "b"),
-        (ColumnType::Varchar(None), "S", false, "b"),
-        (ColumnType::Date, "D", false, "b"),
-        (ColumnType::Time, "D", false, "b"),
-        (ColumnType::Timestamp, "D", false, "b"),
-        (ColumnType::TimestampTz, "D", true, "b"),
-        (ColumnType::Interval, "T", true, "b"),
-        (ColumnType::TimeTz, "D", false, "b"),
-        (
-            ColumnType::Numeric {
-                precision: None,
-                scale: None,
-            },
-            "N",
-            false,
-            "b",
-        ),
-        (ColumnType::Regtype, "N", false, "b"),
-        (ColumnType::Regcollation, "N", false, "b"),
-        (ColumnType::Regnamespace, "N", false, "b"),
-        (ColumnType::Regrole, "N", false, "b"),
-        (ColumnType::AnyArray, "P", false, "p"),
-        (ColumnType::Uuid, "U", false, "b"),
-        (ColumnType::JsonB, "U", false, "b"),
-        (ColumnType::Range(RangeSubtype::Integer), "R", false, "r"),
-        (ColumnType::Range(RangeSubtype::Numeric), "R", false, "r"),
-        (ColumnType::Range(RangeSubtype::Timestamp), "R", false, "r"),
-        (
-            ColumnType::Range(RangeSubtype::TimestampTz),
-            "R",
-            false,
-            "r",
-        ),
-        (ColumnType::Range(RangeSubtype::Date), "R", false, "r"),
-        (ColumnType::Range(RangeSubtype::BigInteger), "R", false, "r"),
-        (
-            ColumnType::Multirange(RangeSubtype::Integer),
-            "R",
-            false,
-            "m",
-        ),
-        (
-            ColumnType::Multirange(RangeSubtype::Numeric),
-            "R",
-            false,
-            "m",
-        ),
-        (
-            ColumnType::Multirange(RangeSubtype::Timestamp),
-            "R",
-            false,
-            "m",
-        ),
-        (
-            ColumnType::Multirange(RangeSubtype::TimestampTz),
-            "R",
-            false,
-            "m",
-        ),
-        (ColumnType::Multirange(RangeSubtype::Date), "R", false, "m"),
-        (
-            ColumnType::Multirange(RangeSubtype::BigInteger),
-            "R",
-            false,
-            "m",
-        ),
-        (ColumnType::Vector(0), "U", false, "b"),
-        (ColumnType::Tensor(0), "U", false, "b"),
-    ];
+    #[cfg(test)]
+    TYPE_PROJECTION_BUILDS.set(TYPE_PROJECTION_BUILDS.get() + 1);
+    let catalog_types = builtins::CATALOG_TYPES;
     let mut types = catalog_types
         .iter()
         .cloned()
@@ -164,8 +84,8 @@ fn build_pg_type_rows(
             )
         })
         .collect::<Vec<_>>();
-    types.extend(polymorphic::rows());
-    types.extend(routine_internal::rows());
+    types.extend(polymorphic::metadata().map(special_pg_type_catalog_row));
+    types.extend(routine_internal::metadata().map(special_pg_type_catalog_row));
     for domain in super::super::schema::information_schema_domains() {
         let ColumnType::Domain { oid, base, .. } = &domain else {
             unreachable!("information schema type constructor returned a non-domain")
@@ -225,176 +145,7 @@ fn build_pg_type_rows(
         ));
     }
     types.extend(super::super::ag_catalog::age_pg_type_rows());
-    types.extend([
-        special_pg_type_catalog_row(PgTypeCatalogMetadata {
-            oid: 2249,
-            name: "record".into(),
-            namespace_oid: schema_oid("pg_catalog"),
-            len: -1,
-            by_value: false,
-            kind: "p",
-            category: "P",
-            preferred: false,
-            relation_oid: 0,
-            subscript: 0,
-            element_oid: 0,
-            array_oid: 2287,
-            routines: PgTypeRoutineOids {
-                input: 2290,
-                output: 2291,
-                receive: 2402,
-                send: 2403,
-                modifier_input: 0,
-                modifier_output: 0,
-                analyze: 0,
-            },
-            align: "d",
-            storage: "x",
-            base_oid: 0,
-            type_modifier: -1,
-            collation_oid: 0,
-        }),
-        special_pg_type_catalog_row(PgTypeCatalogMetadata {
-            oid: 705,
-            name: "unknown".into(),
-            namespace_oid: schema_oid("pg_catalog"),
-            len: -2,
-            by_value: false,
-            kind: "p",
-            category: "X",
-            preferred: false,
-            relation_oid: 0,
-            subscript: 0,
-            element_oid: 0,
-            array_oid: 0,
-            routines: PgTypeRoutineOids {
-                input: 109,
-                output: 110,
-                receive: 2416,
-                send: 2417,
-                modifier_input: 0,
-                modifier_output: 0,
-                analyze: 0,
-            },
-            align: "c",
-            storage: "p",
-            base_oid: 0,
-            type_modifier: -1,
-            collation_oid: 0,
-        }),
-        special_pg_type_catalog_row(PgTypeCatalogMetadata {
-            oid: 2278,
-            name: "void".into(),
-            namespace_oid: schema_oid("pg_catalog"),
-            len: 4,
-            by_value: true,
-            kind: "p",
-            category: "P",
-            preferred: false,
-            relation_oid: 0,
-            subscript: 0,
-            element_oid: 0,
-            array_oid: 0,
-            routines: PgTypeRoutineOids {
-                input: 2298,
-                output: 2299,
-                receive: 3120,
-                send: 3121,
-                modifier_input: 0,
-                modifier_output: 0,
-                analyze: 0,
-            },
-            align: "i",
-            storage: "p",
-            base_oid: 0,
-            type_modifier: -1,
-            collation_oid: 0,
-        }),
-        special_pg_type_catalog_row(PgTypeCatalogMetadata {
-            oid: 2287,
-            name: "_record".into(),
-            namespace_oid: schema_oid("pg_catalog"),
-            len: -1,
-            by_value: false,
-            kind: "p",
-            category: "P",
-            preferred: false,
-            relation_oid: 0,
-            subscript: 6179,
-            element_oid: 2249,
-            array_oid: 0,
-            routines: PgTypeRoutineOids {
-                input: 750,
-                output: 751,
-                receive: 2400,
-                send: 2401,
-                modifier_input: 0,
-                modifier_output: 0,
-                analyze: 3816,
-            },
-            align: "d",
-            storage: "x",
-            base_oid: 0,
-            type_modifier: -1,
-            collation_oid: 0,
-        }),
-        special_pg_type_catalog_row(PgTypeCatalogMetadata {
-            oid: 13_314,
-            name: "_information_schema_catalog_name".into(),
-            namespace_oid: schema_oid("information_schema"),
-            len: -1,
-            by_value: false,
-            kind: "b",
-            category: "A",
-            preferred: false,
-            relation_oid: 0,
-            subscript: 6179,
-            element_oid: 13_315,
-            array_oid: 0,
-            routines: PgTypeRoutineOids {
-                input: 750,
-                output: 751,
-                receive: 2400,
-                send: 2401,
-                modifier_input: 0,
-                modifier_output: 0,
-                analyze: 3816,
-            },
-            align: "d",
-            storage: "x",
-            base_oid: 0,
-            type_modifier: -1,
-            collation_oid: 0,
-        }),
-        special_pg_type_catalog_row(PgTypeCatalogMetadata {
-            oid: 13_315,
-            name: "information_schema_catalog_name".into(),
-            namespace_oid: schema_oid("information_schema"),
-            len: -1,
-            by_value: false,
-            kind: "c",
-            category: "C",
-            preferred: false,
-            relation_oid: 13_313,
-            subscript: 0,
-            element_oid: 0,
-            array_oid: 13_314,
-            routines: PgTypeRoutineOids {
-                input: 2290,
-                output: 2291,
-                receive: 2402,
-                send: 2403,
-                modifier_input: 0,
-                modifier_output: 0,
-                analyze: 0,
-            },
-            align: "d",
-            storage: "x",
-            base_oid: 0,
-            type_modifier: -1,
-            collation_oid: 0,
-        }),
-    ]);
+    types.extend(special::metadata().map(special_pg_type_catalog_row));
     for domain in catalog.domains() {
         let ty = domain.column_type();
         let owner = domain.owner.oid;

@@ -151,6 +151,8 @@ mod output;
 pub use output::CatalogOutput;
 mod partitioning;
 mod pg_catalog;
+#[cfg(test)]
+pub(crate) use pg_catalog::TYPE_PROJECTION_BUILDS;
 mod pg_namespace;
 mod pg_proc;
 pub(crate) use pg_proc::{routine_oid_in_use, user_routine_catalog_oid};

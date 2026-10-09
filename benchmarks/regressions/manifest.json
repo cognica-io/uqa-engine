@@ -824,6 +824,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_occupancy_reads_identities_without_building_type_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/identity_claims/tests.rs",
+      "capability": "Type OID occupancy",
+      "workload": "Four occupied/free type OID probes against an empty catalog.",
+      "invariant": "Eight inquiries generate zero complete pg_type projections.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_membership_matches_complete_projection_without_producing_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/identity_claims/tests/types.rs",
+      "capability": "Type OID occupancy",
+      "workload": "Builtin types and arrays, domains with recorded and legacy arrays, enums, composites, views, materialized views, foreign tables and zero, one or 256 unrelated relations.",
+      "invariant": "Every projected type identity remains occupied; free and other-class OIDs stay free, with zero type-row builds during the inquiries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_membership_uses_the_selected_generation_after_rename_removal_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/identity_claims/tests/types.rs",
+      "capability": "Type OID occupancy",
+      "workload": "Retained, renamed, removed and restored catalog generations with user type and relation identities.",
+      "invariant": "Occupancy follows only the selected generation without producing type rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/identity_claims/tests/types.rs",
+      "capability": "Type OID occupancy",
+      "workload": "Recorded view, materialized-view, foreign and graph-label row/array identities.",
+      "invariant": "Row and array OIDs occupy pg_type independently of their relation-class identities, without type-row projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_reservations_check_both_catalog_generations_without_projecting_type_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests.rs",
+      "capability": "Type OID occupancy",
+      "workload": "Domain and array collisions present before allocation or appearing after the object lock wait.",
+      "invariant": "Allocation skips both occupied identities, releases losing locks, retains only the final address until savepoint release, and builds zero type rows.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

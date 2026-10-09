@@ -65,7 +65,7 @@ pub fn catalog_oid_in_use(
             }
             trigger_address_in_use(catalog, resolution, oid)
         }
-        CatalogOidClass::Type => type_oid_in_use(catalog, resolution, oid),
+        CatalogOidClass::Type => Ok(type_oid_in_use(catalog, oid)),
         CatalogOidClass::EnumLabel => Ok(catalog
             .enums()
             .any(|definition| definition.label_oids().any(|label| i64::from(label) == oid))),
@@ -218,15 +218,27 @@ fn rewrite_oid_in_use(catalog: &CatalogReadView, oid: i64) -> Result<bool, SQLEr
 }
 
 /// Every projected `pg_type` row and every relation row type occupies the type OID space.
-fn type_oid_in_use(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    oid: i64,
-) -> Result<bool, SQLError> {
-    if super::pg_catalog::build_pg_type_without_defaults(catalog, resolution)?.iter().any(
-        |row| matches!(row.get("oid"), Some(uqa_core::Value::Int(existing)) if *existing == oid),
-    ) {
-        return Ok(true);
+fn type_oid_in_use(catalog: &CatalogReadView, oid: i64) -> bool {
+    if super::pg_catalog::builtin_type_oid_in_use(oid)
+        || catalog.domains().any(|domain| {
+            i64::from(domain.oid) == oid
+                || uqa_sql::catalog::type_metadata::pg_domain_array_oid(
+                    domain.oid,
+                    domain.array_oid,
+                ) == oid
+        })
+        || catalog.enums().any(|definition| {
+            [definition.oid, definition.array_oid]
+                .into_iter()
+                .any(|claimed| i64::from(claimed) == oid)
+        })
+        || catalog.composites().any(|definition| {
+            [definition.oid, definition.array_oid]
+                .into_iter()
+                .any(|claimed| i64::from(claimed) == oid)
+        })
+    {
+        return true;
     }
     // Relation row types and their array types occupy `pg_type` OIDs too.
     let claims = |oids: uqa_sql::catalog::relation_oids::RelationCatalogOids| {
@@ -236,7 +248,7 @@ fn type_oid_in_use(
             .any(|claimed| i64::from(claimed) == oid)
     };
     let snapshot = catalog.snapshot();
-    Ok(snapshot
+    snapshot
         .tables
         .values()
         .any(|table| claims(table.catalog_oids))
@@ -249,7 +261,7 @@ fn type_oid_in_use(
             .definitions
             .foreign_tables
             .values()
-            .any(|table| claims(table.relation_oids())))
+            .any(|table| claims(table.relation_oids()))
 }
 
 /// Return whether this exact row already belongs to the target, rejecting any other claim on its OID or incarnation.

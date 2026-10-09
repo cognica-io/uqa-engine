@@ -1,0 +1,32 @@
+# Catalog performance corrections
+
+This ledger preserves the performance issues opened on 2026-10-09 in Asia/Seoul. Completed issues #639, #647 and #657 are already merged. The six open issues below remain in scope until their implementation and verification requirements are satisfied; a completed unit does not complete the whole ledger. Use small independent PRs and close only the issues actually resolved by each merge.
+
+| Issue | Required correction and evidence | Status |
+| --- | --- | --- |
+| [#661](https://github.com/cognica-io/uqa-engine/issues/661) | Check type OID occupancy from identities without producing full `pg_type` rows. Cover builtin and user type families, retained/current generations and both sides of the allocation lock wait; retain collision, rollback, savepoint and cancellation behavior. | Implemented and locally verified in PR #670; merge pending |
+| [#660](https://github.com/cognica-io/uqa-engine/issues/660) | Reuse the correct retained catalog in scoped scalar, permission, overload and read-only view callbacks. Bound fresh captures independently of result rows and unrelated views; preserve role/ACL checks, nested command freshness and portal snapshots. | Open |
+| [#659](https://github.com/cognica-io/uqa-engine/issues/659) | Apply safe requested-field and predicate bounds before virtual catalog metadata production; share derived output metadata across expressions and aliases. Verify narrow, missing and self-joined sources, selected definitions, visibility and catalog transitions. | Open |
+| [#662](https://github.com/cognica-io/uqa-engine/issues/662) | Avoid unrelated object collection for definition inquiries and repeated dependency construction for one retained generation. Verify exact definitions, complete enumeration, concurrent initialization and generation changes. | Open |
+| [#663](https://github.com/cognica-io/uqa-engine/issues/663) | Remove discarded and unchanged full snapshot copies in DDL/restoration while preserving deliberate candidate isolation, post-lock freshness, partition identity and malformed metadata validation. | Open |
+| [#653](https://github.com/cognica-io/uqa-engine/issues/653) | Investigate the retained controlled-runner calibration/resource evidence, identify and correct a supported cause of uncertainty, and obtain fresh automatic qualification after the correction. Preserve the original inconclusive result, all observations, protocol and limits. | Open |
+
+## Ownership and verification
+
+Execution owns catalog identities, virtual-row production, derived metadata and DDL algorithms. SQL owns type identity and semantic rules. Engine supplies catalog/session/transaction adapters and retains the requested immutable generation. The Execution, SQL and Engine manifests, enabled features, dependency policy and manual ownership boundaries have been inspected; these corrections require no new dependency or feature edge.
+
+Use deterministic work counters and synthetic fixtures in the existing owning-crate test targets to prove the eliminated work, with semantic assertions and existing concurrency/restoration regressions. Run focused local checks once the affected unit is ready, then normal pushes drive automatic CI. Timing acceptance uses only the controlled runner and its independent noise bound; generated reports and diagnostic traces remain ignored artifacts. The source-identified catalog defects do not depend on waiting for the timing investigation.
+
+## Type occupancy preservation
+
+For a retained catalog generation $C$, let $B$ be its database-independent builtin type identities, $U(C)$ its domain, enum and standalone-composite identities and arrays, and $R(C)$ its relation and graph-label row/array identities. Type occupancy is membership in $B\cup U(C)\cup R(C)$. Reading these identities directly must return the same membership as the complete type projection and explicit relation/graph claims, without allocating or formatting unrelated result rows. The builtin set is immutable; user identities are read from the caller-selected generation rather than a global mutable cache. Allocation still checks occupancy before acquiring its object lock and after refreshing shared state following the wait. Thus an unchanged catalog yields the same selected address, while a newly occupied address is rejected before retention. Transaction/savepoint lock ownership, cancellation and rollback remain with the existing reservation owner; no query, payload or scoring operation changes.
+
+## Evidence
+
+The initial baseline is main `d74153cf4005e7ca59e4288b25b1258b9fa698b1`. The retained #653 artifact is from [automatic run 37864044436](https://github.com/cognica-io/uqa-engine/actions/runs/37864044436), for source `e893a6800bd6169e16d3704b809988c48e153373`; downloading and inspecting it does not initiate another measurement. Implementation and verification results will be recorded here with each completed unit.
+
+### Type OID membership
+
+PR #670 replaces full `pg_type` projection with identity membership. Immutable builtin OIDs are derived once from the same metadata used by catalog output; user domains, enums, composites and relation/graph row arrays come from the selected retained catalog. The reproducer performed eight full type projections for eight occupied/free probes before the correction and zero afterwards. Zero, one and 256 unrelated relations, recorded and legacy array identities, retained/renamed/removed generations and refreshed post-lock collisions are covered. All 248 Execution catalog tests and fourteen Engine OID-order, type-metadata and legacy-reopen tests pass, including native SQLite, SQLite Key/Value and redb reopening. Five deterministic work tests are registered in the automatic Linux/macOS inventory, whose validator and nineteen runner tests pass. Strict Execution library/test Clippy, rustfmt, dependency/ownership, harness, header and file-size checks also pass. These are work-count and correctness results, not elapsed-time acceptance.
+
+The #653 artifact signatures, resource-file hashes, reference-only noise factors and analytical decisions have been independently reverified. Reference invocations at calibration positions 1/2 and 25/26 contain the large variation; their measured main-task queue delays remain about 22–27 ms over whole invocations of about 16–18 seconds, and memory-pressure totals do not advance. Those observations do not yet identify a root cause or qualify the inconclusive analytical result. The original report and all observations remain unchanged.
