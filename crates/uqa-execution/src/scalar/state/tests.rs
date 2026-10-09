@@ -14,6 +14,42 @@ use uqa_sql::{
     ResultRow, SQLError,
 };
 
+#[test]
+fn analytical_numeric_predicates_do_not_probe_enum_call_state() {
+    let uqa_sql::Statement::Select(mut query) = uqa_sql::compile(
+        "SELECT ship_day BETWEEN 365 AND 2190 AND discount BETWEEN 2 AND 8 AND quantity < 40",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("SELECT predicate");
+    };
+    let prepared = PreparedExpressions::scalar(
+        uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar,
+    );
+    assert_eq!(prepared.calls().enums.len(), 5);
+    COMPARISON_LOOKUPS.with(|count| count.set(0));
+    for id in 0..20_000 {
+        let sample = id ^ 20_260_802;
+        let (ship_day, discount, quantity) = (sample % 2_500, sample % 11, 1 + sample % 50);
+        let row = ResultRow::from([
+            ("ship_day".into(), Value::Int(ship_day)),
+            ("discount".into(), Value::Int(discount)),
+            ("quantity".into(), Value::Int(quantity)),
+        ]);
+        let context = ScalarEvalContext::new(Some(&row), &[])
+            .with_function_hook(&Catalog)
+            .with_function_states(prepared.calls());
+        assert_eq!(
+            eval_scalar(&prepared, &context).unwrap(),
+            Value::Bool(
+                (365..=2190).contains(&ship_day) && (2..=8).contains(&discount) && quantity < 40
+            ),
+            "row {id}"
+        );
+    }
+    assert_eq!(COMPARISON_LOOKUPS.with(std::cell::Cell::get), 0);
+}
+
 struct Catalog;
 
 impl EnumLabelCatalog for Catalog {
@@ -221,4 +257,46 @@ fn binary_operators_keep_independent_state_after_owner_moves() {
         Value::Bool(true)
     );
     assert_eq!(prepared.calls().enums.len(), 2);
+}
+
+#[test]
+fn between_bounds_retain_separate_enum_state_after_primitive_rows() {
+    let prepared = PreparedExpressions::scalar(ScalarExpr::Between {
+        expr: Box::new(ScalarExpr::Column("value".into())),
+        low: Box::new(ScalarExpr::Column("low".into())),
+        high: Box::new(ScalarExpr::Column("high".into())),
+    });
+    let evaluate = |prepared: &PreparedExpressions<ScalarExpr>, values: [Value; 3]| {
+        let row = ["value", "low", "high"]
+            .into_iter()
+            .map(str::to_owned)
+            .zip(values)
+            .collect::<ResultRow>();
+        let context = ScalarEvalContext::new(Some(&row), &[])
+            .with_function_hook(&Catalog)
+            .with_function_states(prepared.calls());
+        eval_scalar(prepared, &context)
+    };
+    let physical = |oid: u32| Value::Datum(DatumValue::new(16_400, 0, oid.to_le_bytes().to_vec()));
+    COMPARISON_LOOKUPS.with(|count| count.set(0));
+    assert_eq!(
+        evaluate(&prepared, [Value::Int(1), Value::Int(0), Value::Int(2)]).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(COMPARISON_LOOKUPS.with(std::cell::Cell::get), 0);
+    // The even-OID lower comparison does not initialize its private state.
+    // The odd-OID upper comparison retains first_enum for later rows.
+    assert_eq!(
+        evaluate(&prepared, [physical(4), physical(2), physical(5)]).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(COMPARISON_LOOKUPS.with(std::cell::Cell::get), 2);
+    let prepared = Box::new(prepared);
+    let error = evaluate(&prepared, [physical(8), physical(2), physical(11)]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error.to_string().contains("first_enum"));
+    assert_eq!(
+        evaluate(&prepared.clone(), [physical(8), physical(2), physical(11)]).unwrap(),
+        Value::Bool(false)
+    );
 }

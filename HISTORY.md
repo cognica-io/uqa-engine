@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reduce scalar filter overhead for same-type integer, floating-point and Boolean comparisons by resolving enum call state only when needed, preserving PostgreSQL coercions, NULLs, evaluation order, retained enum state and cancellation.
+
 - Avoid discarded catalog captures during DDL and unnecessary snapshot copies during index-name restoration and partition key preparation, while preserving validation, identities, rollback and post-lock freshness.
 
 - Preserve lazy OLD/NEW view expressions in RULE conditions, including CASE, COALESCE and nested scalar subqueries, without discarding required volatile projection effects or live whole-row fields. Retain analyzed constants and coercions in stored RULE conditions so enum definitions follow label renames and rollback.

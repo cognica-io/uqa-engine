@@ -175,13 +175,13 @@ pub(super) fn eval_scalar_inner(
                     | BinaryOp::Greater
                     | BinaryOp::GreaterEqual
             ) {
-                let value = uqa_sql::expr::eval_comparison_truth_with_engine(
+                let value = uqa_sql::expr::eval_comparison_truth_with_deferred_state(
                     *op,
                     &left,
                     &right,
                     control,
                     context.function_hook(),
-                    context.enum_binary_comparison_state(lhs),
+                    || context.enum_binary_comparison_state(lhs),
                 )?;
                 return plain(value.map_or(Value::Null, Value::Bool), control);
             }
@@ -457,20 +457,18 @@ fn eval_between(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let states = [
-        context.enum_binary_comparison_state(low),
-        context.enum_binary_comparison_state(high),
-    ];
-    eval_between_states(expression, low, high, context, control, states)
+    eval_between_states(expression, low, high, context, control, |index| {
+        context.enum_binary_comparison_state(if index == 0 { low } else { high })
+    })
 }
 
-fn eval_between_states(
+fn eval_between_states<'a>(
     expression: &ScalarExpr,
     low: &ScalarExpr,
     high: &ScalarExpr,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
-    states: [Option<&uqa_sql::expr::enums::EnumComparisonState>; 2],
+    state: impl Fn(usize) -> Option<&'a uqa_sql::expr::enums::EnumComparisonState>,
 ) -> Result<Produced<Value>, SQLError> {
     let ge = {
         let value = eval_scalar_inner(expression, context, control)?;
@@ -481,7 +479,7 @@ fn eval_between_states(
             &low,
             context,
             control,
-            states[0],
+            || state(0),
         )?
     };
     if ge == Some(false) {
@@ -489,14 +487,9 @@ fn eval_between_states(
     }
     let value = eval_scalar_inner(expression, context, control)?;
     let high = eval_scalar_inner(high, context, control)?;
-    let le = compare_values(
-        BinaryOp::LessEqual,
-        &value,
-        &high,
-        context,
-        control,
-        states[1],
-    )?;
+    let le = compare_values(BinaryOp::LessEqual, &value, &high, context, control, || {
+        state(1)
+    })?;
     plain(
         match (ge, le) {
             (_, Some(false)) => Value::Bool(false),
@@ -518,11 +511,13 @@ fn eval_between_symmetric(
         ));
     };
     let states = context.enum_comparison_states(args);
-    let forward = eval_between_states(value, low, high, context, control, [states[0], states[1]])?;
+    let forward = eval_between_states(value, low, high, context, control, |index| states[index])?;
     if *forward == Value::Bool(true) {
         return Ok(forward);
     }
-    let backward = eval_between_states(value, high, low, context, control, [states[2], states[3]])?;
+    let backward = eval_between_states(value, high, low, context, control, |index| {
+        states[index + 2]
+    })?;
     plain(
         match (&*forward, &*backward) {
             (_, Value::Bool(true)) => Value::Bool(true),
@@ -533,15 +528,15 @@ fn eval_between_symmetric(
     )
 }
 
-fn compare_values(
+fn compare_values<'a>(
     op: BinaryOp,
     left: &Value,
     right: &Value,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
-    state: Option<&uqa_sql::expr::enums::EnumComparisonState>,
+    state: impl FnOnce() -> Option<&'a uqa_sql::expr::enums::EnumComparisonState>,
 ) -> Result<Option<bool>, SQLError> {
-    uqa_sql::expr::eval_comparison_truth_with_engine(
+    uqa_sql::expr::eval_comparison_truth_with_deferred_state(
         op,
         left,
         right,
@@ -562,7 +557,14 @@ fn eval_in_list(
     let mut saw_null = matches!(*needle, Value::Null);
     for item in list {
         let candidate = eval_scalar_inner(item, context, control)?;
-        match compare_values(BinaryOp::Equal, &needle, &candidate, context, control, None)? {
+        match compare_values(
+            BinaryOp::Equal,
+            &needle,
+            &candidate,
+            context,
+            control,
+            || None,
+        )? {
             Some(true) => return plain(Value::Bool(!negated), control),
             None => saw_null = true,
             _ => {}
@@ -592,7 +594,7 @@ fn eval_case(
         let condition = eval_scalar_inner(condition, context, control)?;
         let matched = match &base {
             Some(base) => {
-                compare_values(BinaryOp::Equal, base, &condition, context, control, None)?
+                compare_values(BinaryOp::Equal, base, &condition, context, control, || None)?
                     == Some(true)
             }
             None => truthy(&condition),

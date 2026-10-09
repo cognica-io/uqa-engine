@@ -59,6 +59,40 @@ pub fn eval_comparison_truth_with_engine(
     engine: Option<&dyn crate::expr::EngineHook>,
     state: Option<&EnumComparisonState>,
 ) -> Result<Option<bool>> {
+    eval_comparison_truth_with_deferred_state(op, left, right, control, engine, || state)
+}
+
+/// Primitive scalar comparisons need no catalog or private enum call state. Resolve that state only when the evaluated carriers require the general comparison path; operand evaluation and its SQL ordering remain the caller's responsibility.
+#[inline]
+pub fn eval_comparison_truth_with_deferred_state<'a>(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+    state: impl FnOnce() -> Option<&'a EnumComparisonState>,
+) -> Result<Option<bool>> {
+    control.check()?;
+    let primitive = match (left, right) {
+        (Value::Null, _) | (_, Value::Null) => Some(None),
+        (Value::Int(_), Value::Int(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::Bool(_), Value::Bool(_)) => Some(Some(left.cmp(right))),
+        _ => None,
+    };
+    if let Some(order) = primitive {
+        return match op {
+            BinaryOp::Equal => Ok(order.map(Ordering::is_eq)),
+            BinaryOp::NotEqual => Ok(order.map(|order| !order.is_eq())),
+            BinaryOp::Less => Ok(order.map(Ordering::is_lt)),
+            BinaryOp::LessEqual => Ok(order.map(Ordering::is_le)),
+            BinaryOp::Greater => Ok(order.map(Ordering::is_gt)),
+            BinaryOp::GreaterEqual => Ok(order.map(Ordering::is_ge)),
+            _ => Err(SQLError::Internal(format!(
+                "non-comparison operator {op:?} reached comparison evaluation"
+            ))),
+        };
+    }
     let catalog = engine.map(crate::expr::value_catalog::EngineValueCatalog);
     eval_comparison_truth_with_enum_catalog(
         op,
@@ -68,7 +102,7 @@ pub fn eval_comparison_truth_with_engine(
         catalog
             .as_ref()
             .map(|catalog| catalog as &dyn crate::expr::SQLValueCatalog),
-        state,
+        state(),
     )
 }
 
