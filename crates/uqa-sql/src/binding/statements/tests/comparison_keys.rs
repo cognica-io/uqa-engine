@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL 18.6 rejects comparison keys during analysis, including empty inputs.
+//! `PostgreSQL` 18.6 rejects comparison keys during analysis, including empty inputs.
 
 use super::*;
 

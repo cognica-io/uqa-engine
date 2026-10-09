@@ -318,13 +318,9 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
             );
             let snapshot = records.snapshot(&control).unwrap();
             assert_eq!(snapshot.sequence(), receipt.sequence);
+            let record = snapshot.get(b"migration", &control).unwrap().unwrap();
             assert_eq!(
-                snapshot
-                    .get(b"migration", &control)
-                    .unwrap()
-                    .unwrap()
-                    .value()
-                    .map(|value| value.to_vec()),
+                record.value().map(|value| value.to_vec()),
                 Some(b"preserved".to_vec())
             );
             assert!(
@@ -333,14 +329,9 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
         }
         let database = redb::Database::open(&path).unwrap();
         let transaction = database.begin_read().unwrap();
+        let metadata = transaction.open_table(METADATA).unwrap();
         assert_eq!(
-            transaction
-                .open_table(METADATA)
-                .unwrap()
-                .get("format")
-                .unwrap()
-                .unwrap()
-                .value(),
+            metadata.get("format").unwrap().unwrap().value(),
             RECORD_FORMAT.to_be_bytes()
         );
     }
