@@ -14,6 +14,8 @@ mod classification;
 mod correlation;
 #[path = "automatic_updatability/insert.rs"]
 mod insert;
+#[path = "automatic_updatability/lazy_rules.rs"]
+mod lazy_rules;
 #[path = "automatic_updatability/merge.rs"]
 mod merge;
 #[path = "automatic_updatability/returning.rs"]

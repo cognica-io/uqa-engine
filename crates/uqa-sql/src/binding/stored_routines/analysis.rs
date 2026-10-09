@@ -51,6 +51,25 @@ impl CatalogRoutineAnalysisContext<'_> {
             )
         })
     }
+    pub fn bind_rule_inputs(
+        &self,
+        expression: &mut ExpressionPlan,
+        binding: &crate::catalog::events::RuleConditionBinding,
+        table: &str,
+        columns: &[(String, ColumnType)],
+    ) -> Result<(), SQLError> {
+        let schema = binding.row_schema(columns);
+        self.with_scope_result(|scope| {
+            crate::binding::rule_inputs::expand(
+                self.routines,
+                &scope.binding_context()?,
+                expression,
+                binding,
+                table,
+                &schema,
+            )
+        })
+    }
     pub fn bind_expression(
         &self,
         expression: &mut ExpressionPlan,

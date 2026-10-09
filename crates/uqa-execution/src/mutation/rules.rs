@@ -12,14 +12,16 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
-use uqa_sql::ast::{Expr, RuleEvent, Statement};
-use uqa_sql::plpgsql::{ResolvedVariable, VariableResolver};
+use uqa_sql::ast::{RuleEvent, Statement};
+use uqa_sql::plpgsql::VariableResolver;
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
 use uqa_core::RelationIdentity;
 mod context;
+mod inputs;
 pub use context::{RuleContext, RuleExpressions, RuleSecurity, RuleStatements};
+pub use inputs::RuleInputProjection;
 
 pub use crate::mutation::row_images::RuleRowImage;
 use returning::capture_rule_returning_result;
@@ -200,7 +202,7 @@ impl PreparedRuleBatch {
                             row_index,
                             row,
                             &columns,
-                            &mut |_, _, _| Ok(None),
+                            &mut |_, _, _| Ok(RuleInputProjection::default()),
                         )? {
                             matched.push(row_index);
                         }
@@ -247,7 +249,7 @@ impl PreparedRuleBatch {
                             qualification_index,
                             &mut row,
                             &columns,
-                            &mut |_, _, _| Ok(None),
+                            &mut |_, _, _| Ok(RuleInputProjection::default()),
                         )? {
                             matched.push(row);
                         }
@@ -377,7 +379,9 @@ pub fn prepare_rule_batch(
     event: RuleEvent,
     rows: Vec<RuleRowImage>,
 ) -> Result<PreparedRuleBatch, SQLError> {
-    prepare_rule_batch_with_projection(context, table, event, rows, |_, _, _| Ok(None))
+    prepare_rule_batch_with_projection(context, table, event, rows, |_, _, _| {
+        Ok(RuleInputProjection::default())
+    })
 }
 
 pub fn prepare_rule_batch_with_projection<F>(
@@ -388,7 +392,7 @@ pub fn prepare_rule_batch_with_projection<F>(
     mut project: F,
 ) -> Result<PreparedRuleBatch, SQLError>
 where
-    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
+    F: FnMut(usize, RuleRowSide, &BTreeSet<String>) -> Result<RuleInputProjection, SQLError>,
 {
     let table = context
         .analysis
@@ -487,116 +491,6 @@ fn ensure_not_recursive(table: &str, event: RuleEvent) -> Result<(), SQLError> {
     })
 }
 
-struct ProjectedRuntimeRuleResolver<'a, F> {
-    row_index: usize,
-    row: &'a mut RuleRowImage,
-    columns: &'a BTreeMap<String, RuleColumnMetadata>,
-    project: &'a mut F,
-}
-
-impl<F> ProjectedRuntimeRuleResolver<'_, F>
-where
-    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
-{
-    fn record_field(
-        &mut self,
-        side: RuleRowSide,
-        column: &str,
-    ) -> Result<ResolvedVariable, SQLError> {
-        let metadata = self
-            .columns
-            .get(column)
-            .ok_or_else(|| SQLError::UnknownColumn(column.to_string()))?;
-        let (record, doc_id) = match side {
-            RuleRowSide::Old => (&mut self.row.old, self.row.old_doc_id),
-            RuleRowSide::New => (&mut self.row.new, self.row.new_doc_id),
-        };
-        let value = if let Some(value) = record
-            .as_ref()
-            .and_then(|record| record.get(column).cloned())
-        {
-            value
-        } else if metadata.uses_document_id {
-            doc_id
-                .filter(|doc_id| uqa_sql::semantics::key_identity::is_key_document_id(*doc_id))
-                .map(i64::try_from)
-                .transpose()
-                .map_err(|_| {
-                    SQLError::TypeMismatch("document id exceeds PostgreSQL bigint".into())
-                })?
-                .map_or(Value::Null, Value::Int)
-        } else if record.is_some() {
-            let value = (self.project)(self.row_index, side, column)?.unwrap_or(Value::Null);
-            if let Some(record) = record.as_mut() {
-                record.insert(column.to_string(), value.clone());
-            }
-            value
-        } else {
-            Value::Null
-        };
-        Ok(ResolvedVariable {
-            value,
-            declared_type: Some(metadata.ty.sql_name()),
-        })
-    }
-
-    fn record(&mut self, side: RuleRowSide) -> Result<ResolvedVariable, SQLError> {
-        let mut columns = self
-            .columns
-            .iter()
-            .map(|(column, metadata)| (column.clone(), metadata.position))
-            .collect::<Vec<_>>();
-        columns.sort_by_key(|(_, position)| *position);
-        let fields = columns
-            .into_iter()
-            .map(|(column, _)| {
-                self.record_field(side, &column)
-                    .map(|field| (column, field.value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ResolvedVariable::untyped(Value::Record(fields.into())))
-    }
-}
-
-impl<F> VariableResolver for ProjectedRuntimeRuleResolver<'_, F>
-where
-    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
-{
-    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        if name.eq_ignore_ascii_case("old") {
-            return self.record(RuleRowSide::Old).map(Some);
-        }
-        if name.eq_ignore_ascii_case("new") {
-            return self.record(RuleRowSide::New).map(Some);
-        }
-        Ok(None)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if qualifier.eq_ignore_ascii_case("old") {
-            return self.record_field(RuleRowSide::Old, column).map(Some);
-        }
-        if qualifier.eq_ignore_ascii_case("new") {
-            return self.record_field(RuleRowSide::New, column).map(Some);
-        }
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
-        Ok(self
-            .resolve_name(qualifier)?
-            .map(|record| Expr::Literal(record.value)))
-    }
-}
-
 mod condition_binding;
 use condition_binding::rule_condition_matches;
 
@@ -607,6 +501,29 @@ fn prepare_rule_actions(
     mut rule: uqa_sql::catalog::events::StoredRule,
     columns: &BTreeMap<String, RuleColumnMetadata>,
 ) -> Result<PreparedRule, SQLError> {
+    if let Some((plan, binding)) = rule
+        .condition_plan
+        .as_mut()
+        .zip(rule.condition_binding.as_ref())
+    {
+        let mut ordered = columns.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|(_, column)| column.position);
+        let binding = binding.refresh_columns(
+            ordered.iter().map(|(name, _)| (*name).clone()).collect(),
+            plan,
+        );
+        if uqa_sql::semantics::rules::action_binding::rule_condition_plan_references_whole_row(plan)
+        {
+            let columns = ordered
+                .into_iter()
+                .map(|(name, column)| (name.clone(), column.ty.clone()))
+                .collect::<Vec<_>>();
+            context
+                .binding
+                .bind_rule_inputs(plan, &binding, &rule.definition.table, &columns)?;
+        }
+        rule.condition_binding = Some(binding);
+    }
     if let Some(condition) = &mut rule.condition_plan {
         context.expressions.prepare_condition(condition)?;
     }

@@ -27,6 +27,7 @@ impl Engine {
     pub(crate) fn rule_execution_context(&self) -> RuleContext<'_> {
         RuleContext {
             analysis: self.rule_analysis_context(),
+            binding: self.catalog_routine_analysis_context(),
             security: self,
             statements: self,
             expressions: self,

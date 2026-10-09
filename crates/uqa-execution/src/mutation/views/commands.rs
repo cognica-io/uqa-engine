@@ -299,9 +299,9 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
         &target.canonical_name,
         uqa_sql::ast::RuleEvent::Insert,
         rule_rows,
-        |row_index, side, column| {
+        |row_index, side, required| {
             if matches!(side, crate::mutation::rules::RuleRowSide::Old) {
-                return Ok(None);
+                return Ok(crate::mutation::rules::RuleInputProjection::default());
             }
             let expressions = stmt
                 .rows
@@ -310,18 +310,33 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
             let values = cached_rows
                 .get_mut(row_index)
                 .ok_or_else(|| SQLError::Internal("view rule INSERT lost its cached row".into()))?;
-            evaluate_insert_rule_column(
-                read_assignment,
-                target,
-                positions,
-                columns,
-                expressions,
-                column,
-                values,
-                params,
-                &snapshot,
-            )
-            .map(Some)
+            let projected = required
+                .iter()
+                .map(|column| {
+                    evaluate_insert_rule_column(
+                        read_assignment,
+                        target,
+                        positions,
+                        columns,
+                        expressions,
+                        column,
+                        values,
+                        params,
+                        &snapshot,
+                    )
+                    .map(|value| {
+                        let ty = target
+                            .columns
+                            .iter()
+                            .position(|name| name == column)
+                            .and_then(|position| target.types[position].clone());
+                        (column.clone(), value, ty)
+                    })
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            Ok(crate::mutation::rules::RuleInputProjection::values(
+                projected,
+            ))
         },
     )?;
     let action_columns = rule_batch.missing_action_row_columns();

@@ -313,6 +313,22 @@ fn expr_contains_volatile_function_with(
     volatile
 }
 
+/// Inspect a scalar plan with its query arena instead of treating every subquery as an opaque volatile call.
+pub fn expression_plan_contains_volatile_function(
+    catalog: &dyn VolatilityCatalog,
+    plan: &crate::plan::ExpressionPlan,
+) -> Result<bool, SQLError> {
+    if expr_contains_volatile_function_with(catalog, &plan.scalar, false) {
+        return Ok(true);
+    }
+    for query in &plan.subqueries {
+        if query_contains_volatile_function(catalog, query)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The block's own subquery plans are inspected separately by the query-level walk, so subquery references here are not conservatively volatile.
 pub fn select_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
@@ -655,5 +671,30 @@ mod tests {
             modifiers: crate::ast::WindowCallModifiers::default(),
         };
         assert!(expr_contains_volatile_function(&EmptyCatalog, &expression));
+    }
+    #[test]
+    fn scalar_plan_volatility_inspects_its_subquery_body() {
+        for (sql, expected) in [
+            ("SELECT (SELECT 1 / 0)", false),
+            ("SELECT (SELECT nextval('ticks'))", true),
+        ] {
+            let crate::plan::UnifiedPlan::Query(query) =
+                crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+            else {
+                panic!("query");
+            };
+            let crate::plan::RelationalPlan::QueryBlock(mut block) = query.root else {
+                panic!("query block");
+            };
+            let plan = crate::plan::ExpressionPlan {
+                scalar: block.projections.remove(0).expr,
+                subqueries: block.subqueries,
+            };
+            assert_eq!(
+                super::expression_plan_contains_volatile_function(&EmptyCatalog, &plan).unwrap(),
+                expected,
+                "{sql}"
+            );
+        }
     }
 }

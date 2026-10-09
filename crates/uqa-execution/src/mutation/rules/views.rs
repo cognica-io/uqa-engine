@@ -9,7 +9,7 @@
 use crate::{
     mutation::{
         returning::{DmlReturningShape, ReturningExecutionContext},
-        rules::RuleContext,
+        rules::{RuleContext, RuleInputProjection},
         views::ViewRowContext,
     },
     query::CteScope,
@@ -184,6 +184,75 @@ pub struct ViewRuleBatchRequest<'a, S: Clone + 'static> {
     pub document_relation: Option<&'a str>,
 }
 
+fn project_view_rule_expressions<S: Clone + 'static>(
+    projection: &ViewRuleDocumentProjection<'_, S>,
+    side: crate::mutation::rules::RuleRowSide,
+    storage_table: Option<&str>,
+    doc_id: Option<DocId>,
+    document: Option<&Document>,
+    input_document: Option<&Document>,
+) -> Result<Option<RuleInputProjection>, SQLError> {
+    document
+        .map(|document| {
+            let input_document = input_document.unwrap_or(document);
+            let mut values = Vec::new();
+            let mut required = projection.required_columns.clone();
+            let assignments = if let Some(insert) = projection.insert_plan {
+                Some((&insert.supplied_columns, &insert.input_columns, true))
+            } else if matches!(side, crate::mutation::rules::RuleRowSide::New) {
+                projection
+                    .update_plan
+                    .map(|update| (&update.assigned_columns, &update.input_columns, false))
+            } else {
+                None
+            };
+            if let Some((assigned, inputs, insert)) = assignments {
+                let schema = projection
+                    .context
+                    .views
+                    .rows
+                    .relations
+                    .view_schema(projection.relation)?;
+                for column in projection.required_columns {
+                    let value = assigned
+                        .iter()
+                        .position(|name| name == column)
+                        .and_then(|index| inputs.get(index))
+                        .and_then(|input| input_document.get(input));
+                    if !insert && value.is_none() {
+                        continue;
+                    }
+                    let value = value.cloned().unwrap_or(Value::Null);
+                    let ty = schema
+                        .unqualified_position(column)
+                        .and_then(|position| schema.column_type(position));
+                    values.push((column.clone(), value, ty.cloned()));
+                    required.remove(column);
+                }
+            }
+            let mut projected = RuleInputProjection::values(values);
+            if projection.insert_plan.is_none() {
+                let other = crate::mutation::views::automatic_view_rule_expressions(
+                    crate::mutation::views::AutomaticViewRuleDocument {
+                        context: projection.context.views,
+                        view: projection.relation,
+                        document_relation: projection.document_relation,
+                        storage_table,
+                        doc_id,
+                        document,
+                        required_columns: &required,
+                        params: projection.params,
+                        scope: projection.scope,
+                    },
+                )?;
+                super::inputs::append_source(&mut projected.source, &other.source);
+                projected.expressions.extend(other.expressions);
+            }
+            Ok(projected)
+        })
+        .transpose()
+}
+
 fn project_view_rule_document<S: Clone + 'static>(
     projection: &ViewRuleDocumentProjection<'_, S>,
     side: crate::mutation::rules::RuleRowSide,
@@ -192,60 +261,32 @@ fn project_view_rule_document<S: Clone + 'static>(
     document: Option<&Document>,
     input_document: Option<&Document>,
 ) -> Result<Option<Document>, SQLError> {
-    document
-        .map(|document| {
-            if let Some(insert_plan) = projection.insert_plan {
-                let input_document = input_document.unwrap_or(document);
-                let mut projected = Document::new();
-                for column in projection.required_columns {
-                    let value = insert_plan
-                        .supplied_columns
-                        .iter()
-                        .position(|supplied| supplied == column)
-                        .and_then(|position| insert_plan.input_columns.get(position))
-                        .and_then(|input| input_document.get(input))
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    projected.insert(column.clone(), value);
-                }
-                return Ok(projected);
-            }
-            let mut projected = crate::mutation::views::automatic_view_rule_document(
-                crate::mutation::views::AutomaticViewRuleDocument {
-                    context: projection.context.views,
-                    view: projection.relation,
-                    document_relation: projection.document_relation,
-                    storage_table,
-                    doc_id,
-                    document,
-                    required_columns: projection.required_columns,
-                    params: projection.params,
-                    scope: projection.scope,
-                },
-            )?;
-            if matches!(side, crate::mutation::rules::RuleRowSide::New) {
-                if let Some(update_plan) = projection.update_plan {
-                    let input_document = input_document.unwrap_or(document);
-                    for column in projection.required_columns {
-                        let Some(position) = update_plan
-                            .assigned_columns
-                            .iter()
-                            .position(|assigned| assigned == column)
-                        else {
-                            continue;
-                        };
-                        let Some(input) = update_plan.input_columns.get(position) else {
-                            continue;
-                        };
-                        if let Some(value) = input_document.get(input) {
-                            projected.insert(column.clone(), value.clone());
-                        }
-                    }
-                }
-            }
-            Ok(projected)
-        })
-        .transpose()
+    project_view_rule_expressions(
+        projection,
+        side,
+        storage_table,
+        doc_id,
+        document,
+        input_document,
+    )?
+    .map(|projected| {
+        projected
+            .expressions
+            .into_iter()
+            .map(|(name, expression)| {
+                crate::query::catalog_expression::eval_stored_expression_plan_with_row(
+                    projection.context.views.expressions.expressions,
+                    projection.scope.clone(),
+                    &expression,
+                    &projected.source.schema,
+                    &projected.source.row,
+                    projection.params,
+                )
+                .map(|value| (name, value))
+            })
+            .collect()
+    })
+    .transpose()
 }
 
 fn project_view_rule_row<S: Clone + 'static>(
@@ -393,7 +434,7 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
             relation,
             event,
             view_rows,
-            |local_index, side, column| {
+            |local_index, side, required| {
                 let row_index = row_indices.get(local_index).copied().ok_or_else(|| {
                     SQLError::Internal("automatic-view rule lost its event row".into())
                 })?;
@@ -425,14 +466,13 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
                     ),
                 };
                 let Some(document) = document else {
-                    return Ok(None);
+                    return Ok(RuleInputProjection::default());
                 };
-                let required = BTreeSet::from([column.to_string()]);
                 let projection = ViewRuleDocumentProjection {
-                    required_columns: &required,
+                    required_columns: required,
                     ..projection
                 };
-                let projected = project_view_rule_document(
+                let projected = project_view_rule_expressions(
                     &projection,
                     side,
                     storage_table,
@@ -443,11 +483,7 @@ pub fn prepare_view_rule_batches<S: Clone + 'static>(
                 .ok_or_else(|| {
                     SQLError::Internal("automatic-view rule projection lost its row".into())
                 })?;
-                projected.get(column).cloned().map(Some).ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "automatic-view rule projection omitted column `{column}`"
-                    ))
-                })
+                Ok(projected)
             },
         )?;
         let action_columns = batch.missing_action_row_columns();

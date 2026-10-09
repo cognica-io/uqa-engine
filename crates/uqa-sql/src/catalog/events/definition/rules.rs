@@ -34,33 +34,6 @@ fn rule_condition_has_subquery(condition: &Expr) -> bool {
     })
 }
 
-fn rule_condition_row_schema(
-    columns: &[(String, ColumnType)],
-    binding: &RuleConditionBinding,
-) -> crate::RowSchema {
-    let mut names = Vec::with_capacity(columns.len() * 2);
-    let mut identities = Vec::with_capacity(columns.len() * 2);
-    let mut types = Vec::with_capacity(columns.len() * 2);
-    let mut internal = Vec::with_capacity(columns.len() * 2);
-    for (side, relation) in [
-        ("old", binding.old_relation()),
-        ("new", binding.new_relation()),
-    ] {
-        let Some(relation) = relation else {
-            continue;
-        };
-        for (attribute, (name, ty)) in columns.iter().enumerate() {
-            let slot = names.len();
-            names.push(name.clone());
-            identities.push(crate::ColumnIdentity::qualified(side, name));
-            types.push(Some(ty.clone()));
-            internal.push((relation.column(attribute), slot, Some(ty.clone())));
-        }
-    }
-    let schema = crate::RowSchema::with_identities(names, identities, types);
-    crate::RowSchema::with_physical_internal_aliases(&schema, &internal)
-}
-
 fn validate_rule_action_contract(definition: &CreateRule) -> Result<(), SQLError> {
     if definition.condition.is_some()
         && definition.actions.iter().any(rule_action_has_set_operation)
@@ -320,7 +293,7 @@ impl EventAnalysisContext<'_> {
                 self.bind_rule_condition_subquery_relations(subquery)?;
             }
         }
-        let schema = rule_condition_row_schema(columns, &binding);
+        let schema = binding.row_schema(columns);
         let ty = self
             .stored_routines
             .bind_expression(&mut plan, &[], &schema)?;

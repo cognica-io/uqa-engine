@@ -84,6 +84,7 @@ pub use context::BindingContext;
 use uqa_core::Value;
 
 pub mod context;
+mod rule_inputs;
 use crate::ast::ColumnType;
 use crate::catalog::analysis::CatalogReadView;
 use crate::catalog::resolution::RelationNameResolution;
@@ -112,6 +113,7 @@ struct SchemaScope {
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+    stored_whole_rows: BTreeMap<String, ScalarExpr>,
     /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
     routine_parameters: Option<RoutineParameterScope>,
     /// Select reference resolution, complete stored binding, or prepared composite identity retention.
@@ -141,6 +143,7 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
+            stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
             variable_sites: None,
@@ -166,6 +169,7 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
+            stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
             variable_sites: None,

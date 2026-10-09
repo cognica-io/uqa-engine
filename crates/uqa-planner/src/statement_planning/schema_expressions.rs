@@ -37,11 +37,14 @@ pub fn optimize_rule_condition(
     context: &StatementPlanningContext<'_>,
     expression: &mut uqa_sql::plan::ExpressionPlan,
 ) -> Result<(), SQLError> {
-    let config = catalog_config(context);
+    let mut config = catalog_config(context);
+    // Stored rule analysis has already retained every conditional result coercion.
+    config.coerced_conditionals = true;
     optimize_scalar_expression(&mut expression.scalar, &config)?;
     if reject_unknown(&mut expression.scalar) {
         optimize_scalar_expression(&mut expression.scalar, &config)?;
     }
+    uqa_sql::plan::subqueries::prune_expression(expression);
     Ok(())
 }
 

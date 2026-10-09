@@ -379,27 +379,58 @@ pub(super) fn assert_suppressed_nested_and_direct_view_dml_is_lazy() {
 }
 
 pub(super) fn assert_rule_condition_case_projection_is_lazy() {
-    let engine = Engine::new();
-    exec(
-        &engine,
-        "CREATE TABLE condition_lazy_base (id INTEGER PRIMARY KEY);
-         INSERT INTO condition_lazy_base VALUES (1);
-         CREATE TABLE condition_lazy_log (id INTEGER);
-         CREATE VIEW condition_lazy_view AS
-           SELECT id, 1 / (id - id) AS boom FROM condition_lazy_base;
-         CREATE RULE condition_lazy_rule AS ON UPDATE TO condition_lazy_view
-           WHERE CASE WHEN NEW.id = 1 THEN false ELSE NEW.boom > 0 END
-           DO ALSO INSERT INTO condition_lazy_log VALUES (NEW.id)",
-    );
-    let updated = exec(
-        &engine,
-        "UPDATE condition_lazy_view SET id = id WHERE id = 1",
-    );
-    assert_eq!(updated.affected_rows, 1);
-    assert_eq!(
-        exec(&engine, "SELECT * FROM condition_lazy_log").rows.len(),
-        0
-    );
+    // PostgreSQL 18.4 accepts each UPDATE without evaluating the unreachable view expression.
+    for condition in [
+        "CASE WHEN NEW.id = 1 THEN false ELSE NEW.boom > 0 END",
+        "(SELECT CASE WHEN NEW.id = 1 THEN false ELSE NEW.boom > 0 END)",
+        "CASE WHEN OLD.id = 1 THEN false ELSE OLD.boom > 0 END",
+        "NOT COALESCE(NEW.id = 1, NEW.boom > 0)",
+    ] {
+        for nested in [false, true] {
+            let engine = Engine::new();
+            exec(
+                &engine,
+                "CREATE TABLE condition_lazy_base (id INTEGER PRIMARY KEY);
+                 INSERT INTO condition_lazy_base VALUES (1);
+                 CREATE TABLE condition_lazy_log (id INTEGER);
+                 CREATE VIEW condition_lazy_inner AS
+                   SELECT id, 1 / (id - id) AS boom FROM condition_lazy_base",
+            );
+            let source = if nested {
+                "SELECT id, boom FROM condition_lazy_inner"
+            } else {
+                "SELECT id, 1 / (id - id) AS boom FROM condition_lazy_base"
+            };
+            exec(
+                &engine,
+                &format!(
+                    "CREATE VIEW condition_lazy_view AS {source};
+                 CREATE RULE condition_lazy_rule AS ON UPDATE TO condition_lazy_view
+                   WHERE {condition}
+                   DO ALSO INSERT INTO condition_lazy_log VALUES (NEW.id)"
+                ),
+            );
+            let updated = exec(
+                &engine,
+                "UPDATE condition_lazy_view SET id = id WHERE id = 1",
+            );
+            assert_eq!(updated.affected_rows, 1, "{condition}; nested={nested}");
+            assert!(exec(&engine, "SELECT * FROM condition_lazy_log")
+                .rows
+                .is_empty());
+            if condition.contains("NEW.id") && !condition.contains("COALESCE") {
+                let error = engine.sql("UPDATE condition_lazy_view SET id = 2 WHERE id = 1", &[]);
+                assert!(
+                    error.unwrap_err().to_string().contains("division by zero"),
+                    "{condition}"
+                );
+                assert_eq!(
+                    exec(&engine, "SELECT id FROM condition_lazy_base").rows[0]["id"],
+                    Value::Int(1)
+                );
+            }
+        }
+    }
 }
 
 pub(super) fn assert_nested_insert_rule_suppression_and_order() {
