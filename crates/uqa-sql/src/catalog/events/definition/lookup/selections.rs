@@ -34,11 +34,12 @@ impl EventLookupContext<'_> {
 
     pub fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
         let relation = self.analysis.resolve_rule_relation(table)?;
+        let replica = self.state.session_replication_role_is_replica();
         Ok(selection::active_rules(
             &self.registry.read_rules(),
             &relation,
             event,
-            self.state.session_replication_role_is_replica(),
+            replica,
         ))
     }
 
