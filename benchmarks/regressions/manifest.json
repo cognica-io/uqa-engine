@@ -1950,6 +1950,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unaligned_entry_ranges_decrypt_each_physical_block_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Authenticated spill entry reads",
+      "workload": "A 1024-record run whose logical entry blocks cross physical encryption-block boundaries.",
+      "invariant": "Every physical block intersecting an entry range is decrypted exactly once, with unchanged range length, cancellation and allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unaligned_value_ranges_decrypt_each_physical_block_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Authenticated spill value reads",
+      "workload": "A value starting at an 11-byte offset and spanning three encrypted blocks, loaded and copied through the real spill files.",
+      "invariant": "Loading and copying each decrypt exactly the intersecting physical blocks, return identical complete bytes and release the original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

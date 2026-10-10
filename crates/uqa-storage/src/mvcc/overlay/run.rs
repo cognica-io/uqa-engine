@@ -192,11 +192,8 @@ impl SpilledRun {
         let mut chunk = [0_u8; VALUE_CHUNK as usize];
         let mut remaining = location.len;
         while remaining > 0 {
-            control.cancellation().check()?;
             let count = remaining.min(chunk.len() as u64) as usize;
-            reader
-                .read_exact(&mut chunk[..count])
-                .map_err(spill_error)?;
+            let count = read_chunk(&mut reader, &mut chunk[..count], control)?;
             sink(&chunk[..count])?;
             remaining -= count as u64;
         }
@@ -338,14 +335,33 @@ fn read_range(
     reader.seek(SeekFrom::Start(offset)).map_err(spill_error)?;
     let mut chunk = [0_u8; 16 * 1024];
     while bytes.len() < len {
-        control.cancellation().check()?;
         let count = (len - bytes.len()).min(chunk.len());
-        reader
-            .read_exact(&mut chunk[..count])
-            .map_err(spill_error)?;
+        let count = read_chunk(&mut reader, &mut chunk[..count], control)?;
         bytes.extend_from_slice(&chunk[..count])?;
     }
     Ok(bytes)
+}
+
+/// Consume a physical block's short read before requesting another block. Filling an unaligned logical chunk with `read_exact` would decrypt its trailing block again on the next iteration.
+fn read_chunk(
+    reader: &mut TemporaryFile,
+    output: &mut [u8],
+    control: &StorageReadControl,
+) -> VersionResult<usize> {
+    loop {
+        control.cancellation().check()?;
+        match reader.read(output) {
+            Ok(0) => {
+                return Err(spill_error(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                )))
+            }
+            Ok(count) => return Ok(count),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => (),
+            Err(error) => return Err(spill_error(error)),
+        }
+    }
 }
 
 /// A failed read or write of a spill file.

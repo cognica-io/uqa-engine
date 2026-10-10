@@ -137,6 +137,99 @@ fn cursor_seeks_between_blocks_do_not_decode_preceding_entries() {
 }
 
 #[test]
+fn unaligned_entry_ranges_decrypt_each_physical_block_once() {
+    let control = StorageReadControl::with_limit(128 << 10);
+    let mut writer = SpilledRunWriter::new(1024, 10 * 1024, control.memory()).unwrap();
+    for index in 0..1024 {
+        writer
+            .push(
+                &key(index),
+                None,
+                RecordWriteKind::Canonical,
+                PrivateRecordRevision::for_tests(),
+                Some(b"value"),
+                &control,
+            )
+            .unwrap();
+    }
+    let run = writer.finish().unwrap().unwrap();
+    assert!(run
+        .blocks
+        .iter()
+        .any(|block| block.offset % super::VALUE_CHUNK != 0));
+    let baseline = control.memory().used();
+    for (index, block) in run.blocks.iter().enumerate() {
+        let before = run.entries.block_io_counts().0;
+        let bytes = run.read_block(index, &control).unwrap();
+        let expected = block.end.div_ceil(super::VALUE_CHUNK) - block.offset / super::VALUE_CHUNK;
+        assert_eq!(bytes.len() as u64, block.end - block.offset);
+        assert_eq!(
+            run.entries.block_io_counts().0 - before,
+            expected as usize,
+            "entry block {index} at {}..{}",
+            block.offset,
+            block.end,
+        );
+        drop(bytes);
+        assert_eq!(control.memory().used(), baseline);
+    }
+    control.cancellation().cancel();
+    assert!(run.read_block(0, &control).is_err());
+    drop(run);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn unaligned_value_ranges_decrypt_each_physical_block_once() {
+    let control = StorageReadControl::with_limit(256 << 10);
+    let value: Vec<_> = (0..(2 * super::VALUE_CHUNK as usize + 19))
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let mut writer = SpilledRunWriter::new(2, 2, control.memory()).unwrap();
+    for (key, bytes) in [(b"a", b"elevenbytes".as_slice()), (b"b", value.as_slice())] {
+        writer
+            .push(
+                key,
+                None,
+                RecordWriteKind::Canonical,
+                PrivateRecordRevision::for_tests(),
+                Some(bytes),
+                &control,
+            )
+            .unwrap();
+    }
+    let run = writer.finish().unwrap().unwrap();
+    let entry = run.get(b"b", &control).unwrap().unwrap();
+    let location = entry.value.unwrap();
+    assert_eq!(location.offset, 11);
+    let expected = (location.offset + location.len).div_ceil(super::VALUE_CHUNK)
+        - location.offset / super::VALUE_CHUNK;
+    let baseline = control.memory().used();
+    let before = run.values.block_io_counts().0;
+    let loaded = run.load_value(location, &control).unwrap();
+    assert_eq!(&loaded[..], value.as_slice());
+    assert_eq!(run.values.block_io_counts().0 - before, expected as usize);
+    drop(loaded);
+    assert_eq!(control.memory().used(), baseline);
+    let before = run.values.block_io_counts().0;
+    let mut copied = Vec::new();
+    run.copy_value(
+        location,
+        &mut |bytes| {
+            copied.extend_from_slice(bytes);
+            Ok(())
+        },
+        &control,
+    )
+    .unwrap();
+    assert_eq!(copied, value);
+    assert_eq!(run.values.block_io_counts().0 - before, expected as usize);
+    assert_eq!(control.memory().used(), baseline);
+    drop((entry, run));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn point_reads_find_every_change_and_no_absent_key_across_blocks() {
     let control = StorageReadControl::with_limit(64 << 20);
     let (run, identities) = run(3000, &control);
