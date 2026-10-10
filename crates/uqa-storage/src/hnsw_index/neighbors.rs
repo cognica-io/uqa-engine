@@ -41,12 +41,52 @@ impl HNSWIndex {
         let Some(current) = node.neighbors.get(layer).cloned() else {
             return Ok(());
         };
+        drop(node);
+        self.prune_neighbors(node_id, layer, current, control)
+    }
+
+    pub(super) fn connect_and_prune_node(
+        &mut self,
+        node_id: NodeId,
+        neighbor_id: NodeId,
+        layer: usize,
+        control: Control<'_>,
+    ) -> StorageBackendResult<()> {
+        check(control)?;
+        let Some(node) = self.node(node_id)? else {
+            return Ok(());
+        };
+        let mut current = node.neighbors[layer].clone();
+        if !current.contains(&neighbor_id) {
+            current.push(neighbor_id);
+        }
+        drop(node);
+        self.prune_neighbors(node_id, layer, current, control)
+    }
+
+    fn prune_neighbors(
+        &mut self,
+        node_id: NodeId,
+        layer: usize,
+        current: Vec<NodeId>,
+        control: Control<'_>,
+    ) -> StorageBackendResult<()> {
+        let limit = self.max_connections(layer);
+        // On a valid graph these are distinct, non-self neighbors with vectors.
+        // If they all fit, diversity selection followed by rejected-candidate
+        // filling retains every one; only the final identity sort can change.
+        if current.len() <= limit {
+            let mut selected = current;
+            selected.sort_unstable();
+            return self.modify_node(node_id, control, |node| {
+                node.neighbors[layer] = selected;
+            });
+        }
         let protected = current
             .iter()
             .copied()
             .filter(|neighbor_id| layer == 0 && node_id.abs_diff(*neighbor_id) == 1)
             .collect::<Vec<_>>();
-        let limit = self.max_connections(layer);
         let mut selected = protected.clone();
         selected.extend(
             self.select_neighbors(
@@ -65,7 +105,6 @@ impl HNSWIndex {
             .into_iter()
             .filter(|neighbor| selected.binary_search(neighbor).is_err())
             .collect::<Vec<_>>();
-        drop(node);
         self.modify_node(node_id, control, |node| {
             node.neighbors[layer] = selected;
         })?;

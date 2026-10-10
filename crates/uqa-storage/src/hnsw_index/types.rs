@@ -14,7 +14,7 @@ use crate::StorageBackendResult;
 
 pub(super) type NodeId = u64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HNSWNode {
     pub(super) id: NodeId,
     pub(super) doc_id: DocId,

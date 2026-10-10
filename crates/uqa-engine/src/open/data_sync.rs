@@ -328,10 +328,9 @@ impl Engine {
             return Ok(());
         }
         // With the committed state unchanged since the last refresh, every private generation comes from this session's own transaction, whose writes its caches already include.
+        let previous_view = self.epochs.seen_storage_read_view.lock().clone();
         let committed_unchanged = read_view.as_ref().is_some_and(|current| {
-            self.epochs
-                .seen_storage_read_view
-                .lock()
+            previous_view
                 .as_ref()
                 .is_some_and(|seen| current.same_committed_state(seen))
         });
@@ -342,6 +341,7 @@ impl Engine {
             table_data_epoch,
             catalog_registry_epoch,
             committed_unchanged,
+            previous_view.as_ref(),
         )? {
             self.observe_read_view(read_view, stable_storage_version);
             return Ok(());

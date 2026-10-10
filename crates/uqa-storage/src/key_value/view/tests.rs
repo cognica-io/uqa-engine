@@ -75,6 +75,24 @@ fn committed(database: u8, sequence: u64) -> KeyValueReadRevision {
 }
 
 #[test]
+fn commit_visibility_requires_the_same_database_and_a_sufficient_snapshot() {
+    let database = DatabaseId::from_bytes([1; 16]);
+    let sequence = CommitSequence::from_u64(7);
+    assert!(committed(1, 7).includes_commit(database, sequence));
+    assert!(committed(1, 8).includes_commit(database, sequence));
+    assert!(!committed(1, 6).includes_commit(database, sequence));
+    assert!(!committed(2, 8).includes_commit(database, sequence));
+    assert!(!KeyValueReadRevision::fresh().includes_commit(database, sequence));
+    let private = KeyValueReadRevision::records(
+        database,
+        sequence,
+        Some(crate::mvcc::PrivateRecordRevision::for_tests()),
+    );
+    assert!(private.includes_commit(database, sequence));
+    assert!(!private.includes_commit(database, CommitSequence::from_u64(8)));
+}
+
+#[test]
 fn a_view_follows_only_the_immediately_preceding_commit_of_its_database() {
     assert!(committed(1, 8).follows_by_one_commit(&committed(1, 7)));
     assert!(!committed(1, 7).follows_by_one_commit(&committed(1, 7)));

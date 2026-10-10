@@ -83,6 +83,46 @@ fn row_writes_keep_a_clean_count_equal_to_a_persistent_store() {
     row_writes_keep_a_clean_count(&engine);
 }
 
+#[rstest::rstest]
+#[case::insert("INSERT INTO counted VALUES (5, 5)", 5)]
+#[case::update("UPDATE counted SET value = 10 WHERE id = 1", 4)]
+fn statistics_publication_keeps_the_private_document_count_clean(
+    #[case] mutation: &str,
+    #[case] expected: u64,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("maintenance.db")).unwrap();
+    let peer = engine.new_session().unwrap();
+    // Drive the maintenance commit explicitly, without depending on the worker's timer.
+    for session in [&engine, &peer] {
+        session.release_automatic_statistics_client();
+        session
+            .session
+            .statistics_worker
+            .store(true, Ordering::Release);
+    }
+    run(
+        &engine,
+        "CREATE TABLE counted (id integer PRIMARY KEY, value integer)",
+    );
+    run(&engine, "INSERT INTO counted VALUES (1, 1), (2, 2), (3, 3)");
+    run(&engine, "BEGIN");
+    assert_eq!(engine.table_doc_count("counted").unwrap(), 3);
+    run(&engine, "INSERT INTO counted VALUES (4, 4)");
+    assert_eq!(cached(&engine, "counted"), (true, 4));
+    run(&peer, "ANALYZE counted");
+    run(&engine, mutation);
+    assert_eq!(cached(&engine, "counted"), (true, expected));
+    assert_eq!(stored(&engine, "counted"), expected as usize);
+    // A real committed row change to this table must still refresh its count.
+    run(&peer, "INSERT INTO counted VALUES (6, 6)");
+    run(&engine, "SELECT 1");
+    assert_eq!(engine.table_doc_count("counted").unwrap(), expected + 1);
+    assert_eq!(stored(&engine, "counted"), expected as usize + 1);
+    run(&engine, "ROLLBACK");
+    assert_eq!(engine.table_doc_count("counted").unwrap(), 4);
+}
+
 #[test]
 fn a_failed_statement_leaves_no_count_ahead_of_the_store() {
     let directory = tempfile::tempdir().unwrap();

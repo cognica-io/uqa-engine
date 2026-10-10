@@ -87,12 +87,7 @@ impl HNSWIndex {
             })?;
             for neighbor_id in selected {
                 check(control)?;
-                self.modify_node(neighbor_id, control, |neighbor| {
-                    if !neighbor.neighbors[layer].contains(&node_id) {
-                        neighbor.neighbors[layer].push(node_id);
-                    }
-                })?;
-                self.prune_node(neighbor_id, layer, control)?;
+                self.connect_and_prune_node(neighbor_id, node_id, layer, control)?;
             }
             self.prune_node(node_id, layer, control)?;
             if let Some(Candidate { node_id, .. }) = candidates.iter().next().transpose()? {

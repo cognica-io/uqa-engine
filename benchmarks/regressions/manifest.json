@@ -1557,6 +1557,59 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repeated_spilled_reads_reuse_authenticated_blocks_across_immutable_roots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Encrypted spill reads",
+      "workload": "512 spilled keys under 512 KiB, repeated lookups, retained roots, replacements and failed append rollback.",
+      "invariant": "Warm lookups perform zero additional authenticated block reads; outputs, old roots and the original allowance survive replacement and failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "statistics_publication_keeps_the_private_document_count_clean",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/table_storage/document_count/tests.rs",
+      "capability": "Transaction-local data caches",
+      "workload": "Private INSERT/UPDATE after an explicit peer ANALYZE, then a peer row insert and rollback.",
+      "invariant": "Statistics-only commits preserve the clean exact count; real peer rows refresh it and rollback removes only local changes.",
+      "case_names": [
+        "case_1_insert",
+        "case_2_update"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "commit_visibility_requires_the_same_database_and_a_sufficient_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/view/tests.rs",
+      "capability": "Committed snapshot certificates",
+      "workload": "Committed/private views, earlier/later commits, another database and an unversioned identity.",
+      "invariant": "Only a sufficient record-set snapshot of the same database can certify an observed committed change.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unchanged_pruning_writes_no_topology_and_combined_connections_preserve_the_graph",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW spilled adjacency mutation",
+      "workload": "128 spilled 256-dimensional nodes under 128 KiB; unchanged pruning and repeated connect/prune operations.",
+      "invariant": "Unchanged pruning decodes no vectors and writes no topology; combined mutation writes fewer records with identical complete graph nodes and search output.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

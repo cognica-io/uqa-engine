@@ -123,3 +123,80 @@ fn spilled_search_reads_only_the_vector_used_by_each_distance_or_score() {
     drop(restored);
     assert_eq!(control.memory().used(), 0);
 }
+
+fn assert_same_graph(first: &HNSWIndex, second: &HNSWIndex, control: &StorageReadControl) {
+    let mut first = first.delta(control);
+    let mut second = second.delta(control);
+    first.full_rewrite = true;
+    second.full_rewrite = true;
+    assert_eq!(first.meta, second.meta);
+    let mut first_nodes = first.nodes();
+    let mut second_nodes = second.nodes();
+    loop {
+        match (first_nodes.next(), second_nodes.next()) {
+            (Some(first), Some(second)) => assert_eq!(*first.unwrap(), *second.unwrap()),
+            (None, None) => break,
+            _ => panic!("different graph cardinality"),
+        }
+    }
+}
+
+#[test]
+fn unchanged_pruning_writes_no_topology_and_combined_connections_preserve_the_graph() {
+    let control = StorageReadControl::with_limit(128 * 1024);
+    let mut combined = ring(256, 128, &control).finish().unwrap().into_parts().0;
+    assert!(combined.nodes.is_spilled());
+    let retained = combined.clone();
+    super::super::store::ENCODED_NODES.set(0);
+    super::super::store::DECODED_VECTOR_FLOATS.set(0);
+    for id in 2..128 {
+        combined.prune_node(id, 0, Some(&control)).unwrap();
+    }
+    assert_eq!(super::super::store::ENCODED_NODES.get(), 0);
+    assert_eq!(super::super::store::DECODED_VECTOR_FLOATS.get(), 0);
+    assert_same_graph(&combined, &retained, &control);
+    assert!(combined.take_persistence_delta().nodes().next().is_none());
+    let mut reference = combined.clone();
+    let mut combined_writes = 0;
+    let mut reference_writes = 0;
+    for neighbor in 66..74 {
+        super::super::store::ENCODED_NODES.set(0);
+        // The former algorithm published the tentative connection before pruning it.
+        reference
+            .modify_node(64, Some(&control), |node| {
+                if !node.neighbors[0].contains(&neighbor) {
+                    node.neighbors[0].push(neighbor);
+                }
+            })
+            .unwrap();
+        reference.prune_node(64, 0, Some(&control)).unwrap();
+        reference_writes += super::super::store::ENCODED_NODES.get();
+        super::super::store::ENCODED_NODES.set(0);
+        combined
+            .connect_and_prune_node(64, neighbor, 0, Some(&control))
+            .unwrap();
+        combined_writes += super::super::store::ENCODED_NODES.get();
+        assert_same_graph(&combined, &reference, &control);
+    }
+    assert!(
+        combined_writes < reference_writes,
+        "{combined_writes} versus {reference_writes}"
+    );
+    for id in 1..=128 {
+        assert_eq!(
+            retained.node(id).unwrap().unwrap().neighbors,
+            vec![vec![
+                if id == 1 { 128 } else { id - 1 },
+                if id == 128 { 1 } else { id + 1 }
+            ]]
+        );
+        assert_eq!(retained.raw_vector(id).unwrap().values, vector(id, 256));
+    }
+    assert_eq!(
+        combined.search_knn(&vector(64, 256), 7).unwrap(),
+        reference.search_knn(&vector(64, 256), 7).unwrap()
+    );
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop((combined, reference, retained));
+    assert_eq!(control.memory().used(), 0);
+}

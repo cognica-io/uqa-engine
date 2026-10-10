@@ -6,13 +6,15 @@
 
 //! Persistent binary Patricia roots have at most 128 branch steps for a u128 key.
 
+mod cache;
+
 use super::{invalid, io, Record};
 use crate::{
     read_control::StorageReadControl, temporary_file::BlockTemporaryFile, StorageBackendResult,
 };
 use parking_lot::Mutex;
 use std::{
-    io::{IoSlice, Read, Seek, SeekFrom, Write},
+    io::{IoSlice, Seek, SeekFrom, Write},
     sync::Arc,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
@@ -40,6 +42,7 @@ struct Cache {
 struct Pages {
     file: BlockTemporaryFile<BLOCK_BYTES>,
     cache: Vec<Cache>,
+    blocks: cache::Blocks,
     _memory: MemoryReservation,
 }
 
@@ -146,6 +149,11 @@ impl Map {
     }
 
     #[cfg(test)]
+    pub(super) fn read_blocks(&self) -> usize {
+        self.file.lock().file.block_io_counts().0
+    }
+
+    #[cfg(test)]
     pub(super) fn written_bytes(&self) -> u64 {
         self.file.lock().file.block_io_counts().1
     }
@@ -160,6 +168,7 @@ impl Map {
             file: Arc::new(Mutex::new(Pages {
                 file,
                 cache: vec![Cache::default(); slots],
+                blocks: cache::Blocks::new(memory)?,
                 _memory: reservation,
             })),
             root: 0,
@@ -494,9 +503,8 @@ impl Pages {
                 return Ok(self.cache[position].header);
             }
         }
-        self.file.seek(SeekFrom::Start(offset)).map_err(io)?;
         let mut bytes = [0; HEADER_BYTES];
-        self.file.read_exact(&mut bytes).map_err(io)?;
+        self.blocks.read(&mut self.file, offset, &mut bytes)?;
         let header = decode_header(&bytes);
         if header.bit > LEAF || offset == 0 {
             return Err(invalid("tree header"));
@@ -532,8 +540,7 @@ impl Pages {
         let retained = memory
             .reserve(usize::try_from(header.memory).map_err(|_| MemoryError::SizeOverflow)?)?;
         let mut bytes = vec![0; size];
-        self.file.seek(SeekFrom::Start(header.left)).map_err(io)?;
-        self.file.read_exact(&mut bytes).map_err(io)?;
+        self.blocks.read(&mut self.file, header.left, &mut bytes)?;
         let value = V::decode(&bytes)?;
         if value.memory_bytes()? > retained.bytes() {
             return Err(invalid("decoded size"));
@@ -618,6 +625,7 @@ impl Pages {
 
     fn rollback(&mut self, length: u64) -> StorageBackendResult<()> {
         self.cache.fill(Cache::default());
+        self.blocks.clear();
         self.file.set_len(length).map_err(io)
     }
 }

@@ -24,6 +24,12 @@ pub struct CatalogCacheRevisions {
     /// conservative restoration for providers without graph-scoped tracking.
     pub graphs: Option<BTreeMap<String, u64>>,
     pub table_data: BTreeMap<String, u64>,
+    /// Last committed change of each table's data generation on this snapshot,
+    /// even when its visible generation is private. An absent entry supplies no
+    /// certificate. The database and sequence let a reader recognize data it
+    /// already observed, including its own commit adopted without catalog reads.
+    pub table_data_commits:
+        BTreeMap<String, (crate::mvcc::DatabaseId, crate::mvcc::CommitSequence)>,
     pub column_statistics: BTreeMap<String, u64>,
     pub statistics_maintenance: BTreeMap<String, u64>,
     /// Physical schema changes also invalidate bindings, even when a caller

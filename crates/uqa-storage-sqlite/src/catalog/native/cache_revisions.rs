@@ -11,7 +11,10 @@ use std::collections::BTreeMap;
 use rusqlite::types::ValueRef;
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation};
 use uqa_storage::read_control::StorageReadControl;
-use uqa_storage::{mvcc::VersionError, CatalogCacheRevisions};
+use uqa_storage::{
+    mvcc::{CommitSequence, DatabaseId, VersionError},
+    CatalogCacheRevisions,
+};
 
 use super::{text, Family, NativeRecordOwner, NativeSnapshot, Result, SQLiteError};
 use crate::catalog::cache_revisions::{metadata_scope, revision_slot};
@@ -41,15 +44,24 @@ impl NativeSnapshot {
                     .ok_or_else(|| invalid("invalid native catalog format version"))
             })?
             .ok_or_else(|| invalid("missing native catalog format version"))?;
-        self.visit_rows(Family::CacheRevisions, Some(owner), &[], |row| {
-            let generation = row[2]
-                .as_i64()
-                .ok()
-                .and_then(|value| u64::try_from(value).ok())
-                .ok_or_else(|| invalid("invalid native cache generation"))?;
-            revisions.mark(string(row[0])?, string(row[1])?, generation)?;
-            Ok(())
-        })?;
+        let prefix = NativeRecordIdentity::new(Family::CacheRevisions, owner)?
+            .encode_prefix(&[], &self.control)?;
+        self.view.committed().visit_prefix(
+            &prefix,
+            None,
+            usize::MAX,
+            &self.control,
+            &mut |key, record| {
+                let Some(value) = record.value else {
+                    return Ok(true);
+                };
+                let (_, row) = decode_record(key, value, &self.control)?;
+                revisions
+                    .mark_committed(&row, self.database, record.revision)
+                    .map_err(|error| VersionError::Storage(error.into()))?;
+                Ok(true)
+            },
+        )?;
         self.project_private_revisions(&mut revisions)?;
         Ok(revisions.values)
     }
@@ -256,6 +268,33 @@ impl<'a> RevisionProjection<'a> {
             control,
             retained: BudgetedVec::new(control.memory()),
         }
+    }
+
+    fn mark_committed(
+        &mut self,
+        row: &[ValueRef<'_>],
+        database: DatabaseId,
+        sequence: Option<CommitSequence>,
+    ) -> Result<()> {
+        let generation = row[2]
+            .as_i64()
+            .ok()
+            .and_then(|value| u64::try_from(value).ok())
+            .ok_or_else(|| invalid("invalid native cache generation"))?;
+        let kind = string(row[0])?;
+        let name = string(row[1])?;
+        self.mark(kind, name, generation)?;
+        if let ("data", Some(sequence)) = (kind, sequence) {
+            let bytes = name
+                .len()
+                .checked_add(std::mem::size_of::<(String, (DatabaseId, CommitSequence))>())
+                .ok_or(MemoryError::SizeOverflow)?;
+            self.retained.push(self.control.memory().reserve(bytes)?)?;
+            self.values
+                .table_data_commits
+                .insert(name.into(), (database, sequence));
+        }
+        Ok(())
     }
 
     fn mark(&mut self, kind: &str, name: &str, generation: u64) -> Result<()> {

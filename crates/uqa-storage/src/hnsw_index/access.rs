@@ -85,8 +85,11 @@ impl HNSWIndex {
             .ok_or(MemoryError::SizeOverflow)?;
         let _copy = self.memory.reserve(bytes)?;
         let mut owned = (*node).clone();
-        drop(node);
         change(&mut owned);
+        if owned == *node {
+            return Ok(());
+        }
+        drop(node);
         self.put_node(owned, control)
     }
 }

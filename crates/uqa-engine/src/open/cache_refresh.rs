@@ -25,6 +25,23 @@ fn changed_names(
         .collect()
 }
 
+fn observed_private_data(
+    name: &str,
+    current: &CatalogCacheRevisions,
+    previous_view: Option<&uqa_storage::key_value::KeyValueReadRevision>,
+) -> bool {
+    current
+        .table_data
+        .get(name)
+        .is_some_and(|value| CatalogCacheRevisions::is_private_generation(*value))
+        && current
+            .table_data_commits
+            .get(name)
+            .is_some_and(|(database, sequence)| {
+                previous_view.is_some_and(|view| view.includes_commit(*database, *sequence))
+            })
+}
+
 impl Engine {
     /// After this session's own data commit, keep its table caches when that commit is the only one since the view they reflect. Its writes already maintained them, so the next statement need not rebuild them as it must after another writer. Any other commit, or a catalog, registry, graph or schema revision change, leaves the observed state behind for the ordinary refresh. A catalog that reports no cache revisions, before as after, relies on the caller, which adopts only a commit whose dirty state shows data changes alone. A failure to observe the committed view has the same effect as another commit: the next statement's refresh reads it again and reports any persistent error.
     pub(crate) fn adopt_own_commit_revisions(&self) {
@@ -155,6 +172,7 @@ impl Engine {
         data_epoch: u64,
         registry_epoch: u64,
         committed_unchanged: bool,
+        previous_view: Option<&uqa_storage::key_value::KeyValueReadRevision>,
     ) -> StorageBackendResult<bool> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(false);
@@ -196,7 +214,12 @@ impl Engine {
         // Physical indexes and analyzer bindings belong to the same committed revision. Restore changed registries before reopening data stores, so an old cached binding never meets newly committed occurrence metadata.
         if !catalog_changed {
             if let Some(previous) = previous.as_ref() {
-                self.refresh_changed_table_caches(previous, &current, committed_unchanged)?;
+                self.refresh_changed_table_caches(
+                    previous,
+                    &current,
+                    committed_unchanged,
+                    previous_view,
+                )?;
             }
         }
         // Generations become observed only after every dependent cache was
@@ -232,6 +255,7 @@ impl Engine {
         previous: &CatalogCacheRevisions,
         current: &CatalogCacheRevisions,
         committed_unchanged: bool,
+        previous_view: Option<&uqa_storage::key_value::KeyValueReadRevision>,
     ) -> StorageBackendResult<()> {
         let foreign = |previous: &BTreeMap<String, u64>, current: &BTreeMap<String, u64>| {
             let mut names = changed_names(previous, current);
@@ -244,7 +268,11 @@ impl Engine {
             }
             names
         };
-        let data = foreign(&previous.table_data, &current.table_data);
+        let mut data = foreign(&previous.table_data, &current.table_data);
+        // Own commit adoption can leave the generation baseline behind. Compare
+        // the table's actual last committed change with the view the caches
+        // reflect, rather than mistaking our own older commit for a peer write.
+        data.retain(|name| !observed_private_data(name, current, previous_view));
         let statistics = foreign(&previous.column_statistics, &current.column_statistics);
         let maintenance = changed_names(
             &previous.statistics_maintenance,

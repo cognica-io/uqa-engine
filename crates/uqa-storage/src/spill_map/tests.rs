@@ -18,6 +18,44 @@ fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
 }
 
 #[test]
+fn repeated_spilled_reads_reuse_authenticated_blocks_across_immutable_roots() {
+    let control = StorageReadControl::with_limit(512 * 1024);
+    let mut map = Map::new(control.memory(), 128);
+    for id in 0..512 {
+        map.insert(id, id as u64, Some(&control)).unwrap();
+    }
+    let retained = map.clone();
+    assert_eq!(*map.get(73).unwrap().unwrap(), 73);
+    let Root::Disk(disk) = &map.root else {
+        panic!("expected spill")
+    };
+    let before = disk.read_blocks();
+    for _ in 0..32 {
+        assert_eq!(*map.get(73).unwrap().unwrap(), 73);
+    }
+    assert_eq!(
+        disk.read_blocks(),
+        before,
+        "warm reads must not decrypt the same blocks again"
+    );
+    map.insert(73, 900, Some(&control)).unwrap();
+    assert_eq!(*map.get(73).unwrap().unwrap(), 900);
+    assert_eq!(*retained.get(73).unwrap().unwrap(), 73);
+    let Root::Disk(disk) = &map.root else {
+        unreachable!()
+    };
+    disk.fail_write_after(100);
+    assert!(map.insert(73, 901, Some(&control)).is_err());
+    assert_eq!(*map.get(73).unwrap().unwrap(), 900);
+    map.insert(73, 902, Some(&control)).unwrap();
+    assert_eq!(*map.get(73).unwrap().unwrap(), 902);
+    assert_eq!(*retained.get(73).unwrap().unwrap(), 73);
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop((map, retained));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn disk_replacements_publish_adjacent_path_headers_once_per_block() {
     for count in [128, 512] {
         let control = StorageReadControl::with_limit(32 * 1024);

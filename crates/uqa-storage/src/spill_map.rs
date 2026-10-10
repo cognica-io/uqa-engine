@@ -189,7 +189,7 @@ impl<V: Record> Map<V> {
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
         check(control)?;
-        let present = self.get(key)?.is_some();
+        let present = self.contains_key(key)?;
         let mut value = Some(value);
         let mut retained = None;
         if let Root::Memory(map) = &mut self.root {
@@ -263,7 +263,7 @@ impl<V: Record> Map<V> {
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
         check(control)?;
-        if self.get(key)?.is_none() {
+        if !self.contains_key(key)? {
             return Ok(());
         }
         if let Root::Memory(map) = &mut self.root {
