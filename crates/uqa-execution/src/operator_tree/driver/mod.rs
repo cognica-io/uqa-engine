@@ -340,7 +340,11 @@ impl<'a> PhysicalRetrievalDriver<'a> {
             }
             None => self.scan_doc_ids()?,
         };
-        self.evaluate_filter_candidates(field, predicate, &candidates)
+        self.evaluate_filter_candidates(
+            field,
+            predicate,
+            filter::Candidates::Documents(&candidates),
+        )
     }
 
     /// Restrict physical reads to intersection support while retaining the leaf's logical predicate observation.
@@ -357,35 +361,27 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         if let Some(read) = self.context.relations.serializable_read(self.table)? {
             read.observe_scan()?;
         }
-        self.evaluate_filter_candidates(field, predicate, candidates)
+        self.evaluate_filter_candidates(
+            field,
+            predicate,
+            filter::Candidates::Intersection(candidates),
+        )
     }
 
     fn evaluate_filter_candidates(
         &self,
         field: &str,
         predicate: &Predicate,
-        candidates: &[DocId],
+        candidates: filter::Candidates<'_>,
     ) -> DriverResult<PostingList> {
-        self.context.runtime.check_cancelled()?;
-        let values = self
-            .context
-            .relations
-            .get_document_fields(self.table, candidates, field)?;
-        let mut entries: Vec<PostingEntry> = Vec::with_capacity(candidates.len());
-        for &doc_id in candidates {
-            self.context.runtime.check_cancelled()?;
-            let Some(value) = values.get(&doc_id) else {
-                return Err(SQLError::Internal(format!(
-                    "Filter consistency error: candidate {doc_id} is missing from the document-field snapshot for table `{}`",
-                    self.table
-                )));
-            };
-            if predicate.evaluate(Some(value)) {
-                entries.push(PostingEntry::new(doc_id, Payload::default()));
-            }
-        }
-        entries.sort_by_key(|e| e.doc_id);
-        Ok(PostingList::from_sorted_unchecked(entries))
+        filter::evaluate(
+            self.context.relations,
+            self.table,
+            field,
+            predicate,
+            candidates,
+            || self.context.runtime.check_cancelled(),
+        )
     }
 
     /// Enumerating a relation is a logical scan even when a later predicate yields no postings. Index hydration and planner statistics do not use this execution boundary.
