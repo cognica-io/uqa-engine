@@ -1,0 +1,629 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE boundary_prefix AS (a integer,b integer,c integer); CREATE VIEW boundary_prefix_value AS SELECT '(16909060,84281096,287454020)'::boundary_prefix AS v; CREATE VIEW boundary_prefix_null AS SELECT '(16909060,84281096,)'::boundary_prefix AS v",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "PREPARE boundary_fields AS SELECT (v).a, (v).b FROM boundary_prefix_value; EXECUTE boundary_fields",
+      "command_tags": [
+        "PREPARE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "16909060",
+              "84281096"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prepare"
+    },
+    {
+      "sql": "ALTER TYPE boundary_prefix ALTER ATTRIBUTE a TYPE bigint",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "widen"
+    },
+    {
+      "sql": "SELECT (v).a, (v).b FROM boundary_prefix_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "361984551007945476",
+              "287454020"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix"
+    },
+    {
+      "sql": "SELECT v IS NULL AS n, v IS NOT NULL AS nn, (v).c IS NULL AS tail_null FROM boundary_prefix_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "nn",
+            "tail_null"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullness"
+    },
+    {
+      "sql": "SELECT v::text FROM boundary_prefix_value WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "filtered"
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN v::text ELSE 'unread' END FROM boundary_prefix_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "case"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "unread"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "unused"
+    },
+    {
+      "sql": "EXECUTE boundary_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "16909060",
+              "84281096"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "changed_prepared_result"
+    },
+    {
+      "sql": "SELECT (v).a = 361984551007945476 AS a, (v).b = 287454020 AS b FROM boundary_prefix_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_comparison"
+    },
+    {
+      "sql": "SELECT v IS NULL AS n, v IS NOT NULL AS nn, (v).c IS NULL AS tail_null FROM boundary_prefix_null",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "nn",
+            "tail_null"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_tail_bitmap"
+    },
+    {
+      "sql": "SELECT (v).a, (v).c FROM boundary_prefix_null",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "c"
+          ],
+          "type_oids": [
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "361984551007945476",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_tail_prefix"
+    },
+    {
+      "sql": "BEGIN; SAVEPOINT boundary_restore; ALTER TYPE boundary_prefix ALTER ATTRIBUTE a TYPE integer; SELECT v::text FROM boundary_prefix_value",
+      "command_tags": [
+        "BEGIN",
+        "SAVEPOINT",
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(16909060,84281096,287454020)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "savepoint_setup"
+    },
+    {
+      "sql": "ROLLBACK TO boundary_restore; SELECT (v).a, (v).b FROM boundary_prefix_value; ROLLBACK",
+      "command_tags": [
+        "ROLLBACK",
+        "SELECT 1",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "361984551007945476",
+              "287454020"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "savepoint_undo"
+    },
+    {
+      "sql": "CREATE TYPE boundary_nullable AS (a integer); CREATE VIEW boundary_nullable_value AS SELECT '()'::boundary_nullable AS v; ALTER TYPE boundary_nullable ALTER ATTRIBUTE a TYPE bigint; SELECT v::text, v IS NULL AS n FROM boundary_nullable_value",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "()",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullable_setup"
+    },
+    {
+      "sql": "SELECT '(4,5,6)'::boundary_prefix::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(4,5,6)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "fresh_input"
+    },
+    {
+      "sql": "SELECT (v).a, (v).b, v IS NOT NULL AS nn FROM boundary_prefix_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "nn"
+          ],
+          "type_oids": [
+            20,
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "361984551007945476",
+              "287454020",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "durable_prefix",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).a, (v).c FROM boundary_prefix_null",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "c"
+          ],
+          "type_oids": [
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "361984551007945476",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "durable_null_tail",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT v::text, v IS NULL AS n FROM boundary_nullable_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "()",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "durable_nullable",
+      "reopen": true
+    },
+    {
+      "sql": "ALTER TYPE boundary_prefix ALTER ATTRIBUTE a TYPE integer; SELECT v::text FROM boundary_prefix_value; SELECT v::text FROM boundary_prefix_null",
+      "command_tags": [
+        "ALTER TYPE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(16909060,84281096,287454020)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(16909060,84281096,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "durable_restore",
+      "reopen": true
+    },
+    {
+      "sql": "DROP VIEW boundary_prefix_value, boundary_prefix_null, boundary_nullable_value; DROP TYPE boundary_prefix, boundary_nullable",
+      "command_tags": [
+        "DROP VIEW",
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "cleanup",
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "container_image": "uqa-pg18-oracle-python:18.4",
+    "image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "capture": "capture_command_completion_oracle.py capture with rows, details and notices; new libpq connection before reopen cases",
+    "scope": "Only fields with represented bytes and non-consuming operations; no allocator bytes are used as expected results."
+  }
+}

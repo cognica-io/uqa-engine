@@ -134,14 +134,20 @@ pub fn rewrite_materialized_composite_values(
         }
         changed.push(relation.clone());
     }
-    publish_rewritten_views(context, next, &changed, constants.rename.is_some()).map_err(storage)
+    // Retaining the same admitted datum under another descriptor changes its representation, not the view's SQL definition. Existing prepared scalar constants retain their original inputs.
+    let same_definition = constants.rename.is_some()
+        || matches!(
+            change,
+            uqa_sql::expr::composites::AttributeChange::Type { .. }
+        );
+    publish_rewritten_views(context, next, &changed, same_definition).map_err(storage)
 }
 
 fn publish_rewritten_views(
     context: &ViewDependencyContext<'_>,
     next: std::collections::BTreeMap<RelationIdentity, uqa_sql::catalog::stored_view::StoredView>,
     changed: &[RelationIdentity],
-    expression_names: bool,
+    same_definition: bool,
 ) -> StorageBackendResult<()> {
     if changed.is_empty() {
         return Ok(());
@@ -156,8 +162,8 @@ fn publish_rewritten_views(
             })?;
             if view.persistence != RelationPersistence::Temporary {
                 let row = catalog_view_row(relation, view)?;
-                if expression_names {
-                    context.publication.save_view_expression_names(&row)?;
+                if same_definition {
+                    context.publication.save_view_representation(&row)?;
                 } else {
                     context.publication.save_view(&row)?;
                 }
@@ -165,7 +171,7 @@ fn publish_rewritten_views(
         }
     }
     for relation in changed {
-        if let Some(view) = next.get(relation).filter(|_| !expression_names) {
+        if let Some(view) = next.get(relation).filter(|_| !same_definition) {
             context.changes.prepared_catalog_changed(
                 crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                     view.relation_oids().relation,

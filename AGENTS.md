@@ -24,4 +24,4 @@ Do not prefix commit messages or pull request titles with labels such as `feat:`
 
 Keep exactly one test executable per crate. Put additional integration-test files in submodules of that crate's single test target; never add another top-level `tests/*.rs` file or `[[test]]` target.
 
-Treat every behavior difference from PostgreSQL 18 as a bug. Fix the implementation; do not waive or merely document the difference as a compatibility gap.
+Treat every behavior difference from PostgreSQL 18 as a bug. Fix the implementation; do not waive or merely document the difference as a compatibility gap. The maintainer-approved exception in [#656](https://github.com/cognica-io/uqa-engine/issues/656) rejects retained composite reads beyond their owned tuple with `XX001` instead of reproducing PostgreSQL allocator contents; preserve all defined in-bounds, lazy-read, transaction and persistence behavior.
