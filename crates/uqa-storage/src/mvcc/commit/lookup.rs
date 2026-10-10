@@ -16,7 +16,7 @@ use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
 
 use super::writes::PreparedWrites;
-use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWriteKind};
+use super::{PreparedRecordCommit, PreparedRecordWrite, PreparedWriteMetadata, RecordWriteKind};
 
 enum Source<'a> {
     Resident {
@@ -63,6 +63,29 @@ impl<'a> PreparedLookup<'a> {
             },
         };
         Ok(Self { source })
+    }
+
+    /// The write's identity, condition and kind without reading its payload.
+    pub(in crate::mvcc) fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PreparedWriteMetadata>> {
+        control.check()?;
+        match &self.source {
+            Source::Resident { writes, .. } => Ok(writes.get(key).map(|write| {
+                PreparedWriteMetadata::new(
+                    write.shared_key(),
+                    write.expected(),
+                    write.kind(),
+                    write.value().map(|value| value.len() as u64),
+                )
+            })),
+            Source::Spilled { run, .. } => Ok(run.get(key, control)?.map(|entry| {
+                let value_len = entry.value.map(|location| location.len);
+                PreparedWriteMetadata::new(entry.key, entry.expected, entry.kind, value_len)
+            })),
+        }
     }
 
     /// The write of `key`, with its value.

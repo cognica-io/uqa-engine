@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::mvcc::overlay::run::{write_counts, SpilledRunWriter};
+use crate::mvcc::overlay::run::{read_counts, write_counts, SpilledRunWriter};
 use std::collections::BTreeMap;
 
 #[test]
@@ -93,6 +93,85 @@ fn structural_occurrence_resolution_writes_sorted_spill_once() {
                 &control
             )
             .is_err());
+            drop((resolved, original, base, store));
+            assert_eq!(control.memory().used(), 0);
+        }
+    }
+}
+
+#[test]
+fn structural_occurrence_resolution_reads_each_spilled_value_once() {
+    for count in [4, 128, 512] {
+        for mode in [ResolutionMode::Command, ResolutionMode::Publication] {
+            let control = StorageReadControl::with_limit(128 << 10);
+            let store = MemoryVersionStore::new(control.memory());
+            let base = store.snapshot().unwrap();
+            let values = payload();
+            let mut records = BTreeMap::new();
+            records.insert(
+                keys(&control).pop().unwrap(),
+                (RecordWriteKind::Canonical, values[2].clone()),
+            );
+            for id in 0..count {
+                let term = format!("term{id:04}");
+                for (projection, value) in [
+                    (OccurrenceProjection::Score, &values[0]),
+                    (OccurrenceProjection::Positions, &values[1]),
+                ] {
+                    let mut address = OccurrenceAddress::table("docs");
+                    address.projection = Some(projection);
+                    address.field = Some("body");
+                    address.term = Some(term.as_bytes());
+                    address.cluster = Some(0);
+                    records.insert(
+                        address.encode(&control).unwrap().to_vec(),
+                        (RecordWriteKind::Occurrence, value.clone()),
+                    );
+                }
+            }
+            let key_bytes = records.keys().map(|key| key.len() as u64).sum();
+            let mut writer =
+                SpilledRunWriter::new(records.len() as u64, key_bytes, control.memory()).unwrap();
+            for (key, (kind, value)) in &records {
+                writer
+                    .push(
+                        key,
+                        None,
+                        *kind,
+                        PrivateRecordRevision::for_tests(),
+                        Some(value),
+                        &control,
+                    )
+                    .unwrap();
+            }
+            let original =
+                PreparedRecordCommit::from_spilled_run(writer.finish().unwrap().unwrap(), &control)
+                    .unwrap();
+            read_counts::take();
+            let resolved = resolve(
+                &original,
+                &base,
+                &base,
+                &crate::key_value::KeyValueOccurrenceRecords,
+                mode,
+                &control,
+            )
+            .unwrap();
+            assert_eq!(
+                read_counts::take().values,
+                records.len(),
+                "a structural source needs its marker's kind, not another payload read per term"
+            );
+            let mut cursor = resolved.writes();
+            for (key, (_, value)) in &records {
+                let write = cursor.next(&control).unwrap().unwrap();
+                assert_eq!(write.key(), key);
+                assert_eq!(write.value(), Some(value.as_slice()));
+                assert_eq!(write.expected(), None);
+                assert!(write.kind() == RecordWriteKind::Canonical);
+            }
+            assert!(cursor.next(&control).unwrap().is_none());
+            drop(cursor);
             drop((resolved, original, base, store));
             assert_eq!(control.memory().used(), 0);
         }

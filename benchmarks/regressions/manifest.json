@@ -2056,6 +2056,32 @@
       ]
     },
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "structural_occurrence_resolution_reads_each_spilled_value_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
+      "capability": "Payload-free occurrence source selection",
+      "workload": "4/128/512 paired term clusters and one canonical format marker in an immutable spill under 128 KiB, through command refresh and publication.",
+      "invariant": "Only the ordered input cursor reads values, exactly once per record; marker metadata does not evict its payload block. Every output key, value, condition, canonical kind and final allowance release remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prepared_metadata_lookups_preserve_conditions_without_loading_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/commit/cursor/tests.rs",
+      "capability": "Prepared write metadata projection",
+      "workload": "Resident and spilled live 128 KiB records, tombstones and absent keys under a separate 4 KiB read allowance.",
+      "invariant": "Exact keys, original conditions, kinds and value lengths with zero spill value reads; cancellation and complete allowance release remain intact."
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "binary_rows_reserve_binary_bytes_and_preserve_text_conversion",

@@ -118,7 +118,7 @@ impl Resolver<'_> {
             .layout
             .related_key(write.key(), Related::Format, control)?;
         let source = writes
-            .get(&marker, control)?
+            .metadata(&marker, control)?
             .ok_or(VersionError::InvalidEncoding(
                 "occurrence changes lack their source marker",
             ))?;
@@ -127,9 +127,15 @@ impl Resolver<'_> {
             changes.preserve(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
             return Ok(());
         }
-        if source.kind() != RecordWriteKind::Occurrence
-            || !self.is_format(&marker, source.value())?
-        {
+        if source.kind() != RecordWriteKind::Occurrence {
+            return Err(VersionError::InvalidEncoding(
+                "invalid occurrence source marker",
+            ));
+        }
+        let source = writes
+            .get(&marker, control)?
+            .expect("the immutable prepared source contains this marker");
+        if !self.is_format(&marker, source.value())? {
             return Err(VersionError::InvalidEncoding(
                 "invalid occurrence source marker",
             ));
