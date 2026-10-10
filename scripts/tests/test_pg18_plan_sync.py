@@ -160,6 +160,21 @@ class PG18PlanSyncTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "does not match manifest.json"):
             RUN_DIFF.validate_manual_milestone_snapshot(changed, snapshot)
 
+    def test_item_count_drift_is_rejected_without_a_milestone_change(self) -> None:
+        ledger = RUN_DIFF.render_plan_status(self.manifest)
+        snapshot = RUN_DIFF.render_manual_milestone_snapshot(self.manifest)
+        changed = copy.deepcopy(self.manifest)
+        changed["items"][4]["status"] = "explicitly_rejected"
+        self.assertEqual(
+            RUN_DIFF.derive_milestone_statuses(self.manifest),
+            RUN_DIFF.derive_milestone_statuses(changed),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "does not match manifest.json"):
+            RUN_DIFF.validate_plan_status(changed, ledger)
+        with self.assertRaisesRegex(RuntimeError, "does not match manifest.json"):
+            RUN_DIFF.validate_manual_milestone_snapshot(changed, snapshot)
+
     def test_every_item_has_exactly_one_owning_milestone(self) -> None:
         item_ids = {item["id"] for item in self.manifest["items"]}
         RUN_DIFF.validate_milestone_accounting(self.manifest, item_ids)

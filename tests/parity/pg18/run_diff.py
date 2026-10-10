@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -58,6 +59,19 @@ def derive_milestone_statuses(manifest: dict) -> dict[str, str]:
     return statuses
 
 
+def render_evidence_summary(manifest: dict) -> str:
+    """Summarize scoped evidence without implying a compatibility percentage."""
+    counts = Counter(item["status"] for item in manifest["items"])
+    return (
+        f"Manifest inventory: {len(manifest['items'])} evidence items — "
+        f"{counts['verified']} `verified`, {counts['partial']} `partial`, "
+        f"{counts['explicitly_rejected']} `explicitly_rejected`, and "
+        f"{counts['not_audited']} `not_audited`. "
+        "These items have different scopes; their counts are not a percentage "
+        "of PostgreSQL compatibility or a count of passing upstream tests."
+    )
+
+
 def render_plan_status(manifest: dict) -> str:
     """Render the machine-checked status ledger embedded in the living plan."""
     statuses = derive_milestone_statuses(manifest)
@@ -68,6 +82,8 @@ def render_plan_status(manifest: dict) -> str:
     }
     lines = [
         PLAN_STATUS_START,
+        "",
+        render_evidence_summary(manifest),
         "",
         "| Milestone | Name | Status | Exit gate |",
         "| --- | --- | --- | --- |",
@@ -126,7 +142,15 @@ def render_manual_milestone_snapshot(manifest: dict) -> str:
         "bounded by its exit gate."
     )
     return "\n".join(
-        [MANUAL_MILESTONE_START, "", paragraph, "", MANUAL_MILESTONE_END]
+        [
+            MANUAL_MILESTONE_START,
+            "",
+            render_evidence_summary(manifest),
+            "",
+            paragraph,
+            "",
+            MANUAL_MILESTONE_END,
+        ]
     )
 
 
