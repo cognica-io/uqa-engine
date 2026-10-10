@@ -65,7 +65,19 @@ pub fn encode_row(
     control.cancellation().check()?;
     let columns =
         u16::try_from(values.len()).map_err(|_| invalid("native row has too many columns"))?;
+    let size = values.iter().try_fold(PREFIX.len() + 2, |total, value| {
+        let (envelope, bytes) = match value {
+            ValueRef::Null => (1, 0),
+            ValueRef::Integer(_) | ValueRef::Real(_) => (1 + 8, 0),
+            ValueRef::Text(bytes) | ValueRef::Blob(bytes) => (1 + 4, bytes.len()),
+        };
+        total
+            .checked_add(envelope)
+            .and_then(|total| total.checked_add(bytes))
+            .ok_or_else(|| invalid("native row length overflow"))
+    })?;
     let mut output = BudgetedVec::new(control.memory());
+    output.reserve(size)?;
     output.extend_from_slice(PREFIX)?;
     output.extend_from_slice(&columns.to_be_bytes())?;
     for value in values {

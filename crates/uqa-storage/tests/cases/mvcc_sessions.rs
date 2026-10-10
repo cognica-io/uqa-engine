@@ -40,6 +40,8 @@ mod monitor;
 mod notifications;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
+#[path = "mvcc_sessions/occurrence_rebuild.rs"]
+mod occurrence_rebuild;
 #[path = "mvcc_sessions/occurrences.rs"]
 mod occurrences;
 #[path = "mvcc_sessions/read_limits.rs"]
@@ -171,6 +173,7 @@ struct State {
     /// The commit monitor's value, for a test that gives the persistence one.
     monitor: Option<u64>,
     captures: usize,
+    occurrence_resolutions: usize,
     /// Counts the monitor values its snapshots adopt, for a test whose snapshots can.
     adoptions: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
@@ -204,6 +207,7 @@ impl Persistence {
                 sequence_publications: Vec::new(),
                 monitor: None,
                 captures: 0,
+                occurrence_resolutions: 0,
                 adoptions: None,
             }),
         })
@@ -235,6 +239,11 @@ impl ResourceLeaseProvider for Persistence {
 }
 
 impl VersionedPersistence for Persistence {
+    fn occurrence_record_layout(&self) -> &dyn OccurrenceRecordLayout {
+        self.state.lock().occurrence_resolutions += 1;
+        &uqa_storage::key_value::KeyValueOccurrenceRecords
+    }
+
     fn sequence_value_persistence(
         &self,
         owner: SequencePublicationLease,

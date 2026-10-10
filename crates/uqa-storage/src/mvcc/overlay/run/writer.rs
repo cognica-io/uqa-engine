@@ -81,14 +81,16 @@ pub(in crate::mvcc) struct SpilledRunWriter {
     blocks: BudgetedVec<RunBlock>,
     block_bytes: u64,
     filter: Option<KeyFilter>,
+    prefix_filter: Option<KeyFilter>,
     last: Option<RecordKey>,
     len: u64,
+    key_bytes: u64,
     kinds: u16,
     memory: MemoryBudget,
 }
 
 impl SpilledRunWriter {
-    /// A writer for about `entries` changes whose keys hold about `key_bytes` bytes in all; the estimates size the block index and the key filter. The index and the filter are charged to `memory`, and the filter is left out when `memory` cannot hold it.
+    /// A writer for about `entries` changes whose keys hold about `key_bytes` bytes in all; the estimates size the block index and optional key/prefix filters. The index and filters are charged to `memory`, and unavailable filter admission preserves ordinary reads.
     pub(in crate::mvcc) fn new(
         entries: u64,
         key_bytes: u64,
@@ -105,8 +107,10 @@ impl SpilledRunWriter {
             blocks: BudgetedVec::new(memory),
             block_bytes: (encoded / MAX_BLOCKS).max(MIN_BLOCK_BYTES),
             filter: KeyFilter::with_capacity(entries, memory),
+            prefix_filter: KeyFilter::for_prefixes(key_bytes, memory),
             last: None,
             len: 0,
+            key_bytes: 0,
             kinds: 0,
             memory: memory.clone(),
         })
@@ -181,9 +185,16 @@ impl SpilledRunWriter {
         if starts_block {
             if let Some(block) = self.blocks.last_mut() {
                 block.end = position;
+                block.last = self
+                    .last
+                    .as_ref()
+                    .expect("preceding block has entries")
+                    .clone();
             }
+            let first = RecordKey::new(key, &self.memory)?;
             self.blocks.push(RunBlock {
-                first: RecordKey::new(key, &self.memory)?,
+                last: first.clone(),
+                first,
                 offset: position,
                 end: position,
             })?;
@@ -207,8 +218,12 @@ impl SpilledRunWriter {
         if let Some(filter) = &mut self.filter {
             filter.insert(key);
         }
+        if let Some(filter) = &mut self.prefix_filter {
+            filter.insert_prefixes(key, self.last.as_ref().map(RecordKey::bytes));
+        }
         self.last = Some(RecordKey::new(key, &self.memory)?);
         self.len += 1;
+        self.key_bytes = self.key_bytes.saturating_add(key.len() as u64);
         Ok(())
     }
 
@@ -222,6 +237,7 @@ impl SpilledRunWriter {
         let end = self.entries.position();
         if let Some(block) = self.blocks.last_mut() {
             block.end = end;
+            block.last = last.clone();
         }
         Ok(Some(SpilledRun {
             entry_bytes: end,
@@ -230,8 +246,10 @@ impl SpilledRunWriter {
             values: self.values.file,
             blocks: self.blocks,
             filter: self.filter,
+            prefix_filter: self.prefix_filter,
             last,
             len: self.len,
+            key_bytes: self.key_bytes,
             kinds: self.kinds,
             cache: std::sync::Arc::new(super::cache::RunCache::new(&self.memory)),
         }))

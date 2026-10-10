@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
-use uqa_core::memory::{BudgetedVec, MemoryError};
+use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryError};
 
 use crate::read_control::StorageReadControl;
 
@@ -248,6 +248,17 @@ impl PreparedRecordCommit {
         }
     }
 
+    /// Share immutable spilled writes only with a root charged to the same allowance.
+    pub(super) fn shared_spilled_run(
+        &self,
+        memory: &MemoryBudget,
+    ) -> Option<Arc<super::overlay::run::SpilledRun>> {
+        match &self.writes {
+            PreparedWrites::Spilled(run) if run.shares_allowance(memory) => Some(Arc::clone(run)),
+            _ => None,
+        }
+    }
+
     /// Whether some write replaces `key`.
     pub(crate) fn contains_key(
         &self,
@@ -309,7 +320,13 @@ impl PreparedRecordCommit {
         run: super::overlay::run::SpilledRun,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        let run = Arc::new(run);
+        Self::from_shared_spilled_run(Arc::new(run), control)
+    }
+
+    pub(super) fn from_shared_spilled_run(
+        run: Arc<super::overlay::run::SpilledRun>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
         let typed = run.typed();
         let mut digest = fingerprint_header(typed, run.len());
         let mut cursor = run.cursor(std::ops::Bound::Unbounded);

@@ -48,13 +48,12 @@ thiserror = "1.0.31"
 
 [build-dependencies]
 bindgen = "0.66.1"
-clippy = { version = "0.0.302", optional = true }
 prost-build = "0.13.5"
 fs_extra = "1.2.0"
 cc = "1.0.83"
 glob = "0.3.1"
 
-# Keep the imported Rust wrapper byte-for-byte synchronized with upstream.
+# Keep imported parser behavior synchronized with upstream.
 [lints.clippy]
 clone_on_copy = "allow"
 len_zero = "allow"

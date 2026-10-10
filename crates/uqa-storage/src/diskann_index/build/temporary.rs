@@ -200,7 +200,7 @@ mod tests {
         let temporary = DiskANNTemporaryBudget::new(1 << 20);
         let mut run = TemporaryRun::new(directory.path(), &temporary, &control).unwrap();
         let path = run.path().to_owned();
-        run.file.fail_write_after(4096 + 24 + 2 + 16 + 1 + 30);
+        run.file.fail_write_after(4096 + 24 + 2 + 16 + 2 + 30);
         assert!(matches!(
             run.append(&[1; 9000], &control),
             Err(StorageBackendError::Backend { .. })

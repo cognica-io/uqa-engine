@@ -66,7 +66,7 @@ fn failed_new_blocks_and_sparse_growth_remove_unpublished_tails() {
         let position = if sparse { 8 * 3 + 2 } else { 8 };
         file.seek(SeekFrom::Start(position)).unwrap();
         // Sparse growth completes one new block before the next partial write fails.
-        file.owner.lock().faults.fail_after_bytes = Some(if sparse { 51 + 30 } else { 30 });
+        file.owner.lock().faults.fail_after_bytes = Some(if sparse { 52 + 30 } else { 30 });
         assert!(file.write_all(b"new").is_err());
         assert_eq!(file.metadata().unwrap().len(), 8);
         assert_eq!(std::fs::metadata(file.path()).unwrap().len(), 101);
@@ -104,14 +104,17 @@ fn failed_truncation_preserves_bytes_and_growth_never_reveals_the_truncated_tail
 
 #[test]
 fn failed_physical_reservation_never_publishes_a_new_block() {
-    let mut file = BlockTemporaryFile::<8>::new().unwrap();
-    file.write_all(b"retained").unwrap();
-    file.owner.lock().faults.fail_truncate = true;
-    assert!(file.write(b"x").is_err());
-    assert_eq!(file.metadata().unwrap().len(), 8);
-    assert_eq!(contents(&file), b"retained");
-    file.write_all(b"x").unwrap();
-    assert_eq!(contents(&file), b"retainedx");
+    for failed_after in [SLOT_HEADER_BYTES + 1, SLOT_HEADER_BYTES + 2] {
+        let mut file = BlockTemporaryFile::<8>::new().unwrap();
+        file.write_all(b"retained").unwrap();
+        // Fail the fresh block before its complete ciphertext or sparse extent exists.
+        file.owner.lock().faults.fail_after_bytes = Some(failed_after);
+        assert!(file.write(b"x").is_err());
+        assert_eq!(file.metadata().unwrap().len(), 8);
+        assert_eq!(contents(&file), b"retained");
+        file.write_all(b"x").unwrap();
+        assert_eq!(contents(&file), b"retainedx");
+    }
 }
 
 #[test]
@@ -155,21 +158,27 @@ fn two_file_append_rollback_keeps_old_rows_after_data_or_offset_failure() {
 
 #[test]
 fn rollback_failure_is_reported_without_publishing_partial_bytes_to_existing_readers() {
-    let mut file = BlockTemporaryFile::<8>::new().unwrap();
-    file.write_all(b"retained").unwrap();
-    let mut retained = file.reopen().unwrap();
-    {
-        let mut owner = file.owner.lock();
-        owner.faults.fail_after_bytes = Some(30);
-        owner.faults.fail_truncate = true;
+    for sparse in [false, true] {
+        let mut file = BlockTemporaryFile::<8>::new().unwrap();
+        file.write_all(b"retained").unwrap();
+        let mut retained = file.reopen().unwrap();
+        if sparse {
+            file.seek(SeekFrom::Start(26)).unwrap();
+        }
+        {
+            let mut owner = file.owner.lock();
+            owner.faults.fail_after_bytes = Some(if sparse { 52 + 30 } else { 30 });
+            owner.faults.fail_truncate = true;
+        }
+        let error = file.write(b"x").unwrap_err();
+        assert!(error.to_string().contains("rollback failed"));
+        assert_eq!(file.metadata().unwrap().len(), 8);
+        assert!(file.reopen().is_err());
+        let mut bytes = Vec::new();
+        retained.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"retained");
+        file.seek(SeekFrom::End(0)).unwrap();
+        file.write_all(b"x").unwrap();
+        assert_eq!(contents(&file), b"retainedx");
     }
-    let error = file.write(b"x").unwrap_err();
-    assert!(error.to_string().contains("rollback failed"));
-    assert_eq!(file.metadata().unwrap().len(), 8);
-    assert!(file.reopen().is_err());
-    let mut bytes = Vec::new();
-    retained.read_to_end(&mut bytes).unwrap();
-    assert_eq!(bytes, b"retained");
-    file.write_all(b"x").unwrap();
-    assert_eq!(contents(&file), b"retainedx");
 }

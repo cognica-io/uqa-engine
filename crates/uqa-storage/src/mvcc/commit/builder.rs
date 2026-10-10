@@ -44,7 +44,7 @@ impl PreparedWritesBuilder {
             super::writes::PreparedWrites::Spilled(run) => Target::Spilled {
                 writer: Box::new(SpilledRunWriter::new(
                     run.len(),
-                    run.entry_bytes(),
+                    run.key_bytes(),
                     control.memory(),
                 )?),
                 identity: PrivateRecordRevision::allocate()?,

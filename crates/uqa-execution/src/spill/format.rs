@@ -6,7 +6,8 @@
 
 //! Spill record framing shared by the batch and indexed-row codecs.
 
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Seek, SeekFrom, Take};
+use std::ops::Range;
 use uqa_storage::temporary_file::TemporaryFile as File;
 
 use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
@@ -70,17 +71,34 @@ pub(super) fn read_bounded_spill_record<R: Read>(
     Ok(Some(record))
 }
 
-pub(super) fn open_spill_reader(file: &NamedTempFile) -> ExecResult<BufReader<File>> {
-    let reopened = file
+pub(super) fn open_spill_reader(
+    file: &NamedTempFile,
+    range: Option<&Range<u64>>,
+) -> ExecResult<BufReader<Take<File>>> {
+    let mut reopened = file
         .reopen()
         .map_err(|error| spill_error(format!("failed to reopen spill file: {error}")))?;
-    let mut reader = BufReader::new(reopened);
     let mut magic = [0u8; SPILL_MAGIC.len()];
-    reader
+    reopened
         .read_exact(&mut magic)
         .map_err(|error| spill_error(format!("failed to read spill header: {error}")))?;
     if magic != SPILL_MAGIC {
         return Err(spill_error("invalid spill file header"));
     }
-    Ok(reader)
+    let bytes = if let Some(range) = range {
+        let length = reopened
+            .metadata()
+            .map_err(|error| spill_error(error.to_string()))?
+            .len();
+        if range.start < SPILL_MAGIC.len() as u64 || range.end < range.start || range.end > length {
+            return Err(spill_error("invalid spill segment range"));
+        }
+        reopened
+            .seek(SeekFrom::Start(range.start))
+            .map_err(|error| spill_error(error.to_string()))?;
+        range.end - range.start
+    } else {
+        u64::MAX
+    };
+    Ok(BufReader::new(reopened.take(bytes)))
 }

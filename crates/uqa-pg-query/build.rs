@@ -1,6 +1,3 @@
-#![cfg_attr(feature = "clippy", feature(plugin))]
-#![cfg_attr(feature = "clippy", plugin(clippy))]
-
 use fs_extra::dir::CopyOptions;
 use glob::glob;
 use std::collections::hash_map::DefaultHasher;

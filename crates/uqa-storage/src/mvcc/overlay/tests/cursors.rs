@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::{MemoryVersionStore, MergedRecordSnapshot, RecordMetadata};
 
 #[test]
@@ -55,7 +56,7 @@ fn revision_reads_stream_each_spilled_entry_once_without_payloads() {
 }
 
 #[test]
-fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
+fn prepared_private_roots_share_sorted_spill_and_preserve_undo() {
     for count in [4, 128, 512] {
         for grouped in [false, true] {
             let control = StorageReadControl::with_limit(128 << 10);
@@ -67,13 +68,19 @@ fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
             let prepared = source.prepare(&control).unwrap();
             let scope: Option<PrivateRevisionScope> = grouped.then_some(|key| Ok(key.get(..1)));
             super::super::run::write_counts::take();
+            super::super::run::read_counts::take();
             let changes = PrivateRecordChanges::from_prepared(&prepared, scope, &control).unwrap();
             let written = super::super::run::write_counts::take();
             assert_eq!(
-                written.bytes,
-                if count == 4 { 0 } else { (count * 1024) as u64 }
+                written.bytes, 0,
+                "immutable prepared values must not be rewritten"
             );
-            assert_eq!(written.copied, 0, "sorted inputs must not be merged again");
+            assert_eq!(written.copied, 0);
+            assert_eq!(super::super::run::read_counts::take().values, 0);
+            let again = changes.prepare(&control).unwrap();
+            assert_eq!(again.fingerprint(), prepared.fingerprint());
+            assert_eq!(super::super::run::write_counts::take().bytes, 0);
+            drop(again);
             let retained = changes.snapshot().unwrap();
             assert_streamed_matches(&retained, &model, &control);
             if grouped {
@@ -89,11 +96,49 @@ fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
             assert_eq!(changes.snapshot().unwrap().revision(), retained.revision());
             assert_streamed_matches(&changes.snapshot().unwrap(), &model, &control);
             assert_streamed_matches(&retained, &model, &control);
+            stage(
+                &source,
+                &mut Model::new(),
+                0,
+                Some("changed".into()),
+                &control,
+            );
+            assert_streamed_matches(&changes.snapshot().unwrap(), &model, &control);
             control.cancellation().cancel();
             assert!(PrivateRecordChanges::from_prepared(&prepared, scope, &control).is_err());
             drop((retained, changes, prepared, source));
             assert_eq!(control.memory().used(), 0);
         }
+    }
+}
+
+#[test]
+fn prepared_spill_adoption_preserves_independent_allowance_ownership() {
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let source = PrivateRecordChanges::new(control.memory());
+        let mut model = Model::new();
+        for id in 0..count {
+            stage(&source, &mut model, id, Some("x".repeat(1024)), &control);
+        }
+        let prepared = source.prepare(&control).unwrap();
+        assert!(prepared.resident().is_none());
+        let independent = StorageReadControl::with_limit(128 << 10);
+        super::super::run::write_counts::take();
+        let changes = PrivateRecordChanges::from_prepared(&prepared, None, &independent).unwrap();
+        assert_eq!(
+            super::super::run::write_counts::take().bytes,
+            count as u64 * 1024
+        );
+        let undersized = StorageReadControl::with_limit(1024);
+        assert!(PrivateRecordChanges::from_prepared(&prepared, None, &undersized).is_err());
+        assert_eq!(undersized.memory().used(), 0);
+        drop((source, prepared));
+        assert_eq!(control.memory().used(), 0);
+        assert!(independent.memory().used() > 0);
+        assert_streamed_matches(&changes.snapshot().unwrap(), &model, &independent);
+        drop(changes);
+        assert_eq!(independent.memory().used(), 0);
     }
 }
 
@@ -119,6 +164,144 @@ fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
         std::sync::Arc::new(store.snapshot().unwrap()),
         changes.snapshot().unwrap(),
     )
+}
+
+#[test]
+fn disjoint_private_prefixes_do_not_open_spill_readers() {
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let changes = PrivateRecordChanges::new(control.memory());
+        let mut model = Model::new();
+        for id in 0..count {
+            stage(&changes, &mut model, id, Some("x".repeat(1024)), &control);
+        }
+        assert!(spilled_runs(&changes) > 0);
+        let snapshot = changes.snapshot().unwrap();
+        let read = StorageReadControl::with_limit(32 << 10);
+        let retained = control.memory().used();
+        for prefix in [b"a".as_slice(), b"j\xff", b"l", b"\xff"] {
+            super::super::run::read_counts::take();
+            let mut cursor = snapshot.cursor(prefix, None, &read).unwrap();
+            assert!(cursor.next(&read).unwrap().is_none());
+            drop(cursor);
+            assert!(snapshot.scan(prefix, None, 1, &read).unwrap().is_empty());
+            assert!(snapshot
+                .scan_keys(prefix, None, 1, &read)
+                .unwrap()
+                .is_empty());
+            let counts = super::super::run::read_counts::take();
+            assert_eq!(counts.blocks, 0, "prefix={prefix:?}: {counts:?}");
+            assert_eq!(counts.entries, 0, "prefix={prefix:?}: {counts:?}");
+            assert_eq!(counts.values, 0);
+            assert_eq!(read.memory().used(), 0);
+            assert_eq!(control.memory().used(), retained);
+        }
+        assert_streamed_matches(&snapshot, &model, &read);
+        read.cancellation().cancel();
+        assert!(snapshot.cursor(b"a", None, &read).is_err());
+        drop((snapshot, changes));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn absent_prefixes_inside_spill_blocks_do_not_read_unrelated_entries() {
+    for count in [128_usize, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let revision = PrivateRecordRevision::for_tests();
+        let mut writer =
+            run::SpilledRunWriter::new(count as u64 + 1, count as u64 * 16, control.memory())
+                .unwrap();
+        for id in 0..count {
+            writer
+                .push(
+                    format!("a/{id:06}/vector").as_bytes(),
+                    None,
+                    RecordWriteKind::Canonical,
+                    revision,
+                    (!id.is_multiple_of(7)).then_some(b"value".as_slice()),
+                    &control,
+                )
+                .unwrap();
+        }
+        writer
+            .push(
+                b"z/header",
+                None,
+                RecordWriteKind::Canonical,
+                revision,
+                Some(b"header"),
+                &control,
+            )
+            .unwrap();
+        let changes = PrivateRecordChanges::from_spilled_run(
+            writer.finish().unwrap(),
+            revision,
+            None,
+            &control,
+        )
+        .unwrap();
+        let snapshot = changes.snapshot().unwrap();
+        let baseline = control.memory().used();
+        for prefix in [b"a/999999/".as_slice(), b"y/empty/"] {
+            run::read_counts::take();
+            let mut cursor = snapshot.cursor(prefix, None, &control).unwrap();
+            assert!(cursor.next(&control).unwrap().is_none());
+            drop(cursor);
+            assert!(snapshot.scan(prefix, None, 1, &control).unwrap().is_empty());
+            assert!(snapshot
+                .scan_keys(prefix, None, 1, &control)
+                .unwrap()
+                .is_empty());
+            let reads = run::read_counts::take();
+            assert_eq!(
+                reads.blocks, 0,
+                "count={count}, prefix={prefix:?}: {reads:?}"
+            );
+            assert_eq!(reads.entries, 0);
+            assert_eq!(reads.values, 0);
+            assert_eq!(control.memory().used(), baseline);
+        }
+        for id in [0, count / 2, count - 1] {
+            let key = format!("a/{id:06}/vector");
+            for length in 0..=key.len() {
+                let rows = snapshot
+                    .scan_keys(&key.as_bytes()[..length], None, count + 1, &control)
+                    .unwrap();
+                assert!(rows.iter().any(|row| row.key() == key.as_bytes()));
+            }
+        }
+        let savepoint = StorageSavepointId::allocate();
+        changes.savepoint(savepoint).unwrap();
+        let write =
+            PreparedRecordWrite::copy_bytes(b"a/999999/vector", None, Some(b"new"), &control)
+                .unwrap();
+        changes.apply_owned(&[write], &control).unwrap();
+        let newer = changes.snapshot().unwrap();
+        assert_eq!(
+            newer.scan(b"a/999999/", None, 1, &control).unwrap().len(),
+            1
+        );
+        assert!(snapshot
+            .scan(b"a/999999/", None, 1, &control)
+            .unwrap()
+            .is_empty());
+        changes.rollback_to_savepoint(savepoint).unwrap();
+        assert!(changes
+            .snapshot()
+            .unwrap()
+            .scan(b"a/999999/", None, 1, &control)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            newer.scan(b"a/999999/", None, 1, &control).unwrap().len(),
+            1
+        );
+        control.cancellation().cancel();
+        assert!(snapshot.cursor(b"y/empty/", None, &control).is_err());
+        drop((newer, snapshot, changes));
+        assert_eq!(control.memory().used(), 0);
+    }
 }
 
 #[test]

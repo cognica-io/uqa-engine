@@ -42,9 +42,10 @@ use filter::KeyFilter;
 /// The aligned span of the value file a read of a small value decrypts and keeps.
 const VALUE_CHUNK: u64 = 16 * 1024;
 
-/// One block of a run's entry file: its first key and its byte range.
+/// One block of a run's entry file: its complete key interval and byte range.
 struct RunBlock {
     first: RecordKey,
+    last: RecordKey,
     offset: u64,
     end: u64,
 }
@@ -55,8 +56,10 @@ pub(in crate::mvcc) struct SpilledRun {
     values: TemporaryFile,
     blocks: BudgetedVec<RunBlock>,
     filter: Option<KeyFilter>,
+    prefix_filter: Option<KeyFilter>,
     last: RecordKey,
     len: u64,
+    key_bytes: u64,
     entry_bytes: u64,
     bytes: u64,
     /// One bit for each write kind code the run holds.
@@ -65,6 +68,10 @@ pub(in crate::mvcc) struct SpilledRun {
 }
 
 impl SpilledRun {
+    pub(in crate::mvcc) fn shares_allowance(&self, memory: &MemoryBudget) -> bool {
+        self.cache.memory().shares_allowance(memory)
+    }
+
     /// Share decoded blocks while a lookup operation is active, without tying their lifetime to this run.
     pub(in crate::mvcc) fn cache_reader(&self) -> RunCacheReader {
         self.cache.reader()
@@ -85,14 +92,14 @@ impl SpilledRun {
         self.len
     }
 
+    /// Literal key bytes, excluding entry metadata and values, for sizing derived filters.
+    pub(in crate::mvcc) fn key_bytes(&self) -> u64 {
+        self.key_bytes
+    }
+
     /// The bytes of the run's files, which decide which runs merge.
     pub(super) fn bytes(&self) -> u64 {
         self.bytes
-    }
-
-    /// The bytes of the run's entries, without their values.
-    pub(in crate::mvcc) fn entry_bytes(&self) -> u64 {
-        self.entry_bytes
     }
 
     /// The change of `key`, if the run has one.
@@ -113,6 +120,9 @@ impl SpilledRun {
         let Some(index) = self.block_at_or_before(key) else {
             return Ok(None);
         };
+        if key > self.blocks[index].last.bytes() {
+            return Ok(None);
+        }
         let mut block = reader::EntryReader::new(self, index, control)?;
         block.select(control, |candidate| match candidate.cmp(key) {
             std::cmp::Ordering::Less => reader::Selection::Skip,
@@ -161,6 +171,21 @@ impl SpilledRun {
         RunCursor::new(Arc::clone(self), start)
     }
 
+    /// Whether the run can contain this literal prefix. Interval bounds and an optional false-positive-only membership filter reject absent prefixes without an entry reader or decoded block.
+    pub(super) fn intersects_prefix(&self, prefix: &[u8]) -> bool {
+        let index = self
+            .blocks
+            .partition_point(|block| block.last.bytes() < prefix);
+        self.blocks.get(index).is_some_and(|block| {
+            (block.first.bytes() <= prefix || block.first.bytes().starts_with(prefix))
+                && (prefix.is_empty()
+                    || self
+                        .prefix_filter
+                        .as_ref()
+                        .is_none_or(|filter| filter.may_contain(prefix)))
+        })
+    }
+
     /// Pass the value at `location` to `sink` in chunks, without holding it whole. A value within one aligned chunk of the value file is passed from that chunk, which the run keeps for the values that follow it.
     pub(in crate::mvcc) fn copy_value(
         &self,
@@ -178,11 +203,8 @@ impl SpilledRun {
         let mut chunk = [0_u8; VALUE_CHUNK as usize];
         let mut remaining = location.len;
         while remaining > 0 {
-            control.cancellation().check()?;
             let count = remaining.min(chunk.len() as u64) as usize;
-            reader
-                .read_exact(&mut chunk[..count])
-                .map_err(spill_error)?;
+            let count = read_chunk(&mut reader, &mut chunk[..count], control)?;
             sink(&chunk[..count])?;
             remaining -= count as u64;
         }
@@ -260,13 +282,16 @@ impl SpilledRun {
             .checked_sub(1)
     }
 
-    /// The index of the first block that may hold a key in `start`'s range.
+    /// The first block that may hold a key in `start`'s range, or the block count when the range is beyond this run.
     fn first_block_from(&self, start: Bound<&[u8]>) -> usize {
         match start {
             Bound::Unbounded => 0,
-            Bound::Included(key) | Bound::Excluded(key) => {
-                self.block_at_or_before(key).unwrap_or(0)
-            }
+            Bound::Included(key) => self
+                .blocks
+                .partition_point(|block| block.last.bytes() < key),
+            Bound::Excluded(key) => self
+                .blocks
+                .partition_point(|block| block.last.bytes() <= key),
         }
     }
 
@@ -321,14 +346,33 @@ fn read_range(
     reader.seek(SeekFrom::Start(offset)).map_err(spill_error)?;
     let mut chunk = [0_u8; 16 * 1024];
     while bytes.len() < len {
-        control.cancellation().check()?;
         let count = (len - bytes.len()).min(chunk.len());
-        reader
-            .read_exact(&mut chunk[..count])
-            .map_err(spill_error)?;
+        let count = read_chunk(&mut reader, &mut chunk[..count], control)?;
         bytes.extend_from_slice(&chunk[..count])?;
     }
     Ok(bytes)
+}
+
+/// Consume a physical block's short read before requesting another block. Filling an unaligned logical chunk with `read_exact` would decrypt its trailing block again on the next iteration.
+fn read_chunk(
+    reader: &mut TemporaryFile,
+    output: &mut [u8],
+    control: &StorageReadControl,
+) -> VersionResult<usize> {
+    loop {
+        control.cancellation().check()?;
+        match reader.read(output) {
+            Ok(0) => {
+                return Err(spill_error(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                )))
+            }
+            Ok(count) => return Ok(count),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => (),
+            Err(error) => return Err(spill_error(error)),
+        }
+    }
 }
 
 /// A failed read or write of a spill file.

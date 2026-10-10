@@ -6,7 +6,7 @@
 
 use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
-use std::io::{Read as _, Seek as _, SeekFrom};
+use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_sql::expr::RowLookup as _;

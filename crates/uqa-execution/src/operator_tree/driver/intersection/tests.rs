@@ -89,7 +89,9 @@ fn residual_reads_follow_candidate_count_and_keep_original_payload_order() {
                         .into())
                     },
                     |_, predicate, candidates| {
-                        let candidates = candidates.expect("retrieval support");
+                        let Some(Candidates::Documents(candidates)) = candidates else {
+                            panic!("retrieval support must promise documents");
+                        };
                         assert_eq!(candidates, &[5, 9]);
                         reads.fetch_add(candidates.len(), Ordering::Relaxed);
                         Ok(PostingList::from_sorted_unchecked(
@@ -117,7 +119,7 @@ fn empty_support_still_validates_filters_and_preserves_error_precedence() {
         &ParallelExecutor::new(0),
         |_| Ok(PostingList::new().into()),
         |field, _, candidates| {
-            assert_eq!(candidates, Some([].as_slice()));
+            assert_eq!(candidates, Some(Candidates::Documents([].as_slice())));
             Err(SQLError::UnknownColumn(field.into()))
         },
     );
@@ -164,4 +166,61 @@ fn pure_filters_and_other_carriers_keep_their_execution_contract() {
         },
     );
     assert!(matches!(result, Err(SQLError::TypeMismatch(_))));
+}
+
+#[test]
+fn residual_candidates_keep_relational_promises_through_set_operations() {
+    let indexed = OperatorTree::IndexScan {
+        index_name: "records_id".into(),
+        field: "id".into(),
+        predicate: Predicate::Equals(Value::Int(1)),
+    };
+    let graph = OperatorTree::EncodeGraphPosting {
+        source: Box::new(OperatorTree::GraphEdges {
+            graph: "network".into(),
+            label: None,
+        }),
+    };
+    for (retrieval, promised) in [
+        (indexed.clone(), true),
+        (graph.clone(), false),
+        (
+            OperatorTree::Intersect(vec![indexed.clone(), graph.clone()]),
+            true,
+        ),
+        (
+            OperatorTree::Union(vec![indexed.clone(), graph.clone()]),
+            false,
+        ),
+        (
+            OperatorTree::Union(vec![indexed.clone(), indexed.clone()]),
+            true,
+        ),
+        (
+            OperatorTree::Composed(vec![indexed.clone(), graph.clone()]),
+            false,
+        ),
+        (OperatorTree::Composed(vec![graph, indexed]), true),
+    ] {
+        for workers in [0, 4] {
+            let result = execute(
+                &[retrieval.clone(), residual("status")],
+                &ParallelExecutor::new(workers),
+                |_| Ok(posting(&[1, 99], 0.0, "source").into()),
+                |_, _, candidates| {
+                    assert_eq!(
+                        candidates,
+                        Some(if promised {
+                            Candidates::Documents(&[1, 99])
+                        } else {
+                            Candidates::Intersection(&[1, 99])
+                        })
+                    );
+                    Ok(PostingList::new())
+                },
+            )
+            .unwrap();
+            assert!(result.as_posting().unwrap().is_empty());
+        }
+    }
 }

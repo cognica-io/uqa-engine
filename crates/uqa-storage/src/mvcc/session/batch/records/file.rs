@@ -123,49 +123,14 @@ impl Journal {
         Ok(())
     }
 
-    pub(super) fn visit(
-        &self,
-        control: &StorageReadControl,
-        mut visit: impl FnMut(&Edit) -> VersionResult<()>,
-    ) -> VersionResult<()> {
+    pub(super) fn reader(&self) -> VersionResult<Reader<'_>> {
         self.check()?;
         let file = self.file.reopen().map_err(io_error)?.take(self.written);
-        let mut reader = BufReader::with_capacity(BLOCK, file).chain(self.tail.as_slice());
-        let length = self.written + self.tail.len() as u64;
-        let mut position = 0;
-        while position < length {
-            control.check()?;
-            let mut header = [0; HEADER];
-            reader.read_exact(&mut header).map_err(io_error)?;
-            let action = header[0];
-            let kind = RecordWriteKind::from_code(header[1])?;
-            let key_length = u64::from_le_bytes(header[2..10].try_into().expect("key length"));
-            let value_length = u64::from_le_bytes(header[10..].try_into().expect("value length"));
-            position = position
-                .checked_add(HEADER as u64)
-                .and_then(|p| p.checked_add(key_length))
-                .and_then(|p| p.checked_add(value_length))
-                .filter(|p| *p <= length)
-                .ok_or_else(invalid)?;
-            if action > 2 || (action != 2 && value_length != 0) {
-                return Err(invalid());
-            }
-            let key = read_bytes(&mut reader, key_length, control)?;
-            let key = RecordKey::from_budgeted(key);
-            let value = if action == 2 {
-                Some(Arc::new(read_bytes(&mut reader, value_length, control)?))
-            } else {
-                None
-            };
-            visit(&Edit {
-                key,
-                value,
-                kind,
-                prefix: action == 0,
-            })?;
-        }
-        control.check()?;
-        Ok(())
+        Ok(Reader {
+            input: BufReader::with_capacity(BLOCK, file).chain(self.tail.as_slice()),
+            length: self.written + self.tail.len() as u64,
+            position: 0,
+        })
     }
 
     fn check(&self) -> VersionResult<()> {
@@ -174,6 +139,53 @@ impl Journal {
         } else {
             Ok(())
         }
+    }
+}
+
+pub(super) struct Reader<'a> {
+    input: io::Chain<BufReader<io::Take<BlockTemporaryFile<BLOCK>>>, &'a [u8]>,
+    length: u64,
+    position: u64,
+}
+
+impl Reader<'_> {
+    pub(super) fn next(&mut self, control: &StorageReadControl) -> VersionResult<Option<Edit>> {
+        control.check()?;
+        if self.position == self.length {
+            return Ok(None);
+        }
+        let mut header = [0; HEADER];
+        self.input.read_exact(&mut header).map_err(io_error)?;
+        let action = header[0];
+        let kind = RecordWriteKind::from_code(header[1])?;
+        let key_length = u64::from_le_bytes(header[2..10].try_into().expect("key length"));
+        let value_length = u64::from_le_bytes(header[10..].try_into().expect("value length"));
+        self.position = self
+            .position
+            .checked_add(HEADER as u64)
+            .and_then(|p| p.checked_add(key_length))
+            .and_then(|p| p.checked_add(value_length))
+            .filter(|p| *p <= self.length)
+            .ok_or_else(invalid)?;
+        if action > 2 || (action != 2 && value_length != 0) {
+            return Err(invalid());
+        }
+        let key = RecordKey::from_budgeted(read_bytes(&mut self.input, key_length, control)?);
+        let value = if action == 2 {
+            Some(Arc::new(read_bytes(
+                &mut self.input,
+                value_length,
+                control,
+            )?))
+        } else {
+            None
+        };
+        Ok(Some(Edit {
+            key,
+            value,
+            kind,
+            prefix: action == 0,
+        }))
     }
 }
 

@@ -23,8 +23,8 @@ use crate::mvcc::vector::{OwnedVectorMutation, VectorInputs};
 use crate::mvcc::{
     CommitErrorOutcome, CommitFailure, CommitSequence, CommitStatus, CommittedRecordSnapshot,
     MergedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
-    RecordWrite, SharedRecordValue, StorageTransactionId, VersionError, VersionResult,
-    VersionedPersistence,
+    RecordMetadata, RecordWrite, SharedRecordValue, StorageTransactionId, VersionError,
+    VersionResult, VersionedPersistence,
 };
 use crate::read_control::StorageReadControl;
 use crate::{StorageBackendError, StorageSavepointId};
@@ -65,6 +65,10 @@ pub(super) struct Transaction {
 }
 
 impl Transaction {
+    pub(super) fn committed_snapshot(&self) -> Arc<dyn CommittedRecordSnapshot> {
+        Arc::clone(&self.committed)
+    }
+
     pub(super) fn has_record_publication(&self) -> bool {
         self.allocation.is_some()
             || self.changes.has_written()
@@ -201,9 +205,18 @@ impl Transaction {
         kind: RecordWriteKind,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
-        let Some((expected, kind)) =
-            self.record_condition(key.bytes(), value.is_none(), kind, control)?
-        else {
+        let condition = self.record_condition(key.bytes(), value.is_none(), kind, control)?;
+        self.apply_shared_record(key, value, condition, control)
+    }
+
+    pub(super) fn apply_shared_record(
+        &mut self,
+        key: &RecordKey,
+        value: Option<&SharedRecordValue>,
+        condition: Option<(Option<CommitSequence>, RecordWriteKind)>,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        let Some((expected, kind)) = condition else {
             return Ok(());
         };
         let write =
@@ -259,6 +272,20 @@ impl Transaction {
         } else {
             self.committed.metadata(key, control)?
         };
+        Ok(Self::condition_from_metadata(
+            record,
+            private.map(|(_, kind)| kind),
+            deleted,
+            kind,
+        ))
+    }
+
+    pub(super) fn condition_from_metadata(
+        record: Option<RecordMetadata>,
+        previous: Option<RecordWriteKind>,
+        deleted: bool,
+        kind: RecordWriteKind,
+    ) -> Option<(Option<CommitSequence>, RecordWriteKind)> {
         let expected = record.and_then(|record| record.revision);
         let exists = record.is_some_and(|record| record.live);
         if deleted
@@ -268,12 +295,12 @@ impl Transaction {
                 RecordWriteKind::Canonical | RecordWriteKind::GraphPreview
             )
         {
-            return Ok(None);
+            return None;
         }
-        Ok(Some((
+        Some((
             expected,
-            Self::effective_record_kind(private.map(|(_, kind)| kind), deleted, kind),
-        )))
+            Self::effective_record_kind(previous, deleted, kind),
+        ))
     }
 
     fn record_kind(

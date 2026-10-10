@@ -39,6 +39,7 @@ struct Owner<const BYTES: usize> {
     file: tempfile::NamedTempFile,
     cipher: XChaCha20Poly1305,
     length: u64,
+    unpublished_tail: bool,
     #[cfg(test)]
     faults: tests::Faults,
 }
@@ -89,6 +90,7 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
                 file,
                 cipher,
                 length: 0,
+                unpublished_tail: false,
                 #[cfg(test)]
                 faults: tests::Faults::default(),
             })),
@@ -221,12 +223,15 @@ impl<const BYTES: usize> Owner<BYTES> {
             let active = self.active_slot(block)?;
             let file = self.file.as_file_mut();
             file.seek(SeekFrom::Start(slot_offset::<BYTES>(block, active)?))?;
-            let mut nonce = [0_u8; NONCE_BYTES];
-            let mut length = [0_u8; LENGTH_BYTES];
-            let mut tag = [0_u8; TAG_BYTES];
-            file.read_exact(&mut nonce)?;
-            file.read_exact(&mut length)?;
-            let length = u16::from_le_bytes(length);
+            let mut header = [0_u8; SLOT_HEADER_BYTES];
+            file.read_exact(&mut header)?;
+            let nonce: &[u8; NONCE_BYTES] = header[..NONCE_BYTES].try_into().unwrap();
+            let length = u16::from_le_bytes(
+                header[NONCE_BYTES..NONCE_BYTES + LENGTH_BYTES]
+                    .try_into()
+                    .unwrap(),
+            );
+            let tag: &[u8; TAG_BYTES] = header[NONCE_BYTES + LENGTH_BYTES..].try_into().unwrap();
             let populated = usize::from(length);
             let required = (self.length - block * BYTES as u64).min(BYTES as u64) as usize;
             if populated > BYTES || populated < required {
@@ -235,14 +240,13 @@ impl<const BYTES: usize> Owner<BYTES> {
                     "invalid authenticated temporary block length",
                 ));
             }
-            file.read_exact(&mut tag)?;
             file.read_exact(&mut plaintext[..populated])?;
             self.cipher
                 .decrypt_inout_detached(
-                    (&nonce).into(),
+                    nonce.into(),
                     &block_aad(block, length),
                     (&mut plaintext[..populated]).into(),
-                    (&tag).into(),
+                    tag.into(),
                 )
                 .map_err(|_| {
                     io::Error::new(
@@ -277,17 +281,30 @@ impl<const BYTES: usize> Owner<BYTES> {
                 (&mut ciphertext[..populated]).into(),
             )
             .map_err(|_| io::Error::other("temporary file encryption failed"))?;
-        // The complete replacement reaches the inactive slot before its one-byte publication marker. Failed short writes leave the authoritative slot unchanged, including the prefix retained by append rollback.
+        let mut header = [0_u8; SLOT_HEADER_BYTES];
+        header[..NONCE_BYTES].copy_from_slice(&nonce);
+        header[NONCE_BYTES..NONCE_BYTES + LENGTH_BYTES].copy_from_slice(&length.to_le_bytes());
+        header[NONCE_BYTES + LENGTH_BYTES..].copy_from_slice(&tag);
+        if !existing {
+            // The owner lock and logical length hide a fresh block until its entire extent succeeds. Its initial selector can accompany the ciphertext; there is no earlier slot to preserve. Keep the unused slot sparse instead of writing a whole block of padding.
+            self.file
+                .as_file_mut()
+                .seek(SeekFrom::Start(record_offset::<BYTES>(block)?))?;
+            self.write_physical_vectored(&mut [
+                IoSlice::new(&[0]),
+                IoSlice::new(&header),
+                IoSlice::new(&ciphertext[..populated]),
+            ])?;
+            return self.extend_physical(record_offset::<BYTES>(block + 1)?);
+        }
+        // A replacement reaches the inactive slot before its one-byte publication marker. Failed short writes leave the authoritative slot unchanged, including the prefix retained by append rollback.
         self.file
             .as_file_mut()
             .seek(SeekFrom::Start(slot_offset::<BYTES>(block, next)?))?;
-        self.write_physical(&nonce)?;
-        self.write_physical(&length.to_le_bytes())?;
-        self.write_physical(&tag)?;
-        self.write_physical(&ciphertext[..populated])?;
-        if !existing {
-            self.truncate_physical(record_offset::<BYTES>(block + 1)?)?;
-        }
+        self.write_physical_vectored(&mut [
+            IoSlice::new(&header),
+            IoSlice::new(&ciphertext[..populated]),
+        ])?;
         self.file
             .as_file_mut()
             .seek(SeekFrom::Start(record_offset::<BYTES>(block)?))?;
@@ -300,10 +317,44 @@ impl<const BYTES: usize> Owner<BYTES> {
         self.file.as_file_mut().write_all(bytes)
     }
 
+    fn write_physical_vectored(&mut self, mut input: &mut [IoSlice<'_>]) -> io::Result<()> {
+        #[cfg(test)]
+        self.faults
+            .before_vectored(self.file.as_file_mut(), input)?;
+        IoSlice::advance_slices(&mut input, 0);
+        while !input.is_empty() {
+            match self.file.as_file_mut().write_vectored(input) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "incomplete temporary file slot write",
+                    ));
+                }
+                Ok(written) => IoSlice::advance_slices(&mut input, written),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
     fn truncate_physical(&mut self, length: u64) -> io::Result<()> {
+        self.unpublished_tail = true;
         #[cfg(test)]
         self.faults.before_truncate()?;
-        self.file.as_file().set_len(length)
+        self.file.as_file().set_len(length)?;
+        self.unpublished_tail = false;
+        Ok(())
+    }
+
+    fn extend_physical(&mut self, length: u64) -> io::Result<()> {
+        if self.unpublished_tail {
+            // Failed rollback can leave ciphertext beyond this new block. Repair its exact extent before publishing the block, just as ordinary truncation does.
+            return self.truncate_physical(length);
+        }
+        // A fresh block's inactive slot has no contents to preserve. Writing its last padding byte extends the file without resizing an already populated prefix on every append. Logical length is published only after this succeeds.
+        self.file.as_file_mut().seek(SeekFrom::Start(length - 1))?;
+        self.write_physical(&[0])
     }
 
     fn rollback_length(&mut self, length: u64, cause: &io::Error) -> io::Result<()> {

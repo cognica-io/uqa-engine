@@ -56,11 +56,26 @@ impl<'a> TieredCursor<'a> {
         start: Bound<&[u8]>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
+        Self::for_prefix(records, runs, b"", start, control)
+    }
+
+    /// Start a prefix scan without opening runs whose complete key interval is disjoint. The consumer still enforces the prefix on each returned change.
+    pub(super) fn for_prefix(
+        records: Option<&'a super::Records>,
+        runs: &RunSet,
+        prefix: &[u8],
+        start: Bound<&[u8]>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        control.check()?;
         let memtable = records.map(|records| records.range_from::<[u8]>(start).peekable());
         let mut heads = Vec::new();
         // Every run retains a reader concurrently. Leave half the shared workspace for decoded heads, returned values and the consumer instead of letting the first runs take full blocks.
         let block_limit = control.memory().available() / 2 / runs.newest_first().count().max(1);
         for run in runs.newest_first() {
+            if !run.intersects_prefix(prefix) {
+                continue;
+            }
             let mut cursor = run.cursor(start).with_block_limit(block_limit);
             let head = cursor.next(control)?;
             heads.push(RunHead { cursor, head });

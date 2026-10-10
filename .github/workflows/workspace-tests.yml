@@ -54,7 +54,8 @@ jobs:
       - name: Test documentation examples
         shell: bash
         run: |
-          args=(--workspace --locked --doc)
+          # Explicit --doc overrides doctest=false; Node's cdylib has no Rust doctest target.
+          args=(--workspace --locked --doc --exclude uqa-node)
           if [[ "$RUNNER_OS" == Linux ]]; then args+=(--exclude uqa-fdw); fi
           cargo test "${args[@]}"
 

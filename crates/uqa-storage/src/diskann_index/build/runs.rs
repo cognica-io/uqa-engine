@@ -196,7 +196,8 @@ mod tests {
         }
         let run = writer.finish().unwrap();
         assert_eq!(control.memory().used(), 0);
-        assert_eq!(run.block_io_counts(), (0, 7000 + 2 * 43));
+        // Each new block writes a 42-byte authenticated header, an extent byte and its selector.
+        assert_eq!(run.block_io_counts(), (0, 7000 + 2 * 44));
         run.read(&control, |file| {
             let mut reader = RunReader::new(file, &control)?;
             for id in 0_u64..700 {
@@ -208,7 +209,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(run.block_io_counts(), (2, 7000 + 2 * 43));
+        assert_eq!(run.block_io_counts(), (2, 7000 + 2 * 44));
         drop(run);
         assert_eq!(control.memory().used(), 0);
         assert_eq!(temporary.used(), 0);

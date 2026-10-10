@@ -11,6 +11,10 @@ use super::{
     SchemaSecurityCatalog, SchemaStatementWriter,
 };
 use crate::catalog::security::roles::RoleCatalogGuards;
+use crate::row_locks::{
+    binding::{lock_any_relation_identity, RelationLockCatalog},
+    RelationLockMode,
+};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::TypeObjectKind,
@@ -87,6 +91,7 @@ pub struct SchemaRenameContext<'a> {
     pub schemas: &'a dyn uqa_sql::catalog::security::schema_inquiry::SchemaPrivilegeCatalog,
     pub registry: &'a dyn SchemaRenameRegistry,
     pub members: &'a dyn SchemaMembers,
+    pub relations: &'a dyn RelationLockCatalog,
     pub relocation: &'a dyn SchemaMemberRelocation,
     pub persistence: &'a dyn SchemaRenamePersistence,
     pub changes: &'a dyn NamespaceCatalogChanges,
@@ -156,6 +161,9 @@ pub fn rename_schema(
     validate_schema_creation_name(new_name)?;
     // The schema's tuple is locked and checked under its current name before anything moves, as `RenameSchema` updates the pg_namespace row in place.
     context.tuples.replace(name, locking::tuple(&current)?)?;
+    // Member writers and maintenance retain relation locks. Bind every member before
+    // staging catalog changes, so a wait can refresh the complete committed source.
+    let relations = lock_members(context, name)?;
     // Every refresh of the catalog while the members move must see one row per identity and every member's schema: the destination holds a tuple of its own until the old name is empty, then takes the schema's identity back.
     let transition = super::identity::reserve_namespace_tuple(
         &context.tuples,
@@ -171,9 +179,6 @@ pub fn rename_schema(
         .schemas_write()
         .insert(new_name.to_string(), staged.clone());
     context.persistence.save_schema_row(new_name, &staged)?;
-    let relations = context.members.relations(name).map_err(|error| {
-        SQLError::Internal(format!("list the relations of schema `{name}`: {error}"))
-    })?;
     for relation in &relations {
         context.relocation.relocate_relation(relation, new_name)?;
     }
@@ -194,4 +199,42 @@ pub fn rename_schema(
     context.persistence.save_schema_row(new_name, &current)?;
     context.changes.namespace_catalog_changed();
     Ok(())
+}
+
+fn lock_members(
+    context: &SchemaRenameContext<'_>,
+    schema: &str,
+) -> Result<Vec<SchemaRelation>, SQLError> {
+    let relations = context.members.relations(schema).map_err(|error| {
+        SQLError::Internal(format!("list the relations of schema `{schema}`: {error}"))
+    })?;
+    let targets = relations
+        .into_iter()
+        .map(|relation| {
+            let name = relation.identity.qualified_name();
+            context
+                .relations
+                .relation_object_id(&name)
+                .map(|id| id.map(|id| (relation, name, id)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut locked = Vec::new();
+    for (mut relation, name, id) in targets.into_iter().flatten() {
+        let Some(current) = lock_any_relation_identity(
+            context.relations,
+            context.tuples.relations,
+            name,
+            id,
+            RelationLockMode::AccessExclusive,
+        )?
+        else {
+            continue;
+        };
+        relation.identity =
+            RelationIdentity::from_legacy_name(&current).map_err(SQLError::Internal)?;
+        if relation.identity.schema == schema {
+            locked.push(relation);
+        }
+    }
+    Ok(locked)
 }

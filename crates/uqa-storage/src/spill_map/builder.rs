@@ -62,7 +62,13 @@ impl<V: Record> Builder<V> {
         if let Some(disk) = &mut self.pending {
             disk.push(key, &value, &self.map.memory)?;
         } else if let Some(value) = self.map.insert_resident(key, value)? {
-            let mut disk = disk::Builder::new(&self.map.memory)?;
+            let mut disk = disk::Builder::with_workspace(
+                &self.map.memory,
+                self.map
+                    .workspace
+                    .as_ref()
+                    .filter(|owner| std::sync::Arc::strong_count(owner) == 1),
+            )?;
             for entry in self.map.iter() {
                 check(control)?;
                 let (key, value) = entry?;
@@ -95,6 +101,7 @@ impl<V: Record> Builder<V> {
     fn finish_pending(&mut self) -> StorageBackendResult<()> {
         if let Some(disk) = self.pending.take() {
             self.map.root = Root::Disk(disk.finish()?);
+            self.map.workspace = None;
         }
         Ok(())
     }

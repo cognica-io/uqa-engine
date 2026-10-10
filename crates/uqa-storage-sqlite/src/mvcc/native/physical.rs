@@ -103,6 +103,37 @@ enum Statement {
     Upsert,
 }
 
+/// Measure each storage class without materializing its payload. Mixed identity columns retain their actual TEXT or BLOB class.
+fn byte_sizes(layout: &NativeRecordLayout, kind: NativeColumnType) -> String {
+    let sizes = layout
+        .columns
+        .iter()
+        .zip(layout.column_types)
+        .filter_map(|(name, &column)| {
+            let size = format!("coalesce(octet_length(\"{name}\"), 0)");
+            if column == kind {
+                Some(size)
+            } else if column == NativeColumnType::TextOrBlob {
+                let class = if kind == NativeColumnType::Text {
+                    "text"
+                } else {
+                    "blob"
+                };
+                Some(format!(
+                    "CASE typeof(\"{name}\") WHEN '{class}' THEN {size} ELSE 0 END"
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if sizes.is_empty() {
+        "0".to_owned()
+    } else {
+        sizes.join(" + ")
+    }
+}
+
 /// The SQL of each fixed row statement, built once for its layout.
 fn sql(layout: &'static NativeRecordLayout, statement: Statement) -> Arc<str> {
     type Texts = HashMap<(usize, Statement), Arc<str>>;
@@ -114,24 +145,15 @@ fn sql(layout: &'static NativeRecordLayout, statement: Statement) -> Arc<str> {
     let text: Arc<str> = match statement {
         Statement::Measure(bound) => {
             // octet_length reads the encoded byte size without loading the complete field.
-            let sizes = layout
-                .columns
-                .iter()
-                .zip(layout.column_types)
-                .filter(|(_, kind)| **kind != NativeColumnType::Integer)
-                .map(|(name, _)| format!("coalesce(octet_length(\"{name}\"), 0)"))
-                .collect::<Vec<_>>();
-            let sizes = if sizes.is_empty() {
-                "0".to_owned()
-            } else {
-                sizes.join(" + ")
-            };
+            let text = byte_sizes(layout, NativeColumnType::Text);
+            let binary = byte_sizes(layout, NativeColumnType::Blob);
+            let sizes = format!("({text}) + ({binary})");
             let inline = layout
                 .columns
                 .iter()
                 .zip(layout.column_types)
                 .map(|(name, kind)| {
-                    if *kind == NativeColumnType::Integer {
+                    if matches!(kind, NativeColumnType::Integer | NativeColumnType::Real) {
                         format!("\"{name}\"")
                     } else {
                         format!("CASE WHEN {sizes} <= {INLINE_ROW_BYTES} THEN \"{name}\" END")
@@ -139,7 +161,10 @@ fn sql(layout: &'static NativeRecordLayout, statement: Statement) -> Arc<str> {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("SELECT {sizes}, {inline} {}", selection(layout, bound))
+            format!(
+                "SELECT {text}, {binary}, {inline} {}",
+                selection(layout, bound)
+            )
         }
         Statement::Complete(bound) => {
             format!("SELECT {} {}", columns(layout), selection(layout, bound))
@@ -214,16 +239,22 @@ fn read(
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
-    let stored =
+    let text =
         usize::try_from(row.get::<_, i64>(0)?).map_err(|_| invalid("invalid native row size"))?;
-    // A UTF-16 database can expand to UTF-8; three times its bytes also bounds that conversion.
-    let size = stored
+    let binary =
+        usize::try_from(row.get::<_, i64>(1)?).map_err(|_| invalid("invalid native row size"))?;
+    let stored = text
+        .checked_add(binary)
+        .ok_or(VersionError::from(MemoryError::SizeOverflow))?;
+    // Only TEXT can expand when SQLite converts UTF-16 to UTF-8. BLOBs retain their measured length.
+    let size = text
         .checked_mul(3)
+        .and_then(|size| size.checked_add(binary))
         .ok_or(VersionError::from(MemoryError::SizeOverflow))?;
     let _payload = control.memory().reserve(size).map_err(VersionError::from)?;
     control.cancellation().check().map_err(VersionError::from)?;
     if stored <= INLINE_ROW_BYTES {
-        return encode(layout, row, 1, size, control).map(Some);
+        return encode(layout, row, 2, size, control).map(Some);
     }
     drop(rows);
     drop(statement);

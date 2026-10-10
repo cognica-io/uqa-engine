@@ -10,6 +10,7 @@ mod builder;
 mod disk;
 #[cfg(test)]
 mod tests;
+mod workspace;
 
 pub(crate) use builder::Builder;
 
@@ -60,6 +61,8 @@ pub(crate) struct Map<V> {
     len: usize,
     memory: MemoryBudget,
     resident_bytes: usize,
+    max_encoded_bytes: usize,
+    workspace: Option<Arc<workspace::Workspace>>,
 }
 
 impl<V> Clone for Map<V> {
@@ -69,6 +72,8 @@ impl<V> Clone for Map<V> {
             len: self.len,
             memory: self.memory.clone(),
             resident_bytes: self.resident_bytes,
+            max_encoded_bytes: self.max_encoded_bytes,
+            workspace: self.workspace.clone(),
         }
     }
 }
@@ -89,6 +94,8 @@ impl<V: Record> Map<V> {
             len: 0,
             memory: memory.clone(),
             resident_bytes,
+            max_encoded_bytes: 0,
+            workspace: None,
         }
     }
 
@@ -204,6 +211,18 @@ impl<V: Record> Map<V> {
     /// Return ownership when the resident tree cannot admit the value. Both a
     /// live mutation and an unpublished ordered builder use the same allowance.
     fn insert_resident(&mut self, key: u128, value: V) -> StorageBackendResult<Option<V>> {
+        let encoded_bytes = self.max_encoded_bytes.max(value.encoded_bytes()?);
+        let workspace = if matches!(self.root, Root::Memory(_)) {
+            match self.reserve_spill_workspace(encoded_bytes) {
+                Ok(workspace) => workspace,
+                Err(StorageBackendError::Memory(MemoryError::Limit { .. })) => {
+                    return Ok(Some(value));
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            return Ok(Some(value));
+        };
         if let Root::Memory(map) = &mut self.root {
             let bytes = value
                 .memory_bytes()?
@@ -213,7 +232,11 @@ impl<V: Record> Map<V> {
                 Ok(memory) => {
                     let value = Arc::new(Budgeted::new(value, memory));
                     match map.try_insert(key, Some(Arc::clone(&value))) {
-                        Ok(()) => return Ok(None),
+                        Ok(()) => {
+                            self.max_encoded_bytes = encoded_bytes;
+                            self.retain_spill_workspace(workspace);
+                            return Ok(None);
+                        }
                         Err(MemoryError::Limit { .. }) => {
                             let value = match Arc::try_unwrap(value) {
                                 Ok(value) => value.into_parts().0,
@@ -229,6 +252,43 @@ impl<V: Record> Map<V> {
             }
         }
         Ok(Some(value))
+    }
+
+    /// Roots larger than conversion scratch retain their space across sibling
+    /// growth. Smaller roots only need a transient admission check; retaining a
+    /// larger workspace for each tiny map would defeat bounded component sizing.
+    /// A mutated clone needs its own workspace for its independent future root.
+    fn reserve_spill_workspace(
+        &mut self,
+        encoded_bytes: usize,
+    ) -> StorageBackendResult<Option<MemoryReservation>> {
+        let bytes = disk::Builder::workspace_bytes(&self.memory)
+            .checked_add(encoded_bytes)
+            .ok_or(MemoryError::SizeOverflow)?;
+        if bytes > self.memory.limit() {
+            return Ok(None);
+        }
+        if let Some(workspace) = self
+            .workspace
+            .as_ref()
+            .filter(|owner| Arc::strong_count(owner) == 1)
+        {
+            workspace.ensure(bytes)?;
+            Ok(None)
+        } else {
+            let bytes = bytes
+                .checked_add(size_of::<workspace::Workspace>())
+                .ok_or(MemoryError::SizeOverflow)?;
+            Ok(Some(self.memory.reserve(bytes)?))
+        }
+    }
+
+    fn retain_spill_workspace(&mut self, workspace: Option<MemoryReservation>) {
+        if let (Some(workspace), Root::Memory(resident)) = (workspace, &self.root) {
+            if resident.budget().used() >= workspace.bytes() {
+                self.workspace = Some(workspace::Workspace::new(workspace));
+            }
+        }
     }
 
     fn insert_disk(
@@ -260,13 +320,29 @@ impl<V: Record> Map<V> {
         if !self.contains_key(key)? {
             return Ok(());
         }
+        let workspace = if matches!(self.root, Root::Memory(_)) {
+            match self.reserve_spill_workspace(self.max_encoded_bytes) {
+                Ok(workspace) => workspace,
+                Err(StorageBackendError::Memory(MemoryError::Limit { .. })) => {
+                    self.spill(control)?;
+                    None
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
         if let Root::Memory(map) = &mut self.root {
             match map.try_insert(key, None) {
                 Ok(()) => {
                     self.len -= 1;
+                    self.retain_spill_workspace(workspace);
                     return Ok(());
                 }
-                Err(MemoryError::Limit { .. }) => self.spill(control)?,
+                Err(MemoryError::Limit { .. }) => {
+                    drop(workspace);
+                    self.spill(control)?;
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -310,7 +386,12 @@ impl<V: Record> Map<V> {
         let Root::Memory(resident) = &self.root else {
             return Ok(());
         };
-        let mut disk = disk::Builder::new(&self.memory)?;
+        let mut disk = disk::Builder::with_workspace(
+            &self.memory,
+            self.workspace
+                .as_ref()
+                .filter(|owner| Arc::strong_count(owner) == 1),
+        )?;
         for (key, value) in resident {
             check(control)?;
             if let Some(value) = value {
@@ -320,6 +401,7 @@ impl<V: Record> Map<V> {
         let root = disk.finish()?;
         check(control)?;
         self.root = Root::Disk(root);
+        self.workspace = None;
         Ok(())
     }
 

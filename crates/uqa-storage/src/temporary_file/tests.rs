@@ -38,6 +38,8 @@ pub(super) struct Faults {
     pub(super) fail_after_bytes: Option<usize>,
     pub(super) fail_truncate: bool,
     pub(super) written_bytes: u64,
+    pub(super) write_requests: usize,
+    pub(super) truncate_requests: usize,
     pub(super) read_blocks: usize,
 }
 
@@ -47,25 +49,111 @@ impl Faults {
         file: &mut std::fs::File,
         bytes: &[u8],
     ) -> io::Result<()> {
+        self.before_vectored(file, &[IoSlice::new(bytes)])
+    }
+
+    pub(super) fn before_vectored(
+        &mut self,
+        file: &mut std::fs::File,
+        slices: &[IoSlice<'_>],
+    ) -> io::Result<()> {
+        let bytes: usize = slices.iter().map(|slice| slice.len()).sum();
+        self.write_requests += 1;
         if let Some(remaining) = self.fail_after_bytes.as_mut() {
-            if *remaining < bytes.len() {
+            if *remaining < bytes {
                 let count = *remaining;
                 self.fail_after_bytes = None;
-                file.write_all(&bytes[..count])?;
+                let mut available = count;
+                for slice in slices {
+                    let prefix = available.min(slice.len());
+                    file.write_all(&slice[..prefix])?;
+                    available -= prefix;
+                }
                 self.written_bytes += count as u64;
                 return Err(io::Error::other("injected partial temporary file write"));
             }
-            *remaining -= bytes.len();
+            *remaining -= bytes;
         }
-        self.written_bytes += bytes.len() as u64;
+        self.written_bytes += bytes as u64;
         Ok(())
     }
 
     pub(super) fn before_truncate(&mut self) -> io::Result<()> {
+        self.truncate_requests += 1;
         if std::mem::take(&mut self.fail_truncate) {
             return Err(io::Error::other("injected temporary file truncate failure"));
         }
         Ok(())
+    }
+}
+
+#[test]
+fn appending_authenticated_blocks_does_not_resize_the_existing_file() {
+    for blocks in [1, 32, 257] {
+        let mut file = BlockTemporaryFile::<1024>::new().unwrap();
+        let expected: Vec<_> = (0..blocks * 1024)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        file.write_all(&expected).unwrap();
+        assert_eq!(file.owner.lock().faults.truncate_requests, 0);
+        assert_eq!(
+            std::fs::metadata(file.path()).unwrap().len(),
+            BlockTemporaryFile::<1024>::physical_len_for(expected.len() as u64).unwrap()
+        );
+        let mut actual = Vec::new();
+        file.reopen().unwrap().read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
+        file.set_len(1023).unwrap();
+        assert_eq!(file.owner.lock().faults.truncate_requests, 1);
+        file.set_len(1025).unwrap();
+        assert_eq!(file.owner.lock().faults.truncate_requests, 1);
+        actual.clear();
+        file.reopen().unwrap().read_to_end(&mut actual).unwrap();
+        let mut truncated = expected[..1023].to_vec();
+        truncated.extend_from_slice(&[0, 0]);
+        assert_eq!(actual, truncated);
+    }
+}
+
+#[test]
+fn authenticated_block_headers_do_not_fragment_physical_writes() {
+    for blocks in [1, 32] {
+        let mut file = BlockTemporaryFile::<1024>::new().unwrap();
+        let expected = vec![b'x'; blocks * 1024];
+        file.write_all(&expected).unwrap();
+        let requests = file.owner.lock().faults.write_requests;
+        assert!(
+            requests <= blocks * 3,
+            "{blocks} block publications issued {requests} physical write requests"
+        );
+        let mut actual = Vec::new();
+        file.reopen().unwrap().read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn fresh_authenticated_blocks_combine_initial_selector_and_ciphertext() {
+    for blocks in [1, 32] {
+        let mut file = TemporaryFile::new().unwrap();
+        let expected = vec![b'x'; blocks * BLOCK_BYTES + 13];
+        file.write_all(&expected).unwrap();
+        let owner = file.owner.lock();
+        assert_eq!(owner.faults.write_requests, (blocks + 1) * 2);
+        assert_eq!(
+            owner.faults.written_bytes,
+            (expected.len() + (blocks + 1) * (SLOT_HEADER_BYTES + 2)) as u64
+        );
+        assert_eq!(owner.faults.read_blocks, 0);
+        assert_eq!(owner.faults.truncate_requests, 0);
+        drop(owner);
+        let mut actual = Vec::new();
+        file.reopen().unwrap().read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            std::fs::metadata(file.path()).unwrap().len(),
+            TemporaryFile::physical_len_for(expected.len() as u64).unwrap()
+        );
     }
 }
 
@@ -175,8 +263,8 @@ fn offset_sized_blocks_append_one_record_without_redecrypting_earlier_offsets() 
         file.write_all(&value.to_le_bytes()).unwrap();
     }
     assert_eq!(file.owner.lock().faults.read_blocks, 0);
-    // Each append writes one complete eight-byte slot and its selector. The inactive slot is reserved, and no prior offset block is rewritten.
-    assert_eq!(file.owner.lock().faults.written_bytes, OFFSETS * 51);
+    // Each append writes one complete eight-byte slot, one end byte reserving the inactive slot, and its selector. No prior offset block is rewritten.
+    assert_eq!(file.owner.lock().faults.written_bytes, OFFSETS * 52);
     assert_eq!(std::fs::metadata(file.path()).unwrap().len(), OFFSETS * 101);
     let mut reader = file.reopen().unwrap();
     for value in 0..OFFSETS {
@@ -200,7 +288,7 @@ fn vectored_records_share_one_block_publication_and_preserve_slice_order() {
     );
     assert_eq!(
         file.owner.lock().faults.written_bytes,
-        (SLOT_HEADER_BYTES + 13 + 1) as u64
+        (SLOT_HEADER_BYTES + 13 + 2) as u64
     );
     let mut bytes = Vec::new();
     file.reopen().unwrap().read_to_end(&mut bytes).unwrap();
@@ -237,7 +325,7 @@ fn complete_vectored_records_skip_empty_slices_and_publish_each_block_once() {
     .unwrap();
     assert_eq!(
         file.owner.lock().faults.written_bytes - written,
-        (3 * (SLOT_HEADER_BYTES + 1) + 8 + 8 + 3) as u64
+        (3 * (SLOT_HEADER_BYTES + 1) + 8 + 8 + 3 + 2) as u64
     );
     let mut bytes = Vec::new();
     file.reopen().unwrap().read_to_end(&mut bytes).unwrap();
@@ -255,7 +343,7 @@ fn short_blocks_authenticate_their_populated_length_without_encrypting_padding()
     let mut file = TemporaryFile::new().unwrap();
     file.write_all(b"small record").unwrap();
     let written = file.owner.lock().faults.written_bytes;
-    assert_eq!(written, (SLOT_HEADER_BYTES + 12 + 1) as u64);
+    assert_eq!(written, (SLOT_HEADER_BYTES + 12 + 2) as u64);
     assert_eq!(
         std::fs::metadata(file.path()).unwrap().len(),
         RECORD_BYTES as u64

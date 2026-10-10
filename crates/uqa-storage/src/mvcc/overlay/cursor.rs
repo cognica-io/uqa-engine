@@ -44,7 +44,8 @@ impl PrivateRecordSnapshot {
         let start = after
             .filter(|after| *after >= prefix)
             .map_or(Bound::Included(prefix), Bound::Excluded);
-        let changes = TieredCursor::new(Some(&self.records), &self.runs, start, control)?;
+        let changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         let mut retained_prefix = BudgetedVec::new(control.memory());
         retained_prefix.extend_from_slice(prefix)?;
         Ok(PrivateRecordCursor {

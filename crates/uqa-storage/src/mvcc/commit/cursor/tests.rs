@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::mvcc::{
-    commit::{PreparedRecordCommit, RecordWriteKind},
+    commit::{PreparedLookup, PreparedRecordCommit, RecordWriteKind},
     overlay::run::{read_counts, SpilledRunWriter},
     CommitSequence, PrivateRecordRevision, RecordWrite, VersionError,
 };
@@ -80,5 +80,73 @@ fn metadata_selection_preserves_writes_without_loading_rejected_spill_values() {
         read.cancellation().cancel();
         assert!(prepared.writes().next_where(&read, |_| Ok(false)).is_err());
         assert_eq!(read.memory().used(), 0);
+    }
+}
+
+#[test]
+fn prepared_metadata_lookups_preserve_conditions_without_loading_values() {
+    for spilled in [false, true] {
+        let control = StorageReadControl::with_limit(2 << 20);
+        let large = vec![b'x'; 128 << 10];
+        let writes = [
+            RecordWrite {
+                key: b"deleted",
+                expected: Some(CommitSequence::from_u64(7)),
+                value: None,
+            },
+            RecordWrite {
+                key: b"live",
+                expected: None,
+                value: Some(&large),
+            },
+        ];
+        let prepared = if spilled {
+            let mut spill = SpilledRunWriter::new(2, 11, control.memory()).unwrap();
+            for write in &writes {
+                spill
+                    .push(
+                        write.key,
+                        write.expected,
+                        RecordWriteKind::Occurrence,
+                        PrivateRecordRevision::for_tests(),
+                        write.value,
+                        &control,
+                    )
+                    .unwrap();
+            }
+            PreparedRecordCommit::from_spilled_run(spill.finish().unwrap().unwrap(), &control)
+                .unwrap()
+        } else {
+            PreparedRecordCommit::new(&writes, &control).unwrap()
+        };
+        let read = StorageReadControl::with_limit(4 << 10);
+        let lookup = PreparedLookup::new(&prepared, &read).unwrap();
+        read_counts::take();
+        for write in &writes {
+            let metadata = lookup.metadata(write.key, &read).unwrap().unwrap();
+            assert_eq!(metadata.key(), write.key);
+            assert_eq!(metadata.expected(), write.expected);
+            assert_eq!(metadata.live(), write.value.is_some());
+            assert_eq!(
+                metadata.value_len(),
+                write.value.map(|value| value.len() as u64)
+            );
+            assert!(
+                metadata.kind()
+                    == if spilled {
+                        RecordWriteKind::Occurrence
+                    } else {
+                        RecordWriteKind::Canonical
+                    }
+            );
+        }
+        assert!(lookup.metadata(b"missing", &read).unwrap().is_none());
+        assert_eq!(read_counts::take().values, 0);
+        read.cancellation().cancel();
+        assert!(lookup.metadata(b"live", &read).is_err());
+        drop(lookup);
+        drop(prepared);
+        assert_eq!(read.memory().used(), 0);
+        assert_eq!(control.memory().used(), 0);
     }
 }

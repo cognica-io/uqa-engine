@@ -26,7 +26,7 @@ use crate::physical::{
 };
 use crate::relational::SortComparison;
 use crate::relational::{SharedExpressionEvaluator, SortKey};
-use crate::spill::{EncodedBatchSizer, SpillBuffer, SpillDrain};
+use crate::spill::{EncodedBatchSizer, SpillBuffer, SpillDrain, SpillFileArena};
 
 mod comparison;
 mod top_k;
@@ -148,14 +148,18 @@ impl<'a> ExternalSort<'a> {
         self.merge_pass_count
     }
 
-    fn create_run_buffer(&self) -> SpillBuffer {
-        self.spill_directory.as_ref().map_or_else(
-            || SpillBuffer::new(self.work_mem_bytes),
-            |directory| SpillBuffer::new_in(self.work_mem_bytes, directory),
-        )
+    fn create_run_buffer(&self, arena: &SpillFileArena) -> SpillBuffer {
+        self.spill_directory
+            .as_ref()
+            .map_or_else(
+                || SpillBuffer::new(self.work_mem_bytes),
+                |directory| SpillBuffer::new_in(self.work_mem_bytes, directory),
+            )
+            .with_arena(arena)
     }
 
     fn build_initial_runs(&mut self) -> ExecResult<Vec<SortedRun>> {
+        let arena = SpillFileArena::new(self.spill_directory.clone());
         let mut sequence = 0_u64;
         let mut pending = Vec::new();
         let mut pending_size = EncodedBatchSizer::new(&self.run_schema)?;
@@ -200,7 +204,9 @@ impl<'a> ExternalSort<'a> {
                 let would_exceed = candidate_size.bytes() > self.work_mem_bytes;
 
                 if would_exceed && !pending.is_empty() {
-                    if let Some(run) = self.finish_run(std::mem::take(&mut pending), true)? {
+                    if let Some(run) =
+                        self.finish_run(std::mem::take(&mut pending), true, &arena)?
+                    {
                         runs.push(run);
                     }
                     pending_size = EncodedBatchSizer::new(&self.run_schema)?;
@@ -215,7 +221,9 @@ impl<'a> ExternalSort<'a> {
                 // One row is indivisible. Flush it immediately when it alone is
                 // larger than work_mem so no additional row joins it in memory.
                 if pending_size.bytes() > self.work_mem_bytes {
-                    if let Some(run) = self.finish_run(std::mem::take(&mut pending), true)? {
+                    if let Some(run) =
+                        self.finish_run(std::mem::take(&mut pending), true, &arena)?
+                    {
                         runs.push(run);
                     }
                     pending_size = EncodedBatchSizer::new(&self.run_schema)?;
@@ -225,7 +233,7 @@ impl<'a> ExternalSort<'a> {
         }
 
         let force_spill = !runs.is_empty();
-        if let Some(run) = self.finish_run(pending, force_spill)? {
+        if let Some(run) = self.finish_run(pending, force_spill, &arena)? {
             runs.push(run);
         }
         Ok(runs)
@@ -235,6 +243,7 @@ impl<'a> ExternalSort<'a> {
         &self,
         records: Vec<DecoratedRow>,
         force_spill: bool,
+        arena: &SpillFileArena,
     ) -> ExecResult<Option<SortedRun>> {
         let mut records = records;
         uqa_core::ordering::sort_by_with_control(
@@ -251,7 +260,7 @@ impl<'a> ExternalSort<'a> {
             return Ok(None);
         }
 
-        let mut buffer = self.create_run_buffer();
+        let mut buffer = self.create_run_buffer(arena);
         let mut writer = RunBatchWriter::new(self.run_schema.clone())?;
         for record in records {
             writer.push(&mut buffer, record.row)?;
@@ -265,6 +274,7 @@ impl<'a> ExternalSort<'a> {
 
     fn collapse_runs(&mut self, mut runs: Vec<SortedRun>) -> ExecResult<Option<SortedRun>> {
         while runs.len() > 1 {
+            let arena = SpillFileArena::new(self.spill_directory.clone());
             self.merge_pass_count = self.merge_pass_count.checked_add(1).ok_or_else(|| {
                 ExecError::Other("external sort merge-pass count overflow".into())
             })?;
@@ -279,7 +289,7 @@ impl<'a> ExternalSort<'a> {
                     group,
                     &self.comparison(),
                     self.keep,
-                    self.create_run_buffer(),
+                    self.create_run_buffer(&arena),
                     &self.run_schema,
                     self.input_slots.len(),
                 )?);
@@ -609,6 +619,8 @@ fn heap_pop(
 
 #[cfg(test)]
 mod tests {
+    mod files;
+
     mod enums;
     mod legacy_vectors;
     mod top_k;

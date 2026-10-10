@@ -14,9 +14,12 @@ mod identifiers;
 use super::{open, MODES};
 use std::{collections::BTreeMap, sync::mpsc, time::Duration};
 use uqa_core::Value;
-use uqa_storage::{mvcc::VersionedSessionOptions, DocumentMetadata, DocumentStore, StoredDocument};
+use uqa_storage::{
+    mvcc::VersionedSessionOptions, DocumentMetadata, DocumentStore, StoredDocument, ValueIndexKey,
+};
 use uqa_storage_sqlite::{
-    Catalog, ManagedConnection, SQLiteDocumentStore, SQLiteError, SQLiteKeyValueStore,
+    Catalog, ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore, SQLiteError,
+    SQLiteKeyValueStore,
 };
 
 fn fields(n: i64) -> BTreeMap<String, Value> {
@@ -354,13 +357,15 @@ fn native_document_deletion_versions_both_btree_namespaces_and_clear_retains_old
     let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
     documents.put(1, fields(1)).unwrap();
     documents.put(2, fields(2)).unwrap();
-    connection.with(|sqlite| {
-        for name in [rusqlite::types::Value::Text("n".into()), rusqlite::types::Value::Blob(b"n".to_vec())] {
-            sqlite.execute("INSERT INTO _btree_indexes VALUES ('docs', ?1)", [&name])?;
-            sqlite.execute("INSERT INTO _btree_index_entries VALUES ('docs', ?1, 1, '1'), ('docs', ?1, 2, '2')", [&name])?;
-        }
-        Ok(())
-    }).unwrap();
+    let indexes = SQLiteBTreeIndexStore::new(connection.clone());
+    for key in [
+        ValueIndexKey::Column("n".into()),
+        ValueIndexKey::Index("n".into()),
+    ] {
+        indexes
+            .replace("docs", &key, &[(1, Value::Int(1)), (2, Value::Int(2))])
+            .unwrap();
+    }
     connection
         .bind_native_records(VersionedSessionOptions::default())
         .unwrap();

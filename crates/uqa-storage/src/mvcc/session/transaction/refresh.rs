@@ -7,10 +7,11 @@
 //! Advance command visibility without losing private changes or their original write requirements.
 
 use super::{
-    PrivateRecordChanges, StorageReadControl, Transaction, VersionError, VersionResult,
-    VersionedPersistence,
+    PrivateRecordChanges, StorageReadControl, Transaction, VersionResult, VersionedPersistence,
 };
 use crate::mvcc::resolution::{self, ResolutionMode};
+
+mod validation;
 
 impl Transaction {
     pub(in crate::mvcc::session) fn refresh(
@@ -46,21 +47,7 @@ impl Transaction {
             control,
         )?;
         let records = resolved.as_ref().unwrap_or(&prepared);
-        let mut writes = records.writes();
-        let mut mutation = 0;
-        while let Some(write) = writes.next_metadata(control)? {
-            let actual = current
-                .metadata(write.key(), control)?
-                .and_then(|row| row.revision);
-            if write.expected() != actual {
-                return Err(VersionError::WriteConflict {
-                    mutation,
-                    expected: write.expected(),
-                    actual,
-                });
-            }
-            mutation += 1;
-        }
+        validation::validate(records, current.as_ref(), control)?;
         let changes = PrivateRecordChanges::from_prepared(
             records,
             persistence.private_revision_scope(),

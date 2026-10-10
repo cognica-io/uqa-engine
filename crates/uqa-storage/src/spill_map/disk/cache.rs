@@ -7,8 +7,10 @@
 //! Authenticated immutable prefixes share the charged read cache across appends.
 
 use super::{io, BlockTemporaryFile, StorageBackendResult, BLOCK_BYTES};
+use super::{Reservation, Workspace};
 use std::io::{Read, Seek, SeekFrom};
-use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation};
+use std::sync::Arc;
+use uqa_core::memory::{MemoryBudget, MemoryError};
 
 #[derive(Clone)]
 struct Block {
@@ -20,17 +22,25 @@ struct Block {
 pub(super) struct Blocks {
     entries: Vec<Block>,
     next: usize,
-    _memory: MemoryReservation,
+    _memory: Reservation,
 }
 
 impl Blocks {
-    pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        let count = (memory.limit() / 64 / size_of::<Block>()).min(64);
-        let (count, reservation) = match memory.reserve(count * size_of::<Block>()) {
-            Ok(reservation) => (count, reservation),
-            Err(MemoryError::Limit { .. }) => (0, memory.empty_reservation()),
-            Err(error) => return Err(error.into()),
-        };
+    pub(super) fn workspace_bytes(memory: &MemoryBudget) -> usize {
+        (memory.limit() / 64 / size_of::<Block>()).min(64) * size_of::<Block>()
+    }
+
+    pub(super) fn new(
+        memory: &MemoryBudget,
+        owner: Option<&Arc<Workspace>>,
+    ) -> StorageBackendResult<Self> {
+        let count = Self::workspace_bytes(memory) / size_of::<Block>();
+        let (count, reservation) =
+            match Reservation::reserve(memory, owner, count * size_of::<Block>()) {
+                Ok(reservation) => (count, reservation),
+                Err(MemoryError::Limit { .. }) => (0, Reservation::reserve(memory, None, 0)?),
+                Err(error) => return Err(error.into()),
+            };
         Ok(Self {
             entries: vec![
                 Block {

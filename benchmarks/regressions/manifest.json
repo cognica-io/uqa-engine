@@ -1423,7 +1423,7 @@
       "source": "crates/uqa-storage/src/mvcc/populations/resolve/tests.rs",
       "capability": "Spilled population reconciliation",
       "workload": "128/512 one-KiB canonical values and raw origin invalidation, command and publication resolution under a 128 KiB allowance.",
-      "invariant": "Each intermediate/final output writes values once without repeated run merges; complete keys, preconditions, values and kinds, cancellation and release remain correct."
+      "invariant": "One output write per value and zero additional copies during preparation; complete keys, preconditions, values and kinds, cancellation and release remain correct."
     },
     {
       "package": "uqa-storage-sqlite",
@@ -1484,12 +1484,12 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
-      "test": "prepared_private_roots_copy_sorted_spill_once_and_preserve_undo",
+      "test": "prepared_private_roots_share_sorted_spill_and_preserve_undo",
       "cases": 1,
       "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
       "capability": "Spilled transaction refresh",
       "workload": "4/128/512 one-KiB records; unclassified and grouped private revisions under 128 KiB.",
-      "invariant": "Each spilled payload is written exactly once without merging; complete values, preconditions, cancellation, retained roots and savepoint undo agree.",
+      "invariant": "Adoption and repeated preparation write no immutable payload bytes; complete values, fingerprints, preconditions, cancellation, independent roots and savepoint undo agree.",
       "case_names": [
         ""
       ]
@@ -1764,6 +1764,647 @@
       "capability": "Authenticated spill tail reads",
       "workload": "24 successive appends across partial and complete blocks, eight repeated point reads, a retained root and an injected partial append failure.",
       "invariant": "Warm tail reads perform zero additional block decryptions; growth and address reuse expose exactly the new bytes while old roots and the original allowance remain valid.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "committed_revision_does_not_read_unrelated_private_spill_blocks",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Committed revision point reads",
+      "workload": "32/128 unrelated spilled private records, a committed key and an absent key preceding their range.",
+      "invariant": "Exact committed revisions require zero private entry, block or value reads and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "private_revision_point_reads_preserve_replacements_tombstones_and_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Private revision point reads",
+      "workload": "Resident and spilled records, private tombstones, retained views, savepoint undo, replacement and cancellation.",
+      "invariant": "One metadata lookup obtains the exact revision without reading values; private identities, visibility and allowance release remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_scalar_calls_fit_the_native_routine_stack_budget",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/evaluator/stack_tests.rs",
+      "capability": "Recursive scalar stack ownership",
+      "workload": "32 nested arithmetic/function nodes under ordinary and controlled evaluation.",
+      "invariant": "All 32 visits stay within the existing one-million-byte native stack budget, return the exact result and release controlled allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "intersection_support_preserves_relational_absence_and_null_semantics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Relational intersection support",
+      "workload": "Candidate support containing present NULL, absent and non-NULL identities with independent predicates.",
+      "invariant": "Only candidate fields are read; missing rows are excluded while NULL semantics and default decorated postings are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "promised_document_rows_still_reject_an_inconsistent_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Explicit document support validation",
+      "workload": "A promised document candidate is missing from its retained relational snapshot.",
+      "invariant": "The strict source path retains its consistency error rather than silently dropping the missing row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_reads_and_cancellation_errors_are_not_empty_matches",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Bounded filter error propagation",
+      "workload": "Failed provider reads and cancellation during candidate filtering.",
+      "invariant": "Read errors and typed cancellation propagate without returning empty matches or repeating candidate reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cursor_seeks_past_the_last_key_do_not_read_spilled_entries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Spill cursor range bounds",
+      "workload": "128/1024 records; included and excluded bounds beyond the last key, the included last key, a forward seek and cancellation.",
+      "invariant": "Disjoint forward ranges and seeks read zero blocks, entries or values; the included last key, cancellation and allowance release remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "authenticated_block_headers_do_not_fragment_physical_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests.rs",
+      "capability": "Authenticated spill block I/O",
+      "workload": "Publish one and 32 encrypted blocks through the ordinary temporary-file writer and read their exact bytes back.",
+      "invariant": "Each block publication issues at most three physical write requests without changing the authenticated format or active-slot publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "appending_authenticated_blocks_does_not_resize_the_existing_file",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests.rs",
+      "capability": "Authenticated spill extent growth",
+      "workload": "Append 1, 32 and 257 authenticated blocks, read exact bytes, truncate inside a block and grow across its boundary.",
+      "invariant": "Append performs zero physical resizes; explicit truncation performs one, subsequent growth performs none, physical framing is exact and newly visible bytes are zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "residual_candidates_keep_relational_promises_through_set_operations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/intersection/tests.rs",
+      "capability": "Relational candidate provenance",
+      "workload": "Relational and graph operands nested through intersections, unions and sequential compositions under serial and parallel execution.",
+      "invariant": "Residual filters reject missing promised document identities while allowing graph identities outside the selected relation; composition preserves the provenance of its support.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "disjoint_private_prefixes_do_not_open_spill_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Disjoint private prefix reads",
+      "workload": "128/512 private records forced to spill; prefixes before and after the run range through entry, value and metadata cursors.",
+      "invariant": "Disjoint prefixes open zero blocks, decode zero entries and load zero values, while matching scans, cancellation and original allowance release remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "schema_rename_waits_for_member_statistics_and_refreshes_after_release",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/session/analyze/tests/locking.rs",
+      "capability": "Schema relocation and maintenance concurrency",
+      "workload": "Native SQLite, SQLite Key/Value and redb sessions; an open ANALYZE transaction competes with schema rename and either commits or rolls back.",
+      "invariant": "Schema relocation waits for the member relation, refreshes the released transaction outcome and preserves exact moved statistics and row counts without leftover old-name rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cursor_seeks_between_blocks_do_not_decode_preceding_entries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Spill cursor block bounds",
+      "workload": "A 1024-record spilled run; included and excluded absent keys between blocks, plus an excluded preceding block endpoint.",
+      "invariant": "Each forward seek reads only the next block and its first entry, with unchanged key selection, cancellation and allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "diskann_transaction_larger_than_its_session_allowance_commits",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/diskann/resources.rs",
+      "capability": "DiskANN transaction spill lifecycle",
+      "workload": "The unchanged native and Key/Value conformance cases insert 2048 canonical documents under the original 512 KiB session allowance, undo a replacement, commit and reopen.",
+      "invariant": "All canonical vectors, exact nearest result and population counts survive undo and publication; original allowance and complete release remain enforced under the unchanged CI stall guard.",
+      "case_names": [
+        "native_1_false",
+        "native_2_true"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "population_visits_do_not_reopen_spill_after_a_terminal_page",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/populations/reconcile/tests.rs",
+      "capability": "Population reconciliation page exhaustion",
+      "workload": "Spilled prefixes with 1/63/64/65/127/128/129 records, including tombstones, followed by an unrelated key.",
+      "invariant": "Only required pages open spill blocks; short terminal pages do not cause an extra empty query. Exact live rows, full-page boundaries, cancellation and allowance release are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unaligned_entry_ranges_decrypt_each_physical_block_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Authenticated spill entry reads",
+      "workload": "A 1024-record run whose logical entry blocks cross physical encryption-block boundaries.",
+      "invariant": "Every physical block intersecting an entry range is decrypted exactly once, with unchanged range length, cancellation and allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unaligned_value_ranges_decrypt_each_physical_block_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Authenticated spill value reads",
+      "workload": "A value starting at an 11-byte offset and spanning three encrypted blocks, loaded and copied through the real spill files.",
+      "invariant": "Loading and copying each decrypt exactly the intersecting physical blocks, return identical complete bytes and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "absent_prefixes_inside_spill_blocks_do_not_read_unrelated_entries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Private spill prefix membership",
+      "workload": "128/512 spilled records; absent prefixes inside a block's key interval, matching prefixes of every length, tombstones and retained views across resident replacement and savepoint undo.",
+      "invariant": "Known-absent fixture prefixes read zero blocks, entries and values; matching identities, newer-write precedence, retained roots, cancellation and the original allowance remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prefix_filters_preserve_literal_prefixes_with_bounded_shared_workspace",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/filter.rs",
+      "capability": "Charged literal prefix filters",
+      "workload": "Shared-ancestor memory pressure, arbitrary binary keys, a long key and every nonempty literal prefix, plus failed optional admission.",
+      "invariant": "Every inserted prefix remains a possible match, the optional filter uses at most one quarter of shared available workspace and every reservation is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_cluster_encoding_retains_only_one_decoded_score_block",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/clustered_postings/occurrences/builder/tests.rs",
+      "capability": "Incremental occurrence encoding",
+      "workload": "128/512/20000 postings under a shared 1 MiB allowance with 256 KiB already retained.",
+      "invariant": "All scores and occurrence edges round-trip exactly without relocating a cluster-sized decoded score array; all reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "a_rebuild_larger_than_its_allowance_stages_within_it",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/source_rebuild/tests.rs",
+      "capability": "Bounded text source rebuilding",
+      "workload": "20000 documents with one common and one unique term under the original 2 MiB allowance.",
+      "invariant": "Staging and visiting preserve every common and unique posting while remaining within the original allowance and releasing all retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "structural_occurrence_resolution_writes_sorted_spill_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
+      "capability": "Ordered occurrence publication",
+      "workload": "128/512 spilled canonical records plus structurally owned occurrence records under 128 KiB; command refresh and publication.",
+      "invariant": "Each output value is written exactly once with no merge copies; keys, values, original conditions, canonical kinds, cancellation and cleanup remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "structural_occurrence_resolution_reads_each_spilled_value_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
+      "capability": "Payload-free occurrence source selection",
+      "workload": "4/128/512 paired term clusters and one canonical format marker in an immutable spill under 128 KiB, through command refresh and publication.",
+      "invariant": "Only the ordered input cursor reads values, exactly once per record; marker metadata does not evict its payload block. Every output key, value, condition, canonical kind and final allowance release remains exact. Command conditions share one metadata window with zero scalar reads; publication opens none.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prepared_metadata_lookups_preserve_conditions_without_loading_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/commit/cursor/tests.rs",
+      "capability": "Prepared write metadata projection",
+      "workload": "Resident and spilled live 128 KiB records, tombstones and absent keys under a separate 4 KiB read allowance.",
+      "invariant": "Exact keys, original conditions, kinds and value lengths with zero spill value reads; cancellation and complete allowance release remain intact."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "binary_rows_reserve_binary_bytes_and_preserve_text_conversion",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/physical/tests.rs",
+      "capability": "Native row payload reservations",
+      "workload": "16 KiB binary identities mixed with multibyte and embedded-NUL text in UTF-8, UTF-16le and UTF-16be databases; 40 KiB read allowance.",
+      "invariant": "Point reads and iteration preserve storage classes and values without reserving text-conversion space for binary data; smaller allowances still reject and all reservations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_row_encoding_fits_its_complete_length_without_growing_copies",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/tests.rs",
+      "capability": "Native row encoding ownership",
+      "workload": "A 32 KiB BLOB followed by integer and text fields, with an allowance equal to the independently constructed encoded row.",
+      "invariant": "Exactly one complete output buffer fits the allowance, produces the pinned native bytes and releases all retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_hnsw_spill_builds_mutates_rolls_back_and_reopens",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/tests/spill.rs",
+      "capability": "Native HNSW retained spill lifecycle",
+      "workload": "20 vectors of 4096 dimensions under 256 KiB, retained readers, savepoint and transaction rollback, replacement, tombstone rebuild and cold reopen.",
+      "invariant": "The original allowance holds every lifecycle operation; retained and reopened queries keep their independently checked results and cleanup releases all memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prepared_spill_adoption_preserves_independent_allowance_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Spilled transaction refresh",
+      "workload": "128/512 one-KiB records adopted into independent 128 KiB and undersized 1 KiB allowances.",
+      "invariant": "Different allowances copy and charge their own run; insufficient budgets fail, closing the source releases all original leases and the independent root retains exact results."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resident_growth_keeps_spill_workspace_under_shared_ancestor_pressure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Shared spill workspace admission",
+      "workload": "512 records through unordered and ordered construction under a 64 KiB ancestor with 32 KiB retained elsewhere and a larger child allowance.",
+      "invariant": "Resident growth leaves room for disk conversion, preserving exact values, independent roots and complete final allowance release."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "tiny_runs_share_each_pass_file_and_preserve_stable_output_and_cleanup",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/external_sort/tests/files.rs",
+      "capability": "Bounded external sort files",
+      "workload": "257 indivisible rows with duplicate keys under a one-byte encoded allowance, full drain and early stop.",
+      "invariant": "One physical file during initial-run construction, the same 257 runs and fixed-fan-in merge passes, exact stable output and complete file cleanup."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_segments_bound_readers_and_reject_appends_after_another_segment",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/file/tests.rs",
+      "capability": "Immutable spill segments",
+      "workload": "Adjacent small and multi-block values in one encrypted file, rejected append to an older segment and retained repeatable readers.",
+      "invariant": "Readers stay within their own bytes, rejected append preserves file contents and pending ownership, and the final reader releases the sole file."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ordered_batch_conditions_use_one_read_window_across_resident_and_spilled_edits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/batch_metadata.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "4/128/512 ordered 512-byte records under a 128 KiB session, including spilled evaluated and private writes.",
+      "invariant": "Exactly one physical metadata read window per batch; every private and cold-reopened record matches its input."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ordered_batch_conditions_preserve_duplicate_prefix_undo_and_conflict_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/batch_metadata.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "Ordered repeated puts, point deletion, prefix deletion, recreation, savepoint undo and a later peer commit.",
+      "invariant": "Exact intermediate and restored values; the batch keeps the original snapshot revision and rejects its stale commit."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "private_only_batches_do_not_admit_a_committed_reader",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/batch_metadata.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "32 repeated delete/put pairs of an already private key.",
+      "invariant": "Zero committed-reader admissions, exact final private value and complete outer rollback."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "metadata_requests_keep_history_without_payloads_and_stop_on_error_or_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/metadata_requests.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "Live and deleted snapshots, missing and duplicate keys, a 128 KiB payload with an 8 KiB read allowance, empty input, consumer failure and cancellation.",
+      "invariant": "One read window per nonempty stream, no payload materialization, original revisions and tombstones, no later key after failure and complete reservation release."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "failed_record_metadata_stream_restores_private_root_before_later_edits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/batch/records/tests.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "64 streamed edits followed by a metadata failure and one later edit, a spilled evaluated journal, an existing private record and its retained view under 128 KiB.",
+      "invariant": "The default point-read provider rejects the 65th condition without reading a later key or any values; atomic rollback restores exact prior state and releases every reservation."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "occurrence_validation_closes_its_window_before_derived_reads",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/validation.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "Canonical/derived/canonical replacements in command and publication modes.",
+      "invariant": "Command validation opens exactly two windows and never reenters a provider while active; publication opens none. All values, conditions and kinds remain exact and all memory releases."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "occurrence_validation_preserves_first_error_and_releases_admission",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/validation.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "An ordered successful condition, conflicting condition and later invalid occurrence key, with cancellation injected after the first request.",
+      "invariant": "First conflict ordinal and revisions remain exact, later invalid input is not reached, cancellation stops further requests, admission closes and failed output releases all temporary memory."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "refreshed_conditions_share_one_window_without_reading_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/refresh/validation/tests.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "4/128/512 spilled write conditions under 128 KiB against retained live, tombstone and absent records after a newer peer commit.",
+      "invariant": "Exactly one metadata window and zero scalar or payload reads; every original condition observes the retained sequence and all memory releases."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "refreshed_conditions_stop_at_the_first_conflict_or_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/refresh/validation/tests.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "128 spilled conditions conflicting at ordinal 0, 2 or 127, plus cancellation after the first request.",
+      "invariant": "Exact first conflicting ordinal and expected/actual revisions, no later requests, zero payload reads and complete admission and memory release."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "empty_refreshed_conditions_do_not_admit_a_read_window",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/refresh/validation/tests.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "Empty prepared conditions with active and cancelled read controls.",
+      "invariant": "Empty input opens no physical window, still honors cancellation and releases all memory."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "fresh_authenticated_blocks_combine_initial_selector_and_ciphertext",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests.rs",
+      "capability": "Authenticated spill append",
+      "workload": "One and 32 complete 16 KiB blocks plus a partial block, with exact readback and physical extent checks.",
+      "invariant": "Exactly two physical write requests per fresh block, no prefix reads or truncations, and no additional padding bytes written.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_completion_reclaims_history_but_savepoints_keep_the_root_snapshot",
+      "cases": 9,
+      "source": "crates/uqa-engine/src/transactions/tests/row_change_journal.rs",
+      "capability": "Row change journal ownership",
+      "workload": "Three persistent providers and commit, rollback or session drop with explicitly scheduled application and maintenance snapshot owners.",
+      "invariant": "Savepoint undo retains all eight peer changes and the original snapshot; completing the final root owner restores the 16-byte header and reopen preserves committed rows.",
+      "case_names": [
+        "backend_1___native__::completion_1___COMMIT__",
+        "backend_1___native__::completion_2___ROLLBACK__",
+        "backend_1___native__::completion_3___drop__",
+        "backend_2___kv__::completion_1___COMMIT__",
+        "backend_2___kv__::completion_2___ROLLBACK__",
+        "backend_2___kv__::completion_3___drop__",
+        "backend_3___redb__::completion_1___COMMIT__",
+        "backend_3___redb__::completion_2___ROLLBACK__",
+        "backend_3___redb__::completion_3___drop__"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "maintenance_snapshot_retains_history_until_its_own_completion",
+      "cases": 9,
+      "source": "crates/uqa-engine/src/transactions/tests/row_change_journal.rs",
+      "capability": "Row change journal ownership",
+      "workload": "Three persistent providers and commit, rollback or session drop with explicitly scheduled application and maintenance snapshot owners.",
+      "invariant": "A live maintenance transaction retains all eight changes after the application reader completes; the last maintenance completion immediately reclaims the journal.",
+      "case_names": [
+        "backend_1___native__::completion_1___COMMIT__",
+        "backend_1___native__::completion_2___ROLLBACK__",
+        "backend_1___native__::completion_3___drop__",
+        "backend_2___kv__::completion_1___COMMIT__",
+        "backend_2___kv__::completion_2___ROLLBACK__",
+        "backend_2___kv__::completion_3___drop__",
+        "backend_3___redb__::completion_1___COMMIT__",
+        "backend_3___redb__::completion_2___ROLLBACK__",
+        "backend_3___redb__::completion_3___drop__"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resident_root_can_spill_after_a_sibling_consumes_the_remaining_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Retained spill conversion allowance",
+      "workload": "128 resident records followed by a sibling allocation consuming all unreserved bytes under 64 KiB, then one more record through both live and ordered construction.",
+      "invariant": "Previously admitted roots convert using their retained allowance, preserve all 129 records, and release every lease without exceeding the ancestor limit."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "failed_conversion_returns_reserved_workspace_to_the_resident_root",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Failed spill conversion ownership",
+      "workload": "128 resident records, full sibling pressure, a failed authenticated final flush, and a subsequent conversion of the original root under 64 KiB.",
+      "invariant": "Failure removes the unpublished file and restores exactly the prior charged bytes; successful conversion releases unused workspace and preserves all records."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "complete_occurrence_rebuild_does_not_reenter_delta_resolution",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/occurrence_rebuild.rs",
+      "capability": "Text index structural replacement",
+      "workload": "16 and 1024 synthetic documents under a 512 KiB session allowance; peer commits, retained reader, savepoint undo, publication and fresh session reads.",
+      "invariant": "Complete replacements enter no occurrence delta resolver during refresh or publication; exact counts, frequencies, historical reads and allowance release remain correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "complete_occurrence_rebuild_keeps_concurrent_source_conflicts",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/occurrence_rebuild.rs",
+      "capability": "Text index structural replacement",
+      "workload": "A complete index rebuild and a concurrent document insertion in both commit orders.",
+      "invariant": "The second writer rejects both refresh and commit; rollback exposes only the winner and all retention is released.",
       "case_names": [
         ""
       ]

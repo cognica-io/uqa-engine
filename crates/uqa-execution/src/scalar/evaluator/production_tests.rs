@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
 use uqa_sql::{ColumnType, ResultRow};
 
 fn expression(source: &str, schema: &crate::RowSchema) -> ScalarExpr {

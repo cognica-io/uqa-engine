@@ -89,6 +89,11 @@ class PerformanceChecksTest(unittest.TestCase):
             with self.subTest(names=names), self.assertRaisesRegex(ValueError, "expected case name"):
                 self.write_inventory()
 
+    def test_rust_case_names_keep_uppercase_identifiers(self):
+        self.check["case_names"] = ["backend_1::COMMIT", "backend_1::ROLLBACK"]
+        checks = self.write_inventory()
+        self.assertEqual(checks[0]["case_names"], self.check["case_names"])
+
     def test_filter_syntax_cannot_be_injected(self):
         for field, value in (("package", "uqa-example) | all("), ("test", "work) | all("), ("kind", "bench")):
             changed = {**self.check, field: value}
@@ -149,6 +154,31 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertNotIn("--all-targets", args)
         self.assertIn("test(/(^|::)bounded_work(::.*)?$/)", args[-1])
 
+    def test_archive_selection_preserves_inventory_without_cargo_build_flags(self):
+        archive = self.root / "tests.tar.zst"
+        args = runner.arguments([self.check], archive)
+        self.assertEqual(args[:2], ["--profile", "ci"])
+        self.assertEqual(args[args.index("--archive-file") + 1], str(archive.resolve()))
+        self.assertEqual(args[args.index("--workspace-remap") + 1], str(self.root))
+        self.assertEqual(args[-2:], runner.arguments([self.check])[-2:])
+        for flag in ("--locked", "--lib", "--tests", "-p"):
+            self.assertNotIn(flag, args)
+
+    def test_archive_build_compiles_every_inventory_owner_without_executing_tests(self):
+        archive = self.root / "tests.tar.zst"
+        with (
+            mock.patch.object(runner, "inventory", return_value=[self.check]),
+            mock.patch.object(runner, "capture") as capture,
+            mock.patch.object(runner.subprocess, "run") as run,
+            mock.patch("sys.argv", ["run-performance-checks", "--build-archive", str(archive)]),
+        ):
+            self.assertEqual(runner.main(), 0)
+        capture.assert_not_called()
+        run.assert_called_once_with([
+            "cargo", "nextest", "archive", "--profile", "ci", "--locked", "--lib",
+            "--tests", "-p", "uqa-example", "--archive-file", str(archive),
+        ], cwd=self.root, check=True)
+
     def test_failure_report_retains_diagnostic_and_does_not_claim_timing_acceptance(self):
         output = self.root / "output"
         result = {"status": "failed", "revision": "a" * 40, "checks": [], "timing_acceptance": False, "error": "missing provider case"}
@@ -158,7 +188,7 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertIn("**failed**", (output / "summary.md").read_text())
         self.assertIn("missing provider case", (self.root / "step.md").read_text())
 
-    def run_main(self, *, listing=None, failure=None):
+    def run_main(self, *, listing=None, failure=None, archive=None):
         self.write_inventory()
         output = self.root / "run-output"
         junit = self.root / "target/nextest/ci/junit.xml"
@@ -169,7 +199,9 @@ class PerformanceChecksTest(unittest.TestCase):
             mock.patch.object(runner, "inventory", return_value=[self.check]),
             mock.patch.object(runner, "capture", side_effect=["a" * 40, "rustc", "nextest", json.dumps(self.listing if listing is None else listing)]) as capture,
             mock.patch.object(runner.subprocess, "run", side_effect=failure) as run,
-            mock.patch("sys.argv", ["run-performance-checks", "--output", str(output)]),
+            mock.patch("sys.argv", ["run-performance-checks", "--output", str(output)] + (
+                ["--archive-file", str(archive)] if archive is not None else []
+            )),
             mock.patch.dict("os.environ", {}, clear=True),
             mock.patch("sys.stderr"),
         ):
@@ -191,6 +223,25 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(result["status"], "failed")
         self.assertIn("100", result["error"])
+
+    def test_archived_run_verifies_exact_cases_and_retains_test_failure(self):
+        archive = self.root / "tests.tar.zst"
+        status, result, capture, run = self.run_main(
+            archive=archive, failure=subprocess.CalledProcessError(100, ["cargo", "nextest", "run"]),
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual(result["checks"][0]["selected_cases"], 2)
+        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check], archive))
+        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check], archive))
+        self.assertIn("100", result["error"])
+
+    def test_archived_run_rejects_missing_provider_cases_before_execution(self):
+        status, result, _, run = self.run_main(
+            archive=self.root / "tests.tar.zst", listing={"rust-suites": {}},
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual(result["status"], "failed")
+        run.assert_not_called()
 
     def test_selection_failure_never_runs_a_partial_suite(self):
         status, result, _, run = self.run_main(listing={"rust-suites": {}})

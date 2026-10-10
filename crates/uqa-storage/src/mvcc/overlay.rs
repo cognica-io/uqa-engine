@@ -146,8 +146,10 @@ impl State {
             return Ok(());
         }
         let memory = self.records.budget().clone();
-        let mut writer =
-            SpilledRunWriter::new(self.records.len() as u64, self.resident as u64, &memory)?;
+        let key_bytes = self.records.iter().fold(0_u64, |bytes, (key, _)| {
+            bytes.saturating_add(key.bytes().len() as u64)
+        });
+        let mut writer = SpilledRunWriter::new(self.records.len() as u64, key_bytes, &memory)?;
         for (_, change) in &self.records {
             writer.push(
                 change.write.key(),
@@ -272,9 +274,19 @@ impl PrivateRecordChanges {
         scope: Option<PrivateRevisionScope>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
+        Self::from_shared_spilled_run(run.map(Arc::new), revision, scope, control)
+    }
+
+    /// Retain immutable entries in an independent owner with its own root and scope identities.
+    fn from_shared_spilled_run(
+        run: Option<Arc<run::SpilledRun>>,
+        revision: PrivateRecordRevision,
+        scope: Option<PrivateRevisionScope>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        control.check()?;
         let changes = Self::with_revision_scope(control.memory(), scope);
         if let Some(run) = run {
-            let run = Arc::new(run);
             let mut state = changes.owner.state.lock();
             if let Some(mut scopes) = state.scopes.take() {
                 let mut cursor = run.cursor(std::ops::Bound::Unbounded);
@@ -399,7 +411,7 @@ impl PrivateRecordChanges {
         Ok(())
     }
 
-    /// Copy a prepared replacement map into an independent private root. Sorted spilled writes go directly to one fresh run; failure exposes no partially staged root.
+    /// Adopt prepared replacements in an independent private root. Immutable runs keep their original allowance; crossing allowances copies them into a fresh run. Failure exposes no partially staged root.
     pub(in crate::mvcc) fn from_prepared(
         prepared: &PreparedRecordCommit,
         scope: Option<PrivateRevisionScope>,
@@ -411,6 +423,14 @@ impl PrivateRecordChanges {
                 changes.apply_owned(std::slice::from_ref(write), control)?;
             }
             return Ok(changes);
+        }
+        if let Some(run) = prepared.shared_spilled_run(control.memory()) {
+            return Self::from_shared_spilled_run(
+                Some(run),
+                PrivateRecordRevision::allocate()?,
+                scope,
+                control,
+            );
         }
         let mut builder = super::commit::PreparedWritesBuilder::like(prepared, control)?;
         let mut writes = prepared.writes();
@@ -508,6 +528,15 @@ impl PrivateRecordChanges {
     pub fn prepare(&self, control: &StorageReadControl) -> VersionResult<PreparedRecordCommit> {
         control.cancellation().check()?;
         let state = self.owner.state.lock();
+        if state.records.is_empty() {
+            if let Some(run) = state
+                .runs
+                .only_run()
+                .filter(|run| run.shares_allowance(control.memory()))
+            {
+                return PreparedRecordCommit::from_shared_spilled_run(Arc::clone(run), control);
+            }
+        }
         let mut changes = TieredCursor::new(
             Some(&state.records),
             &state.runs,
@@ -522,10 +551,13 @@ impl PrivateRecordChanges {
             }
             return PreparedRecordCommit::from_unique_owned(writes, control);
         }
-        let (entries, entry_bytes) = state.runs.size();
+        let (entries, key_bytes) = state.runs.size();
+        let key_bytes = state.records.iter().fold(key_bytes, |bytes, (key, _)| {
+            bytes.saturating_add(key.bytes().len() as u64)
+        });
         let mut writer = SpilledRunWriter::new(
             entries.saturating_add(state.records.len() as u64),
-            entry_bytes.saturating_add(state.resident as u64),
+            key_bytes,
             control.memory(),
         )?;
         while let Some(change) = changes.next(control)? {
@@ -630,13 +662,11 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
+        let start = after
+            .filter(|after| *after >= prefix)
+            .map_or(std::ops::Bound::Included(prefix), std::ops::Bound::Excluded);
+        let mut changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         while let Some(change) = changes.next(control)? {
             control.check()?;
             let key = change.key();
@@ -717,8 +747,20 @@ impl PrivateRecordSnapshot {
         key: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<Option<super::RecordMetadata>> {
+        Ok(self
+            .revision_metadata(key, control)?
+            .map(|(metadata, _)| metadata))
+    }
+
+    /// Select one private entry's presence, original committed revision and exact private identity in the same point lookup, without loading its value.
+    pub(super) fn revision_metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<(super::RecordMetadata, PrivateRecordRevision)>> {
         control.cancellation().check()?;
-        Ok(tiers::lookup(&self.records, &self.runs, key, control)?.map(|change| change.metadata()))
+        Ok(tiers::lookup(&self.records, &self.runs, key, control)?
+            .map(|change| (change.metadata(), change.identity())))
     }
 
     pub fn get(
@@ -741,13 +783,11 @@ impl PrivateRecordSnapshot {
         visit: &mut dyn FnMut(&PreparedRecordWrite) -> VersionResult<bool>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
+        let start = after
+            .filter(|after| *after >= prefix)
+            .map_or(std::ops::Bound::Included(prefix), std::ops::Bound::Excluded);
+        let mut changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         while let Some(change) = changes.next(control)? {
             control.cancellation().check()?;
             let key = change.key();
@@ -777,13 +817,11 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
+        let start = after
+            .filter(|after| *after >= prefix)
+            .map_or(std::ops::Bound::Included(prefix), std::ops::Bound::Excluded);
+        let mut changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         while let Some(change) = changes.next(control)? {
             control.cancellation().check()?;
             let key = change.key();

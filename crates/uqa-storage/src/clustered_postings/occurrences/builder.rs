@@ -9,16 +9,16 @@
 use uqa_core::memory::BudgetedVec;
 
 use super::super::encoding::{put_u32, put_varint};
-use super::super::scores::encode_scores_controlled;
+use super::super::scores::ScoreEncoder;
 use super::super::{
-    cluster_id, corrupt, read_varint, validate_scores, DocId, PostingScore, StorageBackendResult,
-    TokenOccurrence, HEADER_LEN, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC,
+    cluster_id, corrupt, read_varint, DocId, PostingScore, StorageBackendResult, TokenOccurrence,
+    HEADER_LEN, OCCURRENCE_FORMAT_VERSION, POSITIONS_MAGIC,
 };
 use crate::read_control::StorageReadControl;
 
 /// The score and positions values of one occurrence cluster, built from its postings in ascending document order.
 pub struct OccurrenceClusterBuilder {
-    scores: BudgetedVec<PostingScore>,
+    scores: ScoreEncoder,
     payload: BudgetedVec<u8>,
     /// The end of each posting's occurrences in `payload`, after a leading zero.
     offsets: BudgetedVec<usize>,
@@ -30,7 +30,7 @@ impl OccurrenceClusterBuilder {
         let mut offsets = BudgetedVec::new(control.memory());
         offsets.push(0_usize)?;
         Ok(Self {
-            scores: BudgetedVec::new(control.memory()),
+            scores: ScoreEncoder::new(control),
             payload: BudgetedVec::new(control.memory()),
             offsets,
             cluster: None,
@@ -107,9 +107,8 @@ impl OccurrenceClusterBuilder {
         if self.scores.is_empty() {
             return Err(corrupt("cannot encode an empty occurrence cluster"));
         }
-        validate_scores(&self.scores)?;
-        let score_blob =
-            encode_scores_controlled(&self.scores, OCCURRENCE_FORMAT_VERSION, control)?;
+        let count = self.scores.len();
+        let score_blob = self.scores.finish(OCCURRENCE_FORMAT_VERSION, control)?;
         let mut blob = BudgetedVec::new(control.memory());
         let blob_len = self
             .offsets
@@ -121,7 +120,7 @@ impl OccurrenceClusterBuilder {
         blob.reserve(blob_len)?;
         blob.extend_from_slice(POSITIONS_MAGIC)?;
         blob.extend_from_slice(&[OCCURRENCE_FORMAT_VERSION, 0, 0, 0])?;
-        put_u32(&mut blob, self.scores.len(), "occurrence posting count")?;
+        put_u32(&mut blob, count, "occurrence posting count")?;
         put_u32(&mut blob, self.offsets.len(), "occurrence offset count")?;
         for &offset in self.offsets.iter() {
             put_u32(&mut blob, offset, "occurrence payload offset")?;
@@ -172,3 +171,6 @@ fn encode_occurrences(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
