@@ -1300,7 +1300,9 @@
       "kind": "lib",
       "test": "spilled_topology_validation_does_not_decode_dense_vectors",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
       "capability": "HNSW topology validation",
       "workload": "128 nodes at 256 and 1024 dimensions with a 128 KiB allowance, forcing topology and both vector maps to spill.",
@@ -1311,7 +1313,9 @@
       "kind": "lib",
       "test": "spilled_search_reads_only_the_vector_used_by_each_distance_or_score",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
       "capability": "HNSW vector reads",
       "workload": "Two repeated searches of a 128-node, 1024-dimensional spilled graph under a 128 KiB allowance.",
@@ -1322,7 +1326,9 @@
       "kind": "lib",
       "test": "residual_reads_follow_candidate_count_and_keep_original_payload_order",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-execution/src/operator_tree/driver/intersection/tests.rs",
       "capability": "Retrieval residual filters",
       "workload": "Two retrieval branches with 128/16384 unrelated documents, every filter position and sequential/parallel execution.",
@@ -1333,7 +1339,9 @@
       "kind": "lib",
       "test": "retrieval_residual_filters_read_only_selected_documents",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-engine/src/tests/storage_consistency/indexed_queries.rs",
       "capability": "SQL retrieval document reads",
       "workload": "GIN/HNSW fusion over 64/512 synthetic documents with the unindexed residual on either side of the retrieval expression.",
@@ -1344,7 +1352,9 @@
       "kind": "lib",
       "test": "cold_scalar_constraint_probes_do_not_hydrate_indexes_after_session_refresh",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-engine/src/value_index/tests.rs",
       "capability": "Cold primary and composite constraints",
       "workload": "256 persisted rows, independent sessions, peer writes, duplicate primary/composite keys, equality projection, savepoint undo and reopen.",
@@ -1355,7 +1365,9 @@
       "kind": "lib",
       "test": "cold_scalar_probes_seek_instead_of_visiting_the_posting_collection",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
       "capability": "Native SQLite equality seeks",
       "workload": "Scalar and composite equality hits and misses against 128/8192-row persisted indexes.",
@@ -1366,7 +1378,9 @@
       "kind": "lib",
       "test": "equality_probe_keys_and_candidates_keep_the_original_allowance_and_cancellation",
       "cases": 1,
-      "case_names": [""],
+      "case_names": [
+        ""
+      ],
       "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
       "capability": "Native equality probe resources",
       "workload": "Oversized keys, 128 matching candidates and cancellation under a 256-byte original allowance.",
@@ -1646,6 +1660,71 @@
       "capability": "Cold and retained covering index reads",
       "workload": "Reopened covering index, cold equality, explicit restoration, divergent document source and DROP.",
       "invariant": "Cold equality hydrates no complete accelerator; results agree, restored index-only reads use carried postings and DROP removes them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ordered_construction_spills_linearly_and_preserves_unordered_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Ordered spill construction",
+      "workload": "128/512 keys, resident and spilled thresholds, unordered replacement, cancellation.",
+      "invariant": "Ordered streams write each authenticated block once; unordered updates retain exact ordered values and failed builders cannot publish.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ordered_restoration_encodes_each_spilled_vector_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW graph restoration",
+      "workload": "128 nodes at 256/1024 dimensions under 128 KiB.",
+      "invariant": "Each canonical and normalized vector is encoded once; complete graph and search output match resident restoration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "diversity_selection_reuses_selected_vectors_within_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW diversity selection",
+      "workload": "32 rejected candidates, exclusions, empty selection, cancellation and values exceeding the optional cache.",
+      "invariant": "Selected vectors are not decoded repeatedly when admitted; both cached and ordinary reads preserve diversity and rejected-candidate fill under the original ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_record_conditions_read_one_entry_without_its_value",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/tests/record_conditions.rs",
+      "capability": "Private mutation preconditions",
+      "workload": "128/512 spilled records, canonical and typed writes, tombstones, missing keys and cancellation.",
+      "invariant": "Each mutation reads metadata and prior kind from one private lookup without loading a value; conditions and write precedence remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "batch_read_scope_reuses_blocks_and_releases_them_without_retaining_a_view",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/tests/record_conditions.rs",
+      "capability": "Private batch spill reads",
+      "workload": "512 spilled records, 32 repeated point conditions, shadowing writes, a retained view, savepoint undo and cancellation.",
+      "invariant": "Repeated conditions decode no additional entry blocks; releasing the batch releases cached bytes while retained snapshots and subsequent writes keep their own values.",
       "case_names": [
         ""
       ]

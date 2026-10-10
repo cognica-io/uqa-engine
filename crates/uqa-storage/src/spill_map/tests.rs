@@ -18,6 +18,51 @@ fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
 }
 
 #[test]
+fn ordered_construction_spills_linearly_and_preserves_unordered_replacements() {
+    for count in [128_u128, 512] {
+        let control = StorageReadControl::with_limit(64 * 1024);
+        let mut builder = Builder::new(control.memory(), 1024);
+        for id in 0..count {
+            builder.insert(id, id as u64, Some(&control)).unwrap();
+        }
+        let map = builder.finish(Some(&control)).unwrap();
+        let Root::Disk(disk) = &map.root else {
+            panic!("expected spill")
+        };
+        let logical_bytes = count as u64 * 136;
+        assert_eq!(disk.read_blocks(), 0);
+        assert_eq!(
+            disk.written_bytes(),
+            logical_bytes + logical_bytes.div_ceil(1024) * 43
+        );
+        assert_eq!(
+            entries(&map),
+            (0..count).map(|id| (id, id as u64)).collect::<Vec<_>>()
+        );
+        drop(map);
+        for resident_bytes in [1024, 32 * 1024] {
+            let mut builder = Builder::new(control.memory(), resident_bytes);
+            let mut expected = BTreeMap::new();
+            for id in (0..count).chain([17, 3, count + 1, 0]) {
+                let value = expected.len() as u64;
+                builder.insert(id, value, Some(&control)).unwrap();
+                expected.insert(id, value);
+            }
+            let map = builder.finish(Some(&control)).unwrap();
+            assert_eq!(entries(&map), expected.into_iter().collect::<Vec<_>>());
+        }
+        let mut builder = Builder::new(control.memory(), 1024);
+        builder.insert(1, 1_u64, Some(&control)).unwrap();
+        control.cancellation().cancel();
+        assert!(builder.insert(2, 2, Some(&control)).is_err());
+        control.cancellation().reset();
+        assert!(builder.finish(Some(&control)).is_err());
+        assert_eq!(control.memory().used(), 0);
+        assert!(control.memory().peak() <= control.memory().limit());
+    }
+}
+
+#[test]
 fn bulk_spill_publishes_each_authenticated_block_once() {
     for count in [127_u128, 512] {
         let memory = MemoryBudget::new(32 * 1024);

@@ -9,8 +9,10 @@
 use super::metric::distance;
 use super::prepare::{check, Control};
 use super::search::Candidate;
-use super::types::{HNSWIndex, NodeId};
+use super::store::Read;
+use super::types::{HNSWIndex, HNSWVector, NodeId};
 use crate::StorageBackendResult;
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
 impl HNSWIndex {
     pub(super) fn ensure_layer_zero_backbone(
@@ -155,6 +157,14 @@ impl HNSWIndex {
     ) -> StorageBackendResult<Vec<NodeId>> {
         let mut selected = Vec::new();
         let mut rejected = Vec::new();
+        // A selected vector is compared with many later candidates. Retain a
+        // bounded set of decoded values for this read-only selection; resident
+        // vectors can already be borrowed. Optional admission never consumes
+        // the allowance needed by the ordinary two-vector comparison.
+        let cache_memory = self
+            .memory
+            .child((self.memory.limit() / 64).min(self.memory.available() / 4));
+        let mut decoded = BudgetedVec::<(NodeId, Budgeted<HNSWVector>)>::new(&cache_memory);
         for candidate in candidates {
             check(control)?;
             if selected.len() == limit {
@@ -172,6 +182,15 @@ impl HNSWIndex {
             let mut diverse = true;
             for selected_id in &selected {
                 check(control)?;
+                if let Some((_, selected_node)) = decoded.iter().find(|(id, _)| id == selected_id) {
+                    let separated = distance(&candidate_node.values, &selected_node.values)
+                        > candidate.distance;
+                    if !separated {
+                        diverse = false;
+                        break;
+                    }
+                    continue;
+                }
                 if let Some(selected_node) =
                     self.normalized_vectors.get(u128::from(*selected_id))?
                 {
@@ -185,6 +204,19 @@ impl HNSWIndex {
             }
             if diverse && selected.len() < limit {
                 selected.push(candidate.node_id);
+                if let Read::Owned(retained) = &candidate_node {
+                    let retain = || -> Result<Budgeted<HNSWVector>, MemoryError> {
+                        let bytes = retained.reserved_bytes();
+                        let memory = cache_memory.reserve(bytes)?;
+                        Ok(Budgeted::new((*candidate_node).clone(), memory))
+                    };
+                    let result =
+                        retain().and_then(|value| decoded.push((candidate.node_id, value)));
+                    match result {
+                        Ok(()) | Err(MemoryError::Limit { .. }) => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
             } else if rejected.len() < limit {
                 rejected.push(candidate.node_id);
             }

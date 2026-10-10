@@ -136,6 +136,7 @@ impl<'a> Batch<'a> {
                 "evaluated batch changed serializable participant",
             ));
         }
+        let _readers = transaction.changes.read_scope(control)?;
         let population_view = (self.has_origins
             || self
                 .operations

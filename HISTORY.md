@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Stream ordered HNSW vector restoration and vector-effect restaging into bulk spill files, assign generated write kinds directly, and reuse decoded selected vectors within the original allowance during diversity selection. Read private mutation conditions once and share authenticated entry blocks within an evaluated batch. Preserve unordered restoration, exact graph/search results, conflict preconditions, undo and failure atomicity.
+
 - Preserve transaction-local document counts across unrelated maintenance commits by checking each table's last committed change against the observed snapshot, while retaining peer-row refresh, rollback and read-free own-commit adoption.
 
 - Avoid unchanged HNSW adjacency writes and tentative connect/prune publications; skip vector comparisons when all validated neighbors fit, preserving final topology, reciprocal removals and canonical search results.

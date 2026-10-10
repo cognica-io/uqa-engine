@@ -8,6 +8,15 @@ use super::*;
 use crate::{hnsw_index::HNSWRestoreBuilder, read_control::StorageReadControl};
 
 fn ring(dimensions: usize, count: u64, control: &StorageReadControl) -> HNSWRestoreBuilder {
+    ring_in_order(dimensions, count, 1..=count, control)
+}
+
+fn ring_in_order(
+    dimensions: usize,
+    count: u64,
+    identities: impl IntoIterator<Item = u64>,
+    control: &StorageReadControl,
+) -> HNSWRestoreBuilder {
     let params = HNSWIndexParams {
         m: 2,
         ef_search: count as usize,
@@ -21,7 +30,7 @@ fn ring(dimensions: usize, count: u64, control: &StorageReadControl) -> HNSWRest
         deleted_count: 0,
     };
     let mut builder = HNSWRestoreBuilder::new(dimensions as u32, params, meta, control).unwrap();
-    for id in 1..=count {
+    for id in identities {
         builder
             .push(super::super::HNSWNodeSnapshot {
                 node_id: id,
@@ -38,6 +47,87 @@ fn ring(dimensions: usize, count: u64, control: &StorageReadControl) -> HNSWRest
             .unwrap();
     }
     builder
+}
+
+#[test]
+fn ordered_restoration_encodes_each_spilled_vector_once() {
+    for dimensions in [256, 1024] {
+        let control = StorageReadControl::with_limit(128 * 1024);
+        super::super::store::ENCODED_VECTORS.set(0);
+        let graph = ring(dimensions, 128, &control).finish().unwrap();
+        assert_eq!(super::super::store::ENCODED_VECTORS.get(), 2 * 128);
+        let reference_control = StorageReadControl::with_limit(8 * 1024 * 1024);
+        let reference = ring(dimensions, 128, &reference_control).finish().unwrap();
+        assert_same_graph(&graph, &reference, &control);
+        assert_eq!(
+            graph.search_knn(&vector(19, dimensions), 7).unwrap(),
+            reference.search_knn(&vector(19, dimensions), 7).unwrap()
+        );
+        drop(graph);
+        let unordered = ring_in_order(dimensions, 128, (65..=128).chain(1..=64), &control)
+            .finish()
+            .unwrap();
+        assert_same_graph(&unordered, &reference, &control);
+        assert_eq!(
+            unordered.search_knn(&vector(19, dimensions), 7).unwrap(),
+            reference.search_knn(&vector(19, dimensions), 7).unwrap()
+        );
+        drop((unordered, reference));
+        assert_eq!(control.memory().used(), 0);
+        assert_eq!(reference_control.memory().used(), 0);
+        assert!(control.memory().peak() <= control.memory().limit());
+    }
+}
+
+#[test]
+fn diversity_selection_reuses_selected_vectors_within_the_original_allowance() {
+    use super::super::search::Candidate;
+    for dimensions in [256, 1024] {
+        let control = StorageReadControl::with_limit(128 * 1024);
+        let graph = ring(dimensions, 128, &control).finish().unwrap();
+        let candidates = || {
+            (1..=32).map(|node_id| {
+                Ok(Candidate {
+                    node_id,
+                    distance: 2.0,
+                })
+            })
+        };
+        super::super::store::DECODED_VECTOR_FLOATS.set(0);
+        assert_eq!(
+            graph
+                .select_candidates(candidates(), 4, None, Some(&control))
+                .unwrap(),
+            vec![1, 2, 3, 4]
+        );
+        if dimensions == 256 {
+            assert_eq!(
+                super::super::store::DECODED_VECTOR_FLOATS.get(),
+                32 * dimensions
+            );
+        }
+        // Wider values do not fit the optional cache. Selection still follows
+        // the same diversity rejection and ordered fill under the same budget.
+        assert_eq!(
+            graph
+                .select_candidates(candidates(), 4, Some(1), Some(&control))
+                .unwrap(),
+            vec![2, 3, 4, 5]
+        );
+        assert_eq!(
+            graph
+                .select_candidates(candidates(), 0, None, Some(&control))
+                .unwrap(),
+            Vec::<u64>::new()
+        );
+        control.cancellation().cancel();
+        assert!(graph
+            .select_candidates(candidates(), 4, None, Some(&control))
+            .is_err());
+        drop(graph);
+        assert_eq!(control.memory().used(), 0);
+        assert!(control.memory().peak() <= control.memory().limit());
+    }
 }
 
 #[test]

@@ -279,6 +279,8 @@ impl SpilledRun {
         if let Some(block) = self.cache.block(index) {
             return Ok(block);
         }
+        #[cfg(test)]
+        read_counts::block();
         let block = &self.blocks[index];
         let len = block.end - block.offset;
         match read_range(

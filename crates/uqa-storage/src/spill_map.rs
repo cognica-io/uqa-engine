@@ -6,9 +6,12 @@
 
 //! Ordered immutable roots move from charged memory to encrypted temporary pages.
 
+mod builder;
 mod disk;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use builder::Builder;
 
 use std::{ops::Deref, sync::Arc};
 use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError, MemoryReservation};
@@ -190,51 +193,42 @@ impl<V: Record> Map<V> {
     ) -> StorageBackendResult<()> {
         check(control)?;
         let present = self.contains_key(key)?;
-        let mut value = Some(value);
-        let mut retained = None;
+        let Some(value) = self.insert_resident(key, value)? else {
+            self.len += usize::from(!present);
+            return Ok(());
+        };
+        self.spill(control)?;
+        self.insert_disk(key, &value, present, control)
+    }
+
+    /// Return ownership when the resident tree cannot admit the value. Both a
+    /// live mutation and an unpublished ordered builder use the same allowance.
+    fn insert_resident(&mut self, key: u128, value: V) -> StorageBackendResult<Option<V>> {
         if let Root::Memory(map) = &mut self.root {
             let bytes = value
-                .as_ref()
-                .expect("unmoved value")
                 .memory_bytes()?
                 .checked_add(size_of::<MemoryReservation>())
                 .ok_or(MemoryError::SizeOverflow)?;
             match map.budget().reserve(bytes) {
                 Ok(memory) => {
-                    let value =
-                        Arc::new(Budgeted::new(value.take().expect("unmoved value"), memory));
+                    let value = Arc::new(Budgeted::new(value, memory));
                     match map.try_insert(key, Some(Arc::clone(&value))) {
-                        Ok(()) => {
-                            self.len += usize::from(!present);
-                            return Ok(());
+                        Ok(()) => return Ok(None),
+                        Err(MemoryError::Limit { .. }) => {
+                            let value = match Arc::try_unwrap(value) {
+                                Ok(value) => value.into_parts().0,
+                                Err(_) => unreachable!("failed tree insertion retains no value"),
+                            };
+                            return Ok(Some(value));
                         }
-                        Err(MemoryError::Limit { .. }) => retained = Some(value),
                         Err(error) => return Err(error.into()),
                     }
                 }
-                Err(MemoryError::Limit { .. }) => {
-                    self.spill(control)?;
-                    return self.insert_disk(
-                        key,
-                        value.as_ref().expect("unmoved value"),
-                        present,
-                        control,
-                    );
-                }
+                Err(MemoryError::Limit { .. }) => {}
                 Err(error) => return Err(error.into()),
             }
         }
-        if let Some(retained) = retained {
-            self.spill(control)?;
-            self.insert_disk(key, &retained, present, control)
-        } else {
-            self.insert_disk(
-                key,
-                value.as_ref().expect("unmoved value"),
-                present,
-                control,
-            )
-        }
+        Ok(Some(value))
     }
 
     fn insert_disk(

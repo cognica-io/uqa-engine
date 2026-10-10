@@ -12,10 +12,19 @@ use std::cell::Cell;
 pub(in crate::mvcc) struct Counts {
     pub(in crate::mvcc) entries: usize,
     pub(in crate::mvcc) values: usize,
+    pub(in crate::mvcc) blocks: usize,
 }
 
 thread_local! {
-    static READS: Cell<Counts> = const { Cell::new(Counts { entries: 0, values: 0 }) };
+    static READS: Cell<Counts> = const { Cell::new(Counts { entries: 0, values: 0, blocks: 0 }) };
+}
+
+pub(super) fn block() {
+    let counts = READS.get();
+    READS.set(Counts {
+        blocks: counts.blocks + 1,
+        ..counts
+    });
 }
 
 pub(super) fn entry() {

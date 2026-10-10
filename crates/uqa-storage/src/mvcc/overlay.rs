@@ -230,6 +230,37 @@ impl PrivateRecordChanges {
         Ok(state.change(key, control)?.map(|change| change.kind()))
     }
 
+    /// A mutation needs both the original condition and the prior write kind.
+    /// Read that one private entry once without materializing its value.
+    pub(in crate::mvcc) fn write_metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<(super::RecordMetadata, super::commit::RecordWriteKind)>> {
+        control.check()?;
+        let state = self.owner.state.lock();
+        Ok(state
+            .change(key, control)?
+            .map(|change| (change.metadata(), change.kind())))
+    }
+
+    /// Reuse immutable decoded blocks across the point lookups of one evaluated
+    /// batch. Releasing the scope releases its cached bytes, even when a
+    /// savepoint still owns the runs. Later changes keep their ordinary lookup
+    /// precedence; this scope retains no record view.
+    pub(in crate::mvcc) fn read_scope(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<run::RunCacheReader>> {
+        control.check()?;
+        let state = self.owner.state.lock();
+        let mut readers = BudgetedVec::new(control.memory());
+        for run in state.runs.newest_first() {
+            readers.push(run.cache_reader())?;
+        }
+        Ok(readers)
+    }
+
     pub fn new(memory: &MemoryBudget) -> Self {
         Self::with_revision_scope(memory, None)
     }
