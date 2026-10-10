@@ -444,15 +444,14 @@ impl MergedRecordSnapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<VisibleRecordRevision>> {
         control.check()?;
-        let Some(metadata) = self.metadata(key, control)?.filter(|record| record.live) else {
+        let (metadata, private) = match self.private.revision_metadata(key, control)? {
+            Some((metadata, revision)) => (Some(metadata), Some(revision)),
+            None => (self.committed.metadata(key, control)?, None),
+        };
+        let Some(metadata) = metadata.filter(|record| record.live) else {
             control.check()?;
             return Ok(None);
         };
-        let private = self.private_keys(key, None, 1, control)?;
-        let private = private
-            .first()
-            .filter(|record| record.key() == key)
-            .map(super::PrivateRecordKey::revision);
         control.check()?;
         Ok(Some(VisibleRecordRevision {
             database,

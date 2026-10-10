@@ -717,8 +717,20 @@ impl PrivateRecordSnapshot {
         key: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<Option<super::RecordMetadata>> {
+        Ok(self
+            .revision_metadata(key, control)?
+            .map(|(metadata, _)| metadata))
+    }
+
+    /// Select one private entry's presence, original committed revision and exact private identity in the same point lookup, without loading its value.
+    pub(super) fn revision_metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<(super::RecordMetadata, PrivateRecordRevision)>> {
         control.cancellation().check()?;
-        Ok(tiers::lookup(&self.records, &self.runs, key, control)?.map(|change| change.metadata()))
+        Ok(tiers::lookup(&self.records, &self.runs, key, control)?
+            .map(|change| (change.metadata(), change.identity())))
     }
 
     pub fn get(

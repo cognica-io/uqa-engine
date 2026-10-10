@@ -1767,6 +1767,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "committed_revision_does_not_read_unrelated_private_spill_blocks",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Committed revision point reads",
+      "workload": "32/128 unrelated spilled private records, a committed key and an absent key preceding their range.",
+      "invariant": "Exact committed revisions require zero private entry, block or value reads and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "private_revision_point_reads_preserve_replacements_tombstones_and_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Private revision point reads",
+      "workload": "Resident and spilled records, private tombstones, retained views, savepoint undo, replacement and cancellation.",
+      "invariant": "One metadata lookup obtains the exact revision without reading values; private identities, visibility and allowance release remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nested_scalar_calls_fit_the_native_routine_stack_budget",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/evaluator/stack_tests.rs",
+      "capability": "Recursive scalar stack ownership",
+      "workload": "32 nested arithmetic/function nodes under ordinary and controlled evaluation.",
+      "invariant": "All 32 visits stay within the existing one-million-byte native stack budget, return the exact result and release controlled allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "intersection_support_preserves_relational_absence_and_null_semantics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Relational intersection support",
+      "workload": "Candidate support containing present NULL, absent and non-NULL identities with independent predicates.",
+      "invariant": "Only candidate fields are read; missing rows are excluded while NULL semantics and default decorated postings are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "promised_document_rows_still_reject_an_inconsistent_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Explicit document support validation",
+      "workload": "A promised document candidate is missing from its retained relational snapshot.",
+      "invariant": "The strict source path retains its consistency error rather than silently dropping the missing row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bounded_reads_and_cancellation_errors_are_not_empty_matches",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/filter/tests.rs",
+      "capability": "Bounded filter error propagation",
+      "workload": "Failed provider reads and cancellation during candidate filtering.",
+      "invariant": "Read errors and typed cancellation propagate without returning empty matches or repeating candidate reads.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
