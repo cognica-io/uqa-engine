@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::{MemoryVersionStore, MergedRecordSnapshot, RecordMetadata};
 
 #[test]
@@ -155,6 +156,106 @@ fn disjoint_private_prefixes_do_not_open_spill_readers() {
         read.cancellation().cancel();
         assert!(snapshot.cursor(b"a", None, &read).is_err());
         drop((snapshot, changes));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn absent_prefixes_inside_spill_blocks_do_not_read_unrelated_entries() {
+    for count in [128_usize, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let revision = PrivateRecordRevision::for_tests();
+        let mut writer =
+            run::SpilledRunWriter::new(count as u64 + 1, count as u64 * 16, control.memory())
+                .unwrap();
+        for id in 0..count {
+            writer
+                .push(
+                    format!("a/{id:06}/vector").as_bytes(),
+                    None,
+                    RecordWriteKind::Canonical,
+                    revision,
+                    (!id.is_multiple_of(7)).then_some(b"value".as_slice()),
+                    &control,
+                )
+                .unwrap();
+        }
+        writer
+            .push(
+                b"z/header",
+                None,
+                RecordWriteKind::Canonical,
+                revision,
+                Some(b"header"),
+                &control,
+            )
+            .unwrap();
+        let changes = PrivateRecordChanges::from_spilled_run(
+            writer.finish().unwrap(),
+            revision,
+            None,
+            &control,
+        )
+        .unwrap();
+        let snapshot = changes.snapshot().unwrap();
+        let baseline = control.memory().used();
+        for prefix in [b"a/999999/".as_slice(), b"y/empty/"] {
+            run::read_counts::take();
+            let mut cursor = snapshot.cursor(prefix, None, &control).unwrap();
+            assert!(cursor.next(&control).unwrap().is_none());
+            drop(cursor);
+            assert!(snapshot.scan(prefix, None, 1, &control).unwrap().is_empty());
+            assert!(snapshot
+                .scan_keys(prefix, None, 1, &control)
+                .unwrap()
+                .is_empty());
+            let reads = run::read_counts::take();
+            assert_eq!(
+                reads.blocks, 0,
+                "count={count}, prefix={prefix:?}: {reads:?}"
+            );
+            assert_eq!(reads.entries, 0);
+            assert_eq!(reads.values, 0);
+            assert_eq!(control.memory().used(), baseline);
+        }
+        for id in [0, count / 2, count - 1] {
+            let key = format!("a/{id:06}/vector");
+            for length in 0..=key.len() {
+                let rows = snapshot
+                    .scan_keys(&key.as_bytes()[..length], None, count + 1, &control)
+                    .unwrap();
+                assert!(rows.iter().any(|row| row.key() == key.as_bytes()));
+            }
+        }
+        let savepoint = StorageSavepointId::allocate();
+        changes.savepoint(savepoint).unwrap();
+        let write =
+            PreparedRecordWrite::copy_bytes(b"a/999999/vector", None, Some(b"new"), &control)
+                .unwrap();
+        changes.apply_owned(&[write], &control).unwrap();
+        let newer = changes.snapshot().unwrap();
+        assert_eq!(
+            newer.scan(b"a/999999/", None, 1, &control).unwrap().len(),
+            1
+        );
+        assert!(snapshot
+            .scan(b"a/999999/", None, 1, &control)
+            .unwrap()
+            .is_empty());
+        changes.rollback_to_savepoint(savepoint).unwrap();
+        assert!(changes
+            .snapshot()
+            .unwrap()
+            .scan(b"a/999999/", None, 1, &control)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            newer.scan(b"a/999999/", None, 1, &control).unwrap().len(),
+            1
+        );
+        control.cancellation().cancel();
+        assert!(snapshot.cursor(b"y/empty/", None, &control).is_err());
+        drop((newer, snapshot, changes));
         assert_eq!(control.memory().used(), 0);
     }
 }

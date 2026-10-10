@@ -1976,6 +1976,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "absent_prefixes_inside_spill_blocks_do_not_read_unrelated_entries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Private spill prefix membership",
+      "workload": "128/512 spilled records; absent prefixes inside a block's key interval, matching prefixes of every length, tombstones and retained views across resident replacement and savepoint undo.",
+      "invariant": "Known-absent fixture prefixes read zero blocks, entries and values; matching identities, newer-write precedence, retained roots, cancellation and the original allowance remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prefix_filters_preserve_literal_prefixes_with_bounded_shared_workspace",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/filter.rs",
+      "capability": "Charged literal prefix filters",
+      "workload": "Shared-ancestor memory pressure, arbitrary binary keys, a long key and every nonempty literal prefix, plus failed optional admission.",
+      "invariant": "Every inserted prefix remains a possible match, the optional filter uses at most one quarter of shared available workspace and every reservation is released.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

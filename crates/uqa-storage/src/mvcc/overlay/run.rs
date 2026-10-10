@@ -56,6 +56,7 @@ pub(in crate::mvcc) struct SpilledRun {
     values: TemporaryFile,
     blocks: BudgetedVec<RunBlock>,
     filter: Option<KeyFilter>,
+    prefix_filter: Option<KeyFilter>,
     last: RecordKey,
     len: u64,
     entry_bytes: u64,
@@ -165,13 +166,18 @@ impl SpilledRun {
         RunCursor::new(Arc::clone(self), start)
     }
 
-    /// Whether the run's key interval can contain this literal prefix. A disjoint interval needs no entry reader or decoded block.
+    /// Whether the run can contain this literal prefix. Interval bounds and an optional false-positive-only membership filter reject absent prefixes without an entry reader or decoded block.
     pub(super) fn intersects_prefix(&self, prefix: &[u8]) -> bool {
         let index = self
             .blocks
             .partition_point(|block| block.last.bytes() < prefix);
         self.blocks.get(index).is_some_and(|block| {
-            block.first.bytes() <= prefix || block.first.bytes().starts_with(prefix)
+            (block.first.bytes() <= prefix || block.first.bytes().starts_with(prefix))
+                && (prefix.is_empty()
+                    || self
+                        .prefix_filter
+                        .as_ref()
+                        .is_none_or(|filter| filter.may_contain(prefix)))
         })
     }
 
