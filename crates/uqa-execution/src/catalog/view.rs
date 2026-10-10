@@ -39,7 +39,8 @@ pub trait ViewIdentityAllocation {
 pub trait ViewPublication: ViewRegistryState {
     fn has_catalog(&self) -> bool;
     fn save_view(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
-    fn save_view_expression_names(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
+    /// Store another representation of the same admitted definition without replacing its analysis identity. Actual definition changes must use `save_view`.
+    fn save_view_representation(&self, row: &ViewRow) -> uqa_storage::StorageBackendResult<()>;
 }
 
 pub mod metadata;

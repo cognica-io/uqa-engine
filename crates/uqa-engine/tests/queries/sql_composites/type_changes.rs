@@ -142,6 +142,144 @@ fn composite_tuple_widths_match_postgresql(#[case] provider: usize) {
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn composite_tuple_boundary_prefix_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("tuple-boundary.db");
+    let engine = super::addition::open(provider, &path);
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_tuple_boundary_oracle.expected.json"
+    ))
+    .unwrap();
+    let mut initial = reference.clone();
+    initial["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] != true);
+    crate::pg18_oracle::verify(&engine, &initial.to_string());
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        super::addition::open(provider, &path)
+    };
+    let mut durable = reference;
+    durable["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] == true);
+    crate::pg18_oracle::verify(&engine, &durable.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn composite_tuple_boundary_reads_reject_missing_bytes(#[case] provider: usize) {
+    fn execute(engine: &uqa_engine::Engine, sql: &str) -> serde_json::Value {
+        let result = crate::pg18_oracle::run_case(engine, sql);
+        assert!(result["error"].is_null(), "{sql}: {result}");
+        result
+    }
+
+    fn reject(engine: &uqa_engine::Engine, sql: &str) {
+        let result = crate::pg18_oracle::run_case(engine, sql);
+        assert_eq!(result["error"]["sqlstate"], "XX001", "{sql}: {result}");
+        assert_eq!(result["error"]["message"], "invalid datum length");
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("tuple-boundary-errors.db");
+    let engine = super::addition::open(provider, &path);
+    execute(
+        &engine,
+        "CREATE TYPE boundary_one AS (a integer); CREATE VIEW boundary_value AS SELECT '(-1)'::boundary_one AS v; PREPARE boundary_whole AS SELECT '(-1)'::boundary_one AS v; EXECUTE boundary_whole; ALTER TYPE boundary_one ALTER ATTRIBUTE a TYPE bigint",
+    );
+    for sql in [
+        "SELECT v FROM boundary_value",
+        "SELECT v::text FROM boundary_value",
+        "SELECT (v).a FROM boundary_value",
+        "SELECT (v).a = 0 FROM boundary_value",
+        "EXECUTE boundary_whole",
+    ] {
+        reject(&engine, sql);
+    }
+    execute(&engine, "BEGIN; SAVEPOINT before_read");
+    reject(&engine, "SELECT v::text FROM boundary_value");
+    execute(
+        &engine,
+        "ROLLBACK TO before_read; ALTER TYPE boundary_one ALTER ATTRIBUTE a TYPE integer",
+    );
+    let result = execute(&engine, "SELECT v::text FROM boundary_value");
+    assert_eq!(result["results"][0]["rows"], serde_json::json!([["(-1)"]]));
+    execute(&engine, "ROLLBACK");
+    reject(&engine, "SELECT v::text FROM boundary_value");
+    execute(
+        &engine,
+        "ALTER TYPE boundary_one ALTER ATTRIBUTE a TYPE double precision",
+    );
+    reject(&engine, "SELECT v::text FROM boundary_value");
+
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        super::addition::open(provider, &path)
+    };
+    reject(&engine, "SELECT v::text FROM boundary_value");
+    execute(
+        &engine,
+        "ALTER TYPE boundary_one ALTER ATTRIBUTE a TYPE integer",
+    );
+    let result = execute(&engine, "SELECT v::text FROM boundary_value");
+    assert_eq!(result["results"][0]["rows"], serde_json::json!([["(-1)"]]));
+}
+
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn peer_tuple_projection_preserves_prepared_view_constants(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("tuple-boundary-peer.db");
+    let engine = super::addition::open(provider, &path);
+    let peer = engine.new_session().unwrap();
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_tuple_boundary_oracle.expected.json"
+    ))
+    .unwrap();
+    let verify = |engine: &uqa_engine::Engine, id: &str| {
+        let case = reference["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap();
+        let mut selected = reference.clone();
+        selected["cases"] = serde_json::json!([case]);
+        crate::pg18_oracle::verify(engine, &selected.to_string());
+    };
+    verify(&engine, "setup");
+    verify(&peer, "prepare");
+    verify(&engine, "widen");
+    verify(&peer, "changed_prepared_result");
+    verify(&peer, "prefix");
+    engine
+        .sql("CREATE OR REPLACE VIEW boundary_prefix_value AS SELECT '(7,8,9)'::boundary_prefix AS v", &[])
+        .unwrap();
+    let result = crate::pg18_oracle::run_case(&peer, "EXECUTE boundary_fields");
+    assert_eq!(result["error"]["sqlstate"], "0A000");
+    assert_eq!(
+        result["error"]["message"],
+        "cached plan must not change result type"
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn composite_datum_consumers_match_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let engine = super::addition::open(provider, &directory.path().join("datum-consumers.db"));

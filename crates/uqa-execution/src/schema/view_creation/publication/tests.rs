@@ -58,7 +58,7 @@ impl Drop for Guard<'_> {
     }
 }
 impl ViewPublication for Publication {
-    fn save_view_expression_names(&self, row: &ViewRow) -> StorageBackendResult<()> {
+    fn save_view_representation(&self, row: &ViewRow) -> StorageBackendResult<()> {
         self.save_view(row)
     }
     fn has_catalog(&self) -> bool {

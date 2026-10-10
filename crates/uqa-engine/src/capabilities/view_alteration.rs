@@ -79,7 +79,7 @@ impl ViewPublication for Engine {
             uqa_execution::catalog::definition_revision::publish_view(catalog.as_ref(), row)
         })
     }
-    fn save_view_expression_names(&self, row: &ViewRow) -> StorageBackendResult<()> {
+    fn save_view_representation(&self, row: &ViewRow) -> StorageBackendResult<()> {
         self.storage
             .catalog
             .as_ref()

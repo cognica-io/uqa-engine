@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve represented composite fields when a later field extends beyond the retained tuple, and reject actual out-of-bounds reads with `XX001` while preserving lazy evaluation, rollback and reopening. Keep already-folded prepared view constants across representation-only descriptor projection, while retaining invalidation for actual definition changes.
+
 - Reject DISTINCT, grouping, ordering and window keys whose declared types lack the required PostgreSQL comparison operators before optimization or execution, including output-column ordinals, empty inputs and unused window definitions. Preserve ordinary `void`/JSON outputs and UNION ALL, and include PostgreSQL's ordering-error hint.
 
 - Reduce scalar filter overhead for same-type integer, floating-point and Boolean comparisons by resolving enum call state only when needed, preserving PostgreSQL coercions, NULLs, evaluation order, retained enum state and cancellation. Restore adjacent inclusive ranges in compiled projected predicates after PostgreSQL BETWEEN expansion, reading each needed range field once.
