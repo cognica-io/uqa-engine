@@ -75,8 +75,8 @@ fn population_reconciliation_copies_sorted_spilled_values_only_once_per_output()
             )
             .unwrap();
             let written = write_counts::take();
-            assert_eq!(written.bytes, 2 * count * VALUE.len() as u64, "{written:?}");
-            assert_eq!(written.copied, count * VALUE.len() as u64, "{written:?}");
+            assert_eq!(written.bytes, count * VALUE.len() as u64, "{written:?}");
+            assert_eq!(written.copied, 0, "{written:?}");
             let mut before = original.writes();
             let mut after = resolved.writes();
             for position in 0..=count {

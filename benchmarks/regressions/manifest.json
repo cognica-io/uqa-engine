@@ -1423,7 +1423,7 @@
       "source": "crates/uqa-storage/src/mvcc/populations/resolve/tests.rs",
       "capability": "Spilled population reconciliation",
       "workload": "128/512 one-KiB canonical values and raw origin invalidation, command and publication resolution under a 128 KiB allowance.",
-      "invariant": "Each intermediate/final output writes values once without repeated run merges; complete keys, preconditions, values and kinds, cancellation and release remain correct."
+      "invariant": "One output write per value and zero additional copies during preparation; complete keys, preconditions, values and kinds, cancellation and release remain correct."
     },
     {
       "package": "uqa-storage-sqlite",
