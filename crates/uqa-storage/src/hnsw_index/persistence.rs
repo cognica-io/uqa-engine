@@ -88,12 +88,13 @@ impl Iterator for HNSWDeltaNodes<'_> {
             let Some((id, node)) = next else {
                 return Ok(None);
             };
+            let vector = graph.raw_vector(id as u64)?;
             let memory = self
                 .delta
                 .control
                 .memory()
-                .reserve(snapshot_bytes(&node)?)?;
-            let snapshot = HNSWNodeSnapshot::from(&*node);
+                .reserve(snapshot_bytes(&node, vector.values.len())?)?;
+            let snapshot = HNSWNodeSnapshot::from_parts(&node, vector.values.clone());
             self.after = Some(id);
             Ok(Some(Budgeted::new(snapshot, memory)))
         })();
@@ -111,14 +112,9 @@ impl Iterator for HNSWDeltaNodes<'_> {
     }
 }
 
-fn snapshot_bytes(node: &HNSWNode) -> Result<usize, MemoryError> {
+fn snapshot_bytes(node: &HNSWNode, dimensions: usize) -> Result<usize, MemoryError> {
     let mut bytes = size_of::<HNSWNodeSnapshot>()
-        .checked_add(
-            node.raw_vector
-                .len()
-                .checked_mul(4)
-                .ok_or(MemoryError::SizeOverflow)?,
-        )
+        .checked_add(dimensions.checked_mul(4).ok_or(MemoryError::SizeOverflow)?)
         .and_then(|n| n.checked_add(node.neighbors.len().checked_mul(size_of::<Vec<u64>>())?))
         .ok_or(MemoryError::SizeOverflow)?;
     for layer in &node.neighbors {
@@ -175,13 +171,13 @@ impl HNSWIndex {
     }
 }
 
-impl From<&HNSWNode> for HNSWNodeSnapshot {
-    fn from(node: &HNSWNode) -> Self {
+impl HNSWNodeSnapshot {
+    fn from_parts(node: &HNSWNode, raw_vector: Vec<f32>) -> Self {
         Self {
             node_id: node.id,
             doc_id: node.doc_id,
             vector_ordinal: node.vector_ordinal,
-            raw_vector: node.raw_vector.clone(),
+            raw_vector,
             level: node.level,
             deleted: node.deleted,
             neighbors: node.neighbors.clone(),

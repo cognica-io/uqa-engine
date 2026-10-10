@@ -49,6 +49,10 @@ fn collect(
         };
         after = Some(last.key().to_vec());
         for key in page.iter() {
+            assert_eq!(
+                snapshot.scope_revision(key.key(), control).unwrap(),
+                Some(key.revision())
+            );
             assert!(result.insert(key.key().to_vec(), key.revision()).is_none());
         }
     }
@@ -81,10 +85,43 @@ fn summary_work_depends_on_scopes_instead_of_spilled_records() {
             collect(&snapshot, &control),
             BTreeMap::from([(b"a".to_vec(), expected)])
         );
+        assert_eq!(snapshot.scope_revision(b"b", &control).unwrap(), None);
     }
     let reads = read_counts::take();
     assert_eq!(reads.entries, 0, "summary must not reopen the source runs");
     assert_eq!(reads.values, 0, "summary must not read source payloads");
+}
+
+#[test]
+fn unclassified_scope_revisions_match_the_newest_prefix_change() {
+    let control = StorageReadControl::with_limit(128 << 10);
+    let changes = PrivateRecordChanges::new(control.memory());
+    for id in 0..256 {
+        stage(&changes, format!("a{id:06}").as_bytes(), &control);
+    }
+    let expected = changes.snapshot().unwrap().revision();
+    let retained = changes.snapshot().unwrap();
+    stage(&changes, b"b0", &control);
+    assert_eq!(retained.scope_revision(b"a", &control).unwrap(), expected);
+    assert_eq!(retained.scope_revision(b"b", &control).unwrap(), None);
+    changes
+        .apply(
+            &[RecordWrite {
+                key: b"a000000",
+                expected: None,
+                value: None,
+            }],
+            &control,
+        )
+        .unwrap();
+    let latest = changes.snapshot().unwrap();
+    assert_eq!(
+        latest.scope_revision(b"a", &control).unwrap(),
+        latest.revision()
+    );
+    assert_eq!(retained.scope_revision(b"a", &control).unwrap(), expected);
+    control.cancellation().cancel();
+    assert!(latest.scope_revision(b"a", &control).is_err());
 }
 
 #[test]

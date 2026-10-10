@@ -16,7 +16,9 @@ use uqa_storage::{
     KeyValueBatch,
 };
 
+mod cache;
 mod publication;
+pub(super) use cache::CachedState;
 mod records;
 mod state;
 #[cfg(test)]
@@ -63,13 +65,17 @@ impl SQLiteIVFIndex {
         doc: i64,
         encoded: &[(i64, Vec<u8>)],
         vectors: &[Vec<f32>],
-    ) -> Result<()> {
+    ) -> Result<Option<uqa_storage::ivf_index::IVFPreparedMetadata>> {
         let read = read.owned(batch)?;
         let doc_id = decode_doc_id(doc)?;
-        let metadata = load_state(&read, self.params, false)?.prepare(&[IVFMutation::Replace {
-            document: doc_id,
-            vectors,
-        }])?;
+        let before = self.cached_native_state(&read)?;
+        let metadata =
+            before
+                .clone_controlled(&read.snapshot.control)?
+                .prepare(&[IVFMutation::Replace {
+                    document: doc_id,
+                    vectors,
+                }])?;
         read.replace(batch, doc, encoded)?;
         publication::write_input(
             &read,
@@ -79,7 +85,9 @@ impl SQLiteIVFIndex {
                 document: doc_id,
                 vectors,
             },
-        )
+            before.header().centroids != metadata.header().centroids,
+        )?;
+        Ok(Some(metadata))
     }
 
     pub(super) fn delete_native(
@@ -87,15 +95,24 @@ impl SQLiteIVFIndex {
         read: &NativeVectorRead<'_>,
         batch: &mut dyn KeyValueBatch,
         doc: i64,
-    ) -> Result<()> {
+    ) -> Result<Option<uqa_storage::ivf_index::IVFPreparedMetadata>> {
         let doc_id = decode_doc_id(doc)?;
-        let metadata =
-            load_state(read, self.params, false)?.prepare(&[IVFMutation::Delete(doc_id)])?;
+        let before = self.cached_native_state(read)?;
+        let metadata = before
+            .clone_controlled(&read.snapshot.control)?
+            .prepare(&[IVFMutation::Delete(doc_id)])?;
         if read.owner.is_none() {
-            return Ok(());
+            return Ok(None);
         }
         read.delete(batch, doc)?;
-        publication::write_input(read, batch, &metadata, IVFMutation::Delete(doc_id))
+        publication::write_input(
+            read,
+            batch,
+            &metadata,
+            IVFMutation::Delete(doc_id),
+            before.header().centroids != metadata.header().centroids,
+        )?;
+        Ok(Some(metadata))
     }
 
     pub(super) fn search_native(

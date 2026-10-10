@@ -6,11 +6,7 @@
 
 //! Persistent backing for logical `btree` value indexes.
 //!
-//! The engine still uses its in-memory [`uqa_storage::BTreeIndex`] for query-time
-//! scans, but the compact `(table, field, doc_id, value)` rows live in `SQLite`.
-//! Reopening an engine hydrates the B-tree from these rows instead of parsing
-//! every full document again. Writes replace the affected postings in the
-//! same managed transaction as the document mutation, including a bound logical native session.
+//! Compact `(table, field, doc_id, value)` rows live in `SQLite`. Native sessions additionally maintain scalar/tuple equality keys and support certificates, allowing equality probes without hydrating the field. Other scans and legacy sessions hydrate an in-memory [`uqa_storage::BTreeIndex`]. Native publication maintains its projections in the same managed transaction as the document mutation.
 
 use std::collections::BTreeMap;
 
@@ -23,7 +19,10 @@ use uqa_core::{
 use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
 
+pub(crate) mod coverage;
+pub(crate) mod equality;
 mod native;
+pub(crate) mod probe;
 pub(crate) use native::columns::change_column as change_native_column;
 pub(crate) use native::delete_document as delete_native_document_entries;
 
@@ -156,7 +155,7 @@ fn encode_value(value: &Value) -> Result<String> {
     Ok(serde_json::to_string(&StoredValue::from(value))?)
 }
 
-fn decode_value(encoded: &str) -> Result<Value> {
+pub(crate) fn decode_value(encoded: &str) -> Result<Value> {
     Ok(serde_json::from_str::<StoredValue>(encoded)?.into_value())
 }
 
@@ -168,6 +167,23 @@ pub struct SQLiteBTreeIndexStore {
 impl SQLiteBTreeIndexStore {
     pub fn new(conn: ManagedConnection) -> Self {
         Self { conn }
+    }
+
+    /// Seek the persisted value index, retaining native snapshot and private-row visibility.
+    pub fn probe_equal(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        value: &Value,
+    ) -> Result<Option<Vec<DocId>>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            let Some(probe) = probe::EqualityProbe::new(value, &snapshot.control)? else {
+                return Ok(None);
+            };
+            return native::probe_equal(&snapshot, table, field, &probe);
+        }
+        // Unmanaged legacy writers cannot certify population maintenance. Their original hydration and sparse-repair path remains authoritative.
+        Ok(None)
     }
 
     pub fn fields(&self, table: &str) -> Result<Vec<uqa_storage::ValueIndexKey>> {

@@ -736,12 +736,12 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
-      "test": "separate_edge_restoration_writes_spilled_vectors_once_per_source",
+      "test": "separate_edge_restoration_never_rewrites_spilled_vectors",
       "cases": 1,
       "source": "crates/uqa-storage/src/hnsw_index/tests/spill.rs",
       "capability": "HNSW spill restoration",
       "workload": "24 vectors of 1024 dimensions; 64 KiB retention allowance and separately streamed edges.",
-      "invariant": "Canonical graph and KNN results match; node encodes are bounded by twice the node count, without exceeding retention.",
+      "invariant": "Canonical graph and KNN results match; edge restoration performs zero vector encodes and bounds topology encodes without exceeding retention.",
       "case_names": [
         ""
       ]
@@ -1294,6 +1294,479 @@
       "capability": "Projected range predicates",
       "workload": "Real parsed BETWEEN and flattened comparison forms over the 20,000-row analytical fixture.",
       "invariant": "Exactly one borrowed read per needed field, at most three per row; identical predicate output and short circuit across direct/indexed projections."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_topology_validation_does_not_decode_dense_vectors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW topology validation",
+      "workload": "128 nodes at 256 and 1024 dimensions with a 128 KiB allowance, forcing topology and both vector maps to spill.",
+      "invariant": "Restoration and repeated topology validation decode zero dense vector coordinates; all retained reservations are released."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_search_reads_only_the_vector_used_by_each_distance_or_score",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW vector reads",
+      "workload": "Two repeated searches of a 128-node, 1024-dimensional spilled graph under a 128 KiB allowance.",
+      "invariant": "Complete postings match the resident graph and decoded coordinates are bounded by candidate distances plus canonical scores within the original allowance."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "residual_reads_follow_candidate_count_and_keep_original_payload_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/operator_tree/driver/intersection/tests.rs",
+      "capability": "Retrieval residual filters",
+      "workload": "Two retrieval branches with 128/16384 unrelated documents, every filter position and sequential/parallel execution.",
+      "invariant": "Only the intersection candidates are read; complete decorated payloads preserve the original branch order and KNN limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retrieval_residual_filters_read_only_selected_documents",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/tests/storage_consistency/indexed_queries.rs",
+      "capability": "SQL retrieval document reads",
+      "workload": "GIN/HNSW fusion over 64/512 synthetic documents with the unindexed residual on either side of the retrieval expression.",
+      "invariant": "No document enumeration; physical reads are bounded by candidate and result counts, with identical row identities and scores."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_scalar_constraint_probes_do_not_hydrate_indexes_after_session_refresh",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/value_index/tests.rs",
+      "capability": "Cold primary and composite constraints",
+      "workload": "256 persisted rows, independent sessions, peer writes, duplicate primary/composite keys, equality projection, savepoint undo and reopen.",
+      "invariant": "Complete in-memory value indexes remain unmaterialized while selected rows, unique violations and rollback stay correct."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "cold_scalar_probes_seek_instead_of_visiting_the_posting_collection",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native SQLite equality seeks",
+      "workload": "Scalar and composite equality hits and misses against 128/8192-row persisted indexes.",
+      "invariant": "Results match Core equality; SQLite VM instructions remain bounded independently of unrelated row count, including completeness and comparison-domain checks."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "equality_probe_keys_and_candidates_keep_the_original_allowance_and_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native equality probe resources",
+      "workload": "Oversized keys, 128 matching candidates and cancellation under a 256-byte original allowance.",
+      "invariant": "Key and candidate admission fail within the original allowance and release all reservations; cancellation is preserved."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequential_ivf_mutations_retain_the_certified_generation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/key_value/ivf_index/tests.rs",
+      "capability": "Certified IVF mutation retention",
+      "workload": "32 sequential writes, training, tensor replacement, deletion, retained readers and clear.",
+      "invariant": "No persisted generation restoration after certified own writes; complete search postings and retained generations match the reference."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_candidates_preserve_undo_and_failed_staging",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/key_value/ivf_index/tests.rs",
+      "capability": "IVF visibility boundaries",
+      "workload": "Failed staging, savepoint rollback, divergent replacement and transaction rollback.",
+      "invariant": "Failed staging keeps the cached generation; each undo invalidates it and retained readers keep discarded branches."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "population_reconciliation_copies_sorted_spilled_values_only_once_per_output",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/populations/resolve/tests.rs",
+      "capability": "Spilled population reconciliation",
+      "workload": "128/512 one-KiB canonical values and raw origin invalidation, command and publication resolution under a 128 KiB allowance.",
+      "invariant": "Each intermediate/final output writes values once without repeated run merges; complete keys, preconditions, values and kinds, cancellation and release remain correct."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sequential_native_ivf_mutations_retain_state_and_write_only_changed_assignments",
+      "cases": 2,
+      "case_names": [
+        "explicit_1_false",
+        "explicit_2_true"
+      ],
+      "source": "crates/uqa-storage-sqlite/src/vector_index/ivf/native/tests.rs",
+      "capability": "Native IVF mutation retention",
+      "workload": "32 native writes after training, tensor replacement, deletion, retained readers and explicit transaction undo.",
+      "invariant": "One cold restoration and one assignment write per new vector; complete scores, undo and original leases remain correct."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "vector_journal_larger_than_its_session_allowance_rebases_and_commits",
+      "cases": 4,
+      "case_names": [
+        "native_1_false::hnsw_1_false",
+        "native_1_false::hnsw_2_true",
+        "native_2_true::hnsw_1_false",
+        "native_2_true::hnsw_2_true"
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/vector_spill.rs",
+      "capability": "Spilled vector transactions",
+      "workload": "Original 320-vector, 512-dimensional, 512 KiB fixture: undo, edits, peer writes, refresh, commit and fresh reader.",
+      "invariant": "All native/Key-Value IVF/HNSW variants preserve complete serial reference results and the unchanged original allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "write_only_ivf_generations_do_not_rebuild_ranked_posting_lists",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/ivf_index/spill/read/tests.rs",
+      "capability": "IVF derived posting lists",
+      "workload": "32 certified writes, repeated KNN reads and a retained earlier reader after another write.",
+      "invariant": "Writes build no ranked posting lists; repeated reads build one list for the selected generation and preserve complete postings."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "revision_reads_stream_each_spilled_entry_once_without_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Private vector cache identities",
+      "workload": "128/512 changed keys exceeding a 128 KiB allowance; retained and current command views.",
+      "invariant": "At most one spilled entry decode per key, zero payload reads, and unchanged private revision/undo visibility.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prepared_private_roots_copy_sorted_spill_once_and_preserve_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Spilled transaction refresh",
+      "workload": "4/128/512 one-KiB records; unclassified and grouped private revisions under 128 KiB.",
+      "invariant": "Each spilled payload is written exactly once without merging; complete values, preconditions, cancellation, retained roots and savepoint undo agree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "summary_work_depends_on_scopes_instead_of_spilled_records",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/scopes/tests.rs",
+      "capability": "Native vector cache identities",
+      "workload": "2048 spilled private records grouped in one revision scope; repeated enumeration and point queries.",
+      "invariant": "Zero source entry and payload reads; complete newest revision agrees with the selected command root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "high_cardinality_summaries_spill_and_match_exact_private_revisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/scopes/tests.rs",
+      "capability": "Private revision summary spill",
+      "workload": "2048 independent scopes under a 256 KiB allowance.",
+      "invariant": "Enumeration and point lookup match every expected revision; summaries remain excluded from publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unclassified_scope_revisions_match_the_newest_prefix_change",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/scopes/tests.rs",
+      "capability": "Private revision fallback",
+      "workload": "256 unclassified records, unrelated writes, tombstone replacement and retained snapshots.",
+      "invariant": "Single-cursor fallback preserves exact newest prefix revisions and cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_revision_scopes_keep_names_and_separate_family_owner_and_generation",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/cache_revisions/tests.rs",
+      "capability": "Native revision scope identity",
+      "workload": "Scalar and vector families, object generations, distinct fields and escaped Unicode field names.",
+      "invariant": "Vector summaries cover exactly one family/owner/field and preserve existing named catalog scope identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "private_hnsw_cache_identities_distinguish_equal_revision_rollback_branches",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/native/tests.rs",
+      "capability": "Native HNSW retention",
+      "workload": "Unrelated table and same-table other-field writes, undo branches with equal persisted revision, retained snapshots.",
+      "invariant": "Unrelated private fields retain the identical graph; changed branches and committed generations return the correct complete results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "disk_replacements_publish_adjacent_path_headers_once_per_block",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Encrypted vector spill paths",
+      "workload": "128/512 disk-backed scalar keys under 32 KiB; replacement and three injected write failures.",
+      "invariant": "Replacement writes at most two authenticated blocks including framing; old/current roots, failed append rollback and reservation release agree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repeated_spilled_reads_reuse_authenticated_blocks_across_immutable_roots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Encrypted spill reads",
+      "workload": "512 spilled keys under 512 KiB, repeated lookups, retained roots, replacements and failed append rollback.",
+      "invariant": "Warm lookups perform zero additional authenticated block reads; outputs, old roots and the original allowance survive replacement and failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "statistics_publication_keeps_the_private_document_count_clean",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/table_storage/document_count/tests.rs",
+      "capability": "Transaction-local data caches",
+      "workload": "Private INSERT/UPDATE after an explicit peer ANALYZE, then a peer row insert and rollback.",
+      "invariant": "Statistics-only commits preserve the clean exact count; real peer rows refresh it and rollback removes only local changes.",
+      "case_names": [
+        "case_1_insert",
+        "case_2_update"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "commit_visibility_requires_the_same_database_and_a_sufficient_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/view/tests.rs",
+      "capability": "Committed snapshot certificates",
+      "workload": "Committed/private views, earlier/later commits, another database and an unversioned identity.",
+      "invariant": "Only a sufficient record-set snapshot of the same database can certify an observed committed change.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unchanged_pruning_writes_no_topology_and_combined_connections_preserve_the_graph",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW spilled adjacency mutation",
+      "workload": "128 spilled 256-dimensional nodes under 128 KiB; unchanged pruning and repeated connect/prune operations.",
+      "invariant": "Unchanged pruning decodes no vectors and writes no topology; combined mutation writes fewer records with identical complete graph nodes and search output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "bulk_spill_publishes_each_authenticated_block_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Encrypted bulk spill construction",
+      "workload": "127/512 ordered keys under 32 KiB and an injected final-flush failure.",
+      "invariant": "Each complete block is published once without re-reading prior bytes; complete values and resource cleanup are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repeated_node_edits_do_not_rewrite_the_spilled_dirty_set",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW pending persistence",
+      "workload": "128 spilled 256-dimensional nodes, repeated edits and a retained graph under 128 KiB.",
+      "invariant": "Already pending identities add zero encrypted dirty-set writes; complete deltas include every changed node exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "a_reopened_database_probes_cold_and_restores_carried_postings_on_demand",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/index_only.rs",
+      "capability": "Cold and retained covering index reads",
+      "workload": "Reopened covering index, cold equality, explicit restoration, divergent document source and DROP.",
+      "invariant": "Cold equality hydrates no complete accelerator; results agree, restored index-only reads use carried postings and DROP removes them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ordered_construction_spills_linearly_and_preserves_unordered_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Ordered spill construction",
+      "workload": "128/512 keys, resident and spilled thresholds, unordered replacement, cancellation.",
+      "invariant": "Ordered streams write each authenticated block once; unordered updates retain exact ordered values and failed builders cannot publish.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ordered_restoration_encodes_each_spilled_vector_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW graph restoration",
+      "workload": "128 nodes at 256/1024 dimensions under 128 KiB.",
+      "invariant": "Each canonical and normalized vector is encoded once; complete graph and search output match resident restoration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "diversity_selection_reuses_selected_vectors_within_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW diversity selection",
+      "workload": "32 rejected candidates, exclusions, empty selection, cancellation and values exceeding the optional cache.",
+      "invariant": "Selected vectors are not decoded repeatedly when admitted; both cached and ordinary reads preserve diversity and rejected-candidate fill under the original ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_record_conditions_read_one_entry_without_its_value",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/tests/record_conditions.rs",
+      "capability": "Private mutation preconditions",
+      "workload": "128/512 spilled records, canonical and typed writes, tombstones, missing keys and cancellation.",
+      "invariant": "Each mutation reads metadata and prior kind from one private lookup without loading a value; conditions and write precedence remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "batch_read_scope_reuses_blocks_and_releases_them_without_retaining_a_view",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/tests/record_conditions.rs",
+      "capability": "Private batch spill reads",
+      "workload": "512 spilled records, 32 repeated point conditions, shadowing writes, a retained view, savepoint undo and cancellation.",
+      "invariant": "Repeated conditions decode no additional entry blocks; releasing the batch releases cached bytes while retained snapshots and subsequent writes keep their own values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "neighbor_scoring_reuses_its_vectors_during_diversity_selection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW scored candidate reuse",
+      "workload": "128 spilled nodes, 512/1024 dimensions, three candidates, duplicate identities and exclusion.",
+      "invariant": "Admitted scored vectors are decoded once across scoring and diversity selection; partial admission preserves complete output and the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hierarchy_query_reuses_exact_distances_and_keeps_uncached_fallback",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW hierarchy distance reuse",
+      "workload": "128 spilled nodes, 32 identities visited three times, missing identity and a cache too small for one score.",
+      "invariant": "Every admitted node vector is read once per query; repeated scores preserve exact float bits and uncached fallback releases the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_tail_reads_reuse_authenticated_prefixes_and_follow_appends",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Authenticated spill tail reads",
+      "workload": "24 successive appends across partial and complete blocks, eight repeated point reads, a retained root and an injected partial append failure.",
+      "invariant": "Warm tail reads perform zero additional block decryptions; growth and address reuse expose exactly the new bytes while old roots and the original allowance remain valid.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

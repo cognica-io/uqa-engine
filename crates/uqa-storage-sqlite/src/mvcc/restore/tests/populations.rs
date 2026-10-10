@@ -91,7 +91,7 @@ fn interrupted_native_population_upgrade_preserves_restore_intent_and_original_h
             "SELECT n.format, m.receipt_limit, m.restore_target FROM _uqa_mvcc_native_format n CROSS JOIN _uqa_mvcc_metadata m", [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        assert_eq!((format, limit, pending), (15, 123, None));
+        assert_eq!((format, limit, pending), (16, 123, None));
         Ok(())
     }).unwrap();
     drop(connection);

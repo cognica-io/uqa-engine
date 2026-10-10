@@ -10,7 +10,7 @@ use uqa_core::DocId;
 
 use super::metric::{deterministic_level, normalize_with_norm};
 use super::prepare::{check, Control};
-use super::search::Candidate;
+use super::search::{Candidate, Query};
 use super::types::{active_key, HNSWIndex, HNSWNode};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -32,14 +32,18 @@ impl HNSWIndex {
         let (normalized_vector, norm) = normalize_with_norm(&raw_vector);
         let previous_entry = self.entry_point;
         let previous_max_level = self.max_level;
+        self.put_vectors(
+            node_id,
+            raw_vector,
+            normalized_vector.clone(),
+            norm,
+            control,
+        )?;
         self.put_node(
             HNSWNode {
                 id: node_id,
                 doc_id,
                 vector_ordinal,
-                raw_vector,
-                norm,
-                normalized_vector: normalized_vector.clone(),
                 level,
                 deleted: false,
                 neighbors: vec![Vec::new(); level + 1],
@@ -54,15 +58,16 @@ impl HNSWIndex {
             self.max_level = level;
             return Ok(());
         };
+        let mut query = Query::new(&normalized_vector, &self.memory);
         if previous_max_level > level {
             for layer in ((level + 1)..=previous_max_level).rev() {
-                entry = self.greedy_search_layer(&normalized_vector, entry, layer, control)?;
+                entry = self.greedy_search_layer(&mut query, entry, layer, control)?;
             }
         }
         for layer in (0..=level.min(previous_max_level)).rev() {
             check(control)?;
             let candidates = self.search_layer(
-                &normalized_vector,
+                &mut query,
                 &[entry],
                 self.params.ef_construction,
                 layer,
@@ -83,12 +88,7 @@ impl HNSWIndex {
             })?;
             for neighbor_id in selected {
                 check(control)?;
-                self.modify_node(neighbor_id, control, |neighbor| {
-                    if !neighbor.neighbors[layer].contains(&node_id) {
-                        neighbor.neighbors[layer].push(node_id);
-                    }
-                })?;
-                self.prune_node(neighbor_id, layer, control)?;
+                self.connect_and_prune_node(neighbor_id, node_id, layer, control)?;
             }
             self.prune_node(node_id, layer, control)?;
             if let Some(Candidate { node_id, .. }) = candidates.iter().next().transpose()? {

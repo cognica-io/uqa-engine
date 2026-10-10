@@ -21,10 +21,21 @@ impl HNSWIndex {
 
     pub(super) fn validate_controlled(&self, control: Control<'_>) -> StorageBackendResult<()> {
         check(control)?;
+        if self.raw_vectors.len() != self.nodes.len()
+            || self.normalized_vectors.len() != self.nodes.len()
+        {
+            return Err(corrupt("graph and vector identity counts differ"));
+        }
         let mut computed_max = 0;
         for entry in self.nodes.iter() {
             check(control)?;
-            let (_, node) = entry?;
+            let (key, node) = entry?;
+            if key != u128::from(node.id)
+                || !self.raw_vectors.contains_key(key)?
+                || !self.normalized_vectors.contains_key(key)?
+            {
+                return Err(corrupt("graph and vector identities differ"));
+            }
             computed_max = computed_max.max(node.level);
             if node.id >= self.next_node_id {
                 return Err(corrupt("next node id does not exceed persisted node ids"));

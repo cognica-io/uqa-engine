@@ -8,7 +8,8 @@
 
 use super::metric::{normalize_with_norm, MAX_HNSW_LEVEL};
 use super::store::Record;
-use super::types::{active_key, HNSWGraphMeta, HNSWIndex, HNSWNode, HNSWNodeSnapshot};
+use super::types::{active_key, HNSWGraphMeta, HNSWIndex, HNSWNode, HNSWNodeSnapshot, HNSWVector};
+use crate::spill_map::Builder;
 use crate::vector_index::{validate_vector_values, HNSWIndexParams};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use uqa_core::memory::{Budgeted, MemoryError, MemoryReservation};
@@ -51,6 +52,8 @@ pub struct HNSWRestoreBuilder {
     control: StorageReadControl,
     memory: MemoryReservation,
     pending: Option<(HNSWNode, MemoryReservation)>,
+    raw_vectors: Builder<HNSWVector>,
+    normalized_vectors: Builder<HNSWVector>,
     failed: bool,
 }
 
@@ -80,6 +83,8 @@ impl HNSWRestoreBuilder {
             control: control.clone(),
             memory,
             pending: None,
+            raw_vectors: Builder::new(control.memory(), control.memory().limit() / 32),
+            normalized_vectors: Builder::new(control.memory(), control.memory().limit() / 32),
             failed: false,
         })
     }
@@ -163,13 +168,16 @@ impl HNSWRestoreBuilder {
                 .ok_or(MemoryError::SizeOverflow)?,
         )?;
         let (normalized_vector, norm) = normalize_with_norm(&snapshot.raw_vector);
+        self.put_vectors(
+            snapshot.node_id,
+            snapshot.raw_vector,
+            normalized_vector,
+            norm,
+        )?;
         let node = HNSWNode {
             id: snapshot.node_id,
             doc_id: snapshot.doc_id,
             vector_ordinal: snapshot.vector_ordinal,
-            raw_vector: snapshot.raw_vector,
-            normalized_vector,
-            norm,
             level: snapshot.level,
             deleted: snapshot.deleted,
             neighbors: snapshot.neighbors,
@@ -190,7 +198,29 @@ impl HNSWRestoreBuilder {
             .insert(u128::from(node.id), node, Some(&self.control))
     }
 
-    /// Providers with a separate edge relation append each decoded edge to its original source node. Retain one charged source until it changes, so ordered edge streams rewrite each spilled vector only once. Unordered streams remain valid and flush on each source change.
+    fn put_vectors(
+        &mut self,
+        id: u64,
+        raw: Vec<f32>,
+        normalized: Vec<f32>,
+        norm: f32,
+    ) -> StorageBackendResult<()> {
+        self.raw_vectors.insert(
+            u128::from(id),
+            HNSWVector { values: raw, norm },
+            Some(&self.control),
+        )?;
+        self.normalized_vectors.insert(
+            u128::from(id),
+            HNSWVector {
+                values: normalized,
+                norm: 1.0,
+            },
+            Some(&self.control),
+        )
+    }
+
+    /// Providers with a separate edge relation append each decoded edge to its original source node. Retain one charged source until it changes, so ordered edge streams rewrite each spilled adjacency record only once. Unordered streams remain valid and flush on each source change.
     pub fn edge(&mut self, source: u64, layer: usize, target: u64) -> StorageBackendResult<()> {
         self.check_usable()?;
         let result = self.edge_inner(source, layer, target);
@@ -263,6 +293,8 @@ impl HNSWRestoreBuilder {
     pub fn finish(mut self) -> StorageBackendResult<Budgeted<HNSWIndex>> {
         self.check_usable()?;
         self.flush_edges()?;
+        self.index.raw_vectors = self.raw_vectors.finish(Some(&self.control))?;
+        self.index.normalized_vectors = self.normalized_vectors.finish(Some(&self.control))?;
         if self.expected.live_count != self.index.active.len()
             || self.expected.deleted_count != self.index.deleted_count
         {

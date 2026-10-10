@@ -510,6 +510,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Probe complete durable postings by Core value equality on the caller's transaction boundary, without hydrating the field. `None` declines an unbuilt index, unsupported value/comparison domain, or snapshot representation. A supported probe must decline if any stored key requires a fallible or typed SQL comparison; NULL matches only the stored NULL bucket. IDs are sorted and unique, including private replacements and deletions.
+    fn probe_btree_index_equal(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+        _value: &Value,
+    ) -> StorageBackendResult<Option<Vec<DocId>>> {
+        Ok(None)
+    }
+
     /// Read one previously evaluated key on the caller's retained transaction boundary, without loading the posting collection. An unbuilt index is distinct from an absent row and a stored NULL.
     fn read_btree_index_entry(
         &self,

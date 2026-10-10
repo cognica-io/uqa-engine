@@ -31,7 +31,7 @@ fn graph_larger_than_its_allowance_keeps_topology_scores_and_retained_readers() 
         builder.push(document, 0, &value).unwrap();
     }
     let (mut spilled, memory) = builder.finish().unwrap().into_parts();
-    assert!(spilled.nodes.is_spilled());
+    assert!(spilled.raw_vectors.is_spilled());
     spilled.validate_invariants().unwrap();
     let expected = resident.take_persistence_delta();
     let actual = spilled.take_persistence_delta();
@@ -105,7 +105,7 @@ fn restoration_streams_nodes_and_preserves_bits_with_more_vectors_than_memory() 
         builder.push(node.unwrap().into_parts().0).unwrap();
     }
     let restored = builder.finish().unwrap();
-    assert!(restored.nodes.is_spilled());
+    assert!(restored.raw_vectors.is_spilled());
     let query = vector(90, 1024);
     assert_eq!(
         restored.search_knn(&query, 10).unwrap(),
@@ -124,7 +124,7 @@ fn restoration_streams_nodes_and_preserves_bits_with_more_vectors_than_memory() 
 }
 
 #[test]
-fn separate_edge_restoration_writes_spilled_vectors_once_per_source() {
+fn separate_edge_restoration_never_rewrites_spilled_vectors() {
     let control = StorageReadControl::with_limit(64 * 1024);
     let params = HNSWIndexParams {
         m: 6,
@@ -143,6 +143,7 @@ fn separate_edge_restoration_writes_spilled_vectors_once_per_source() {
         builder.push(empty).unwrap();
     }
     crate::hnsw_index::store::ENCODED_NODES.set(0);
+    crate::hnsw_index::store::ENCODED_VECTORS.set(0);
     for node in &snapshot.nodes {
         for (layer, neighbors) in node.neighbors.iter().enumerate() {
             for target in neighbors {
@@ -152,7 +153,8 @@ fn separate_edge_restoration_writes_spilled_vectors_once_per_source() {
     }
     let mut restored = builder.finish().unwrap().into_parts().0;
     let encoded = crate::hnsw_index::store::ENCODED_NODES.get();
-    assert!(restored.nodes.is_spilled());
+    assert!(restored.raw_vectors.is_spilled());
+    assert_eq!(crate::hnsw_index::store::ENCODED_VECTORS.get(), 0);
     let mut delta = restored.delta(&control);
     delta.full_rewrite = true;
     assert_eq!(delta.meta, snapshot.meta);
@@ -170,7 +172,7 @@ fn separate_edge_restoration_writes_spilled_vectors_once_per_source() {
     // One replacement per source, with room for one compaction of the live graph.
     assert!(
         encoded <= 2 * snapshot.nodes.len(),
-        "encoded {encoded} vector nodes"
+        "encoded {encoded} adjacency records"
     );
     assert!(control.memory().peak() <= control.memory().limit());
     drop(restored);

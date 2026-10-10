@@ -46,7 +46,7 @@ pub struct NativeRecordIdentity {
 }
 
 impl NativeRecordIdentity {
-    /// Families with named or entity-specific invalidation retain their complete key. All other relevant families aggregate by their validated owner header; family IDs separate these scopes from complete keys of other families.
+    /// Named/entity families retain their complete key, vector families aggregate by owner and field, and other relevant families aggregate by owner. Family IDs separate these scopes from complete keys of other families.
     pub(crate) fn revision_scope(key: &[u8]) -> Option<&[u8]> {
         use NativeRecordFamily as Family;
 
@@ -73,7 +73,39 @@ impl NativeRecordIdentity {
             NativeRecordOwner::Database(_) => 16,
             NativeRecordOwner::Object { .. } => 32,
         };
-        Some(&key[..PREFIX.len() + 2 + 1 + owner_bytes])
+        let header_len = PREFIX.len() + 2 + 1 + owner_bytes;
+        if matches!(
+            identity.family,
+            Family::Vectors
+                | Family::HNSWIndexes
+                | Family::HNSWNodes
+                | Family::HNSWEdges
+                | Family::IVFIndexes
+                | Family::IVFCentroids
+                | Family::IVFAssignments
+        ) {
+            // These layouts begin with an escaped TEXT field name. Include its
+            // complete terminator so distinct fields never share a generation.
+            let Some(rest) = key
+                .get(header_len..)
+                .and_then(|rest| rest.strip_prefix(&[2]))
+            else {
+                return Some(key);
+            };
+            let mut position = 0;
+            while position < rest.len() {
+                if rest[position] == 0 {
+                    match rest.get(position + 1) {
+                        Some(0) => return Some(&key[..header_len + 1 + position + 2]),
+                        Some(255) => position += 1,
+                        _ => return Some(key),
+                    }
+                }
+                position += 1;
+            }
+            return Some(key);
+        }
+        Some(&key[..header_len])
     }
 
     /// Address every retained generation of one object without scanning other object payloads.

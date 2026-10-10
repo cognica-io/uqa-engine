@@ -55,6 +55,8 @@ impl VectorIndex for HNSWIndex {
 
     fn clear(&mut self) -> StorageBackendResult<()> {
         self.nodes.clear();
+        self.raw_vectors.clear();
+        self.normalized_vectors.clear();
         self.active.clear();
         self.entry_point = None;
         self.max_level = 0;

@@ -24,6 +24,9 @@ use crate::ivf_index::{
 use crate::vector_index::{IVFIndexParams, VectorIndex};
 use crate::{ReadOnlySnapshot, StorageBackendError, StorageBackendResult};
 
+#[cfg(test)]
+mod tests;
+
 pub struct KeyValueIVFIndex {
     store: Arc<dyn KeyValueStore>,
     raw: KeyValueVectorIndex,
@@ -134,37 +137,42 @@ impl KeyValueIVFIndex {
         mutation: IVFMutation<'_>,
         canonical: impl FnOnce(&mut dyn KeyValueBatch) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
-        self.view.evaluate(self.store.as_ref(), |read, batch| {
-            let cached = self.index_at(read)?;
-            let after = cached
-                .value
-                .clone_controlled(read.control())?
-                .prepare(&[mutation])?;
-            let changed_doc = match mutation {
-                IVFMutation::Replace { document, .. } | IVFMutation::Delete(document) => {
-                    Some(document)
+        let metadata = ivf_metadata_key(&self.table, &self.field)?;
+        let centroids = ivf_centroid_prefix(&self.table, &self.field)?;
+        let assignments = ivf_assignment_prefix(&self.table, &self.field)?;
+        let vectors = vector_field_prefix(&self.table, &self.field)?;
+        self.view.evaluate_candidate(
+            self.store.as_ref(),
+            &[&metadata, &centroids, &assignments, &vectors],
+            |read, batch| {
+                let cached = self.index_at(read)?;
+                let after = cached
+                    .value
+                    .clone_controlled(read.control())?
+                    .prepare(&[mutation])?;
+                let changed_doc = match mutation {
+                    IVFMutation::Replace { document, .. } | IVFMutation::Delete(document) => {
+                        Some(document)
+                    }
+                    IVFMutation::Clear | IVFMutation::Train => None,
+                };
+                let full_rewrite = changed_doc.is_none()
+                    || cached.definition_candidate
+                    || cached.revision.is_none()
+                    || cached.value.header().centroids != after.header().centroids;
+                canonical(batch)?;
+                let preview = !cached.definition_candidate
+                    && cached.revision.is_some()
+                    && changed_doc.is_some();
+                if preview {
+                    batch.ivf_mutation(&ivf_metadata_key(&self.table, &self.field)?, mutation)?;
                 }
-                IVFMutation::Clear | IVFMutation::Train => None,
-            };
-            let full_rewrite = changed_doc.is_none()
-                || cached.definition_candidate
-                || cached.revision.is_none()
-                || cached.value.header().centroids != after.header().centroids;
-            canonical(batch)?;
-            let preview =
-                !cached.definition_candidate && cached.revision.is_some() && changed_doc.is_some();
-            if preview {
-                batch.ivf_mutation(&ivf_metadata_key(&self.table, &self.field)?, mutation)?;
-            }
-            self.stage_snapshot(
-                batch,
-                &after,
-                next_revision(cached.revision)?,
-                full_rewrite,
-                changed_doc,
-                preview,
-            )
-        })
+                let revision = next_revision(cached.revision)?;
+                self.stage_snapshot(batch, &after, revision, full_rewrite, changed_doc, preview)?;
+                drop(cached);
+                Ok((IVFReadIndex::new(after)?, revision))
+            },
+        )
     }
 
     fn build_from_canonical(

@@ -90,6 +90,26 @@ impl RevisionScopes {
 }
 
 impl PrivateRecordSnapshot {
+    pub(in crate::mvcc) fn scope_revision(
+        &self,
+        scope: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PrivateRecordRevision>> {
+        control.check()?;
+        let Some(scopes) = &self.scopes else {
+            let mut revision = None;
+            let mut cursor = self.cursor(scope, None, control)?;
+            while let Some(entry) = cursor.next(control)? {
+                revision = revision.max(Some(entry.revision()));
+            }
+            return Ok(revision);
+        };
+        scopes
+            .get(scope, control)?
+            .map(|write| decode_revision(&write))
+            .transpose()
+    }
+
     pub(in crate::mvcc) fn revision_scopes(
         &self,
         after: Option<&[u8]>,
@@ -106,20 +126,24 @@ impl PrivateRecordSnapshot {
         }
         scopes.visit(&[], after, control, &mut |write| {
             control.check()?;
-            let bytes = write
-                .value()
-                .and_then(|value| value.try_into().ok())
-                .ok_or(VersionError::InvalidEncoding(
-                    "invalid private revision scope",
-                ))?;
             result.push(PrivateRecordKey {
                 key: write.shared_key(),
-                revision: PrivateRecordRevision::from_u64(u64::from_be_bytes(bytes))?,
+                revision: decode_revision(write)?,
             })?;
             Ok(result.len() < limit)
         })?;
         Ok(result)
     }
+}
+
+fn decode_revision(write: &PreparedRecordWrite) -> VersionResult<PrivateRecordRevision> {
+    let bytes = write
+        .value()
+        .and_then(|value| value.try_into().ok())
+        .ok_or(VersionError::InvalidEncoding(
+            "invalid private revision scope",
+        ))?;
+    PrivateRecordRevision::from_u64(u64::from_be_bytes(bytes))
 }
 
 #[cfg(test)]

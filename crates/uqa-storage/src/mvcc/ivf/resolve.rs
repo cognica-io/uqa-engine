@@ -10,7 +10,8 @@ mod load;
 use super::{IVFRecordKey as Key, IVFRecordLayout, IVFRecordValue as Value};
 use crate::mvcc::vector::resolve::{bytes, replace};
 use crate::mvcc::{
-    CommittedRecordSnapshot, PrivateRecordChanges, RecordWrite, VersionError, VersionResult,
+    commit::RecordWriteKind, CommittedRecordSnapshot, PreparedRecordWrite, PrivateRecordChanges,
+    VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
@@ -20,6 +21,7 @@ pub(in crate::mvcc) fn merge(
     changes: &PrivateRecordChanges,
     current: &dyn CommittedRecordSnapshot,
     layout: &dyn IVFRecordLayout,
+    kind: RecordWriteKind,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
     control.cancellation().check()?;
@@ -46,12 +48,11 @@ pub(in crate::mvcc) fn merge(
         let prefix = layout.key(key, address, control)?;
         current.visit_keys(&prefix, None, usize::MAX, control, &mut |key, record| {
             if record.live {
-                changes.apply(
-                    &[RecordWrite {
-                        key,
-                        expected: record.revision,
-                        value: None,
-                    }],
+                changes.apply_owned(
+                    &[
+                        PreparedRecordWrite::copy_bytes(key, record.revision, None, control)?
+                            .with_kind(kind),
+                    ],
                     control,
                 )?;
             }
@@ -67,17 +68,17 @@ pub(in crate::mvcc) fn merge(
         },
         control,
     )?;
-    replace(changes, current, key, &header_value, control)?;
+    replace(changes, current, key, &header_value, kind, control)?;
     for (centroid, vector) in snapshot.centroids.iter().enumerate() {
         let address = layout.key(key, Key::Centroid(centroid), control)?;
         let value = layout.encode(&address, template, Value::Centroid(vector), control)?;
-        replace(changes, current, &address, &value, control)?;
+        replace(changes, current, &address, &value, kind, control)?;
     }
     for entry in prepared.assignments() {
         let (document, ordinal, centroid) = entry?;
         let address = layout.key(key, Key::Assignment(document, ordinal), control)?;
         let value = layout.encode(&address, template, Value::Assignment(centroid), control)?;
-        replace(changes, current, &address, &value, control)?;
+        replace(changes, current, &address, &value, kind, control)?;
     }
     Ok(())
 }

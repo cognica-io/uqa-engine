@@ -44,8 +44,7 @@ pub(in crate::mvcc) fn resolve(
         .as_ref()
         .expect("graph effects were requested");
     let changes = PrivateRecordChanges::new(control.memory());
-    let preview = PrivateRecordChanges::new(control.memory());
-    preview.apply_prepared(original, control)?;
+    let preview = PrivateRecordChanges::from_prepared(original, None, control)?;
     stage_initial_writes(original, &*committed, layout, mode, &changes, control)?;
     let resolver = Resolver {
         final_view: MergedRecordSnapshot::new(committed.clone(), changes.snapshot()?),

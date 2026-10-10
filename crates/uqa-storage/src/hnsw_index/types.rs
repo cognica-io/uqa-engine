@@ -14,17 +14,20 @@ use crate::StorageBackendResult;
 
 pub(super) type NodeId = u64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HNSWNode {
     pub(super) id: NodeId,
     pub(super) doc_id: DocId,
     pub(super) vector_ordinal: u32,
-    pub(super) raw_vector: Vec<f32>,
-    pub(super) norm: f32,
-    pub(super) normalized_vector: Vec<f32>,
     pub(super) level: usize,
     pub(super) deleted: bool,
     pub(super) neighbors: Vec<Vec<NodeId>>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct HNSWVector {
+    pub(super) values: Vec<f32>,
+    pub(super) norm: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +62,8 @@ pub struct HNSWIndex {
     pub(super) dimensions: u32,
     pub(super) params: HNSWIndexParams,
     pub(super) nodes: Map<HNSWNode>,
+    pub(super) raw_vectors: Map<HNSWVector>,
+    pub(super) normalized_vectors: Map<HNSWVector>,
     pub(super) active: Map<NodeId>,
     pub(super) entry_point: Option<NodeId>,
     pub(super) max_level: usize,
@@ -92,7 +97,9 @@ impl HNSWIndex {
         Ok(Self {
             dimensions,
             params,
-            nodes: Map::new(memory, memory.limit() / 8),
+            nodes: Map::new(memory, memory.limit() / 16),
+            raw_vectors: Map::new(memory, memory.limit() / 32),
+            normalized_vectors: Map::new(memory, memory.limit() / 32),
             active: Map::new(memory, memory.limit() / 32),
             entry_point: None,
             max_level: 0,

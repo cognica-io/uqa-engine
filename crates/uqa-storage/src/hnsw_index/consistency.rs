@@ -66,10 +66,10 @@ impl<'a> HNSWCanonicalValidator<'a> {
         if expected > key {
             return Err(missing_node());
         }
-        let node = self.index.node(*node_id)?.ok_or_else(missing_node)?;
-        if node.raw_vector.len() != vector.len()
+        let node = self.index.raw_vector(*node_id)?;
+        if node.values.len() != vector.len()
             || !node
-                .raw_vector
+                .values
                 .iter()
                 .zip(vector)
                 .all(|(left, right)| left.to_bits() == right.to_bits())

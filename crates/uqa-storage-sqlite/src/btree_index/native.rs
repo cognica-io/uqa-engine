@@ -8,6 +8,24 @@
 
 pub(super) mod columns;
 
+pub(super) fn probe_equal(
+    snapshot: &NativeSnapshot,
+    table: &str,
+    field: &ValueIndexKey,
+    probe: &super::probe::EqualityProbe,
+) -> Result<Option<Vec<DocId>>> {
+    let Some(owner) = snapshot.table_owner(table)? else {
+        return Ok(None);
+    };
+    let field = SQLiteValueIndexKey(field);
+    if !snapshot.contains_row(Family::BtreeIndexes, owner, &[field.as_value_ref()])?
+        || snapshot.contains_row(Family::BtreeIndexRepairs, owner, &[field.as_value_ref()])?
+    {
+        return Ok(None);
+    }
+    snapshot.probe_index_equal(table, owner, field.as_value_ref(), probe)
+}
+
 use rusqlite::types::{FromSql, ValueRef};
 use uqa_storage::{document_store::identifiers::DocumentIdNamespace, KeyValueBatch, ValueIndexKey};
 

@@ -8,6 +8,95 @@ use super::*;
 use std::sync::Arc;
 use uqa_storage::document_store::{Document, DocumentStore, StoredDocument};
 
+#[test]
+fn cold_scalar_constraint_probes_do_not_hydrate_indexes_after_session_refresh() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("scalar-probes.db");
+    let writer = crate::Engine::open(&path).unwrap();
+    writer.sql("CREATE TABLE probe_keys (id TEXT PRIMARY KEY, category TEXT, external_id INTEGER, UNIQUE(category, external_id))", &[]).unwrap();
+    writer.sql("INSERT INTO probe_keys SELECT 'key-' || g::text, 'group', g FROM generate_series(1, 256) AS g", &[]).unwrap();
+    let reader = writer.new_session().unwrap();
+    let assert_cold = |engine: &crate::Engine| {
+        let state = engine.try_table("probe_keys").unwrap().unwrap();
+        let indexes = state.value_indexes.read();
+        assert!(
+            indexes.is_empty(),
+            "a scalar probe hydrated complete fields: {:?}",
+            indexes.keys().collect::<Vec<_>>()
+        );
+    };
+    assert_cold(&reader);
+    reader
+        .sql(
+            "INSERT INTO probe_keys VALUES ('reader-1', 'reader', 1)",
+            &[],
+        )
+        .unwrap();
+    assert_cold(&reader);
+    writer
+        .sql(
+            "INSERT INTO probe_keys VALUES ('writer-1', 'writer', 1)",
+            &[],
+        )
+        .unwrap();
+    reader
+        .sql(
+            "INSERT INTO probe_keys VALUES ('reader-2', 'reader', 2)",
+            &[],
+        )
+        .unwrap();
+    assert_cold(&reader);
+    assert!(reader
+        .sql(
+            "INSERT INTO probe_keys VALUES ('key-42', 'other', 999)",
+            &[]
+        )
+        .is_err());
+    assert_cold(&reader);
+    assert!(reader
+        .sql(
+            "INSERT INTO probe_keys VALUES ('unique-id', 'group', 42)",
+            &[]
+        )
+        .is_err());
+    assert_cold(&reader);
+    let rows = reader
+        .sql("SELECT id FROM probe_keys WHERE id = 'writer-1'", &[])
+        .unwrap();
+    assert_eq!(rows.value_at(0, 0), Some(&Value::Str("writer-1".into())));
+    assert_cold(&reader);
+    reader
+        .sql(
+            "BEGIN; INSERT INTO probe_keys VALUES ('private', 'private', 1); SAVEPOINT keep",
+            &[],
+        )
+        .unwrap();
+    assert!(reader
+        .sql(
+            "INSERT INTO probe_keys VALUES ('private', 'private', 2)",
+            &[]
+        )
+        .is_err());
+    reader.sql("ROLLBACK TO keep; ROLLBACK", &[]).unwrap();
+    reader
+        .sql(
+            "INSERT INTO probe_keys VALUES ('private', 'private', 1)",
+            &[],
+        )
+        .unwrap();
+    assert_cold(&reader);
+    drop(reader);
+    drop(writer);
+    let reopened = crate::Engine::open(&path).unwrap();
+    assert!(reopened
+        .sql(
+            "INSERT INTO probe_keys VALUES ('reopened', 'group', 42)",
+            &[]
+        )
+        .is_err());
+    assert_cold(&reopened);
+}
+
 #[derive(Clone)]
 struct MissingProjectionStore;
 

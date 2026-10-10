@@ -18,6 +18,202 @@ fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
 }
 
 #[test]
+fn ordered_construction_spills_linearly_and_preserves_unordered_replacements() {
+    for count in [128_u128, 512] {
+        let control = StorageReadControl::with_limit(64 * 1024);
+        let mut builder = Builder::new(control.memory(), 1024);
+        for id in 0..count {
+            builder.insert(id, id as u64, Some(&control)).unwrap();
+        }
+        let map = builder.finish(Some(&control)).unwrap();
+        let Root::Disk(disk) = &map.root else {
+            panic!("expected spill")
+        };
+        let logical_bytes = count as u64 * 136;
+        assert_eq!(disk.read_blocks(), 0);
+        assert_eq!(
+            disk.written_bytes(),
+            logical_bytes + logical_bytes.div_ceil(1024) * 43
+        );
+        assert_eq!(
+            entries(&map),
+            (0..count).map(|id| (id, id as u64)).collect::<Vec<_>>()
+        );
+        drop(map);
+        for resident_bytes in [1024, 32 * 1024] {
+            let mut builder = Builder::new(control.memory(), resident_bytes);
+            let mut expected = BTreeMap::new();
+            for id in (0..count).chain([17, 3, count + 1, 0]) {
+                let value = expected.len() as u64;
+                builder.insert(id, value, Some(&control)).unwrap();
+                expected.insert(id, value);
+            }
+            let map = builder.finish(Some(&control)).unwrap();
+            assert_eq!(entries(&map), expected.into_iter().collect::<Vec<_>>());
+        }
+        let mut builder = Builder::new(control.memory(), 1024);
+        builder.insert(1, 1_u64, Some(&control)).unwrap();
+        control.cancellation().cancel();
+        assert!(builder.insert(2, 2, Some(&control)).is_err());
+        control.cancellation().reset();
+        assert!(builder.finish(Some(&control)).is_err());
+        assert_eq!(control.memory().used(), 0);
+        assert!(control.memory().peak() <= control.memory().limit());
+    }
+}
+
+#[test]
+fn bulk_spill_publishes_each_authenticated_block_once() {
+    for count in [127_u128, 512] {
+        let memory = MemoryBudget::new(32 * 1024);
+        let mut builder = disk::Builder::new(&memory).unwrap();
+        for key in 0..count {
+            builder.push(key, &(key as u64), &memory).unwrap();
+        }
+        let disk = builder.finish().unwrap();
+        let logical_bytes = count as u64 * (64 + 8) + (count as u64 - 1) * 64 + 64;
+        let blocks = logical_bytes.div_ceil(1024);
+        assert_eq!(disk.read_blocks(), 0);
+        assert_eq!(
+            disk.written_bytes(),
+            logical_bytes + blocks * (24 + 2 + 16 + 1)
+        );
+        for key in 0..count {
+            assert_eq!(*disk.get::<u64>(key, &memory).unwrap().unwrap(), key as u64);
+        }
+        assert!(memory.peak() <= memory.limit());
+        drop(disk);
+        assert_eq!(memory.used(), 0);
+    }
+    let memory = MemoryBudget::new(32 * 1024);
+    let mut builder = disk::Builder::new(&memory).unwrap();
+    builder.push(1, &17_u64, &memory).unwrap();
+    let path = builder.path();
+    builder.fail_write_after(13);
+    assert!(builder.finish().is_err());
+    assert!(
+        !path.exists(),
+        "a failed final flush must not retain the unpublished map"
+    );
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn spilled_tail_reads_reuse_authenticated_prefixes_and_follow_appends() {
+    let control = StorageReadControl::with_limit(512 * 1024);
+    let mut map = Map::new(control.memory(), 0);
+    map.insert(0, 0_u64, Some(&control)).unwrap();
+    let retained = map.clone();
+    for id in 0..24 {
+        if id != 0 {
+            map.insert(id, id as u64, Some(&control)).unwrap();
+        }
+        assert_eq!(*map.get(id).unwrap().unwrap(), id as u64);
+        let Root::Disk(disk) = &map.root else {
+            panic!("expected spill");
+        };
+        let before = disk.read_blocks();
+        for _ in 0..8 {
+            assert_eq!(*map.get(id).unwrap().unwrap(), id as u64);
+        }
+        assert_eq!(disk.read_blocks(), before, "reread the appended tail");
+        assert_eq!(*retained.get(0).unwrap().unwrap(), 0);
+    }
+    let Root::Disk(disk) = &map.root else {
+        unreachable!();
+    };
+    disk.fail_write_after(100);
+    assert!(map.insert(23, 900, Some(&control)).is_err());
+    assert_eq!(*map.get(23).unwrap().unwrap(), 23);
+    map.insert(23, 901, Some(&control)).unwrap();
+    assert_eq!(*map.get(23).unwrap().unwrap(), 901);
+    assert_eq!(*retained.get(0).unwrap().unwrap(), 0);
+    drop((map, retained));
+    assert_eq!(control.memory().used(), 0);
+    assert!(control.memory().peak() <= control.memory().limit());
+}
+
+#[test]
+fn repeated_spilled_reads_reuse_authenticated_blocks_across_immutable_roots() {
+    let control = StorageReadControl::with_limit(512 * 1024);
+    let mut map = Map::new(control.memory(), 128);
+    for id in 0..512 {
+        map.insert(id, id as u64, Some(&control)).unwrap();
+    }
+    let retained = map.clone();
+    assert_eq!(*map.get(73).unwrap().unwrap(), 73);
+    let Root::Disk(disk) = &map.root else {
+        panic!("expected spill")
+    };
+    let before = disk.read_blocks();
+    for _ in 0..32 {
+        assert_eq!(*map.get(73).unwrap().unwrap(), 73);
+    }
+    assert_eq!(
+        disk.read_blocks(),
+        before,
+        "warm reads must not decrypt the same blocks again"
+    );
+    map.insert(73, 900, Some(&control)).unwrap();
+    assert_eq!(*map.get(73).unwrap().unwrap(), 900);
+    assert_eq!(*retained.get(73).unwrap().unwrap(), 73);
+    let Root::Disk(disk) = &map.root else {
+        unreachable!()
+    };
+    disk.fail_write_after(100);
+    assert!(map.insert(73, 901, Some(&control)).is_err());
+    assert_eq!(*map.get(73).unwrap().unwrap(), 900);
+    map.insert(73, 902, Some(&control)).unwrap();
+    assert_eq!(*map.get(73).unwrap().unwrap(), 902);
+    assert_eq!(*retained.get(73).unwrap().unwrap(), 73);
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop((map, retained));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn disk_replacements_publish_adjacent_path_headers_once_per_block() {
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(32 * 1024);
+        let mut map = Map::new(control.memory(), 128);
+        for id in 0..count {
+            map.insert(id, id as u64, Some(&control)).unwrap();
+        }
+        let retained = map.clone();
+        let Root::Disk(disk) = &map.root else {
+            panic!("expected spill")
+        };
+        let before = disk.written_bytes();
+        map.insert(73, 900, Some(&control)).unwrap();
+        let Root::Disk(disk) = &map.root else {
+            unreachable!()
+        };
+        let written = disk.written_bytes() - before;
+        // One 72-byte leaf and at most nine 64-byte ancestors span at most two
+        // 1024-byte blocks, each with nonce/length/tag and one publication byte.
+        assert!(written <= 2 * (1024 + 24 + 2 + 16 + 1), "{written}");
+        assert_eq!(
+            entries(&retained),
+            (0..count).map(|id| (id, id as u64)).collect::<Vec<_>>()
+        );
+        let expected = (0..count)
+            .map(|id| (id, if id == 73 { 900 } else { id as u64 }))
+            .collect::<Vec<_>>();
+        assert_eq!(entries(&map), expected);
+        for failed_after in [0, 42, 100] {
+            let Root::Disk(disk) = &map.root else {
+                unreachable!()
+            };
+            disk.fail_write_after(failed_after);
+            assert!(map.insert(73, 901, Some(&control)).is_err());
+            assert_eq!(entries(&map), expected);
+        }
+        drop((map, retained));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn resident_and_spilled_roots_preserve_ordered_lookup_and_independent_mutations() {
     let memory = MemoryBudget::new(256 * 1024);
     let mut resident = Map::new(&memory, 128 * 1024);

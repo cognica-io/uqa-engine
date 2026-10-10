@@ -7,6 +7,112 @@
 use super::*;
 use crate::mvcc::{MemoryVersionStore, MergedRecordSnapshot, RecordMetadata};
 
+#[test]
+fn revision_reads_stream_each_spilled_entry_once_without_payloads() {
+    use crate::key_value::{KeyValueRead, KeyValueReadRevision};
+    use crate::mvcc::{DatabaseId, RecordRead};
+
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let changes = PrivateRecordChanges::new(control.memory());
+        for id in 0..count {
+            stage(
+                &changes,
+                &mut Model::new(),
+                id,
+                Some("x".repeat(1024)),
+                &control,
+            );
+        }
+        let view = merged(&changes);
+        let expected = view.private_revision();
+        let database = DatabaseId::from_bytes([7; 16]);
+        let read = RecordRead::new(&view, database, &control);
+        super::super::run::read_counts::take();
+        assert!(
+            read.revision(&[b"k"]).unwrap()
+                == KeyValueReadRevision::records(database, view.sequence(), expected)
+        );
+        let counts = super::super::run::read_counts::take();
+        assert!(counts.entries > 0);
+        assert!(counts.entries <= count, "{counts:?}");
+        assert_eq!(counts.values, 0);
+        stage(&changes, &mut Model::new(), 0, None, &control);
+        assert!(
+            read.revision(&[b"k"]).unwrap()
+                == KeyValueReadRevision::records(database, view.sequence(), expected)
+        );
+        let newer = merged(&changes);
+        assert!(
+            RecordRead::new(&newer, database, &control)
+                .revision(&[b"k"])
+                .unwrap()
+                != read.revision(&[b"k"]).unwrap()
+        );
+        control.cancellation().cancel();
+        assert!(read.revision(&[b"k"]).is_err());
+    }
+}
+
+#[test]
+fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
+    for count in [4, 128, 512] {
+        for grouped in [false, true] {
+            let control = StorageReadControl::with_limit(128 << 10);
+            let source = PrivateRecordChanges::new(control.memory());
+            let mut model = Model::new();
+            for id in 0..count {
+                stage(&source, &mut model, id, Some("x".repeat(1024)), &control);
+            }
+            let prepared = source.prepare(&control).unwrap();
+            let scope: Option<PrivateRevisionScope> = grouped.then_some(|key| Ok(key.get(..1)));
+            super::super::run::write_counts::take();
+            let changes = PrivateRecordChanges::from_prepared(&prepared, scope, &control).unwrap();
+            let written = super::super::run::write_counts::take();
+            assert_eq!(
+                written.bytes,
+                if count == 4 { 0 } else { (count * 1024) as u64 }
+            );
+            assert_eq!(written.copied, 0, "sorted inputs must not be merged again");
+            let retained = changes.snapshot().unwrap();
+            assert_streamed_matches(&retained, &model, &control);
+            if grouped {
+                assert_eq!(
+                    retained.scope_revision(b"k", &control).unwrap(),
+                    retained.revision()
+                );
+            }
+            let savepoint = StorageSavepointId::allocate();
+            changes.savepoint(savepoint).unwrap();
+            stage(&changes, &mut Model::new(), 0, None, &control);
+            changes.rollback_to_savepoint(savepoint).unwrap();
+            assert_eq!(changes.snapshot().unwrap().revision(), retained.revision());
+            assert_streamed_matches(&changes.snapshot().unwrap(), &model, &control);
+            assert_streamed_matches(&retained, &model, &control);
+            control.cancellation().cancel();
+            assert!(PrivateRecordChanges::from_prepared(&prepared, scope, &control).is_err());
+            drop((retained, changes, prepared, source));
+            assert_eq!(control.memory().used(), 0);
+        }
+    }
+}
+
+fn assert_streamed_matches(
+    snapshot: &PrivateRecordSnapshot,
+    model: &Model,
+    control: &StorageReadControl,
+) {
+    let mut cursor = snapshot.cursor(b"k", None, control).unwrap();
+    for (key, (expected, value)) in model {
+        let entry = cursor.next(control).unwrap().unwrap();
+        let write = entry.read(control).unwrap();
+        assert_eq!(write.key(), key.as_slice());
+        assert_eq!(write.expected(), *expected);
+        assert_eq!(write.value(), value.as_deref());
+    }
+    assert!(cursor.next(control).unwrap().is_none());
+}
+
 fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
     let store = MemoryVersionStore::new(&MemoryBudget::new(1 << 20));
     MergedRecordSnapshot::new(

@@ -10,11 +10,11 @@ mod canonical;
 
 use super::{layout::Layout, IndexKind, Key, VectorOperations};
 use crate::mvcc::{
-    commit::{PreparedLookup, RecordWriteKind},
+    commit::{PreparedLookup, PreparedWritesBuilder, RecordWriteKind},
     key::RecordKey,
     resolution::ResolutionMode,
     CommittedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
-    RecordWrite, VersionError, VersionResult,
+    VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::BudgetedMap;
@@ -92,7 +92,7 @@ pub(in crate::mvcc) fn resolve(
         }
     });
     validation?;
-    let changes = PrivateRecordChanges::new(control.memory());
+    let mut changes = PreparedWritesBuilder::like(original, control)?;
     let mut originals = original.writes();
     let mut position = 0;
     while let Some(write) = originals.next(control)? {
@@ -100,7 +100,7 @@ pub(in crate::mvcc) fn resolve(
         position += 1;
         let position = position - 1;
         let Some(kind) = IndexKind::from_preview(write.kind()) else {
-            changes.apply_owned(std::slice::from_ref(write), control)?;
+            changes.push(write.clone(), control)?;
             continue;
         };
         let layout = kind.layout(persistence)?;
@@ -115,42 +115,25 @@ pub(in crate::mvcc) fn resolve(
         )?;
         if !scope.rebase {
             validate(current, position, write.key(), write.expected(), control)?;
-            changes.apply_owned(&[write.clone().with_kind(mode.kind(write.kind()))], control)?;
+            changes.push(write.clone().with_kind(mode.kind(write.kind())), control)?;
         }
     }
+    drop(originals);
+    let changes = changes.finish_changes(None, control)?;
     for ((_, key), scope) in scopes.iter().filter(|(_, scope)| scope.rebase) {
-        scope.merge(key.bytes(), &changes, current, mode, control)?;
+        scope.layout.merge(
+            key.bytes(),
+            &scope.operations,
+            &changes,
+            current,
+            mode.kind(scope.kind.preview()),
+            control,
+        )?;
     }
     Ok(changes
         .prepare(control)?
         .retain_graph_effects(original, control)?
         .resolved(original, current.sequence()))
-}
-
-impl Scope<'_> {
-    fn merge(
-        &self,
-        key: &[u8],
-        changes: &PrivateRecordChanges,
-        current: &dyn CommittedRecordSnapshot,
-        mode: ResolutionMode,
-        control: &StorageReadControl,
-    ) -> VersionResult<()> {
-        if mode == ResolutionMode::Publication {
-            return self
-                .layout
-                .merge(key, &self.operations, changes, current, control);
-        }
-        let merged = PrivateRecordChanges::new(control.memory());
-        self.layout
-            .merge(key, &self.operations, &merged, current, control)?;
-        let merged = merged.prepare(control)?;
-        let mut merged_writes = merged.writes();
-        while let Some(write) = merged_writes.next(control)? {
-            changes.apply_owned(&[write.with_kind(mode.kind(self.kind.preview()))], control)?;
-        }
-        Ok(())
-    }
 }
 
 fn validate_scope(
@@ -260,14 +243,17 @@ pub(in crate::mvcc) fn replace(
     current: &dyn CommittedRecordSnapshot,
     key: &[u8],
     value: &[u8],
+    kind: RecordWriteKind,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
-    changes.apply(
-        &[RecordWrite {
+    changes.apply_owned(
+        &[PreparedRecordWrite::copy_bytes(
             key,
-            expected: revision(current, key, control)?,
-            value: Some(value),
-        }],
+            revision(current, key, control)?,
+            Some(value),
+            control,
+        )?
+        .with_kind(kind)],
         control,
     )
 }

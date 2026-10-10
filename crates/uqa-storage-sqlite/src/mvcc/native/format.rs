@@ -48,7 +48,10 @@ const FORMAT_THIRTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton I
 
 const FORMAT_FOURTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 14), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
-pub(super) const CURRENT_VERSION: u32 = 15;
+const FORMAT_FIFTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 15), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
+
+pub(super) const CURRENT_VERSION: u32 = 16;
+const EQUALITY_INDEX_VERSION: u32 = 16;
 const FOREIGN_SERVER_METADATA_VERSION: u32 = 15;
 
 /// The first format that keeps sequence value state in value records of its own.
@@ -58,7 +61,7 @@ const SEQUENCE_VALUES_VERSION: u32 = 14;
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 15), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 16), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -202,6 +205,7 @@ pub(in crate::mvcc) fn initialize_in(
         return Ok(mapping);
     }
     prepare_catalog_sources(transaction, control)?;
+    install_equality_projection(transaction)?;
     let identity = schema::initialize_in(transaction)?.identity;
     let header = codec::header(transaction, identity)?;
     let populated: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_heads) OR EXISTS(SELECT 1 FROM _uqa_mvcc_versions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_transactions) OR EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| row.get(0))?;
@@ -337,6 +341,7 @@ fn stored_version(connection: &Connection) -> PhysicalResult<u32> {
         FORMAT_TWELVE,
         FORMAT_THIRTEEN,
         FORMAT_FOURTEEN,
+        FORMAT_FIFTEEN,
     ]) {
         if schema::definition_matches(connection, TABLES[0].0, definition)? == Some(true) {
             return Ok(version);
@@ -433,6 +438,9 @@ fn reopen(
         }
         install_family_guards(connection, Family::ForeignServerMetadata)?;
     }
+    if version < EQUALITY_INDEX_VERSION {
+        install_equality_projection(connection)?;
+    }
     if version < CURRENT_VERSION {
         upgrade_format(connection, version, identity)?;
     }
@@ -507,6 +515,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 12 => FORMAT_TWELVE,
                 13 => FORMAT_THIRTEEN,
                 14 => FORMAT_FOURTEEN,
+                15 => FORMAT_FIFTEEN,
                 _ => sql,
             }
         } else {
@@ -559,6 +568,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
         )?;
     }
     validate_foreign_server_metadata(connection, version)?;
+    validate_equality_index(connection, version)?;
     for family in families(version) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             let (name, sql) = schema::trigger(family.layout().table, action);
@@ -584,6 +594,42 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
         }
     }
     validate_layouts(connection, version)
+}
+
+fn install_equality_projection(connection: &Connection) -> PhysicalResult<()> {
+    crate::btree_index::equality::install(connection)?;
+    crate::btree_index::coverage::install(connection)?;
+    for (name, _) in crate::btree_index::coverage::TABLES {
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            connection.execute_batch(&schema::trigger(name, action).1.replacen(
+                "CREATE TRIGGER",
+                "CREATE TRIGGER IF NOT EXISTS",
+                1,
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_equality_index(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    if version >= EQUALITY_INDEX_VERSION {
+        require_definition(
+            connection,
+            crate::btree_index::equality::INDEX_NAME,
+            crate::btree_index::equality::INDEX_SQL,
+        )?;
+        for (name, sql) in crate::btree_index::coverage::TABLES {
+            require_definition(connection, name, sql)?;
+            for action in ["INSERT", "UPDATE", "DELETE"] {
+                let (name, sql) = schema::trigger(name, action);
+                require_definition(connection, &name, &sql)?;
+            }
+        }
+        for (name, sql) in crate::btree_index::coverage::triggers() {
+            require_definition(connection, &name, &sql)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_foreign_server_metadata(connection: &Connection, version: u32) -> PhysicalResult<()> {
@@ -706,6 +752,9 @@ fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()>
             .map_err(|_| invalid("native table name is not UTF-8"))?;
         if !families(version).any(|family| family.layout().table == name)
             && !TABLES.iter().any(|(table, _)| *table == name)
+            && !crate::btree_index::coverage::TABLES
+                .iter()
+                .any(|(table, _)| *table == name)
             && !matches!(
                 name,
                 "_uqa_mvcc_metadata"

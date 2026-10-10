@@ -120,7 +120,7 @@ fn namespace_upgrade_preserves_record_history_receipts_and_watermarks() {
             aborted.allocation() + 1
         );
         with(&connection, |sqlite| {
-            assert_eq!(mapping_version(sqlite), 15);
+            assert_eq!(mapping_version(sqlite), 16);
             Ok(())
         });
     }
@@ -140,7 +140,7 @@ fn failed_namespace_upgrade_rolls_back_its_marker_and_guards() {
         let restored = initialize_in(&transaction, &control)?;
         assert_eq!(restored.identity, identity);
         assert_eq!(restored.namespace.0, identity);
-        assert_eq!(mapping_version(&transaction), 15);
+        assert_eq!(mapping_version(&transaction), 16);
         drop(transaction);
         assert_eq!(mapping_version(sqlite), 8);
         assert!(sqlite

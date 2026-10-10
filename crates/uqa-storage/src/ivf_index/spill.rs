@@ -207,7 +207,8 @@ impl IVFPreparedMetadata {
         })
     }
 
-    pub(crate) fn document_assignments(
+    /// Stream only the assignments of one document from this immutable generation.
+    pub fn document_assignments(
         &self,
         document: DocId,
     ) -> impl Iterator<Item = StorageBackendResult<(u32, usize)>> + '_ {

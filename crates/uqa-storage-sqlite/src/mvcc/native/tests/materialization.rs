@@ -249,13 +249,13 @@ fn btree_cascades_must_be_in_the_evaluated_batch_and_named_blob_keys_survive() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     initialize(&connection);
     with(&connection, |connection| {
-        connection.execute_batch("INSERT INTO _btree_indexes VALUES ('public.docs', 'named'); INSERT INTO _btree_index_entries VALUES ('public.docs', 'named', 1, '10');")?;
+        connection.execute_batch("INSERT INTO _btree_indexes VALUES ('public.docs', 'named'); INSERT INTO _btree_index_entries VALUES ('public.docs', 'named', 1, '{\"type\":\"Int\",\"value\":10}');")?;
         connection.execute(
             "INSERT INTO _btree_indexes VALUES ('public.docs', ?1)",
             params![b"named".as_slice()],
         )?;
         connection.execute(
-            "INSERT INTO _btree_index_entries VALUES ('public.docs', ?1, 1, '10')",
+            "INSERT INTO _btree_index_entries VALUES ('public.docs', ?1, 1, '{\"type\":\"Int\",\"value\":10}')",
             params![b"named".as_slice()],
         )?;
         Ok(())

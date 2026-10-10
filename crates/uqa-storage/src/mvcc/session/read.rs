@@ -12,7 +12,6 @@ use crate::mvcc::{DatabaseId, VersionError};
 use crate::mvcc::{MergedRecordSnapshot, VersionResult};
 use crate::read_control::{KeyReadVisitor, KeyValueReadVisitor, StorageReadControl};
 use crate::{read_control::ValueReadVisitor, StorageBackendResult};
-use uqa_core::memory::BudgetedVec;
 
 /// Borrowed Key/Value adapter over an already captured committed/private record view. It does not open or advance a session.
 pub struct RecordRead<'a> {
@@ -50,23 +49,15 @@ impl KeyValueRead for RecordRead<'_> {
         self.control.check()?;
         let mut private = None;
         for prefix in prefixes {
-            let mut after = BudgetedVec::new(self.control.memory());
-            loop {
-                let page = self
-                    .view
-                    .private_keys(
-                        prefix,
-                        (!after.is_empty()).then_some(&*after),
-                        64,
-                        self.control,
-                    )
-                    .map_err(VersionError::into_storage_error)?;
-                let Some(last) = page.last() else { break };
-                after.clear();
-                after.extend_from_slice(last.key())?;
-                for record in page.iter() {
-                    private = private.max(Some(record.revision()));
-                }
+            let mut cursor = self
+                .view
+                .private_cursor(prefix, None, self.control)
+                .map_err(VersionError::into_storage_error)?;
+            while let Some(record) = cursor
+                .next(self.control)
+                .map_err(VersionError::into_storage_error)?
+            {
+                private = private.max(Some(record.revision()));
             }
         }
         Ok(KeyValueReadRevision::records(

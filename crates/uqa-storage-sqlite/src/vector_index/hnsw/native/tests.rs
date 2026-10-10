@@ -97,6 +97,9 @@ fn private_hnsw_cache_identities_distinguish_equal_revision_rollback_branches() 
     unrelated.add(1, vec![1.0, 0.0]).unwrap();
     assert!(std::ptr::eq(&raw const *stable, &raw const *graph(&index)));
     connection.begin_transaction().unwrap();
+    let mut other_field = SQLiteVectorIndex::new(connection.clone(), "docs", "other", 2);
+    other_field.add(1, vec![0.0, 1.0]).unwrap();
+    assert!(std::ptr::eq(&raw const *stable, &raw const *graph(&index)));
     connection.savepoint("before").unwrap();
     index.add(3, vec![-1.0, 0.0]).unwrap();
     let discarded = index.snapshot().unwrap();

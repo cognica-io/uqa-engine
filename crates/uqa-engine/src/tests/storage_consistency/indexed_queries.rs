@@ -9,6 +9,75 @@
 use super::*;
 use std::sync::atomic::Ordering;
 
+#[test]
+fn retrieval_residual_filters_read_only_selected_documents() {
+    for count in [64, 512] {
+        let engine = Engine::new();
+        engine.sql("CREATE TABLE retrieval_probe (id integer, kind text, body text, embedding vector(2)); CREATE INDEX retrieval_body ON retrieval_probe USING gin(body)", &[]).unwrap();
+        engine.sql(&format!("INSERT INTO retrieval_probe SELECT i, CASE WHEN i % 2 = 0 THEN 'visible' ELSE 'hidden' END, CASE WHEN i = 7 THEN 'needle' ELSE 'unrelated' END, ARRAY[1.0, i::real] FROM generate_series(1,{count}) g(i)"), &[]).unwrap();
+        engine
+            .sql(
+                "CREATE INDEX retrieval_vector ON retrieval_probe USING hnsw(embedding)",
+                &[],
+            )
+            .unwrap();
+        let signal = "fuse_log_odds(bayesian_match(body, 'needle'), knn_match(embedding, ARRAY[1.0,0.0], 5))";
+        let expected = engine
+            .sql(
+                &format!("SELECT id, _score FROM retrieval_probe WHERE {signal} ORDER BY id"),
+                &[],
+            )
+            .unwrap();
+        assert!(expected.rows.len() <= 6);
+        let probe = PortalSnapshotProbeStore::from_table(&engine, "retrieval_probe");
+        let enumerations = Arc::clone(&probe.doc_id_calls);
+        let fields = Arc::clone(&probe.field_reads);
+        let rows = Arc::clone(&probe.row_reads);
+        *engine
+            .table("retrieval_probe")
+            .unwrap()
+            .unwrap()
+            .document_store
+            .write() = Box::new(probe);
+        for predicate in [
+            format!("kind = 'visible' AND {signal}"),
+            format!("{signal} AND kind = 'visible'"),
+        ] {
+            enumerations.store(0, Ordering::Relaxed);
+            fields.store(0, Ordering::Relaxed);
+            rows.store(0, Ordering::Relaxed);
+            let actual = engine
+                .sql(
+                    &format!(
+                        "SELECT id, _score FROM retrieval_probe WHERE {predicate} ORDER BY id"
+                    ),
+                    &[],
+                )
+                .unwrap();
+            assert_eq!(
+                actual.rows,
+                expected
+                    .rows
+                    .iter()
+                    .filter(|row| matches!(row["id"], Value::Int(id) if id % 2 == 0))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                enumerations.load(Ordering::Relaxed),
+                0,
+                "residual filter enumerated the relation"
+            );
+            let reads = fields.load(Ordering::Relaxed) + rows.load(Ordering::Relaxed);
+            assert!(
+                reads <= expected.rows.len() + actual.rows.len(),
+                "read {reads} rows for {} candidates from {count} documents",
+                expected.rows.len()
+            );
+        }
+    }
+}
+
 #[rstest::rstest]
 #[case::plain("SELECT id, body FROM probe WHERE qty = $1 + 1")]
 #[case::alias("SELECT p.id, p.body FROM probe AS p WHERE p.qty = $1 + 1")]

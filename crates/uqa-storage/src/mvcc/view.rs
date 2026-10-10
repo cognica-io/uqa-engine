@@ -533,6 +533,15 @@ impl MergedRecordSnapshot {
         self.private.revision_scopes(after, limit, control)
     }
 
+    /// Read one complete provider-selected revision scope without scanning its changed records. The caller must pass a scope emitted by its provider's classifier, not a narrower or broader prefix. Providers without a classifier scan that prefix's key metadata using one retained cursor.
+    pub fn private_scope_revision(
+        &self,
+        scope: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<super::PrivateRecordRevision>> {
+        self.private.scope_revision(scope, control)
+    }
+
     /// Stream private entries on this command boundary without repeated key lookups. Providers can merge their committed rows with each entry's metadata or requested payload.
     pub fn private_cursor(
         &self,

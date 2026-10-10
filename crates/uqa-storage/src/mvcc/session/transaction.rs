@@ -253,7 +253,12 @@ impl Transaction {
         control: &StorageReadControl,
     ) -> VersionResult<Option<(Option<CommitSequence>, RecordWriteKind)>> {
         self.writable()?;
-        let record = self.view()?.metadata(key, control)?;
+        let private = self.changes.write_metadata(key, control)?;
+        let record = if let Some((metadata, _)) = private {
+            Some(metadata)
+        } else {
+            self.committed.metadata(key, control)?
+        };
         let expected = record.and_then(|record| record.revision);
         let exists = record.is_some_and(|record| record.live);
         if deleted
@@ -267,7 +272,7 @@ impl Transaction {
         }
         Ok(Some((
             expected,
-            self.record_kind(key, deleted, kind, control)?,
+            Self::effective_record_kind(private.map(|(_, kind)| kind), deleted, kind),
         )))
     }
 
@@ -278,9 +283,28 @@ impl Transaction {
         kind: RecordWriteKind,
         control: &StorageReadControl,
     ) -> VersionResult<RecordWriteKind> {
-        Ok(if kind == RecordWriteKind::GraphPreview {
+        if matches!(
+            kind,
+            RecordWriteKind::Canonical | RecordWriteKind::GraphCache
+        ) || (kind == RecordWriteKind::DiskANNOrigin && deleted)
+        {
+            return Ok(kind);
+        }
+        Ok(Self::effective_record_kind(
+            self.changes.write_kind(key, control)?,
+            deleted,
+            kind,
+        ))
+    }
+
+    fn effective_record_kind(
+        previous: Option<RecordWriteKind>,
+        deleted: bool,
+        kind: RecordWriteKind,
+    ) -> RecordWriteKind {
+        if kind == RecordWriteKind::GraphPreview {
             // A later preview must retain an earlier explicit replacement or canonical write to the same private record.
-            self.changes.write_kind(key, control)?.unwrap_or(kind)
+            previous.unwrap_or(kind)
         } else if matches!(
             kind,
             RecordWriteKind::Occurrence
@@ -293,12 +317,12 @@ impl Transaction {
                 | RecordWriteKind::DiskANNOrigin
                 | RecordWriteKind::DiskANNPopulationPreview
         ) && !(kind == RecordWriteKind::DiskANNOrigin && deleted)
-            && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
+            && previous == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical
         } else {
             kind
-        })
+        }
     }
 
     pub(super) fn graph_mutation(&mut self, mutation: &OwnedGraphMutation) -> VersionResult<()> {

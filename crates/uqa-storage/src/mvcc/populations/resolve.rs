@@ -4,14 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{reconcile::Reconciliation, structural::StructuralRecords, OwnedPopulationMutation};
+use super::{
+    reconcile::Reconciliation, structural::StructuralRecords, DiskANNPopulationRecordLayout,
+    OwnedPopulationMutation,
+};
 use crate::mvcc::{
-    commit::RecordWriteKind, resolution::ResolutionMode, CommittedRecordSnapshot,
-    MergedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite, PrivateRecordChanges,
-    VersionError, VersionResult, VersionedPersistence,
+    commit::{PreparedWritesBuilder, RecordWriteKind},
+    resolution::ResolutionMode,
+    CommittedRecordSnapshot, DatabaseId, MergedRecordSnapshot, PreparedRecordCommit,
+    PreparedRecordWrite, PrivateRecordChanges, VersionError, VersionResult, VersionedPersistence,
 };
 use crate::read_control::StorageReadControl;
 use std::sync::Arc;
+
+#[cfg(test)]
+mod tests;
 
 pub(in crate::mvcc) fn stage(
     origins: &PreparedRecordCommit,
@@ -55,7 +62,12 @@ pub(in crate::mvcc) fn resolve(
             .as_ref()
             .map_or(&[], |effects| &effects.operations),
         current,
-        persistence,
+        persistence
+            .diskann_population_record_layout()
+            .ok_or(VersionError::InvalidEncoding(
+                "provider has no DiskANN population layout",
+            ))?,
+        persistence.database_id(),
         mode,
         control,
     )
@@ -66,17 +78,12 @@ fn reconcile(
     original: &PreparedRecordCommit,
     lifecycle: &[OwnedPopulationMutation],
     current: &Arc<dyn CommittedRecordSnapshot>,
-    persistence: &dyn VersionedPersistence,
+    layout: &dyn DiskANNPopulationRecordLayout,
+    history: DatabaseId,
     mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
-    let layout =
-        persistence
-            .diskann_population_record_layout()
-            .ok_or(VersionError::InvalidEncoding(
-                "provider has no DiskANN population layout",
-            ))?;
-    let changes = PrivateRecordChanges::new(control.memory());
+    let mut changes = PreparedWritesBuilder::like(original, control)?;
     let structural = StructuralRecords::new(original, control)?;
     let mut originals = original.writes();
     let mut position = 0;
@@ -108,8 +115,10 @@ fn reconcile(
             }
             kind => kind,
         };
-        changes.apply_owned(&[write.clone().with_kind(kind)], control)?;
+        changes.push(write.clone().with_kind(kind), control)?;
     }
+    drop(originals);
+    let changes = changes.finish_changes(None, control)?;
     let empty = PrivateRecordChanges::new(control.memory());
     let before = MergedRecordSnapshot::new(current.clone(), empty.snapshot()?);
     let after = MergedRecordSnapshot::new(current.clone(), changes.snapshot()?);
@@ -117,7 +126,7 @@ fn reconcile(
         before: &before,
         after: &after,
         layout,
-        history: persistence.database_id(),
+        history,
         control,
         structural: Some(&structural),
     }

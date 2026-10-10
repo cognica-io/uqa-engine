@@ -91,7 +91,7 @@ impl HNSWIndex {
                     *node_id
                 ))
             })?;
-            let vector = node.raw_vector.clone();
+            let vector = source.raw_vector(*node_id)?.values.clone();
             drop(node);
             self.insert_vector((key >> 32) as u64, key as u32, vector, control)?;
         }

@@ -26,6 +26,11 @@ use crate::StorageBackendResult;
 
 pub(super) const IVF_FORMAT_VERSION: u32 = 1;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static RESTORED_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct PersistedIVFMetadata {
     pub(super) format_version: u32,
@@ -56,6 +61,8 @@ pub(super) fn restore_state(
     dimensions: u32,
     params: IVFIndexParams,
 ) -> StorageBackendResult<(Budgeted<IVFReadIndex>, u64)> {
+    #[cfg(test)]
+    RESTORED_INDEXES.set(RESTORED_INDEXES.get() + 1);
     let metadata = load_metadata(store, table, field)?.ok_or_else(|| {
         other_error(format!(
             "missing persisted IVF metadata for {table}.{field}"

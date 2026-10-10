@@ -34,6 +34,7 @@ fn native_cache_projection_visits_one_scope_for_many_private_documents() {
         })
         .unwrap();
     let before = catalog.cache_revisions().unwrap();
+    assert!(before.table_data_commits.contains_key("docs"));
     connection.begin_transaction().unwrap();
     let fields = BTreeMap::from([("n".into(), Value::Str("v".repeat(512)))]);
     for id in 1..=2048 {
@@ -47,6 +48,10 @@ fn native_cache_projection_visits_one_scope_for_many_private_documents() {
                 "projection work must depend on owners, not rows"
             );
             assert_ne!(current.table_data["docs"], before.table_data["docs"]);
+            assert_eq!(
+                current.table_data_commits["docs"],
+                before.table_data_commits["docs"]
+            );
             assert_eq!(current.table_catalog, before.table_catalog);
             assert_eq!(current.registries, before.registries);
         }
@@ -102,7 +107,12 @@ fn native_revision_summary_follows_command_refresh_and_its_savepoint_undo() {
         .refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
         .unwrap();
     VISITED.set(0);
-    assert_ne!(catalog.cache_revisions().unwrap(), saved);
+    let refreshed = catalog.cache_revisions().unwrap();
+    assert_ne!(refreshed, saved);
+    assert_ne!(
+        refreshed.table_data_commits["docs"],
+        saved.table_data_commits["docs"]
+    );
     assert_eq!(VISITED.get(), 1, "rebasing must restore grouped revisions");
     assert_eq!(documents.get(1).unwrap().unwrap()["n"], Value::Int(9));
     assert_eq!(captured.cache_revisions().unwrap(), saved);
@@ -168,6 +178,33 @@ fn native_revision_scopes_keep_names_and_separate_family_owner_and_generation() 
                 Some(&*record)
             );
             assert!(scopes.insert(record.to_vec()));
+        }
+    }
+    for family in [
+        Family::Vectors,
+        Family::HNSWIndexes,
+        Family::HNSWNodes,
+        Family::HNSWEdges,
+        Family::IVFIndexes,
+        Family::IVFCentroids,
+        Family::IVFAssignments,
+    ] {
+        for owner in [owner(1, 1), owner(2, 1), owner(1, 2)] {
+            for field in ["a", "ab", "a\0日本語"] {
+                let prefix = key(family, owner, &[text(field)]);
+                for id in [1, 2] {
+                    let mut components = vec![text(field)];
+                    if family.layout().identity_columns.len() > 1 {
+                        components.push(ValueRef::Integer(id));
+                    }
+                    let record = key(family, owner, &components);
+                    assert_eq!(
+                        NativeRecordIdentity::revision_scope(&record),
+                        Some(&*prefix)
+                    );
+                }
+                assert!(scopes.insert(prefix.to_vec()));
+            }
         }
     }
     for family in [

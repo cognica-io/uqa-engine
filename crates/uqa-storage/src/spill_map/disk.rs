@@ -6,16 +6,18 @@
 
 //! Persistent binary Patricia roots have at most 128 branch steps for a u128 key.
 
+mod cache;
+
 use super::{invalid, io, Record};
 use crate::{
     read_control::StorageReadControl, temporary_file::BlockTemporaryFile, StorageBackendResult,
 };
 use parking_lot::Mutex;
 use std::{
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufWriter, IoSlice, Seek, SeekFrom, Write},
     sync::Arc,
 };
-use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError, MemoryReservation};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
 
 const HEADER_BYTES: usize = 64;
 const LEAF: u8 = 128;
@@ -40,6 +42,7 @@ struct Cache {
 struct Pages {
     file: BlockTemporaryFile<BLOCK_BYTES>,
     cache: Vec<Cache>,
+    blocks: cache::Blocks,
     _memory: MemoryReservation,
 }
 
@@ -53,6 +56,8 @@ pub(super) struct Map {
 /// Ordered input builds each branch once, without retaining obsolete insertion paths in the new file.
 pub(super) struct Builder {
     map: Map,
+    writer: BufWriter<BlockTemporaryFile<BLOCK_BYTES>>,
+    position: u64,
     path: [Header; 128],
     depth: usize,
     previous: Option<u128>,
@@ -60,10 +65,27 @@ pub(super) struct Builder {
 }
 
 impl Builder {
+    #[cfg(test)]
+    pub(super) fn fail_write_after(&self, bytes: usize) {
+        self.map.fail_write_after(bytes);
+    }
+
+    #[cfg(test)]
+    pub(super) fn path(&self) -> std::path::PathBuf {
+        self.map.path()
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        let workspace = memory.reserve(size_of::<[Header; 128]>())?;
+        let mut workspace = memory.reserve(size_of::<[Header; 128]>() + BLOCK_BYTES)?;
+        let map = Map::new(memory)?;
+        let mut writer =
+            BufWriter::with_capacity(BLOCK_BYTES, map.file.lock().file.reopen().map_err(io)?);
+        workspace.grow(writer.capacity() - BLOCK_BYTES)?;
+        writer.write_all(&[0; HEADER_BYTES]).map_err(io)?;
         Ok(Self {
-            map: Map::new(memory)?,
+            map,
+            writer,
+            position: HEADER_BYTES as u64,
             path: [Header::default(); 128],
             depth: 0,
             previous: None,
@@ -85,7 +107,6 @@ impl Builder {
             return Err(invalid("encoded size"));
         }
         encoded_memory.grow(bytes.capacity() - encoded)?;
-        let mut file = self.map.file.lock();
         if let Some(previous) = self.previous {
             if key <= previous {
                 return Err(invalid("unordered bulk input"));
@@ -95,7 +116,7 @@ impl Builder {
                 self.depth -= 1;
                 let mut branch = self.path[self.depth];
                 branch.right = self.map.root;
-                self.map.root = file.append_header(branch)?;
+                self.map.root = self.append_header(branch)?;
             }
             self.path[self.depth] = Header {
                 bit: differing,
@@ -110,7 +131,19 @@ impl Builder {
                 .checked_add(HEADER_BYTES as u64)
                 .ok_or(MemoryError::SizeOverflow)?;
         }
-        self.map.root = file.append_value(key, value.memory_bytes()?, &bytes)?;
+        let offset = self.position;
+        self.append_header(Header {
+            bit: LEAF,
+            key,
+            left: offset
+                .checked_add(HEADER_BYTES as u64)
+                .ok_or(MemoryError::SizeOverflow)?,
+            length: bytes.len() as u64,
+            memory: value.memory_bytes()? as u64,
+            ..Header::default()
+        })?;
+        self.append_bytes(&bytes)?;
+        self.map.root = offset;
         self.map.logical_bytes = self
             .map
             .logical_bytes
@@ -121,16 +154,38 @@ impl Builder {
     }
 
     pub(super) fn finish(mut self) -> StorageBackendResult<Map> {
-        {
-            let mut file = self.map.file.lock();
-            while self.depth > 0 {
-                self.depth -= 1;
-                let mut branch = self.path[self.depth];
-                branch.right = self.map.root;
-                self.map.root = file.append_header(branch)?;
+        while self.depth > 0 {
+            self.depth -= 1;
+            let mut branch = self.path[self.depth];
+            branch.right = self.map.root;
+            self.map.root = self.append_header(branch)?;
+        }
+        self.writer.flush().map_err(io)?;
+        Ok(self.map)
+    }
+
+    fn append_header(&mut self, header: Header) -> StorageBackendResult<u64> {
+        let offset = self.position;
+        self.append_bytes(&encode_header(header))?;
+        Ok(offset)
+    }
+
+    fn append_bytes(&mut self, mut bytes: &[u8]) -> StorageBackendResult<()> {
+        while !bytes.is_empty() {
+            let count = bytes
+                .len()
+                .min(BLOCK_BYTES - (self.position % BLOCK_BYTES as u64) as usize);
+            self.writer.write_all(&bytes[..count]).map_err(io)?;
+            self.position = self
+                .position
+                .checked_add(count as u64)
+                .ok_or(MemoryError::SizeOverflow)?;
+            bytes = &bytes[count..];
+            if self.position.is_multiple_of(BLOCK_BYTES as u64) {
+                self.writer.flush().map_err(io)?;
             }
         }
-        Ok(self.map)
+        Ok(())
     }
 }
 
@@ -145,16 +200,26 @@ impl Map {
         self.file.lock().file.fail_write_after(bytes);
     }
 
+    #[cfg(test)]
+    pub(super) fn read_blocks(&self) -> usize {
+        self.file.lock().file.block_io_counts().0
+    }
+
+    #[cfg(test)]
+    pub(super) fn written_bytes(&self) -> u64 {
+        self.file.lock().file.block_io_counts().1
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
         let slots = (memory.limit() / 64 / size_of::<Cache>()).min(256);
         let slots = if slots == 0 { 0 } else { 1 << slots.ilog2() };
         let reservation = memory.reserve(size_of::<Pages>() + slots * size_of::<Cache>())?;
-        let mut file = BlockTemporaryFile::new().map_err(io)?;
-        file.write_all(&[0; HEADER_BYTES]).map_err(io)?;
+        let file = BlockTemporaryFile::new().map_err(io)?;
         Ok(Self {
             file: Arc::new(Mutex::new(Pages {
                 file,
                 cache: vec![Cache::default(); slots],
+                blocks: cache::Blocks::new(memory)?,
                 _memory: reservation,
             })),
             root: 0,
@@ -301,11 +366,24 @@ impl Map {
                 depth += 1;
                 previous = if right { header.right } else { header.left };
             }
-            let mut root = file.append_value(key, retained, &bytes)?;
+            let mut root = original;
+            let parent_start = original
+                .checked_add(HEADER_BYTES as u64)
+                .and_then(|offset| offset.checked_add(bytes.len() as u64))
+                .ok_or(MemoryError::SizeOverflow)?;
+            let mut parents = BudgetedVec::new(memory);
+            parents.reserve((depth + 1) * HEADER_BYTES)?;
+            let mut append_parent = |header| -> StorageBackendResult<u64> {
+                let offset = parent_start
+                    .checked_add(parents.len() as u64)
+                    .ok_or(MemoryError::SizeOverflow)?;
+                parents.extend_from_slice(&encode_header(header))?;
+                Ok(offset)
+            };
             let replaced = existing.filter(|(_, leaf)| leaf.key == key);
             if previous != 0 && replaced.is_none() {
                 let right = bit(key, differing);
-                root = file.append_header(Header {
+                root = append_parent(Header {
                     bit: differing,
                     key,
                     left: if right { previous } else { root },
@@ -321,8 +399,9 @@ impl Map {
                 } else {
                     header.left = root;
                 }
-                root = file.append_header(header)?;
+                root = append_parent(header)?;
             }
+            file.append_path(key, retained, &bytes, &parents)?;
             let removed = replaced.map_or(0, |(_, leaf)| leaf.length + HEADER_BYTES as u64);
             let added = bytes.len() as u64
                 + HEADER_BYTES as u64
@@ -436,6 +515,28 @@ fn bit(key: u128, position: u8) -> bool {
     key & (1_u128 << (127 - position)) != 0
 }
 
+fn encode_header(header: Header) -> [u8; HEADER_BYTES] {
+    let mut bytes = [0; HEADER_BYTES];
+    bytes[0] = header.bit;
+    bytes[1..17].copy_from_slice(&header.key.to_le_bytes());
+    bytes[17..25].copy_from_slice(&header.left.to_le_bytes());
+    bytes[25..33].copy_from_slice(&header.right.to_le_bytes());
+    bytes[33..41].copy_from_slice(&header.length.to_le_bytes());
+    bytes[41..49].copy_from_slice(&header.memory.to_le_bytes());
+    bytes
+}
+
+fn decode_header(bytes: &[u8]) -> Header {
+    Header {
+        bit: bytes[0],
+        key: u128::from_le_bytes(bytes[1..17].try_into().unwrap()),
+        left: u64::from_le_bytes(bytes[17..25].try_into().unwrap()),
+        right: u64::from_le_bytes(bytes[25..33].try_into().unwrap()),
+        length: u64::from_le_bytes(bytes[33..41].try_into().unwrap()),
+        memory: u64::from_le_bytes(bytes[41..49].try_into().unwrap()),
+    }
+}
+
 impl Pages {
     fn cache_position(&self, offset: u64) -> Option<usize> {
         if self.cache.is_empty() {
@@ -453,17 +554,9 @@ impl Pages {
                 return Ok(self.cache[position].header);
             }
         }
-        self.file.seek(SeekFrom::Start(offset)).map_err(io)?;
         let mut bytes = [0; HEADER_BYTES];
-        self.file.read_exact(&mut bytes).map_err(io)?;
-        let header = Header {
-            bit: bytes[0],
-            key: u128::from_le_bytes(bytes[1..17].try_into().unwrap()),
-            left: u64::from_le_bytes(bytes[17..25].try_into().unwrap()),
-            right: u64::from_le_bytes(bytes[25..33].try_into().unwrap()),
-            length: u64::from_le_bytes(bytes[33..41].try_into().unwrap()),
-            memory: u64::from_le_bytes(bytes[41..49].try_into().unwrap()),
-        };
+        self.blocks.read(&mut self.file, offset, &mut bytes)?;
+        let header = decode_header(&bytes);
         if header.bit > LEAF || offset == 0 {
             return Err(invalid("tree header"));
         }
@@ -498,8 +591,7 @@ impl Pages {
         let retained = memory
             .reserve(usize::try_from(header.memory).map_err(|_| MemoryError::SizeOverflow)?)?;
         let mut bytes = vec![0; size];
-        self.file.seek(SeekFrom::Start(header.left)).map_err(io)?;
-        self.file.read_exact(&mut bytes).map_err(io)?;
+        self.blocks.read(&mut self.file, header.left, &mut bytes)?;
         let value = V::decode(&bytes)?;
         if value.memory_bytes()? > retained.bytes() {
             return Err(invalid("decoded size"));
@@ -509,13 +601,7 @@ impl Pages {
 
     fn append_header(&mut self, header: Header) -> StorageBackendResult<u64> {
         let offset = self.file.seek(SeekFrom::End(0)).map_err(io)?;
-        let mut bytes = [0; HEADER_BYTES];
-        bytes[0] = header.bit;
-        bytes[1..17].copy_from_slice(&header.key.to_le_bytes());
-        bytes[17..25].copy_from_slice(&header.left.to_le_bytes());
-        bytes[25..33].copy_from_slice(&header.right.to_le_bytes());
-        bytes[33..41].copy_from_slice(&header.length.to_le_bytes());
-        bytes[41..49].copy_from_slice(&header.memory.to_le_bytes());
+        let bytes = encode_header(header);
         self.file.write_all(&bytes).map_err(io)?;
         if let Some(position) = self.cache_position(offset) {
             self.cache[position] = Cache { offset, header };
@@ -523,30 +609,52 @@ impl Pages {
         Ok(offset)
     }
 
-    fn append_value(
+    /// Append a complete immutable replacement path in one vectored write. Adjacent ancestors share their authenticated block publication instead of re-encrypting it for every 64-byte header.
+    fn append_path(
         &mut self,
         key: u128,
         memory: usize,
-        bytes: &[u8],
-    ) -> StorageBackendResult<u64> {
-        let offset = self.file.metadata().map_err(io)?.len();
-        let payload = offset
-            .checked_add(HEADER_BYTES as u64)
-            .ok_or(MemoryError::SizeOverflow)?;
-        self.append_header(Header {
+        value: &[u8],
+        parents: &[u8],
+    ) -> StorageBackendResult<()> {
+        let offset = self.file.seek(SeekFrom::End(0)).map_err(io)?;
+        let leaf = Header {
             bit: LEAF,
             key,
-            left: payload,
-            length: bytes.len() as u64,
+            left: offset + HEADER_BYTES as u64,
+            length: value.len() as u64,
             memory: memory as u64,
             ..Header::default()
-        })?;
-        self.file.write_all(bytes).map_err(io)?;
-        Ok(offset)
+        };
+        self.file
+            .write_all_vectored(&mut [
+                IoSlice::new(&encode_header(leaf)),
+                IoSlice::new(value),
+                IoSlice::new(parents),
+            ])
+            .map_err(io)?;
+        if let Some(position) = self.cache_position(offset) {
+            self.cache[position] = Cache {
+                offset,
+                header: leaf,
+            };
+        }
+        let start = offset + HEADER_BYTES as u64 + value.len() as u64;
+        for (index, bytes) in parents.chunks_exact(HEADER_BYTES).enumerate() {
+            let offset = start + (index * HEADER_BYTES) as u64;
+            if let Some(position) = self.cache_position(offset) {
+                self.cache[position] = Cache {
+                    offset,
+                    header: decode_header(bytes),
+                };
+            }
+        }
+        Ok(())
     }
 
     fn rollback(&mut self, length: u64) -> StorageBackendResult<()> {
         self.cache.fill(Cache::default());
+        self.blocks.clear();
         self.file.set_len(length).map_err(io)
     }
 }

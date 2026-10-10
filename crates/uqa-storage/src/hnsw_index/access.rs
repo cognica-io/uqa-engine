@@ -9,7 +9,7 @@
 use super::{
     prepare::{check, Control},
     store::{Read, Record},
-    types::{HNSWIndex, HNSWNode, NodeId},
+    types::{HNSWIndex, HNSWNode, HNSWVector, NodeId},
 };
 use crate::StorageBackendResult;
 use uqa_core::memory::MemoryError;
@@ -19,6 +19,41 @@ impl HNSWIndex {
         self.nodes.get(u128::from(id))
     }
 
+    pub(super) fn raw_vector(&self, id: NodeId) -> StorageBackendResult<Read<'_, HNSWVector>> {
+        self.raw_vectors.get(u128::from(id))?.ok_or_else(|| {
+            crate::StorageBackendError::Other(format!("HNSW node {id} has no canonical vector"))
+        })
+    }
+
+    pub(super) fn normalized_vector(
+        &self,
+        id: NodeId,
+    ) -> StorageBackendResult<Read<'_, HNSWVector>> {
+        self.normalized_vectors.get(u128::from(id))?.ok_or_else(|| {
+            crate::StorageBackendError::Other(format!("HNSW node {id} has no normalized vector"))
+        })
+    }
+
+    pub(super) fn put_vectors(
+        &mut self,
+        id: NodeId,
+        raw: Vec<f32>,
+        normalized: Vec<f32>,
+        norm: f32,
+        control: Control<'_>,
+    ) -> StorageBackendResult<()> {
+        self.raw_vectors
+            .insert(u128::from(id), HNSWVector { values: raw, norm }, control)?;
+        self.normalized_vectors.insert(
+            u128::from(id),
+            HNSWVector {
+                values: normalized,
+                norm: 1.0,
+            },
+            control,
+        )
+    }
+
     pub(super) fn put_node(
         &mut self,
         node: HNSWNode,
@@ -26,7 +61,10 @@ impl HNSWIndex {
     ) -> StorageBackendResult<()> {
         let id = u128::from(node.id);
         self.nodes.insert(id, node, control)?;
-        self.dirty_nodes.insert(id, 0, control)
+        if !self.dirty_nodes.contains_key(id)? {
+            self.dirty_nodes.insert(id, 0, control)?;
+        }
+        Ok(())
     }
 
     pub(super) fn modify_node(
@@ -50,8 +88,11 @@ impl HNSWIndex {
             .ok_or(MemoryError::SizeOverflow)?;
         let _copy = self.memory.reserve(bytes)?;
         let mut owned = (*node).clone();
-        drop(node);
         change(&mut owned);
+        if owned == *node {
+            return Ok(());
+        }
+        drop(node);
         self.put_node(owned, control)
     }
 }

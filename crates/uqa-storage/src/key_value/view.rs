@@ -289,6 +289,13 @@ impl KeyValueReadRevision {
         }
     }
 
+    /// Whether a record-set view includes this commit from the same database.
+    /// Individual-record and unversioned identities cannot certify a snapshot.
+    pub fn includes_commit(&self, database: DatabaseId, sequence: CommitSequence) -> bool {
+        matches!(&self.0, Revision::Records { database: own, committed, .. }
+            if *own == database && *committed >= sequence)
+    }
+
     /// The database, committed sequence and presence of private changes of a record view.
     fn committed_state(&self) -> Option<(DatabaseId, CommitSequence, bool)> {
         match &self.0 {

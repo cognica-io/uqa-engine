@@ -18,6 +18,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse HNSW candidate vectors between scoring and diversity selection, and retain exact query distances across hierarchy levels within bounded portions of the original memory allowance. Preserve floating-point bits, graph construction order, candidate ties and uncached results.
+
+- Stream ordered HNSW vector restoration and vector-effect restaging into bulk spill files, assign generated write kinds directly, and reuse decoded selected vectors within the original allowance during diversity selection. Read private mutation conditions once and share authenticated entry blocks within an evaluated batch. Preserve unordered restoration, exact graph/search results, conflict preconditions, undo and failure atomicity.
+
+- Preserve transaction-local document counts across unrelated maintenance commits by checking each table's last committed change against the observed snapshot, while retaining peer-row refresh, rollback and read-free own-commit adoption.
+
+- Avoid unchanged HNSW adjacency writes and tentative connect/prune publications; skip vector comparisons when all validated neighbors fit, preserving final topology, reciprocal removals and canonical search results.
+
+- Build unpublished spill maps with one charged block buffer and avoid rewriting already-pending HNSW identities, preserving atomic publication, complete persistence deltas and retained graphs.
+
+- Reuse authenticated spill-map block prefixes, including partially populated tails, within the original memory allowance, and avoid decoding values for membership checks. Track each cached extent, refresh it only when a read reaches newly appended bytes, preserve immutable readers and clear cached blocks before failed append addresses can be reused.
+
+- Retain certified IVF mutation candidates in Key/Value and native SQLite, derive ranked posting lists only on demand, and update only changed native assignments when centroids are unchanged. Read native vector revision summaries by field, stream unclassified revision scans, restage sorted spilled transaction writes without repeated merging, and append encrypted spill-map paths in one bounded write. Preserve undo, peer-write refresh, canonical results, encrypted spill and the original allowance.
+
+- Separate spilled HNSW topology from canonical and normalized vector pages so validation and edge restoration do not decode or rewrite dense vectors, while preserving graph integrity, canonical scores, encrypted spill and the original allowance.
+
+- Restrict unindexed scalar filters in retrieval intersections to selected candidate documents without changing KNN boundaries, payload merge order, column validation or error precedence.
+
+- Seek cold native SQLite scalar and composite equality indexes directly across session refreshes instead of hydrating complete value indexes for constraint checks and result projection. Preserve complete index support, private writes, savepoints, fixed snapshots, typed comparisons and serializable observations; upgrade the physical equality projection and population certificates atomically through native mapping 16.
+
 - Preserve represented composite fields when a later field extends beyond the retained tuple, and reject actual out-of-bounds reads with `XX001` while preserving lazy evaluation, rollback and reopening. Keep already-folded prepared view constants across representation-only descriptor projection, while retaining invalidation for actual definition changes.
 
 - Reject DISTINCT, grouping, ordering and window keys whose declared types lack the required PostgreSQL comparison operators before optimization or execution, including output-column ordinals, empty inputs and unused window definitions. Preserve ordinary `void`/JSON outputs and UNION ALL, and include PostgreSQL's ordering-error hint.

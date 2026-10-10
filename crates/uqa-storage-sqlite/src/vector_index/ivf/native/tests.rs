@@ -8,6 +8,66 @@ use super::super::SQLiteIVFIndex;
 use crate::{Catalog, ManagedConnection};
 use uqa_storage::{mvcc::VersionedSessionOptions, StorageBackendError, VectorIndex};
 
+#[rstest::rstest]
+fn sequential_native_ivf_mutations_retain_state_and_write_only_changed_assignments(
+    #[values(false, true)] explicit: bool,
+) {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    let mut index = SQLiteIVFIndex::with_params(connection.clone(), "items", "vector", 2, 2, 2, 8);
+    let mut reference = uqa_storage::IVFIndex::with_params(2, 2, 2, 8);
+    for id in 1..=8 {
+        let vector = vec![id as f32, 1.0];
+        index.add(id, vector.clone()).unwrap();
+        reference.add(id, vector).unwrap();
+    }
+    index.initialize().unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let control = connection.retention_control().unwrap();
+    if explicit {
+        connection.begin_transaction().unwrap();
+    }
+    let retained = index.snapshot().unwrap();
+    super::state::RESTORED_STATES.set(0);
+    super::publication::ASSIGNMENT_WRITES.set(0);
+    for id in 9..=40 {
+        let vector = vec![id as f32, 1.0];
+        index.add(id, vector.clone()).unwrap();
+        reference.add(id, vector).unwrap();
+    }
+    assert_eq!(super::state::RESTORED_STATES.get(), 1);
+    assert_eq!(super::publication::ASSIGNMENT_WRITES.get(), 32);
+    assert_eq!(
+        index.search_knn(&[1.0, 1.0], 8).unwrap(),
+        reference.search_knn(&[1.0, 1.0], 8).unwrap()
+    );
+    assert_eq!(retained.count().unwrap(), 8);
+    index
+        .add_many(7, vec![vec![-1.0, 0.0], vec![0.0, 1.0]])
+        .unwrap();
+    reference
+        .add_many(7, vec![vec![-1.0, 0.0], vec![0.0, 1.0]])
+        .unwrap();
+    assert_eq!(super::publication::ASSIGNMENT_WRITES.get(), 34);
+    index.delete(19).unwrap();
+    reference.delete(19).unwrap();
+    assert_eq!(
+        index.search_knn(&[-1.0, 0.0], 8).unwrap(),
+        reference.search_knn(&[-1.0, 0.0], 8).unwrap()
+    );
+    assert_eq!(super::state::RESTORED_STATES.get(), 1);
+    if explicit {
+        connection.rollback_transaction().unwrap();
+        index.add(90, vec![1.0, 0.0]).unwrap();
+        assert_eq!(index.count().unwrap(), 9);
+        assert_eq!(super::state::RESTORED_STATES.get(), 2);
+    }
+    drop((retained, index, connection));
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[test]
 fn native_ivf_probes_and_untrained_search_keep_the_original_reader_control() {
     for threshold in [2, 100] {

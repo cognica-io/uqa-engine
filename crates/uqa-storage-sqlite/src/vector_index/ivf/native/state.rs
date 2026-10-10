@@ -26,6 +26,8 @@ pub(in crate::vector_index::ivf) fn load_state(
     params: IVFIndexParams,
     rebuild: bool,
 ) -> Result<uqa_storage::ivf_index::IVFPreparedMetadata> {
+    #[cfg(test)]
+    RESTORED_STATES.set(RESTORED_STATES.get() + 1);
     let count = read.count()?;
     let mut header = IVFMetadataSnapshot {
         state: IVFState::Untrained,
@@ -104,4 +106,9 @@ pub(in crate::vector_index::ivf) fn load_state(
         Ok(())
     })?;
     Ok(builder.finish()?)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static RESTORED_STATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

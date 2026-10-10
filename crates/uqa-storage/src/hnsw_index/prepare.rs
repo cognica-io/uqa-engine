@@ -47,6 +47,17 @@ impl HNSWIndex {
             let _copy = control.memory().reserve(node.memory_bytes()?)?;
             candidate.nodes.insert(id, (*node).clone(), Some(control))?;
         }
+        for (source, target) in [
+            (&self.raw_vectors, &mut candidate.raw_vectors),
+            (&self.normalized_vectors, &mut candidate.normalized_vectors),
+        ] {
+            for entry in source.iter() {
+                control.check()?;
+                let (id, vector) = entry?;
+                let _copy = control.memory().reserve(vector.memory_bytes()?)?;
+                target.insert(id, (*vector).clone(), Some(control))?;
+            }
+        }
         for entry in self.active.iter() {
             control.check()?;
             let (key, node) = entry?;

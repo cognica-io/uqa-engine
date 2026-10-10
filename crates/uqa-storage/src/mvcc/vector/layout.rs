@@ -8,8 +8,9 @@
 
 use super::{IndexKind, Key, VectorOperations};
 use crate::mvcc::{
-    CommittedRecordSnapshot, HNSWRecordKey, HNSWRecordLayout, IVFRecordKey, IVFRecordLayout,
-    PrivateRecordChanges, VersionError, VersionResult, VersionedPersistence,
+    commit::RecordWriteKind, CommittedRecordSnapshot, HNSWRecordKey, HNSWRecordLayout,
+    IVFRecordKey, IVFRecordLayout, PrivateRecordChanges, VersionError, VersionResult,
+    VersionedPersistence,
 };
 use crate::{read_control::StorageReadControl, HNSWIndexParams, IVFIndexParams};
 use uqa_core::{memory::BudgetedVec, DocId};
@@ -142,14 +143,15 @@ impl Layout<'_> {
         operations: &VectorOperations<'_>,
         changes: &PrivateRecordChanges,
         current: &dyn CommittedRecordSnapshot,
+        kind: RecordWriteKind,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         match self {
             Self::IVFIndex(layout) => {
-                crate::mvcc::ivf::merge(key, operations, changes, current, layout, control)
+                crate::mvcc::ivf::merge(key, operations, changes, current, layout, kind, control)
             }
             Self::HNSWIndex(layout) => {
-                crate::mvcc::hnsw::merge(key, operations, changes, current, layout, control)
+                crate::mvcc::hnsw::merge(key, operations, changes, current, layout, kind, control)
             }
         }
     }

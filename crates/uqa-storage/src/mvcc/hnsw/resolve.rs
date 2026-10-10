@@ -12,8 +12,9 @@ use crate::mvcc::vector::{
     VectorOperations,
 };
 use crate::mvcc::{
-    CommittedRecordSnapshot, HNSWRecordKey as Key, HNSWRecordLayout, HNSWRecordValue as Value,
-    PrivateRecordChanges, RecordWrite, VersionError, VersionResult,
+    commit::RecordWriteKind, CommittedRecordSnapshot, HNSWRecordKey as Key, HNSWRecordLayout,
+    HNSWRecordValue as Value, PreparedRecordWrite, PrivateRecordChanges, VersionError,
+    VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
@@ -23,6 +24,7 @@ pub(in crate::mvcc) fn merge(
     changes: &PrivateRecordChanges,
     current: &dyn CommittedRecordSnapshot,
     layout: &dyn HNSWRecordLayout,
+    kind: RecordWriteKind,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
     let row = current.get(key, control)?;
@@ -52,10 +54,11 @@ pub(in crate::mvcc) fn merge(
             changes,
             current,
             &layout.key(key, Key::Nodes, control)?,
+            kind,
             control,
         )?;
         if let Some(edges) = layout.edges_prefix(key, None, control)? {
-            delete_prefix(changes, current, &edges, control)?;
+            delete_prefix(changes, current, &edges, kind, control)?;
         }
     }
     let value = layout.encode(
@@ -67,16 +70,16 @@ pub(in crate::mvcc) fn merge(
         },
         control,
     )?;
-    replace(changes, current, key, &value, control)?;
+    replace(changes, current, key, &value, kind, control)?;
     for node in delta.nodes() {
         let node = node?;
         control.cancellation().check()?;
         let address = layout.key(key, Key::Node(node.node_id), control)?;
         let value = layout.encode(&address, template, Value::Node(&node), control)?;
-        replace(changes, current, &address, &value, control)?;
+        replace(changes, current, &address, &value, kind, control)?;
         if let Some(edges) = layout.edges_prefix(key, Some(node.node_id), control)? {
             if !delta.full_rewrite {
-                delete_prefix(changes, current, &edges, control)?;
+                delete_prefix(changes, current, &edges, kind, control)?;
             }
             for (layer, neighbors) in node.neighbors.iter().enumerate() {
                 for target in neighbors {
@@ -91,7 +94,7 @@ pub(in crate::mvcc) fn merge(
                         control,
                     )?;
                     let value = layout.encode(&address, template, Value::Edge, control)?;
-                    replace(changes, current, &address, &value, control)?;
+                    replace(changes, current, &address, &value, kind, control)?;
                 }
             }
         }
@@ -103,16 +106,16 @@ fn delete_prefix(
     changes: &PrivateRecordChanges,
     current: &dyn CommittedRecordSnapshot,
     prefix: &[u8],
+    kind: RecordWriteKind,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
     current.visit_keys(prefix, None, usize::MAX, control, &mut |key, row| {
         if row.live {
-            changes.apply(
-                &[RecordWrite {
-                    key,
-                    expected: row.revision,
-                    value: None,
-                }],
+            changes.apply_owned(
+                &[
+                    PreparedRecordWrite::copy_bytes(key, row.revision, None, control)?
+                        .with_kind(kind),
+                ],
                 control,
             )?;
         }

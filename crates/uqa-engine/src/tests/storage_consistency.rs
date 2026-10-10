@@ -463,7 +463,7 @@ fn sql_update_reports_stale_document_ids() {
     let eng = Engine::new();
     eng.sql(
         "CREATE TABLE docs (
-           id INTEGER PRIMARY KEY,
+           id TEXT PRIMARY KEY,
            status TEXT,
            title TEXT,
            content TEXT
@@ -478,15 +478,23 @@ fn sql_update_reports_stale_document_ids() {
     .unwrap();
     eng.sql(
         "INSERT INTO docs (id, status, title, content)
-         VALUES (1, 'queued', 'Runtime search', 'old content'),
-                (2, 'indexed', 'Other', 'other content')",
+         VALUES ('1', 'queued', 'Runtime search', 'old content'),
+                ('2', 'indexed', 'Other', 'other content')",
         &[],
     )
     .unwrap();
+    eng.sql("SELECT id FROM docs WHERE id = '1'", &[]).unwrap();
     {
         let table = eng.table("docs").unwrap().expect("table");
         *table.document_store.write() =
             Box::new(StoreWithMissingDocId::from_table(&eng, "docs", 99));
+        // Corrupt the selected index support itself. An unrelated identity in a full relation scan is no longer a candidate of this bounded update.
+        table
+            .value_indexes
+            .write()
+            .get_mut(&"id".into())
+            .unwrap()
+            .insert(99, &s("1"));
     }
 
     let error = eng
@@ -494,7 +502,7 @@ fn sql_update_reports_stale_document_ids() {
             "UPDATE docs
                 SET content = 'updated content',
                     status = 'indexed'
-              WHERE id = 1 AND status = 'queued'",
+              WHERE id = '1' AND status = 'queued'",
             &[],
         )
         .expect_err("a stale index candidate must not be treated as no matching row");
