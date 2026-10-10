@@ -13,6 +13,7 @@ mod graph_diagnostics;
 mod mutation_failures;
 mod new_rows;
 mod rollback_reload;
+mod row_change_journal;
 
 #[test]
 fn serializable_dependency_errors_preserve_uncertain_commit_precedence() {

@@ -7,15 +7,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/vector-knn.mjs";
 import { registerNativeNotificationTests } from "./notifications/native.mjs";
+import { runCLIFixture } from "./http_cli.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
@@ -159,31 +160,9 @@ test("HTTP engine executes SQL, atomic batches, and streams", async () => {
   });
 });
 
-test("HTTP engine resolves local and Cloud projects through the CLI", {
-  skip: process.platform === "win32" ? "POSIX fake CLI fixture" : false,
-}, async () => {
+test("HTTP engine resolves local and Cloud projects through the CLI", async () => {
   await withHTTPServer(async (origin) => {
-    const directory = mkdtempSync(join(tmpdir(), "uqa-http-cli-"));
-    const cli = join(directory, "uqa");
-    writeFileSync(cli, [
-      "#!/bin/sh",
-      "test \"$2\" = connection || exit 19",
-      "if test \"$1\" = cloud; then test \"$6\" = --org && test \"$7\" = acme || exit 20; fi",
-      `printf '%s\\n' '{"url":"${origin}","token":"uqa_db_test"}'`,
-      "",
-    ].join("\n"), "ascii");
-    chmodSync(cli, 0o700);
-    try {
-      const local = await uqa.HttpEngine.local("notes", { cliPath: cli });
-      assert.equal((await local.sql("SELECT $1", [7])).rows[0].answer, 7);
-      const cloud = await uqa.HttpEngine.cloud("analytics", {
-        organization: "acme",
-        cliPath: cli,
-      });
-      assert.equal((await cloud.sql("SELECT $1", [7])).rows[0].answer, 7);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+    await runCLIFixture(packagePath, "native", origin);
   });
 });
 
@@ -199,7 +178,7 @@ test("HTTP engine does not serialize concurrent requests onto the libuv worker p
 });
 
 test("JavaScript HTTP values agree with the native client across SQL carriers", async () => {
-  const { HttpEngine: NativeHttpEngine } = require("../../crates/uqa-node/index.js");
+  const { HttpEngine: NativeHttpEngine } = require(join(dirname(packagePath), "index.js"));
   const fixtures = [
     "9223372036854775807", "-9223372036854775808", "9223372036854775808", "1e30",
     '{"$uqa_type":"void"}',

@@ -89,6 +89,11 @@ class PerformanceChecksTest(unittest.TestCase):
             with self.subTest(names=names), self.assertRaisesRegex(ValueError, "expected case name"):
                 self.write_inventory()
 
+    def test_rust_case_names_keep_uppercase_identifiers(self):
+        self.check["case_names"] = ["backend_1::COMMIT", "backend_1::ROLLBACK"]
+        checks = self.write_inventory()
+        self.assertEqual(checks[0]["case_names"], self.check["case_names"])
+
     def test_filter_syntax_cannot_be_injected(self):
         for field, value in (("package", "uqa-example) | all("), ("test", "work) | all("), ("kind", "bench")):
             changed = {**self.check, field: value}

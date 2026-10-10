@@ -107,7 +107,7 @@ fn failed_physical_reservation_never_publishes_a_new_block() {
     for failed_after in [SLOT_HEADER_BYTES + 1, SLOT_HEADER_BYTES + 2] {
         let mut file = BlockTemporaryFile::<8>::new().unwrap();
         file.write_all(b"retained").unwrap();
-        // Fail either the inactive slot's extent write or the final selector.
+        // Fail the fresh block before its complete ciphertext or sparse extent exists.
         file.owner.lock().faults.fail_after_bytes = Some(failed_after);
         assert!(file.write(b"x").is_err());
         assert_eq!(file.metadata().unwrap().len(), 8);

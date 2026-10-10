@@ -12,6 +12,16 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+export async function runCLIFixture(packagePath, mode, origin = "") {
+  const fixture = fileURLToPath(new URL("./fixtures/cli/", import.meta.url));
+  await promisify(execFile)(process.execPath, [join(fixture, "driver.cjs"), packagePath, mode, origin], {
+    cwd: fixture, env: { ...process.env, UQA_TOKEN: "must-not-reach-child" },
+  });
+}
 
 function resolver(packagePath) {
   const child = new EventEmitter();

@@ -44,7 +44,7 @@ def inventory(path: pathlib.Path = MANIFEST) -> list[dict]:
         if (
             not isinstance(names, list)
             or len(names) != check["cases"]
-            or any(not isinstance(name, str) or not re.fullmatch(r"(?:[a-z0-9_]+(?:::[a-z0-9_]+)*)?", name) for name in names)
+            or any(not isinstance(name, str) or not re.fullmatch(r"(?:[A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)?", name) for name in names)
             or len(set(names)) != len(names)
         ):
             raise ValueError("each check needs every distinct expected case name")

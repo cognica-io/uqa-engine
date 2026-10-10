@@ -133,6 +133,31 @@ fn authenticated_block_headers_do_not_fragment_physical_writes() {
 }
 
 #[test]
+fn fresh_authenticated_blocks_combine_initial_selector_and_ciphertext() {
+    for blocks in [1, 32] {
+        let mut file = TemporaryFile::new().unwrap();
+        let expected = vec![b'x'; blocks * BLOCK_BYTES + 13];
+        file.write_all(&expected).unwrap();
+        let owner = file.owner.lock();
+        assert_eq!(owner.faults.write_requests, (blocks + 1) * 2);
+        assert_eq!(
+            owner.faults.written_bytes,
+            (expected.len() + (blocks + 1) * (SLOT_HEADER_BYTES + 2)) as u64
+        );
+        assert_eq!(owner.faults.read_blocks, 0);
+        assert_eq!(owner.faults.truncate_requests, 0);
+        drop(owner);
+        let mut actual = Vec::new();
+        file.reopen().unwrap().read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            std::fs::metadata(file.path()).unwrap().len(),
+            TemporaryFile::physical_len_for(expected.len() as u64).unwrap()
+        );
+    }
+}
+
+#[test]
 fn random_access_and_independent_readers_preserve_exact_bytes() {
     let mut file = TemporaryFile::new().unwrap();
     let mut expected = vec![b'a'; BLOCK_BYTES * 3 + 7];

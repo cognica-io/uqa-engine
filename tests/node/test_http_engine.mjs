@@ -17,7 +17,7 @@ import { promisify, inspect } from "node:util";
 import { registerNotificationProtocolTests } from "./notifications/protocol.mjs";
 import { registerNotificationPortabilityTests } from "./notifications/portability.mjs";
 import { registerNotificationHTTPTests } from "./notifications/http.mjs";
-import { registerCLILifecycleTests } from "./http_cli.mjs";
+import { registerCLILifecycleTests, runCLIFixture } from "./http_cli.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../../crates/uqa-node/", import.meta.url));
@@ -267,21 +267,14 @@ test("HTTP validates origin, malformed responses, lengths, and counters", async 
   }
 });
 
-async function cliFixture(mode, origin = "") {
-  const fixture = fileURLToPath(new URL("./fixtures/cli/", import.meta.url));
-  await exec(process.execPath, [join(fixture, "driver.cjs"), packagePath, mode, origin], {
-    cwd: fixture, env: { ...process.env, UQA_TOKEN: "must-not-reach-child" },
-  });
-}
-
 test("CLI project lookup retains literal arguments and excludes UQA_TOKEN", async () => {
   await server((request, response) => json(response, result()), async (origin) => {
-    await cliFixture("cloud", origin);
+    await runCLIFixture(packagePath, "cloud", origin);
   });
 });
 
 test("CLI failures and oversized output do not expose captured secrets", async () => {
-  await cliFixture("failures");
+  await runCLIFixture(packagePath, "failures");
 });
 
 test("packed npm package installs offline and runs HTTP without native artifacts", async () => {

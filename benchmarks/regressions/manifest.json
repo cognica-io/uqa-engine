@@ -2301,6 +2301,61 @@
       "capability": "Ordered refresh metadata validation",
       "workload": "Empty prepared conditions with active and cancelled read controls.",
       "invariant": "Empty input opens no physical window, still honors cancellation and releases all memory."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "fresh_authenticated_blocks_combine_initial_selector_and_ciphertext",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests.rs",
+      "capability": "Authenticated spill append",
+      "workload": "One and 32 complete 16 KiB blocks plus a partial block, with exact readback and physical extent checks.",
+      "invariant": "Exactly two physical write requests per fresh block, no prefix reads or truncations, and no additional padding bytes written.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_completion_reclaims_history_but_savepoints_keep_the_root_snapshot",
+      "cases": 9,
+      "source": "crates/uqa-engine/src/transactions/tests/row_change_journal.rs",
+      "capability": "Row change journal ownership",
+      "workload": "Three persistent providers and commit, rollback or session drop with explicitly scheduled application and maintenance snapshot owners.",
+      "invariant": "Savepoint undo retains all eight peer changes and the original snapshot; completing the final root owner restores the 16-byte header and reopen preserves committed rows.",
+      "case_names": [
+        "backend_1___native__::completion_1___COMMIT__",
+        "backend_1___native__::completion_2___ROLLBACK__",
+        "backend_1___native__::completion_3___drop__",
+        "backend_2___kv__::completion_1___COMMIT__",
+        "backend_2___kv__::completion_2___ROLLBACK__",
+        "backend_2___kv__::completion_3___drop__",
+        "backend_3___redb__::completion_1___COMMIT__",
+        "backend_3___redb__::completion_2___ROLLBACK__",
+        "backend_3___redb__::completion_3___drop__"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "maintenance_snapshot_retains_history_until_its_own_completion",
+      "cases": 9,
+      "source": "crates/uqa-engine/src/transactions/tests/row_change_journal.rs",
+      "capability": "Row change journal ownership",
+      "workload": "Three persistent providers and commit, rollback or session drop with explicitly scheduled application and maintenance snapshot owners.",
+      "invariant": "A live maintenance transaction retains all eight changes after the application reader completes; the last maintenance completion immediately reclaims the journal.",
+      "case_names": [
+        "backend_1___native__::completion_1___COMMIT__",
+        "backend_1___native__::completion_2___ROLLBACK__",
+        "backend_1___native__::completion_3___drop__",
+        "backend_2___kv__::completion_1___COMMIT__",
+        "backend_2___kv__::completion_2___ROLLBACK__",
+        "backend_2___kv__::completion_3___drop__",
+        "backend_3___redb__::completion_1___COMMIT__",
+        "backend_3___redb__::completion_2___ROLLBACK__",
+        "backend_3___redb__::completion_3___drop__"
+      ]
     }
   ]
 }

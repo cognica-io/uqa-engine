@@ -15,10 +15,16 @@ async function run() {
   // created or rewritten, and parent process state is never changed.
   const cliPath = process.execPath;
   assert.equal(process.env.UQA_TOKEN, "must-not-reach-child");
+  process.env.UQA_CLI_FIXTURE_ORIGIN = origin;
   if (mode === "cloud") {
-    process.env.UQA_CLI_FIXTURE_ORIGIN = origin;
     const engine = await HttpEngine.cloud("a;$(false)", { cliPath, organization: "organization" });
     assert.deepEqual((await engine.sql("SELECT 1")).rows, [{ n: 1 }]);
+  } else if (mode === "native") {
+    process.env.UQA_CLI_FIXTURE_MODE = mode;
+    const local = await HttpEngine.local("notes", { cliPath });
+    assert.equal((await local.sql("SELECT $1", [7])).rows[0].answer, 7);
+    const cloud = await HttpEngine.cloud("analytics", { cliPath, organization: "acme" });
+    assert.equal((await cloud.sql("SELECT $1", [7])).rows[0].answer, 7);
   } else {
     assert.equal(mode, "failures");
     for (const [fixture, message] of [
