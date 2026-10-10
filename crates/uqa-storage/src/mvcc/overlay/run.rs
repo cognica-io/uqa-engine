@@ -260,10 +260,12 @@ impl SpilledRun {
             .checked_sub(1)
     }
 
-    /// The index of the first block that may hold a key in `start`'s range.
+    /// The first block that may hold a key in `start`'s range, or the block count when the range is beyond this run.
     fn first_block_from(&self, start: Bound<&[u8]>) -> usize {
         match start {
             Bound::Unbounded => 0,
+            Bound::Included(key) if key > self.last.bytes() => self.blocks.len(),
+            Bound::Excluded(key) if key >= self.last.bytes() => self.blocks.len(),
             Bound::Included(key) | Bound::Excluded(key) => {
                 self.block_at_or_before(key).unwrap_or(0)
             }

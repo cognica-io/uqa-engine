@@ -1845,6 +1845,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cursor_seeks_past_the_last_key_do_not_read_spilled_entries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Spill cursor range bounds",
+      "workload": "128/1024 records; included and excluded bounds beyond the last key, the included last key, a forward seek and cancellation.",
+      "invariant": "Disjoint forward ranges and seeks read zero blocks, entries or values; the included last key, cancellation and allowance release remain exact.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

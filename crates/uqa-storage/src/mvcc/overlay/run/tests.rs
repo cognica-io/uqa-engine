@@ -52,6 +52,53 @@ fn run(count: usize, control: &StorageReadControl) -> (SpilledRun, Vec<PrivateRe
 }
 
 #[test]
+fn cursor_seeks_past_the_last_key_do_not_read_spilled_entries() {
+    for count in [128, 1024] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let (run, _) = run(count, &control);
+        let run = Arc::new(run);
+        let baseline = control.memory().used();
+        let last = key((count - 1) * 2);
+        let beyond = key(count * 2);
+        for start in [
+            Bound::Included(beyond.as_slice()),
+            Bound::Excluded(beyond.as_slice()),
+            Bound::Excluded(last.as_slice()),
+        ] {
+            super::read_counts::take();
+            let mut cursor = run.cursor(start);
+            assert!(cursor.next(&control).unwrap().is_none());
+            assert!(cursor.next(&control).unwrap().is_none());
+            let reads = super::read_counts::take();
+            assert_eq!(reads.blocks, 0);
+            assert_eq!(reads.entries, 0);
+            assert_eq!(reads.values, 0);
+        }
+        let mut cursor = run.cursor(Bound::Included(&last));
+        assert_eq!(
+            cursor.next(&control).unwrap().unwrap().key.bytes(),
+            last.as_slice()
+        );
+        assert!(cursor.next(&control).unwrap().is_none());
+        drop(cursor);
+        let mut cursor = run.cursor(Bound::Unbounded);
+        assert!(cursor.next(&control).unwrap().is_some());
+        super::read_counts::take();
+        assert!(cursor.seek_to(&beyond, &control).unwrap().is_none());
+        assert!(cursor.next(&control).unwrap().is_none());
+        let reads = super::read_counts::take();
+        assert_eq!(reads.blocks, 0);
+        assert_eq!(reads.entries, 0);
+        assert_eq!(reads.values, 0);
+        assert_eq!(control.memory().used(), baseline);
+        control.cancellation().cancel();
+        assert!(cursor.next(&control).is_err());
+        drop((cursor, run));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn point_reads_find_every_change_and_no_absent_key_across_blocks() {
     let control = StorageReadControl::with_limit(64 << 20);
     let (run, identities) = run(3000, &control);
