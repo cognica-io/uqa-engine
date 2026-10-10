@@ -736,12 +736,12 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
-      "test": "separate_edge_restoration_writes_spilled_vectors_once_per_source",
+      "test": "separate_edge_restoration_never_rewrites_spilled_vectors",
       "cases": 1,
       "source": "crates/uqa-storage/src/hnsw_index/tests/spill.rs",
       "capability": "HNSW spill restoration",
       "workload": "24 vectors of 1024 dimensions; 64 KiB retention allowance and separately streamed edges.",
-      "invariant": "Canonical graph and KNN results match; node encodes are bounded by twice the node count, without exceeding retention.",
+      "invariant": "Canonical graph and KNN results match; edge restoration performs zero vector encodes and bounds topology encodes without exceeding retention.",
       "case_names": [
         ""
       ]
@@ -1294,6 +1294,83 @@
       "capability": "Projected range predicates",
       "workload": "Real parsed BETWEEN and flattened comparison forms over the 20,000-row analytical fixture.",
       "invariant": "Exactly one borrowed read per needed field, at most three per row; identical predicate output and short circuit across direct/indexed projections."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_topology_validation_does_not_decode_dense_vectors",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW topology validation",
+      "workload": "128 nodes at 256 and 1024 dimensions with a 128 KiB allowance, forcing topology and both vector maps to spill.",
+      "invariant": "Restoration and repeated topology validation decode zero dense vector coordinates; all retained reservations are released."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_search_reads_only_the_vector_used_by_each_distance_or_score",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW vector reads",
+      "workload": "Two repeated searches of a 128-node, 1024-dimensional spilled graph under a 128 KiB allowance.",
+      "invariant": "Complete postings match the resident graph and decoded coordinates are bounded by candidate distances plus canonical scores within the original allowance."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "residual_reads_follow_candidate_count_and_keep_original_payload_order",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-execution/src/operator_tree/driver/intersection/tests.rs",
+      "capability": "Retrieval residual filters",
+      "workload": "Two retrieval branches with 128/16384 unrelated documents, every filter position and sequential/parallel execution.",
+      "invariant": "Only the intersection candidates are read; complete decorated payloads preserve the original branch order and KNN limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retrieval_residual_filters_read_only_selected_documents",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-engine/src/tests/storage_consistency/indexed_queries.rs",
+      "capability": "SQL retrieval document reads",
+      "workload": "GIN/HNSW fusion over 64/512 synthetic documents with the unindexed residual on either side of the retrieval expression.",
+      "invariant": "No document enumeration; physical reads are bounded by candidate and result counts, with identical row identities and scores."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cold_scalar_constraint_probes_do_not_hydrate_indexes_after_session_refresh",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-engine/src/value_index/tests.rs",
+      "capability": "Cold primary and composite constraints",
+      "workload": "256 persisted rows, independent sessions, peer writes, duplicate primary/composite keys, equality projection, savepoint undo and reopen.",
+      "invariant": "Complete in-memory value indexes remain unmaterialized while selected rows, unique violations and rollback stay correct."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "cold_scalar_probes_seek_instead_of_visiting_the_posting_collection",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native SQLite equality seeks",
+      "workload": "Scalar and composite equality hits and misses against 128/8192-row persisted indexes.",
+      "invariant": "Results match Core equality; SQLite VM instructions remain bounded independently of unrelated row count, including completeness and comparison-domain checks."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "equality_probe_keys_and_candidates_keep_the_original_allowance_and_cancellation",
+      "cases": 1,
+      "case_names": [""],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native equality probe resources",
+      "workload": "Oversized keys, 128 matching candidates and cancellation under a 256-byte original allowance.",
+      "invariant": "Key and candidate admission fail within the original allowance and release all reservations; cancellation is preserved."
     }
   ]
 }
