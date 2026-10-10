@@ -146,8 +146,10 @@ impl State {
             return Ok(());
         }
         let memory = self.records.budget().clone();
-        let mut writer =
-            SpilledRunWriter::new(self.records.len() as u64, self.resident as u64, &memory)?;
+        let key_bytes = self.records.iter().fold(0_u64, |bytes, (key, _)| {
+            bytes.saturating_add(key.bytes().len() as u64)
+        });
+        let mut writer = SpilledRunWriter::new(self.records.len() as u64, key_bytes, &memory)?;
         for (_, change) in &self.records {
             writer.push(
                 change.write.key(),
@@ -522,10 +524,13 @@ impl PrivateRecordChanges {
             }
             return PreparedRecordCommit::from_unique_owned(writes, control);
         }
-        let (entries, entry_bytes) = state.runs.size();
+        let (entries, key_bytes) = state.runs.size();
+        let key_bytes = state.records.iter().fold(key_bytes, |bytes, (key, _)| {
+            bytes.saturating_add(key.bytes().len() as u64)
+        });
         let mut writer = SpilledRunWriter::new(
             entries.saturating_add(state.records.len() as u64),
-            entry_bytes.saturating_add(state.resident as u64),
+            key_bytes,
             control.memory(),
         )?;
         while let Some(change) = changes.next(control)? {

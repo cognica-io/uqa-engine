@@ -32,17 +32,9 @@ impl KeyFilter {
         Self::allocate(words, maximum, memory)
     }
 
-    /// Index all literal prefixes within a quarter of the remaining workspace. The byte estimate bounds the possible prefix count; a smaller admitted filter only increases false positives. No filter is required for correctness.
+    /// Index all literal prefixes when their estimated filter fits the same optional workspace policy as point keys. The key-byte estimate bounds the possible prefix count; pressure omits the filter instead of retaining a saturated allocation.
     pub(super) fn for_prefixes(key_bytes: u64, memory: &MemoryBudget) -> Option<Self> {
-        let bits = key_bytes
-            .checked_mul(BITS_PER_KEY)?
-            .max(64)
-            .checked_next_multiple_of(64)?;
-        let maximum = memory.available() / 4;
-        let words = usize::try_from(bits / 64)
-            .ok()?
-            .min(maximum / size_of::<u64>());
-        Self::allocate(words, maximum, memory)
+        Self::with_capacity(key_bytes, memory)
     }
 
     fn allocate(words: usize, maximum: usize, memory: &MemoryBudget) -> Option<Self> {
@@ -144,7 +136,15 @@ mod tests {
         }));
         keys.push(vec![255; 4096]);
         keys.sort();
-        let mut filter = KeyFilter::for_prefixes(1 << 20, &reader).unwrap();
+        assert!(KeyFilter::for_prefixes(1 << 20, &reader).is_none());
+        assert_eq!(memory.used(), retained.bytes());
+        let admitted = KeyFilter::for_prefixes(128, &reader).unwrap();
+        assert!(reader.used() <= (16 << 10) / 4);
+        drop((admitted, retained));
+        let available = reader.available();
+        let mut filter =
+            KeyFilter::for_prefixes(keys.iter().map(|key| key.len() as u64).sum(), &reader)
+                .unwrap();
         for (index, key) in keys.iter().enumerate() {
             filter.insert_prefixes(
                 key,
@@ -161,8 +161,9 @@ mod tests {
                 );
             }
         }
-        assert!(reader.used() <= (16 << 10) / 4);
-        drop((filter, retained));
+        assert!(!filter.may_contain(b"not an inserted prefix"));
+        assert!(reader.used() <= available / 4);
+        drop(filter);
         assert_eq!(memory.used(), 0);
         assert!(KeyFilter::for_prefixes(128, &MemoryBudget::new(7)).is_none());
     }

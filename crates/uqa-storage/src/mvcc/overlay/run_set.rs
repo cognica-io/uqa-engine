@@ -43,12 +43,12 @@ impl RunSet {
         self.0.as_ref().map_or(0, |runs| runs.len())
     }
 
-    /// The changes and entry bytes of the runs together.
+    /// Changes and literal key bytes across the runs; overlapping keys remain a safe upper bound for a merge.
     pub(super) fn size(&self) -> (u64, u64) {
         self.runs().iter().fold((0, 0), |(entries, bytes), run| {
             (
                 entries.saturating_add(run.len()),
-                bytes.saturating_add(run.entry_bytes()),
+                bytes.saturating_add(run.key_bytes()),
             )
         })
     }
@@ -140,10 +140,10 @@ fn merge(
     control: &StorageReadControl,
 ) -> VersionResult<SpilledRun> {
     let entries = runs.iter().map(|run| run.len()).sum();
-    let entry_bytes = runs.iter().map(|run| run.entry_bytes()).sum();
+    let key_bytes = runs.iter().map(|run| run.key_bytes()).sum();
     let set = RunSet(Some(StrongArc::new(runs.to_vec())));
     // Reader admission must see the writer's retained workspace before it divides the remaining allowance among runs.
-    let mut writer = SpilledRunWriter::new(entries, entry_bytes, memory)?;
+    let mut writer = SpilledRunWriter::new(entries, key_bytes, memory)?;
     let mut cursor = TieredCursor::new(None, &set, Bound::Unbounded, control)?;
     while let Some(change) = cursor.next(control)? {
         let TieredChange::Spilled { entry, run } = &change else {

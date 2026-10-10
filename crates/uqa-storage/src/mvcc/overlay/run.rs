@@ -59,6 +59,7 @@ pub(in crate::mvcc) struct SpilledRun {
     prefix_filter: Option<KeyFilter>,
     last: RecordKey,
     len: u64,
+    key_bytes: u64,
     entry_bytes: u64,
     bytes: u64,
     /// One bit for each write kind code the run holds.
@@ -87,14 +88,14 @@ impl SpilledRun {
         self.len
     }
 
+    /// Literal key bytes, excluding entry metadata and values, for sizing derived filters.
+    pub(in crate::mvcc) fn key_bytes(&self) -> u64 {
+        self.key_bytes
+    }
+
     /// The bytes of the run's files, which decide which runs merge.
     pub(super) fn bytes(&self) -> u64 {
         self.bytes
-    }
-
-    /// The bytes of the run's entries, without their values.
-    pub(in crate::mvcc) fn entry_bytes(&self) -> u64 {
-        self.entry_bytes
     }
 
     /// The change of `key`, if the run has one.

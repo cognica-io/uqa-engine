@@ -84,6 +84,7 @@ pub(in crate::mvcc) struct SpilledRunWriter {
     prefix_filter: Option<KeyFilter>,
     last: Option<RecordKey>,
     len: u64,
+    key_bytes: u64,
     kinds: u16,
     memory: MemoryBudget,
 }
@@ -109,6 +110,7 @@ impl SpilledRunWriter {
             prefix_filter: KeyFilter::for_prefixes(key_bytes, memory),
             last: None,
             len: 0,
+            key_bytes: 0,
             kinds: 0,
             memory: memory.clone(),
         })
@@ -221,6 +223,7 @@ impl SpilledRunWriter {
         }
         self.last = Some(RecordKey::new(key, &self.memory)?);
         self.len += 1;
+        self.key_bytes = self.key_bytes.saturating_add(key.len() as u64);
         Ok(())
     }
 
@@ -246,6 +249,7 @@ impl SpilledRunWriter {
             prefix_filter: self.prefix_filter,
             last,
             len: self.len,
+            key_bytes: self.key_bytes,
             kinds: self.kinds,
             cache: std::sync::Arc::new(super::cache::RunCache::new(&self.memory)),
         }))
