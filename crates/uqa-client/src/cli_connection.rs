@@ -284,13 +284,7 @@ mod tests {
              printf '%s\\n' '{\"url\":\"http://127.0.0.1:8432/\",\"token\":\"uqa_db_test\"}'\n",
         );
 
-        let connection = resolve(
-            cli.as_os_str(),
-            local_arguments("notes"),
-            Duration::from_secs(2),
-        )
-        .await
-        .unwrap();
+        let connection = resolve_local(cli.as_os_str(), "notes").await.unwrap();
         assert_eq!(connection.url, "http://127.0.0.1:8432/");
         assert_eq!(connection.token.expose_secret(), "uqa_db_test");
     }
@@ -303,14 +297,10 @@ mod tests {
             "#!/bin/sh\nprintf '%s\\n' '{secret}' >&2\nexit 23\n"
         ));
 
-        let error = resolve(
-            cli.as_os_str(),
-            local_arguments("notes"),
-            Duration::from_secs(2),
-        )
-        .await
-        .err()
-        .expect("CLI must fail");
+        let error = resolve_local(cli.as_os_str(), "notes")
+            .await
+            .err()
+            .expect("CLI must fail");
         assert!(
             matches!(error, HttpEngineError::CLIConnectionFailed),
             "unexpected error: {error:?}"
@@ -325,14 +315,10 @@ mod tests {
         let oversized = "x".repeat(MAX_CLI_OUTPUT_BYTES + 1);
         let (_directory, cli) =
             executable_script(&format!("#!/bin/sh\nprintf '%s' '{oversized}'\n"));
-        let error = resolve(
-            cli.as_os_str(),
-            local_arguments("notes"),
-            Duration::from_secs(2),
-        )
-        .await
-        .err()
-        .expect("oversized output must fail");
+        let error = resolve_local(cli.as_os_str(), "notes")
+            .await
+            .err()
+            .expect("oversized output must fail");
         assert!(
             matches!(error, HttpEngineError::CLIOutputTooLarge),
             "unexpected error: {error:?}"
