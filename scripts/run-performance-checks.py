@@ -73,11 +73,19 @@ def selector(check: dict) -> str:
     )
 
 
-def arguments(checks: list[dict]) -> list[str]:
+def build_arguments(checks: list[dict]) -> list[str]:
     packages = sorted({check["package"] for check in checks})
-    return ["--profile", "ci", "--locked", "--lib", "--tests"] + [
+    return ["--locked", "--lib", "--tests"] + [
         argument for package in packages for argument in ("-p", package)
-    ] + ["-E", " | ".join(selector(check) for check in checks)]
+    ]
+
+
+def arguments(checks: list[dict], archive: pathlib.Path | None = None) -> list[str]:
+    source = build_arguments(checks) if archive is None else [
+        "--archive-file", str(archive.resolve()), "--extract-to", str(ROOT),
+        "--extract-overwrite", "--workspace-remap", str(ROOT),
+    ]
+    return ["--profile", "ci", *source, "-E", " | ".join(selector(check) for check in checks)]
 
 
 def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
@@ -157,11 +165,20 @@ def report(output: pathlib.Path, result: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=pathlib.Path, default=ROOT / "target/performance-checks")
-    parser.add_argument("--check", action="store_true", help="validate inventory without building or running")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="validate inventory without building or running")
+    mode.add_argument("--build-archive", type=pathlib.Path, help="compile the inventory's test targets without executing them")
+    mode.add_argument("--archive-file", type=pathlib.Path, help="verify and run an already compiled nextest archive")
     args = parser.parse_args()
     checks = inventory()
     if args.check:
         print(f"{len(checks)} deterministic checks, {sum(check['cases'] for check in checks)} required cases")
+        return 0
+    if args.build_archive is not None:
+        subprocess.run([
+            "cargo", "nextest", "archive", "--profile", "ci", *build_arguments(checks),
+            "--archive-file", str(args.build_archive),
+        ], cwd=ROOT, check=True)
         return 0
     result = {
         "schema_version": 1,
@@ -176,7 +193,7 @@ def main() -> int:
         "status": "failed", "checks": [],
     }
     try:
-        selection = arguments(checks)
+        selection = arguments(checks, args.archive_file)
         # A build/selection failure must never publish JUnit from an earlier run.
         (ROOT / "target/nextest/ci/junit.xml").unlink(missing_ok=True)
         listing = json.loads(capture("cargo", "nextest", "list", "--message-format", "json", *selection))

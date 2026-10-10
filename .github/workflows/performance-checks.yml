@@ -45,16 +45,17 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  deterministic-work:
-    name: Deterministic work and memory (${{ matrix.os }})
+  build:
+    name: Build regression archive (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Use the workspace's compilation job bound; execution keeps its own deadline below.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-14]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -65,13 +66,50 @@ jobs:
       - uses: ./.github/actions/setup-nextest
       - name: Verify the regression inventory and failure detection
         run: python3 -m unittest discover -s scripts/tests -p test_performance_checks.py
+      - name: Build the selected existing test targets
+        run: python3 scripts/run-performance-checks.py --build-archive "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
+      - name: Build the independent-process claim fixture
+        run: |
+          cargo build -p uqa-execution --example row_claim_contention --locked
+          tar -czf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C target/debug/examples row_claim_contention
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: performance-binaries-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/uqa-performance-tests.tar.zst
+            ${{ runner.temp }}/uqa-claim-fixture.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  deterministic-work:
+    name: Deterministic work and memory (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-nextest
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: performance-binaries-${{ matrix.os }}
+          path: ${{ runner.temp }}
       - name: Check bounded work, memory and output correctness
-        run: python3 scripts/run-performance-checks.py
+        run: python3 scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Verify independent-process claim workload without timing
-        run: cargo run -p uqa-execution --example row_claim_contention --locked -- --verify > target/performance-checks/claim-contention.json
+        run: |
+          tar -xzf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/row_claim_contention" --verify > target/performance-checks/claim-contention.json
       - name: Retain regression results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: performance-checks-${{ matrix.os }}
           path: |
