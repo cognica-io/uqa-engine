@@ -19,6 +19,9 @@ kuromoji = ["uqa-engine/kuromoji"]
 [lib]
 name = "uqa_node"
 crate-type = ["cdylib"]
+# This addon is loaded by Node.js; cdylib targets cannot run Rust doctests.
+# Native unit tests and JavaScript binding tests cover its callable surface.
+doctest = false
 
 [dependencies]
 uqa-storage-sqlite = { workspace = true }

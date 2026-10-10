@@ -14,10 +14,13 @@ use crate::mvcc::{
     commit::{PreparedLookup, RecordWriteKind},
     resolution::ResolutionMode,
     CommitSequence, CommittedRecordSnapshot, PreparedRecordCommit, PreparedRecordWrite,
-    PrivateRecordChanges, VersionError, VersionResult,
+    VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::BudgetedVec;
+
+mod writes;
+use writes::ResolvedChanges;
 
 pub(in crate::mvcc) fn resolve(
     original: &PreparedRecordCommit,
@@ -27,7 +30,7 @@ pub(in crate::mvcc) fn resolve(
     mode: ResolutionMode,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordCommit> {
-    let changes = PrivateRecordChanges::new(control.memory());
+    let changes = ResolvedChanges::new(original, control)?;
     let writes = PreparedLookup::new(original, control)?;
     let resolver = Resolver {
         base,
@@ -44,7 +47,7 @@ pub(in crate::mvcc) fn resolve(
         match write.kind() {
             RecordWriteKind::Canonical => {
                 resolver.validate(mutation, write)?;
-                changes.apply_owned(std::slice::from_ref(write), control)?;
+                changes.preserve(write.clone(), control)?;
             }
             RecordWriteKind::GraphCache
             | RecordWriteKind::GraphPreview
@@ -55,7 +58,7 @@ pub(in crate::mvcc) fn resolve(
             | RecordWriteKind::DiskANNPopulationPreview
             | RecordWriteKind::IdempotentDelete
             | RecordWriteKind::StatisticsMaintenance => {
-                changes.apply_owned(std::slice::from_ref(write), control)?;
+                changes.preserve(write.clone(), control)?;
             }
             RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache => {
                 resolver.merge_write(mutation, write, &writes)?;
@@ -64,7 +67,7 @@ pub(in crate::mvcc) fn resolve(
         mutation += 1;
     }
     Ok(changes
-        .prepare(control)?
+        .finish(control)?
         .retain_graph_effects(original, control)?
         .resolved(original, current.sequence()))
 }
@@ -74,7 +77,7 @@ pub(super) struct Resolver<'a> {
     pub(super) current: &'a dyn CommittedRecordSnapshot,
     pub(super) layout: &'a dyn OccurrenceRecordLayout,
     mode: ResolutionMode,
-    pub(super) changes: &'a PrivateRecordChanges,
+    changes: &'a ResolvedChanges,
     pub(super) control: &'a StorageReadControl,
 }
 
@@ -90,8 +93,8 @@ pub(super) fn revision(
 
 impl Resolver<'_> {
     pub(super) fn preserve(&self, write: &PreparedRecordWrite) -> VersionResult<()> {
-        self.changes.apply_owned(
-            &[write.clone().with_kind(self.mode.kind(write.kind()))],
+        self.changes.replace(
+            write.clone().with_kind(self.mode.kind(write.kind())),
             self.control,
         )
     }
@@ -121,10 +124,7 @@ impl Resolver<'_> {
             ))?;
         if writes.contains(&fence, control)? || source.kind() == RecordWriteKind::Canonical {
             self.validate(mutation, write)?;
-            changes.apply_owned(
-                &[write.clone().with_kind(RecordWriteKind::Canonical)],
-                control,
-            )?;
+            changes.preserve(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
             return Ok(());
         }
         if source.kind() != RecordWriteKind::Occurrence
@@ -178,10 +178,8 @@ impl Resolver<'_> {
                         ))?;
                 if paired.kind() != RecordWriteKind::Occurrence {
                     self.validate(mutation, write)?;
-                    changes.apply_owned(
-                        &[write.clone().with_kind(RecordWriteKind::Canonical)],
-                        control,
-                    )?;
+                    changes
+                        .preserve(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
                 } else if let Kind::Score(cluster) = kind {
                     self.merge_cluster(mutation, write, Some(&paired), cluster)?;
                 }
@@ -249,7 +247,7 @@ impl Resolver<'_> {
             self.control,
         )?;
         self.changes
-            .apply_owned(&[write.with_kind(self.mode.kind(kind))], self.control)
+            .replace(write.with_kind(self.mode.kind(kind)), self.control)
     }
     fn invalidate(&self, marker: &[u8]) -> VersionResult<()> {
         for kind in [Related::Skips, Related::BlockMax] {

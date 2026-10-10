@@ -185,7 +185,20 @@ def format_imported_rust() -> None:
     run(["cargo", "fmt", "--package", "uqa-pg-query"], cwd=ROOT)
 
 
+def remove_legacy_clippy_plugin() -> None:
+    path = DEST / "build.rs"
+    source = path.read_text(encoding="utf-8")
+    attributes = (
+        '#![cfg_attr(feature = "clippy", feature(plugin))]\n'
+        '#![cfg_attr(feature = "clippy", plugin(clippy))]\n'
+    )
+    if not source.startswith(attributes):
+        raise RuntimeError("pinned build.rs has unexpected compiler-plugin attributes")
+    path.write_text(source[len(attributes):], encoding="utf-8")
+
+
 def finalize_import(imported: list[tuple[str, pathlib.Path]]) -> None:
+    remove_legacy_clippy_plugin()
     format_imported_rust()
     write_checksums(imported)
 

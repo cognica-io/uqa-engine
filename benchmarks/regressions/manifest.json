@@ -2002,6 +2002,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_cluster_encoding_retains_only_one_decoded_score_block",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/clustered_postings/occurrences/builder/tests.rs",
+      "capability": "Incremental occurrence encoding",
+      "workload": "128/512/20000 postings under a shared 1 MiB allowance with 256 KiB already retained.",
+      "invariant": "All scores and occurrence edges round-trip exactly without relocating a cluster-sized decoded score array; all reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "a_rebuild_larger_than_its_allowance_stages_within_it",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/source_rebuild/tests.rs",
+      "capability": "Bounded text source rebuilding",
+      "workload": "20000 documents with one common and one unique term under the original 2 MiB allowance.",
+      "invariant": "Staging and visiting preserve every common and unique posting while remaining within the original allowance and releasing all retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "structural_occurrence_resolution_writes_sorted_spill_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
+      "capability": "Ordered occurrence publication",
+      "workload": "128/512 spilled canonical records plus structurally owned occurrence records under 128 KiB; command refresh and publication.",
+      "invariant": "Each output value is written exactly once with no merge copies; keys, values, original conditions, canonical kinds, cancellation and cleanup remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "binary_rows_reserve_binary_bytes_and_preserve_text_conversion",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/physical/tests.rs",
+      "capability": "Native row payload reservations",
+      "workload": "16 KiB binary identities mixed with multibyte and embedded-NUL text in UTF-8, UTF-16le and UTF-16be databases; 40 KiB read allowance.",
+      "invariant": "Point reads and iteration preserve storage classes and values without reserving text-conversion space for binary data; smaller allowances still reject and all reservations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_row_encoding_fits_its_complete_length_without_growing_copies",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/tests.rs",
+      "capability": "Native row encoding ownership",
+      "workload": "A 32 KiB BLOB followed by integer and text fields, with an allowance equal to the independently constructed encoded row.",
+      "invariant": "Exactly one complete output buffer fits the allowance, produces the pinned native bytes and releases all retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_hnsw_spill_builds_mutates_rolls_back_and_reopens",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/tests/spill.rs",
+      "capability": "Native HNSW retained spill lifecycle",
+      "workload": "20 vectors of 4096 dimensions under 256 KiB, retained readers, savepoint and transaction rollback, replacement, tombstone rebuild and cold reopen.",
+      "invariant": "The original allowance holds every lifecycle operation; retained and reopened queries keep their independently checked results and cleanup releases all memory.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

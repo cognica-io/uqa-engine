@@ -143,3 +143,46 @@ fn a_row_is_read_with_its_size_until_it_exceeds_the_inline_limit() {
         .is_none());
     assert_eq!(narrow.memory().used(), 0);
 }
+
+#[test]
+fn binary_rows_reserve_binary_bytes_and_preserve_text_conversion() {
+    for encoding in ["UTF-8", "UTF-16le", "UTF-16be"] {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(&format!(
+                "PRAGMA encoding = '{encoding}'; CREATE TABLE _schemas (name TEXT PRIMARY KEY, role_owner TEXT NOT NULL, acl_json TEXT)"
+            ))
+            .unwrap();
+        let layout = super::super::NativeRecordFamily::Schemas.layout();
+        let control = StorageReadControl::with_limit(40 * 1024);
+        let binary = vec![0xa7; 16 * 1024];
+        let text = "가\0é🌲".repeat(128);
+        for owner in [ValueRef::Blob(&binary), ValueRef::Text(text.as_bytes())] {
+            let values = [
+                ValueRef::Text(b"namespace"),
+                owner,
+                ValueRef::Text(text.as_bytes()),
+            ];
+            upsert(&connection, layout, &values, &control).unwrap();
+            let key = physical_key(layout, &values, &control).unwrap();
+            let row = get(&connection, layout, &key, &control).unwrap().unwrap();
+            assert_eq!(&*decode_row(&row, 3, &control).unwrap(), &values);
+            drop(row);
+            let mut count = 0;
+            visit(&connection, layout, &control, |found| {
+                assert_eq!(found, values);
+                count += 1;
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(count, 1);
+            let narrow = StorageReadControl::with_limit(1024);
+            assert!(matches!(
+                get(&connection, layout, &key, &narrow),
+                Err(crate::mvcc::Error::Version(VersionError::Memory(_)))
+            ));
+            assert_eq!(narrow.memory().used(), 0);
+        }
+        assert_eq!(control.memory().used(), 0);
+    }
+}

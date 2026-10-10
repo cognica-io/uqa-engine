@@ -368,3 +368,5 @@ fn publication_preserves_canonical_guards_for_atomic_admission() {
         assert!(after.get(key).is_none());
     }
 }
+
+mod spill;

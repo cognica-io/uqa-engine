@@ -237,6 +237,27 @@ fn native_rows_reject_corruption_and_release_failed_allocation_reservations() {
 }
 
 #[test]
+fn native_row_encoding_fits_its_complete_length_without_growing_copies() {
+    let binary = vec![0xa7; 32 * 1024];
+    let values = [
+        ValueRef::Blob(&binary),
+        ValueRef::Integer(7),
+        ValueRef::Text(b"end"),
+    ];
+    let mut expected = b"UNR\x01\0\x03\x04\0\0\x80\0".to_vec();
+    expected.extend_from_slice(&binary);
+    expected.push(1);
+    expected.extend_from_slice(&7_i64.to_be_bytes());
+    expected.extend_from_slice(b"\x03\0\0\0\x03end");
+    let control = StorageReadControl::with_limit(expected.len());
+    let encoded = encode_row(&values, &control).unwrap();
+    assert_eq!(&*encoded, expected);
+    assert_eq!(control.memory().used(), expected.len());
+    drop(encoded);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn native_record_fixture_pins_family_and_owner_encoding_and_checks_the_row_key() {
     let control = StorageReadControl::with_limit(4096);
     let row = [

@@ -10,6 +10,7 @@ import argparse
 import importlib.util
 import pathlib
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -24,6 +25,31 @@ SPEC.loader.exec_module(SYNC)
 
 
 class SyncUQAPGQueryTest(unittest.TestCase):
+    def test_build_adaptation_removes_only_the_obsolete_plugin_attributes(self) -> None:
+        body = '\nfn main() { println!("cargo:rerun-if-changed=libpg_query"); }\n'
+        with tempfile.TemporaryDirectory() as directory:
+            destination = pathlib.Path(directory)
+            build = destination / "build.rs"
+            build.write_text(
+                '#![cfg_attr(feature = "clippy", feature(plugin))]\n'
+                '#![cfg_attr(feature = "clippy", plugin(clippy))]\n' + body,
+                encoding="utf-8",
+            )
+            with mock.patch.object(SYNC, "DEST", destination):
+                SYNC.remove_legacy_clippy_plugin()
+            self.assertEqual(build.read_text(encoding="utf-8"), body)
+
+    def test_build_adaptation_rejects_an_unreviewed_upstream_header(self) -> None:
+        source = '#![cfg_attr(feature = "new_feature", feature(plugin))]\nfn main() {}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            destination = pathlib.Path(directory)
+            build = destination / "build.rs"
+            build.write_text(source, encoding="utf-8")
+            with mock.patch.object(SYNC, "DEST", destination):
+                with self.assertRaisesRegex(RuntimeError, "unexpected compiler-plugin"):
+                    SYNC.remove_legacy_clippy_plugin()
+            self.assertEqual(build.read_text(encoding="utf-8"), source)
+
     def test_format_imported_rust_uses_the_cargo_format_graph(self) -> None:
         with mock.patch.object(SYNC, "run") as run:
             SYNC.format_imported_rust()
@@ -37,14 +63,17 @@ class SyncUQAPGQueryTest(unittest.TestCase):
         imported = [("src/lib.rs", pathlib.Path("src/lib.rs"))]
         events: list[str] = []
         with (
+            mock.patch.object(SYNC, "remove_legacy_clippy_plugin") as adapt_build,
             mock.patch.object(SYNC, "format_imported_rust") as format_imported,
             mock.patch.object(SYNC, "write_checksums") as write_checksums,
         ):
+            adapt_build.side_effect = lambda: events.append("adapt")
             format_imported.side_effect = lambda: events.append("format")
             write_checksums.side_effect = lambda _imported: events.append("checksums")
             SYNC.finalize_import(imported)
 
-        self.assertEqual(events, ["format", "checksums"])
+        self.assertEqual(events, ["adapt", "format", "checksums"])
+        adapt_build.assert_called_once_with()
         format_imported.assert_called_once_with()
         write_checksums.assert_called_once_with(imported)
 
