@@ -99,3 +99,45 @@ fn nested_projection_and_binary_output_keep_the_original_inner_tuple() {
     assert_eq!(fields[2].1, Value::Int(23));
     assert_eq!(source, record(Value::Int(1_065_353_216)));
 }
+
+#[test]
+fn widening_keeps_in_bounds_fields_when_a_later_field_exceeds_the_original_tuple() {
+    let before = descriptor(
+        20_000,
+        &[
+            ("a", ColumnType::Integer),
+            ("b", ColumnType::Integer),
+            ("c", ColumnType::Integer),
+        ],
+    );
+    let original = Descriptors::from([(20_000, before.clone())]);
+    let mut current = original.clone();
+    Arc::make_mut(current.get_mut(&20_000).unwrap()).attributes[0].ty = ColumnType::BigInteger;
+    let source = Value::Record(
+        vec![
+            ("a".into(), Value::Int(16_909_060)),
+            ("b".into(), Value::Int(84_281_096)),
+            ("c".into(), Value::Int(287_454_020)),
+        ]
+        .into(),
+    );
+    let Value::Record(fields) =
+        project_value(&source, &reference(20_000), &original, &current, true).unwrap()
+    else {
+        panic!("retained record")
+    };
+    // PostgreSQL 18.4 and 18.6 both read the first eight bytes as a and the next four as b, even when c is not read.
+    assert_eq!(fields[0].1, Value::Int(361_984_551_007_945_476));
+    assert_eq!(fields[1].1, Value::Int(287_454_020));
+    let Value::Datum(tail) = &fields[2].1 else {
+        panic!("an unread tail must retain its physical position")
+    };
+    assert_eq!(tail.offset(), 36);
+    assert_eq!(tail.bytes().len(), 36);
+    assert_eq!(tail.type_oid(), 23);
+    assert!(crate::expr::datums::read(tail).is_err());
+    assert_eq!(
+        project_value(&source, &reference(20_000), &original, &original, true).unwrap(),
+        source
+    );
+}

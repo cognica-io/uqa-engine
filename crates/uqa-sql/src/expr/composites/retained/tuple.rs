@@ -68,9 +68,16 @@ pub(super) fn project(
             } else {
                 let length = width(length)?;
                 let end = offset.checked_add(length)?;
-                let mut bits = [0; 8];
-                bits[..length].copy_from_slice(bytes.get(offset..end)?);
-                datum::decode_bits(u64::from_le_bytes(bits), &attribute.ty)?
+                if let Some(bytes) = bytes.get(offset..end) {
+                    let mut bits = [0; 8];
+                    bits[..length].copy_from_slice(bytes);
+                    datum::decode_bits(u64::from_le_bytes(bits), &attribute.ty)?
+                } else {
+                    // A later field outside the original tuple must not discard earlier physical reads. Retain its position without reading or extending the owned bytes.
+                    Value::Datum(
+                        backing.field(base_oid(&attribute.ty)?, u32::try_from(offset).ok()?),
+                    )
+                }
             };
         }
         offset = offset.checked_add(if length == -1 {
@@ -227,12 +234,23 @@ mod tests {
         };
         let mut after = before.clone();
         after.attributes[0].ty = ColumnType::BigInteger;
-        assert!(project(
+        let Value::Record(fields) = project(
             &[("a".into(), Value::Int(4))],
             &before,
             &after,
-            &super::super::Descriptors::new()
+            &super::super::Descriptors::new(),
         )
-        .is_none());
+        .unwrap() else {
+            panic!("retained record")
+        };
+        let Value::Datum(field) = &fields[0].1 else {
+            panic!("unread fixed field")
+        };
+        assert_eq!(field.bytes().len(), 28);
+        assert_eq!(field.offset(), 24);
+        assert_eq!(field.type_oid(), 20);
+        let error = crate::expr::datums::read(field).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX001"));
+        assert_eq!(error.to_string(), "invalid datum length");
     }
 }
