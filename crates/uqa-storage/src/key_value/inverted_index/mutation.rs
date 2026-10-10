@@ -132,25 +132,6 @@ impl OccurrenceRead<'_> {
         Ok(())
     }
 
-    /// Write a cluster whose score and positions values are already encoded.
-    pub(super) fn put_encoded_cluster(
-        &self,
-        batch: &mut dyn KeyValueBatch,
-        cluster: &crate::inverted_index::StagedCluster<'_>,
-    ) -> StorageBackendResult<()> {
-        let key = |kind| {
-            keys::cluster_key(
-                self.table,
-                kind,
-                cluster.field,
-                cluster.term,
-                cluster.cluster,
-            )
-        };
-        batch.replace_occurrence_record(&key(keys::SCORE)?, Some(cluster.score))?;
-        batch.replace_occurrence_record(&key(keys::POSITIONS)?, Some(cluster.positions))
-    }
-
     pub(super) fn put_document(
         &self,
         batch: &mut dyn KeyValueBatch,

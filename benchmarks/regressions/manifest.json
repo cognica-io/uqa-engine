@@ -2382,6 +2382,32 @@
       "capability": "Failed spill conversion ownership",
       "workload": "128 resident records, full sibling pressure, a failed authenticated final flush, and a subsequent conversion of the original root under 64 KiB.",
       "invariant": "Failure removes the unpublished file and restores exactly the prior charged bytes; successful conversion releases unused workspace and preserves all records."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "complete_occurrence_rebuild_does_not_reenter_delta_resolution",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/occurrence_rebuild.rs",
+      "capability": "Text index structural replacement",
+      "workload": "16 and 1024 synthetic documents under a 512 KiB session allowance; peer commits, retained reader, savepoint undo, publication and fresh session reads.",
+      "invariant": "Complete replacements enter no occurrence delta resolver during refresh or publication; exact counts, frequencies, historical reads and allowance release remain correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "test": "complete_occurrence_rebuild_keeps_concurrent_source_conflicts",
+      "cases": 1,
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/occurrence_rebuild.rs",
+      "capability": "Text index structural replacement",
+      "workload": "A complete index rebuild and a concurrent document insertion in both commit orders.",
+      "invariant": "The second writer rejects both refresh and commit; rollback exposes only the winner and all retention is released.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

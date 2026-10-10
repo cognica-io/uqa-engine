@@ -63,23 +63,37 @@ impl OccurrenceRead<'_> {
         })?;
         staged.visit_clusters(&mut |cluster| {
             check()?;
-            self.put_encoded_cluster(batch, &cluster)
+            // The reset fenced this complete replacement. These are final rows,
+            // not document deltas to merge again after another session commits.
+            for (kind, value) in [
+                (keys::SCORE, cluster.score),
+                (keys::POSITIONS, cluster.positions),
+            ] {
+                batch.put(
+                    &keys::cluster_key(
+                        self.table,
+                        kind,
+                        cluster.field,
+                        cluster.term,
+                        cluster.cluster,
+                    )?,
+                    value,
+                )?;
+            }
+            Ok(())
         })?;
-        let totals = staged
-            .totals()
-            .iter()
-            .map(|(field, totals)| {
-                (
-                    field.clone(),
-                    FieldStats {
-                        revision: totals.revision,
-                        doc_count: totals.doc_count,
-                        total_length: totals.total_length,
-                    },
-                )
-            })
-            .collect();
-        self.put_field_statistics(batch, totals)?;
+        for (field, totals) in staged.totals() {
+            check()?;
+            let stats = FieldStats {
+                revision: totals.revision,
+                doc_count: totals.doc_count,
+                total_length: totals.total_length,
+            };
+            batch.put(
+                &keys::field_prefix(self.table, keys::FIELD, field)?,
+                &stats.to_bytes()?,
+            )?;
+        }
         Ok(check()?)
     }
 }
