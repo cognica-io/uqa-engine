@@ -25,7 +25,7 @@ function resolveProject(kind, project, options = {}) {
     const chunks = [];
     let stdoutBytes = 0;
     let stderrBytes = 0;
-    let failure;
+    let settled = false;
     let child;
     try {
       child = spawn(cliPath, args, { env, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -33,36 +33,49 @@ function resolveProject(kind, project, options = {}) {
       reject(new HttpEngineError("UQA CLI is unavailable"));
       return;
     }
-    const timer = setTimeout(() => {
-      failure = new HttpEngineError("UQA CLI connection lookup timed out");
-      child.kill("SIGKILL");
-    }, 30_000);
-    timer.unref();
-    child.once("error", () => {
+    const erase = () => {
+      for (const chunk of chunks) chunk.fill(0);
+      chunks.length = 0;
+    };
+    const fail = (message) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      failure = new HttpEngineError("UQA CLI is unavailable");
-      reject(failure);
-    });
+      child.kill("SIGKILL");
+      // A descendant can retain inherited pipes after the selected CLI exits.
+      // The lookup deadline and output bound must not wait for that process.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      erase();
+      reject(new HttpEngineError(message));
+    };
+    const timer = setTimeout(() => fail("UQA CLI connection lookup timed out"), 30_000);
+    timer.unref();
+    child.once("error", () => fail("UQA CLI is unavailable"));
     child.stdout.on("data", (chunk) => {
+      if (settled) { chunk.fill(0); return; }
       stdoutBytes += chunk.length;
       if (stdoutBytes <= MAX_OUTPUT_BYTES) chunks.push(chunk);
       else {
-        failure = new HttpEngineError("UQA CLI connection output exceeded the client safety limit");
-        child.kill("SIGKILL");
+        chunk.fill(0);
+        fail("UQA CLI connection output exceeded the client safety limit");
       }
     });
     child.stderr.on("data", (chunk) => {
       stderrBytes += chunk.length;
+      chunk.fill(0);
       if (stderrBytes > MAX_OUTPUT_BYTES) {
-        failure = new HttpEngineError("UQA CLI connection output exceeded the client safety limit");
-        child.kill("SIGKILL");
+        fail("UQA CLI connection output exceeded the client safety limit");
       }
     });
+    child.stdout.once("error", () => fail("UQA CLI connection output is invalid"));
+    child.stderr.once("error", () => fail("UQA CLI connection output is invalid"));
     child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       const bytes = Buffer.concat(chunks);
       try {
-        if (failure !== undefined) throw failure;
         if (code !== 0) throw new HttpEngineError("UQA CLI connection command failed");
         let connection;
         try { connection = JSON.parse(bytes.toString("utf8")); }
@@ -75,7 +88,7 @@ function resolveProject(kind, project, options = {}) {
         reject(error);
       } finally {
         bytes.fill(0);
-        for (const chunk of chunks) chunk.fill(0);
+        erase();
       }
     });
   });

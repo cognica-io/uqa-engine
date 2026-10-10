@@ -8,7 +8,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, chmodSync, rmSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,6 +17,7 @@ import { promisify, inspect } from "node:util";
 import { registerNotificationProtocolTests } from "./notifications/protocol.mjs";
 import { registerNotificationPortabilityTests } from "./notifications/portability.mjs";
 import { registerNotificationHTTPTests } from "./notifications/http.mjs";
+import { registerCLILifecycleTests } from "./http_cli.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../../crates/uqa-node/", import.meta.url));
@@ -33,6 +34,7 @@ const uqa = require("@cognica-io/uqa");
 registerNotificationProtocolTests(packagePath);
 registerNotificationPortabilityTests(packagePath);
 registerNotificationHTTPTests(packagePath);
+registerCLILifecycleTests(packagePath);
 after(() => rmSync(directory, { recursive: true, force: true }));
 
 async function server(handler, run) {
@@ -265,48 +267,21 @@ test("HTTP validates origin, malformed responses, lengths, and counters", async 
   }
 });
 
-test("CLI project lookup retains literal arguments and excludes UQA_TOKEN", { skip: process.platform === "win32" }, async () => {
-  const cli = join(directory, "fake-uqa");
+async function cliFixture(mode, origin = "") {
+  const fixture = fileURLToPath(new URL("./fixtures/cli/", import.meta.url));
+  await exec(process.execPath, [join(fixture, "driver.cjs"), packagePath, mode, origin], {
+    cwd: fixture, env: { ...process.env, UQA_TOKEN: "must-not-reach-child" },
+  });
+}
+
+test("CLI project lookup retains literal arguments and excludes UQA_TOKEN", async () => {
   await server((request, response) => json(response, result()), async (origin) => {
-    writeFileSync(cli, [
-      "#!/bin/sh",
-      'test -z "$UQA_TOKEN" || exit 31',
-      'test "$1" = cloud && test "$2" = connection || exit 32',
-      'test "$3" = \'a;$(false)\' || exit 33',
-      'test "$4" = --format && test "$5" = json || exit 34',
-      'test "$6" = --org && test "$7" = organization || exit 35',
-      "printf '%s' '" + JSON.stringify({ url: origin, token: "token" }) + "'",
-      "",
-    ].join("\n"));
-    chmodSync(cli, 0o700);
-    const previous = process.env.UQA_TOKEN;
-    process.env.UQA_TOKEN = "must-not-reach-child";
-    try {
-      const engine = await uqa.HttpEngine.cloud("a;$(false)", { cliPath: cli, organization: "organization" });
-      assert.deepEqual((await engine.sql("SELECT 1")).rows, [{ n: 1 }]);
-    } finally {
-      if (previous === undefined) delete process.env.UQA_TOKEN;
-      else process.env.UQA_TOKEN = previous;
-    }
+    await cliFixture("cloud", origin);
   });
 });
 
-test("CLI failures and oversized output do not expose captured secrets", { skip: process.platform === "win32" }, async () => {
-  const cli = join(directory, "failed-uqa");
-  for (const program of [
-    'echo "private token" >&2; exit 1',
-    'i=0; while test "$i" -lt 10000; do printf "private token"; i=$((i + 1)); done',
-    'printf "private malformed JSON"',
-  ]) {
-    writeFileSync(cli, "#!/bin/sh\n" + program + "\n");
-    chmodSync(cli, 0o700);
-    await assert.rejects(uqa.HttpEngine.local("project", { cliPath: cli }), (error) => {
-      for (const secret of ["private token", "private malformed JSON"]) {
-        assert.equal(inspect(error).includes(secret), false);
-      }
-      return true;
-    });
-  }
+test("CLI failures and oversized output do not expose captured secrets", async () => {
+  await cliFixture("failures");
 });
 
 test("packed npm package installs offline and runs HTTP without native artifacts", async () => {
