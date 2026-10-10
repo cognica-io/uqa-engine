@@ -60,6 +60,7 @@ pub(crate) struct Map<V> {
     len: usize,
     memory: MemoryBudget,
     resident_bytes: usize,
+    max_encoded_bytes: usize,
 }
 
 impl<V> Clone for Map<V> {
@@ -69,6 +70,7 @@ impl<V> Clone for Map<V> {
             len: self.len,
             memory: self.memory.clone(),
             resident_bytes: self.resident_bytes,
+            max_encoded_bytes: self.max_encoded_bytes,
         }
     }
 }
@@ -89,6 +91,7 @@ impl<V: Record> Map<V> {
             len: 0,
             memory: memory.clone(),
             resident_bytes,
+            max_encoded_bytes: 0,
         }
     }
 
@@ -204,6 +207,18 @@ impl<V: Record> Map<V> {
     /// Return ownership when the resident tree cannot admit the value. Both a
     /// live mutation and an unpublished ordered builder use the same allowance.
     fn insert_resident(&mut self, key: u128, value: V) -> StorageBackendResult<Option<V>> {
+        let encoded_bytes = self.max_encoded_bytes.max(value.encoded_bytes()?);
+        let _workspace = if matches!(self.root, Root::Memory(_)) {
+            match self.reserve_spill_workspace(encoded_bytes) {
+                Ok(workspace) => workspace,
+                Err(StorageBackendError::Memory(MemoryError::Limit { .. })) => {
+                    return Ok(Some(value));
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            return Ok(Some(value));
+        };
         if let Root::Memory(map) = &mut self.root {
             let bytes = value
                 .memory_bytes()?
@@ -213,7 +228,10 @@ impl<V: Record> Map<V> {
                 Ok(memory) => {
                     let value = Arc::new(Budgeted::new(value, memory));
                     match map.try_insert(key, Some(Arc::clone(&value))) {
-                        Ok(()) => return Ok(None),
+                        Ok(()) => {
+                            self.max_encoded_bytes = encoded_bytes;
+                            return Ok(None);
+                        }
                         Err(MemoryError::Limit { .. }) => {
                             let value = match Arc::try_unwrap(value) {
                                 Ok(value) => value.into_parts().0,
@@ -229,6 +247,22 @@ impl<V: Record> Map<V> {
             }
         }
         Ok(Some(value))
+    }
+
+    /// A successful resident growth leaves enough shared allowance to encode
+    /// its largest record and convert the complete immutable root. A budget
+    /// smaller than the conversion workspace can only hold a resident map.
+    fn reserve_spill_workspace(
+        &self,
+        encoded_bytes: usize,
+    ) -> StorageBackendResult<Option<MemoryReservation>> {
+        let bytes = disk::Builder::workspace_bytes(&self.memory)
+            .checked_add(encoded_bytes)
+            .ok_or(MemoryError::SizeOverflow)?;
+        if bytes > self.memory.limit() {
+            return Ok(None);
+        }
+        Ok(Some(self.memory.reserve(bytes)?))
     }
 
     fn insert_disk(
@@ -260,13 +294,28 @@ impl<V: Record> Map<V> {
         if !self.contains_key(key)? {
             return Ok(());
         }
+        let workspace = if matches!(self.root, Root::Memory(_)) {
+            match self.reserve_spill_workspace(self.max_encoded_bytes) {
+                Ok(workspace) => workspace,
+                Err(StorageBackendError::Memory(MemoryError::Limit { .. })) => {
+                    self.spill(control)?;
+                    None
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
         if let Root::Memory(map) = &mut self.root {
             match map.try_insert(key, None) {
                 Ok(()) => {
                     self.len -= 1;
                     return Ok(());
                 }
-                Err(MemoryError::Limit { .. }) => self.spill(control)?,
+                Err(MemoryError::Limit { .. }) => {
+                    drop(workspace);
+                    self.spill(control)?;
+                }
                 Err(error) => return Err(error.into()),
             }
         }

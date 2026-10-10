@@ -1484,12 +1484,12 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
-      "test": "prepared_private_roots_copy_sorted_spill_once_and_preserve_undo",
+      "test": "prepared_private_roots_share_sorted_spill_and_preserve_undo",
       "cases": 1,
       "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
       "capability": "Spilled transaction refresh",
       "workload": "4/128/512 one-KiB records; unclassified and grouped private revisions under 128 KiB.",
-      "invariant": "Each spilled payload is written exactly once without merging; complete values, preconditions, cancellation, retained roots and savepoint undo agree.",
+      "invariant": "Adoption and repeated preparation write no immutable payload bytes; complete values, fingerprints, preconditions, cancellation, independent roots and savepoint undo agree.",
       "case_names": [
         ""
       ]
@@ -2093,6 +2093,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prepared_spill_adoption_preserves_independent_allowance_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Spilled transaction refresh",
+      "workload": "128/512 one-KiB records adopted into independent 128 KiB and undersized 1 KiB allowances.",
+      "invariant": "Different allowances copy and charge their own run; insufficient budgets fail, closing the source releases all original leases and the independent root retains exact results."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resident_growth_keeps_spill_workspace_under_shared_ancestor_pressure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Shared spill workspace admission",
+      "workload": "512 records through unordered and ordered construction under a 64 KiB ancestor with 32 KiB retained elsewhere and a larger child allowance.",
+      "invariant": "Resident growth leaves room for disk conversion, preserving exact values, independent roots and complete final allowance release."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "tiny_runs_share_each_pass_file_and_preserve_stable_output_and_cleanup",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/external_sort/tests/files.rs",
+      "capability": "Bounded external sort files",
+      "workload": "257 indivisible rows with duplicate keys under a one-byte encoded allowance, full drain and early stop.",
+      "invariant": "One physical file during initial-run construction, the same 257 runs and fixed-fan-in merge passes, exact stable output and complete file cleanup."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_segments_bound_readers_and_reject_appends_after_another_segment",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/file/tests.rs",
+      "capability": "Immutable spill segments",
+      "workload": "Adjacent small and multi-block values in one encrypted file, rejected append to an older segment and retained repeatable readers.",
+      "invariant": "Readers stay within their own bytes, rejected append preserves file contents and pending ownership, and the final reader releases the sole file."
     }
   ]
 }

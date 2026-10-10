@@ -24,8 +24,12 @@ pub(super) struct Blocks {
 }
 
 impl Blocks {
+    pub(super) fn workspace_bytes(memory: &MemoryBudget) -> usize {
+        (memory.limit() / 64 / size_of::<Block>()).min(64) * size_of::<Block>()
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        let count = (memory.limit() / 64 / size_of::<Block>()).min(64);
+        let count = Self::workspace_bytes(memory) / size_of::<Block>();
         let (count, reservation) = match memory.reserve(count * size_of::<Block>()) {
             Ok(reservation) => (count, reservation),
             Err(MemoryError::Limit { .. }) => (0, memory.empty_reservation()),

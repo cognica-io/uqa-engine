@@ -38,6 +38,13 @@ impl RunSet {
         self.0.is_none()
     }
 
+    pub(super) fn only_run(&self) -> Option<&Arc<SpilledRun>> {
+        match self.runs() {
+            [run] => Some(run),
+            _ => None,
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.0.as_ref().map_or(0, |runs| runs.len())

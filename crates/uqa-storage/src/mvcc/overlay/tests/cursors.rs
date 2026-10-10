@@ -56,7 +56,7 @@ fn revision_reads_stream_each_spilled_entry_once_without_payloads() {
 }
 
 #[test]
-fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
+fn prepared_private_roots_share_sorted_spill_and_preserve_undo() {
     for count in [4, 128, 512] {
         for grouped in [false, true] {
             let control = StorageReadControl::with_limit(128 << 10);
@@ -68,13 +68,19 @@ fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
             let prepared = source.prepare(&control).unwrap();
             let scope: Option<PrivateRevisionScope> = grouped.then_some(|key| Ok(key.get(..1)));
             super::super::run::write_counts::take();
+            super::super::run::read_counts::take();
             let changes = PrivateRecordChanges::from_prepared(&prepared, scope, &control).unwrap();
             let written = super::super::run::write_counts::take();
             assert_eq!(
-                written.bytes,
-                if count == 4 { 0 } else { (count * 1024) as u64 }
+                written.bytes, 0,
+                "immutable prepared values must not be rewritten"
             );
-            assert_eq!(written.copied, 0, "sorted inputs must not be merged again");
+            assert_eq!(written.copied, 0);
+            assert_eq!(super::super::run::read_counts::take().values, 0);
+            let again = changes.prepare(&control).unwrap();
+            assert_eq!(again.fingerprint(), prepared.fingerprint());
+            assert_eq!(super::super::run::write_counts::take().bytes, 0);
+            drop(again);
             let retained = changes.snapshot().unwrap();
             assert_streamed_matches(&retained, &model, &control);
             if grouped {
@@ -90,11 +96,49 @@ fn prepared_private_roots_copy_sorted_spill_once_and_preserve_undo() {
             assert_eq!(changes.snapshot().unwrap().revision(), retained.revision());
             assert_streamed_matches(&changes.snapshot().unwrap(), &model, &control);
             assert_streamed_matches(&retained, &model, &control);
+            stage(
+                &source,
+                &mut Model::new(),
+                0,
+                Some("changed".into()),
+                &control,
+            );
+            assert_streamed_matches(&changes.snapshot().unwrap(), &model, &control);
             control.cancellation().cancel();
             assert!(PrivateRecordChanges::from_prepared(&prepared, scope, &control).is_err());
             drop((retained, changes, prepared, source));
             assert_eq!(control.memory().used(), 0);
         }
+    }
+}
+
+#[test]
+fn prepared_spill_adoption_preserves_independent_allowance_ownership() {
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let source = PrivateRecordChanges::new(control.memory());
+        let mut model = Model::new();
+        for id in 0..count {
+            stage(&source, &mut model, id, Some("x".repeat(1024)), &control);
+        }
+        let prepared = source.prepare(&control).unwrap();
+        assert!(prepared.resident().is_none());
+        let independent = StorageReadControl::with_limit(128 << 10);
+        super::super::run::write_counts::take();
+        let changes = PrivateRecordChanges::from_prepared(&prepared, None, &independent).unwrap();
+        assert_eq!(
+            super::super::run::write_counts::take().bytes,
+            count as u64 * 1024
+        );
+        let undersized = StorageReadControl::with_limit(1024);
+        assert!(PrivateRecordChanges::from_prepared(&prepared, None, &undersized).is_err());
+        assert_eq!(undersized.memory().used(), 0);
+        drop((source, prepared));
+        assert_eq!(control.memory().used(), 0);
+        assert!(independent.memory().used() > 0);
+        assert_streamed_matches(&changes.snapshot().unwrap(), &model, &independent);
+        drop(changes);
+        assert_eq!(independent.memory().used(), 0);
     }
 }
 

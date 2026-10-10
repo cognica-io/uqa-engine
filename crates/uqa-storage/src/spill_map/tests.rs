@@ -18,6 +18,46 @@ fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
 }
 
 #[test]
+fn resident_growth_keeps_spill_workspace_under_shared_ancestor_pressure() {
+    for ordered in [false, true] {
+        let owner = MemoryBudget::new(64 * 1024);
+        let retained = owner.reserve(32 * 1024).unwrap();
+        let component = owner.child(256 * 1024);
+        let map = if ordered {
+            let mut builder = Builder::new(&component, 64 * 1024);
+            for key in 0..512_u128 {
+                builder.insert(key, key as u64, None).unwrap();
+            }
+            builder.finish(None).unwrap()
+        } else {
+            let mut map = Map::new(&component, 64 * 1024);
+            for key in 0..512_u128 {
+                map.insert(key, key as u64, None).unwrap();
+            }
+            map
+        };
+        assert!(map.is_spilled());
+        assert_eq!(
+            entries(&map),
+            (0..512).map(|key| (key, key as u64)).collect::<Vec<_>>()
+        );
+        let original = map.clone();
+        let mut changed = map;
+        changed.insert(17, 900, None).unwrap();
+        changed.remove(18, None).unwrap();
+        assert_eq!(*original.get(17).unwrap().unwrap(), 17);
+        assert_eq!(*original.get(18).unwrap().unwrap(), 18);
+        assert_eq!(*changed.get(17).unwrap().unwrap(), 900);
+        assert!(changed.get(18).unwrap().is_none());
+        drop((changed, original));
+        assert_eq!(owner.used(), retained.bytes());
+        assert!(owner.peak() <= owner.limit());
+        drop(retained);
+        assert_eq!(owner.used(), 0);
+    }
+}
+
+#[test]
 fn ordered_construction_spills_linearly_and_preserves_unordered_replacements() {
     for count in [128_u128, 512] {
         let control = StorageReadControl::with_limit(64 * 1024);

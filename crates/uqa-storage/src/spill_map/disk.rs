@@ -65,6 +65,16 @@ pub(super) struct Builder {
 }
 
 impl Builder {
+    /// Conversion retains the input root while building an independent file.
+    /// Include both page caches so resident admission cannot consume their workspace.
+    pub(super) fn workspace_bytes(memory: &MemoryBudget) -> usize {
+        size_of::<[Header; 128]>()
+            + BLOCK_BYTES
+            + size_of::<Pages>()
+            + Map::cache_slots(memory) * size_of::<Cache>()
+            + cache::Blocks::workspace_bytes(memory)
+    }
+
     #[cfg(test)]
     pub(super) fn fail_write_after(&self, bytes: usize) {
         self.map.fail_write_after(bytes);
@@ -190,6 +200,15 @@ impl Builder {
 }
 
 impl Map {
+    fn cache_slots(memory: &MemoryBudget) -> usize {
+        let slots = (memory.limit() / 64 / size_of::<Cache>()).min(256);
+        if slots == 0 {
+            0
+        } else {
+            1 << slots.ilog2()
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn path(&self) -> std::path::PathBuf {
         self.file.lock().file.path().to_path_buf()
@@ -211,8 +230,7 @@ impl Map {
     }
 
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        let slots = (memory.limit() / 64 / size_of::<Cache>()).min(256);
-        let slots = if slots == 0 { 0 } else { 1 << slots.ilog2() };
+        let slots = Self::cache_slots(memory);
         let reservation = memory.reserve(size_of::<Pages>() + slots * size_of::<Cache>())?;
         let file = BlockTemporaryFile::new().map_err(io)?;
         Ok(Self {

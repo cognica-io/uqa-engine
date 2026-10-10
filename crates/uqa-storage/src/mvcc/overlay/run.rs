@@ -68,6 +68,10 @@ pub(in crate::mvcc) struct SpilledRun {
 }
 
 impl SpilledRun {
+    pub(in crate::mvcc) fn shares_allowance(&self, memory: &MemoryBudget) -> bool {
+        self.cache.memory().shares_allowance(memory)
+    }
+
     /// Share decoded blocks while a lookup operation is active, without tying their lifetime to this run.
     pub(in crate::mvcc) fn cache_reader(&self) -> RunCacheReader {
         self.cache.reader()
