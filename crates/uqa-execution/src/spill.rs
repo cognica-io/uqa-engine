@@ -127,6 +127,11 @@ impl EncodedBatchSizer {
     }
 }
 
+struct ArenaSegment {
+    arena: SpillFileArena,
+    range: Option<Range<u64>>,
+}
+
 /// Append-only batch buffer with an encoded-byte memory budget.
 ///
 /// The budget is exact for the serialized representation and does not claim to
@@ -144,8 +149,7 @@ pub struct SpillBuffer {
     budget_bytes: usize,
     spill_directory: Option<PathBuf>,
     spill_file: Option<NamedTempFile>,
-    spill_arena: Option<SpillFileArena>,
-    spill_range: Option<Range<u64>>,
+    spill_segment: Option<Box<ArenaSegment>>,
     spilled_batches: usize,
     spilled_rows: usize,
     spilled_bytes: usize,
@@ -164,8 +168,7 @@ impl SpillBuffer {
             budget_bytes,
             spill_directory: None,
             spill_file: None,
-            spill_arena: None,
-            spill_range: None,
+            spill_segment: None,
             spilled_batches: 0,
             spilled_rows: 0,
             spilled_bytes: 0,
@@ -189,7 +192,10 @@ impl SpillBuffer {
 
     /// A caller appends each segment completely before beginning the next one.
     pub(crate) fn with_arena(mut self, arena: &SpillFileArena) -> Self {
-        self.spill_arena = Some(arena.clone());
+        self.spill_segment = Some(Box::new(ArenaSegment {
+            arena: arena.clone(),
+            range: None,
+        }));
         self
     }
 
@@ -355,8 +361,8 @@ impl SpillBuffer {
             .max_spilled_record_bytes
             .max(self.max_in_memory_record_bytes);
 
-        if let Some(arena) = &self.spill_arena {
-            self.spill_file = Some(arena.append(&self.batches, &mut self.spill_range)?);
+        if let Some(segment) = &mut self.spill_segment {
+            self.spill_file = Some(segment.arena.append(&self.batches, &mut segment.range)?);
         } else if let Some(file) = self.spill_file.as_mut() {
             append_batches(file.as_file_mut(), &self.batches)?;
         } else {
@@ -384,7 +390,7 @@ impl SpillBuffer {
         let reader = self
             .spill_file
             .as_ref()
-            .map(|file| open_spill_reader(file, self.spill_range.as_ref()))
+            .map(|file| open_spill_reader(file, self.spill_range()))
             .transpose()?;
         let disk_finished = reader.is_none();
         Ok(SpillReader {
@@ -411,10 +417,12 @@ impl SpillBuffer {
         let reader = self
             .spill_file
             .as_ref()
-            .map(|file| open_spill_reader(file, self.spill_range.as_ref()))
+            .map(|file| open_spill_reader(file, self.spill_range()))
             .transpose()?;
         let spill_file = self.spill_file.take();
-        self.spill_range = None;
+        if let Some(segment) = &mut self.spill_segment {
+            segment.range = None;
+        }
         let memory = std::mem::take(&mut self.batches).into_iter();
         let expected_schema = self.schema.take();
 
@@ -454,7 +462,9 @@ impl SpillBuffer {
         self.schema = None;
         self.batches.clear();
         self.spill_file = None;
-        self.spill_range = None;
+        if let Some(segment) = &mut self.spill_segment {
+            segment.range = None;
+        }
         self.rows = 0;
         self.in_memory_rows = 0;
         self.in_memory_bytes = 0;
@@ -499,13 +509,19 @@ impl SpillBuffer {
                 schema,
                 rows,
                 max_record_bytes: self.max_spilled_record_bytes,
-                range: self.spill_range,
+                range: self.spill_segment.and_then(|segment| segment.range),
             }),
         })
     }
 
     fn create_spill_file(&self) -> ExecResult<NamedTempFile> {
         file::create(self.spill_directory.as_deref())
+    }
+
+    fn spill_range(&self) -> Option<&Range<u64>> {
+        self.spill_segment
+            .as_ref()
+            .and_then(|segment| segment.range.as_ref())
     }
 
     fn retain_batch(&mut self, batch: Batch, encoded_bytes: usize) {
