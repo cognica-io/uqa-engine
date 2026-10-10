@@ -57,7 +57,7 @@ fn incremental_cluster_encoding_retains_only_one_decoded_score_block() {
         for (offset, posting) in decoded.iter().enumerate() {
             assert_eq!(posting.doc_id, offset as u64 + 1);
             assert_eq!(posting.doc_length, 7);
-            assert_eq!(posting.occurrences, [occurrence.clone()]);
+            assert_eq!(posting.occurrences, [occurrence]);
         }
         assert!(control.memory().peak() <= 1 << 20);
         drop((scores, positions, retained));
