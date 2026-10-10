@@ -10,7 +10,7 @@ use uqa_core::DocId;
 
 use super::metric::{deterministic_level, normalize_with_norm};
 use super::prepare::{check, Control};
-use super::search::Candidate;
+use super::search::{Candidate, Query};
 use super::types::{active_key, HNSWIndex, HNSWNode};
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -58,15 +58,16 @@ impl HNSWIndex {
             self.max_level = level;
             return Ok(());
         };
+        let mut query = Query::new(&normalized_vector, &self.memory);
         if previous_max_level > level {
             for layer in ((level + 1)..=previous_max_level).rev() {
-                entry = self.greedy_search_layer(&normalized_vector, entry, layer, control)?;
+                entry = self.greedy_search_layer(&mut query, entry, layer, control)?;
             }
         }
         for layer in (0..=level.min(previous_max_level)).rev() {
             check(control)?;
             let candidates = self.search_layer(
-                &normalized_vector,
+                &mut query,
                 &[entry],
                 self.params.ef_construction,
                 layer,

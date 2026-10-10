@@ -131,6 +131,94 @@ fn diversity_selection_reuses_selected_vectors_within_the_original_allowance() {
 }
 
 #[test]
+fn neighbor_scoring_reuses_its_vectors_during_diversity_selection() {
+    for dimensions in [512, 1024] {
+        let control = StorageReadControl::with_limit(512 * 1024);
+        let graph = ring(dimensions, 128, &control).finish().unwrap();
+        let reference_control = StorageReadControl::with_limit(8 * 1024 * 1024);
+        let reference = ring(dimensions, 128, &reference_control).finish().unwrap();
+        let query = vector(19, dimensions);
+        let expected = reference
+            .select_neighbors(&query, [5, 17, 39], 3, None, Some(&reference_control))
+            .unwrap();
+        super::super::store::DECODED_VECTOR_FLOATS.set(0);
+        let selected = graph
+            .select_neighbors(&query, [5, 17, 39], 3, None, Some(&control))
+            .unwrap();
+        assert_eq!(selected, expected);
+        if dimensions == 512 {
+            assert_eq!(
+                super::super::store::DECODED_VECTOR_FLOATS.get(),
+                3 * dimensions
+            );
+        }
+        assert_eq!(
+            graph
+                .select_neighbors(&query, [5, 17, 39, 17], 2, Some(5), Some(&control))
+                .unwrap(),
+            reference
+                .select_neighbors(
+                    &query,
+                    [5, 17, 39, 17],
+                    2,
+                    Some(5),
+                    Some(&reference_control)
+                )
+                .unwrap()
+        );
+        drop((graph, reference));
+        assert_eq!(control.memory().used(), 0);
+        assert_eq!(reference_control.memory().used(), 0);
+        assert!(control.memory().peak() <= control.memory().limit());
+    }
+}
+
+#[test]
+fn hierarchy_query_reuses_exact_distances_and_keeps_uncached_fallback() {
+    use super::super::search::{Candidate, Query};
+    for dimensions in [256, 1024] {
+        let control = StorageReadControl::with_limit(128 * 1024);
+        let graph = ring(dimensions, 128, &control).finish().unwrap();
+        let values = vector(19, dimensions);
+        let expected = (1..=32)
+            .map(|node_id| Candidate {
+                node_id,
+                distance: super::super::metric::distance(
+                    &values,
+                    &graph.normalized_vector(node_id).unwrap().values,
+                ),
+            })
+            .collect::<Vec<_>>();
+        let mut query = Query::new(&values, control.memory());
+        super::super::store::DECODED_VECTOR_FLOATS.set(0);
+        for _ in 0..3 {
+            for candidate in expected.iter().rev() {
+                assert_eq!(
+                    query.score(&graph, candidate.node_id).unwrap(),
+                    Some(*candidate)
+                );
+            }
+        }
+        assert_eq!(
+            super::super::store::DECODED_VECTOR_FLOATS.get(),
+            32 * dimensions
+        );
+        assert!(query.score(&graph, 500).unwrap().is_none());
+        drop(query);
+        let mut uncached = Query::new(&values, &control.memory().child(128));
+        for candidate in &expected {
+            assert_eq!(
+                uncached.score(&graph, candidate.node_id).unwrap(),
+                Some(*candidate)
+            );
+        }
+        drop((uncached, graph));
+        assert_eq!(control.memory().used(), 0);
+        assert!(control.memory().peak() <= control.memory().limit());
+    }
+}
+
+#[test]
 fn spilled_topology_validation_does_not_decode_dense_vectors() {
     for dimensions in [256, 1024] {
         let control = StorageReadControl::with_limit(128 * 1024);

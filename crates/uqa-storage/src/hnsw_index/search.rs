@@ -6,9 +6,11 @@
 
 //! Greedy hierarchy traversal and bounded layer search.
 
+mod query;
+pub(super) use query::Query;
+
 use std::cmp::Ordering;
 
-use super::metric::distance;
 use super::prepare::{check, Control};
 use super::queue::{Candidates, Queue};
 use super::types::{HNSWIndex, NodeId};
@@ -46,20 +48,15 @@ impl Ord for Candidate {
 impl HNSWIndex {
     pub(super) fn greedy_search_layer(
         &self,
-        query: &[f32],
+        query: &mut Query<'_>,
         entry: NodeId,
         layer: usize,
         control: Control<'_>,
     ) -> StorageBackendResult<NodeId> {
         check(control)?;
-        let Some(entry_node) = self.normalized_vectors.get(u128::from(entry))? else {
+        let Some(mut best) = query.score(self, entry)? else {
             return Ok(entry);
         };
-        let mut best = Candidate {
-            distance: distance(query, &entry_node.values),
-            node_id: entry,
-        };
-        drop(entry_node);
         loop {
             check(control)?;
             let mut improved = false;
@@ -71,12 +68,8 @@ impl HNSWIndex {
             };
             for &neighbor_id in neighbors {
                 check(control)?;
-                let Some(neighbor) = self.normalized_vectors.get(u128::from(neighbor_id))? else {
+                let Some(candidate) = query.score(self, neighbor_id)? else {
                     continue;
-                };
-                let candidate = Candidate {
-                    distance: distance(query, &neighbor.values),
-                    node_id: neighbor_id,
                 };
                 if candidate < best {
                     best = candidate;
@@ -91,7 +84,7 @@ impl HNSWIndex {
 
     pub(super) fn search_layer(
         &self,
-        query: &[f32],
+        query: &mut Query<'_>,
         entries: &[NodeId],
         ef: usize,
         layer: usize,
@@ -112,16 +105,12 @@ impl HNSWIndex {
         let mut nearest = Queue::<false>::new(workspace);
         for entry in entries {
             check(control)?;
-            let Some(node) = self.normalized_vectors.get(u128::from(*entry))? else {
+            let Some(candidate) = query.score(self, *entry)? else {
                 continue;
             };
             if !visited.insert(*entry)? {
                 continue;
             }
-            let candidate = Candidate {
-                distance: distance(query, &node.values),
-                node_id: *entry,
-            };
             candidates.push(candidate)?;
             nearest.push(candidate)?;
         }
@@ -141,12 +130,8 @@ impl HNSWIndex {
                 if !visited.insert(neighbor_id)? {
                     continue;
                 }
-                let Some(neighbor) = self.normalized_vectors.get(u128::from(neighbor_id))? else {
+                let Some(candidate) = query.score(self, neighbor_id)? else {
                     continue;
-                };
-                let candidate = Candidate {
-                    distance: distance(query, &neighbor.values),
-                    node_id: neighbor_id,
                 };
                 if nearest.len() < ef || nearest.peek()?.is_some_and(|worst| candidate < worst) {
                     candidates.push(candidate)?;
@@ -173,9 +158,10 @@ impl HNSWIndex {
                 StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
             return Ok(Queue::<false>::new(control.unwrap_or(&fallback)).into_sorted());
         };
+        let mut query = Query::new(query, &self.memory);
         for layer in (1..=self.max_level).rev() {
-            entry = self.greedy_search_layer(query, entry, layer, control)?;
+            entry = self.greedy_search_layer(&mut query, entry, layer, control)?;
         }
-        self.search_layer(query, &[entry], ef, 0, control, control)
+        self.search_layer(&mut query, &[entry], ef, 0, control, control)
     }
 }

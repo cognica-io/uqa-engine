@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse HNSW candidate vectors between scoring and diversity selection, and retain exact query distances across hierarchy levels within bounded portions of the original memory allowance. Preserve floating-point bits, graph construction order, candidate ties and uncached results.
+
 - Stream ordered HNSW vector restoration and vector-effect restaging into bulk spill files, assign generated write kinds directly, and reuse decoded selected vectors within the original allowance during diversity selection. Read private mutation conditions once and share authenticated entry blocks within an evaluated batch. Preserve unordered restoration, exact graph/search results, conflict preconditions, undo and failure atomicity.
 
 - Preserve transaction-local document counts across unrelated maintenance commits by checking each table's last committed change against the observed snapshot, while retaining peer-row refresh, rollback and read-free own-commit adoption.

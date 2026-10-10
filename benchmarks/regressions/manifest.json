@@ -1728,6 +1728,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "neighbor_scoring_reuses_its_vectors_during_diversity_selection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW scored candidate reuse",
+      "workload": "128 spilled nodes, 512/1024 dimensions, three candidates, duplicate identities and exclusion.",
+      "invariant": "Admitted scored vectors are decoded once across scoring and diversity selection; partial admission preserves complete output and the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hierarchy_query_reuses_exact_distances_and_keeps_uncached_fallback",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW hierarchy distance reuse",
+      "workload": "128 spilled nodes, 32 identities visited three times, missing identity and a cache too small for one score.",
+      "invariant": "Every admitted node vector is read once per query; repeated scores preserve exact float bits and uncached fallback releases the original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

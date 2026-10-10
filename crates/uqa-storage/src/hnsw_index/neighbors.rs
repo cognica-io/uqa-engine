@@ -14,6 +14,8 @@ use super::types::{HNSWIndex, HNSWVector, NodeId};
 use crate::StorageBackendResult;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
+type DecodedVectors = BudgetedVec<(NodeId, Budgeted<HNSWVector>)>;
+
 impl HNSWIndex {
     pub(super) fn ensure_layer_zero_backbone(
         &self,
@@ -131,6 +133,7 @@ impl HNSWIndex {
     ) -> StorageBackendResult<Vec<NodeId>> {
         check(control)?;
         let mut scored = Vec::new();
+        let mut decoded = self.decoded_vectors();
         for node_id in candidates {
             check(control)?;
             if Some(node_id) != exclude {
@@ -139,13 +142,22 @@ impl HNSWIndex {
                         distance: distance(query, &node.values),
                         node_id,
                     });
+                    if !decoded.iter().any(|(id, _)| *id == node_id) {
+                        retain_vector(&mut decoded, node_id, &node)?;
+                    }
                 }
             }
         }
         let mut candidates = scored;
         candidates.sort();
         candidates.dedup_by_key(|candidate| candidate.node_id);
-        self.select_candidates(candidates.into_iter().map(Ok), limit, exclude, control)
+        self.select_cached_candidates(
+            candidates.into_iter().map(Ok),
+            limit,
+            exclude,
+            control,
+            decoded,
+        )
     }
 
     pub(super) fn select_candidates(
@@ -155,16 +167,30 @@ impl HNSWIndex {
         exclude: Option<NodeId>,
         control: Control<'_>,
     ) -> StorageBackendResult<Vec<NodeId>> {
+        self.select_cached_candidates(candidates, limit, exclude, control, self.decoded_vectors())
+    }
+
+    fn decoded_vectors(&self) -> DecodedVectors {
+        let memory = self
+            .memory
+            .child((self.memory.limit() / 64).min(self.memory.available() / 4));
+        BudgetedVec::new(&memory)
+    }
+
+    fn select_cached_candidates(
+        &self,
+        candidates: impl IntoIterator<Item = StorageBackendResult<Candidate>>,
+        limit: usize,
+        exclude: Option<NodeId>,
+        control: Control<'_>,
+        mut decoded: DecodedVectors,
+    ) -> StorageBackendResult<Vec<NodeId>> {
         let mut selected = Vec::new();
         let mut rejected = Vec::new();
         // A selected vector is compared with many later candidates. Retain a
         // bounded set of decoded values for this read-only selection; resident
         // vectors can already be borrowed. Optional admission never consumes
         // the allowance needed by the ordinary two-vector comparison.
-        let cache_memory = self
-            .memory
-            .child((self.memory.limit() / 64).min(self.memory.available() / 4));
-        let mut decoded = BudgetedVec::<(NodeId, Budgeted<HNSWVector>)>::new(&cache_memory);
         for candidate in candidates {
             check(control)?;
             if selected.len() == limit {
@@ -174,8 +200,13 @@ impl HNSWIndex {
             if Some(candidate.node_id) == exclude {
                 continue;
             }
-            let Some(candidate_node) =
+            let cached = decoded.iter().find(|(id, _)| *id == candidate.node_id);
+            let loaded = if cached.is_none() {
                 self.normalized_vectors.get(u128::from(candidate.node_id))?
+            } else {
+                None
+            };
+            let Some(candidate_node) = cached.map(|(_, value)| &**value).or(loaded.as_deref())
             else {
                 continue;
             };
@@ -204,18 +235,8 @@ impl HNSWIndex {
             }
             if diverse && selected.len() < limit {
                 selected.push(candidate.node_id);
-                if let Read::Owned(retained) = &candidate_node {
-                    let retain = || -> Result<Budgeted<HNSWVector>, MemoryError> {
-                        let bytes = retained.reserved_bytes();
-                        let memory = cache_memory.reserve(bytes)?;
-                        Ok(Budgeted::new((*candidate_node).clone(), memory))
-                    };
-                    let result =
-                        retain().and_then(|value| decoded.push((candidate.node_id, value)));
-                    match result {
-                        Ok(()) | Err(MemoryError::Limit { .. }) => {}
-                        Err(error) => return Err(error.into()),
-                    }
+                if let Some(loaded) = &loaded {
+                    retain_vector(&mut decoded, candidate.node_id, loaded)?;
                 }
             } else if rejected.len() < limit {
                 rejected.push(candidate.node_id);
@@ -232,4 +253,23 @@ impl HNSWIndex {
         check(control)?;
         Ok(selected)
     }
+}
+
+fn retain_vector(
+    decoded: &mut DecodedVectors,
+    node_id: NodeId,
+    vector: &Read<'_, HNSWVector>,
+) -> StorageBackendResult<()> {
+    if let Read::Owned(retained) = vector {
+        let retain = || -> Result<Budgeted<HNSWVector>, MemoryError> {
+            let memory = decoded.budget().reserve(retained.reserved_bytes())?;
+            Ok(Budgeted::new((**vector).clone(), memory))
+        };
+        let result = retain().and_then(|value| decoded.push((node_id, value)));
+        match result {
+            Ok(()) | Err(MemoryError::Limit { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
