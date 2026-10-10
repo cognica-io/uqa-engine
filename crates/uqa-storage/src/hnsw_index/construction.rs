@@ -32,14 +32,18 @@ impl HNSWIndex {
         let (normalized_vector, norm) = normalize_with_norm(&raw_vector);
         let previous_entry = self.entry_point;
         let previous_max_level = self.max_level;
+        self.put_vectors(
+            node_id,
+            raw_vector,
+            normalized_vector.clone(),
+            norm,
+            control,
+        )?;
         self.put_node(
             HNSWNode {
                 id: node_id,
                 doc_id,
                 vector_ordinal,
-                raw_vector,
-                norm,
-                normalized_vector: normalized_vector.clone(),
                 level,
                 deleted: false,
                 neighbors: vec![Vec::new(); level + 1],

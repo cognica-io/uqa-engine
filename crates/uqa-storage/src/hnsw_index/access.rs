@@ -9,7 +9,7 @@
 use super::{
     prepare::{check, Control},
     store::{Read, Record},
-    types::{HNSWIndex, HNSWNode, NodeId},
+    types::{HNSWIndex, HNSWNode, HNSWVector, NodeId},
 };
 use crate::StorageBackendResult;
 use uqa_core::memory::MemoryError;
@@ -17,6 +17,41 @@ use uqa_core::memory::MemoryError;
 impl HNSWIndex {
     pub(super) fn node(&self, id: NodeId) -> StorageBackendResult<Option<Read<'_, HNSWNode>>> {
         self.nodes.get(u128::from(id))
+    }
+
+    pub(super) fn raw_vector(&self, id: NodeId) -> StorageBackendResult<Read<'_, HNSWVector>> {
+        self.raw_vectors.get(u128::from(id))?.ok_or_else(|| {
+            crate::StorageBackendError::Other(format!("HNSW node {id} has no canonical vector"))
+        })
+    }
+
+    pub(super) fn normalized_vector(
+        &self,
+        id: NodeId,
+    ) -> StorageBackendResult<Read<'_, HNSWVector>> {
+        self.normalized_vectors.get(u128::from(id))?.ok_or_else(|| {
+            crate::StorageBackendError::Other(format!("HNSW node {id} has no normalized vector"))
+        })
+    }
+
+    pub(super) fn put_vectors(
+        &mut self,
+        id: NodeId,
+        raw: Vec<f32>,
+        normalized: Vec<f32>,
+        norm: f32,
+        control: Control<'_>,
+    ) -> StorageBackendResult<()> {
+        self.raw_vectors
+            .insert(u128::from(id), HNSWVector { values: raw, norm }, control)?;
+        self.normalized_vectors.insert(
+            u128::from(id),
+            HNSWVector {
+                values: normalized,
+                norm: 1.0,
+            },
+            control,
+        )
     }
 
     pub(super) fn put_node(

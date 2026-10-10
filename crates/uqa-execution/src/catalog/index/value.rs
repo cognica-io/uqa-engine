@@ -66,6 +66,30 @@ fn predicate_targets_are_index_safe(predicate: &Predicate) -> bool {
     }
 }
 
+/// Ask a durable scalar index for exact equality candidates without creating an accelerator. Providers decline unsupported stored comparison domains. SQL null tests retain their ordinary path because a row's null test examines its fields rather than comparing its storage key with `Value::Null`.
+pub fn probe_durable_equality(
+    backend: &dyn uqa_storage::PersistentStorageBackend,
+    table: &str,
+    field: &uqa_storage::ValueIndexKey,
+    predicate: &Predicate,
+) -> uqa_storage::StorageBackendResult<Option<PostingList>> {
+    let value = match predicate {
+        Predicate::Equals(
+            value @ (Value::Bool(_)
+            | Value::Int(_)
+            | Value::Str(_)
+            | Value::Bytes(_)
+            | Value::Row(_)),
+        ) => value,
+        Predicate::Equals(value @ Value::Float(number)) if !number.is_nan() => value,
+        _ => return Ok(None),
+    };
+    let Some(ids) = backend.probe_btree_index_equal(table, field, value)? else {
+        return Ok(None);
+    };
+    Ok(Some(posting_list_from_sorted_ids(ids.into_iter())))
+}
+
 impl ColumnValueIndex {
     /// Borrow the key evaluated for the stored row, without reevaluating an index expression against a newer routine definition.
     pub fn stored_value(&self, doc_id: DocId) -> Option<&Value> {

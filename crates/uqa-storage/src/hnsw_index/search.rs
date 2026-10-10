@@ -52,11 +52,11 @@ impl HNSWIndex {
         control: Control<'_>,
     ) -> StorageBackendResult<NodeId> {
         check(control)?;
-        let Some(entry_node) = self.node(entry)? else {
+        let Some(entry_node) = self.normalized_vectors.get(u128::from(entry))? else {
             return Ok(entry);
         };
         let mut best = Candidate {
-            distance: distance(query, &entry_node.normalized_vector),
+            distance: distance(query, &entry_node.values),
             node_id: entry,
         };
         drop(entry_node);
@@ -71,11 +71,11 @@ impl HNSWIndex {
             };
             for &neighbor_id in neighbors {
                 check(control)?;
-                let Some(neighbor) = self.node(neighbor_id)? else {
+                let Some(neighbor) = self.normalized_vectors.get(u128::from(neighbor_id))? else {
                     continue;
                 };
                 let candidate = Candidate {
-                    distance: distance(query, &neighbor.normalized_vector),
+                    distance: distance(query, &neighbor.values),
                     node_id: neighbor_id,
                 };
                 if candidate < best {
@@ -103,7 +103,7 @@ impl HNSWIndex {
         let workspace = workspace.unwrap_or(&fallback);
         let ef = ef.max(1);
         let mut visited = Visited::new(
-            self.nodes.next(None)?.map(|(id, _)| id as u64),
+            self.nodes.next_key(None, &self.memory)?.map(|id| id as u64),
             self.next_node_id.checked_sub(1),
             ef.saturating_mul(2).min(self.nodes.len()),
             Some(workspace),
@@ -112,14 +112,14 @@ impl HNSWIndex {
         let mut nearest = Queue::<false>::new(workspace);
         for entry in entries {
             check(control)?;
-            let Some(node) = self.node(*entry)? else {
+            let Some(node) = self.normalized_vectors.get(u128::from(*entry))? else {
                 continue;
             };
             if !visited.insert(*entry)? {
                 continue;
             }
             let candidate = Candidate {
-                distance: distance(query, &node.normalized_vector),
+                distance: distance(query, &node.values),
                 node_id: *entry,
             };
             candidates.push(candidate)?;
@@ -141,11 +141,11 @@ impl HNSWIndex {
                 if !visited.insert(neighbor_id)? {
                     continue;
                 }
-                let Some(neighbor) = self.node(neighbor_id)? else {
+                let Some(neighbor) = self.normalized_vectors.get(u128::from(neighbor_id))? else {
                     continue;
                 };
                 let candidate = Candidate {
-                    distance: distance(query, &neighbor.normalized_vector),
+                    distance: distance(query, &neighbor.values),
                     node_id: neighbor_id,
                 };
                 if nearest.len() < ef || nearest.peek()?.is_some_and(|worst| candidate < worst) {

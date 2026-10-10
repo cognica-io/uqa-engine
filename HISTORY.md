@@ -18,6 +18,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Separate spilled HNSW topology from canonical and normalized vector pages so validation and edge restoration do not decode or rewrite dense vectors, while preserving graph integrity, canonical scores, encrypted spill and the original allowance.
+
+- Restrict unindexed scalar filters in retrieval intersections to selected candidate documents without changing KNN boundaries, payload merge order, column validation or error precedence.
+
+- Seek cold native SQLite scalar and composite equality indexes directly across session refreshes instead of hydrating complete value indexes for constraint checks and result projection. Preserve complete index support, private writes, savepoints, fixed snapshots, typed comparisons and serializable observations; upgrade the physical equality projection and population certificates atomically through native mapping 16.
+
 - Preserve represented composite fields when a later field extends beyond the retained tuple, and reject actual out-of-bounds reads with `XX001` while preserving lazy evaluation, rollback and reopening. Keep already-folded prepared view constants across representation-only descriptor projection, while retaining invalidation for actual definition changes.
 
 - Reject DISTINCT, grouping, ordering and window keys whose declared types lack the required PostgreSQL comparison operators before optimization or execution, including output-column ordinals, empty inputs and unused window definitions. Preserve ordinary `void`/JSON outputs and UNION ALL, and include PostgreSQL's ordering-error hint.

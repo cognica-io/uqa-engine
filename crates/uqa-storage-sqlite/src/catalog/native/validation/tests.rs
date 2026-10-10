@@ -117,8 +117,8 @@ fn fixture() -> (ManagedConnection, Catalog) {
         for field in [rusqlite::types::Value::Text("id".into()), rusqlite::types::Value::Blob(b"id".to_vec())] {
             raw.execute("INSERT INTO _btree_indexes VALUES ('app.docs', ?1)", [&field])?;
             raw.execute(
-                "WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 70) INSERT INTO _btree_index_entries SELECT 'app.docs', ?1, id, CASE WHEN id = 70 THEN ?2 ELSE '1' END FROM ids",
-                rusqlite::params![field, format!("\"{}\"", "x".repeat(64 * 1024))],
+                "WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 70) INSERT INTO _btree_index_entries SELECT 'app.docs', ?1, id, CASE WHEN id = 70 THEN ?2 ELSE '{\"type\":\"Int\",\"value\":1}' END FROM ids",
+                rusqlite::params![field, serde_json::json!({"type": "Str", "value": "x".repeat(64 * 1024)}).to_string()],
             )?;
         }
         Ok(())

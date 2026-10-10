@@ -185,12 +185,7 @@ fn restoration_charges_transferred_vector_and_adjacency_capacity() {
     .unwrap();
     assert!(control.memory().used() > compact_bytes);
     assert_eq!(
-        restored
-            .node(node_id)
-            .unwrap()
-            .unwrap()
-            .raw_vector
-            .capacity(),
+        restored.raw_vector(node_id).unwrap().values.capacity(),
         raw_capacity
     );
     assert_eq!(

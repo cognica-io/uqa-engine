@@ -153,6 +153,7 @@ impl ConnectionSpec {
                 if let Some(key) = key {
                     ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
                 }
+                crate::btree_index::equality::register(&conn)?;
                 if matches!(self, Self::Auxiliary { .. }) {
                     // Registry writers already serialize their transactions.
                     // Retain the original journal mode instead of racing to
@@ -176,6 +177,7 @@ impl ConnectionSpec {
             } => {
                 let conn =
                     Connection::open_with_flags_and_vfs(path, flags, compressed_vfs::VFS_NAME)?;
+                crate::btree_index::equality::register(&conn)?;
                 if initialize_database {
                     conn.pragma_update(None, "page_size", compression.page_size)?;
                     ManagedConnection::enable_compressed_journal(&conn)?;
@@ -185,6 +187,7 @@ impl ConnectionSpec {
             }
             Self::Memory => {
                 let conn = Connection::open_in_memory()?;
+                crate::btree_index::equality::register(&conn)?;
                 if initialize_database {
                     ManagedConnection::enable_wal(&conn)?;
                 }

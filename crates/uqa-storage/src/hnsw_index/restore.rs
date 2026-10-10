@@ -163,13 +163,17 @@ impl HNSWRestoreBuilder {
                 .ok_or(MemoryError::SizeOverflow)?,
         )?;
         let (normalized_vector, norm) = normalize_with_norm(&snapshot.raw_vector);
+        self.index.put_vectors(
+            snapshot.node_id,
+            snapshot.raw_vector,
+            normalized_vector,
+            norm,
+            Some(&self.control),
+        )?;
         let node = HNSWNode {
             id: snapshot.node_id,
             doc_id: snapshot.doc_id,
             vector_ordinal: snapshot.vector_ordinal,
-            raw_vector: snapshot.raw_vector,
-            normalized_vector,
-            norm,
             level: snapshot.level,
             deleted: snapshot.deleted,
             neighbors: snapshot.neighbors,
@@ -190,7 +194,7 @@ impl HNSWRestoreBuilder {
             .insert(u128::from(node.id), node, Some(&self.control))
     }
 
-    /// Providers with a separate edge relation append each decoded edge to its original source node. Retain one charged source until it changes, so ordered edge streams rewrite each spilled vector only once. Unordered streams remain valid and flush on each source change.
+    /// Providers with a separate edge relation append each decoded edge to its original source node. Retain one charged source until it changes, so ordered edge streams rewrite each spilled adjacency record only once. Unordered streams remain valid and flush on each source change.
     pub fn edge(&mut self, source: u64, layer: usize, target: u64) -> StorageBackendResult<()> {
         self.check_usable()?;
         let result = self.edge_inner(source, layer, target);

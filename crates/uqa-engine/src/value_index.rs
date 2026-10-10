@@ -123,6 +123,19 @@ impl crate::Engine {
         read: Option<&uqa_execution::serializable::SerializableRelationRead>,
     ) -> Result<Option<PostingList>, SQLError> {
         let observed = read.map(|read| (read, t.columns.snapshot()));
+        if !t.value_indexes.read().contains_key(field) {
+            if let Some(posting) = self
+                .probe_value_index_state(table, t, field, predicate)
+                .map_err(|error| {
+                    uqa_execution::storage_errors::storage_error("probe stored value index", &error)
+                })?
+            {
+                if let Some((read, columns)) = &observed {
+                    read.observe_column_index(columns, field, predicate)?;
+                }
+                return Ok(Some(posting));
+            }
+        }
         self.read_value_index_state(table, t, field, |index| {
             index.scan_observing_with_catalog(predicate, Some(self), || {
                 if let Some((read, columns)) = &observed {
@@ -131,6 +144,42 @@ impl crate::Engine {
                 Ok(())
             })
         })
+    }
+
+    /// Bind a provider probe only to the current table handle and its catalog-selected search keys. Detached table snapshots retain their own readers and cannot use this session's backend.
+    fn probe_value_index_state(
+        &self,
+        table: &str,
+        state: &std::sync::Arc<TableState>,
+        field: &ValueIndexKey,
+        predicate: &Predicate,
+    ) -> StorageBackendResult<Option<PostingList>> {
+        let Some(backend) = self.persistent_value_index_backend(state) else {
+            return Ok(None);
+        };
+        let Some(name) = self.try_resolve_query_table_name(table)? else {
+            return Ok(None);
+        };
+        let Some(live) = self.try_table(&name)? else {
+            return Ok(None);
+        };
+        if !std::sync::Arc::ptr_eq(&live, state) {
+            return Ok(None);
+        }
+        if !self
+            .physical_index_definitions()?
+            .search_fields(
+                &name,
+                &state.columns.snapshot(),
+                &state.key_constraints.snapshot(),
+            )
+            .contains(field)
+        {
+            return Ok(None);
+        }
+        uqa_execution::catalog::index::value::probe_durable_equality(
+            backend, &name, field, predicate,
+        )
     }
 
     /// Read an accelerator belonging to the caller's selected table, hydrating
@@ -163,9 +212,7 @@ impl crate::Engine {
         }
     }
 
-    /// Estimate one exact value-index predicate without materializing or
-    /// sorting its posting list. Engine column indexes keep every document in
-    /// one value bucket, so the storage upper bound is exact here.
+    /// Estimate a predicate from a retained accelerator or a direct durable equality probe. A cold supported equality reads only its matching candidates instead of hydrating the complete field.
     pub(crate) fn value_index_cardinality(
         &self,
         table: &str,
@@ -179,6 +226,14 @@ impl crate::Engine {
             if let Some(index) = indexes.get(field) {
                 return Ok(index.estimate_cardinality(predicate));
             }
+        }
+        if let Some(posting) = self
+            .probe_value_index_state(table, &table_state, field, predicate)
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("probe stored value index", &error)
+            })?
+        {
+            return Ok(Some(posting.len()));
         }
         if !self
             .ensure_query_value_index(table, &table_state, field)
@@ -194,10 +249,7 @@ impl crate::Engine {
         Ok(cardinality)
     }
 
-    /// Return whether catalog policy provides an exact in-memory value-index
-    /// implementation for this predicate. Missing hot state is hydrated in
-    /// memory, preserving the read-only lazy-recovery contract without forcing
-    /// the relational planner to execute every scalar filter as a posting scan.
+    /// Return whether a retained accelerator or durable probe answers this predicate. Unsupported durable probes retain the read-only hydration path.
     pub(crate) fn value_index_supports(
         &self,
         table: &str,
@@ -211,6 +263,13 @@ impl crate::Engine {
         let Some(table) = self.try_query_table(&table_name)? else {
             return Ok(false);
         };
+        if !table.value_indexes.read().contains_key(field)
+            && self
+                .probe_value_index_state(&table_name, &table, field, predicate)?
+                .is_some()
+        {
+            return Ok(true);
+        }
         if !self.ensure_query_value_index(&table_name, &table, field)? {
             return Ok(false);
         }
@@ -222,7 +281,7 @@ impl crate::Engine {
         Ok(supported)
     }
 
-    /// Make the accelerators of `fields` available to an index-only read of `table`, the handle a query bound for `name`. Only the live table loads or builds an accelerator: a detached snapshot table lives for one statement, and building its accelerators would read every document to save reading a few.
+    /// Bind an index-only read to accelerators already retained by the selected live table. A cold equality probe does not hydrate a complete field just to project a few matching rows; those rows use the document reader instead.
     pub(crate) fn prepare_index_only_read(
         &self,
         name: &str,
@@ -242,15 +301,10 @@ impl crate::Engine {
             if !std::ptr::addr_eq(std::sync::Arc::as_ptr(&live), std::sync::Arc::as_ptr(table)) {
                 return Ok(false);
             }
-            for field in fields {
-                let field = ValueIndexKey::Column(field.clone());
-                // A loaded accelerator answers without consulting the catalog or the durable postings again.
-                if !self.ensure_query_value_index(&table_name, &live, &field)? {
-                    return Ok(false);
-                }
-            }
-            // A read of no field asks whichever accelerator its access path has loaded by then whether each row exists.
-            Ok(true)
+            let indexes = live.value_indexes.read();
+            Ok(fields
+                .iter()
+                .all(|field| indexes.contains_key(&ValueIndexKey::Column(field.clone()))))
         };
         prepare().map_err(|error| {
             uqa_execution::storage_errors::storage_error("prepare index-only read", &error)

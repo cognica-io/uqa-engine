@@ -14,31 +14,19 @@ use super::{
 
 impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_intersect(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {
-        let membership_only = parts.iter().all(OperatorTree::is_membership_only);
-        let mut iter = self.execute_output_branches(parts)?.into_iter();
-        let Some(first) = iter.next() else {
-            return Ok(PostingList::new().into());
-        };
-        iter.try_fold(first, |acc, next| match (acc, next) {
-            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
-                let intersection = if membership_only {
-                    left.merge_support_intersection_owned(&right)
-                } else {
-                    left.merge_intersection_owned(&right)
-                };
-                Ok(OperatorOutput::Posting(intersection))
-            }
-            (OperatorOutput::Graph(left), OperatorOutput::Graph(right)) => left
-                .merge_intersection(&right)
-                .map(OperatorOutput::Graph)
-                .map_err(|error| graph_execution_error("GraphIntersect", error)),
-            (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
-                Ok(OperatorOutput::Generalized(left.merge_intersection(&right)))
-            }
-            _ => Err(SQLError::TypeMismatch(
-                "Intersect operands must use the same posting-list carrier".to_string(),
-            )),
-        })
+        super::intersection::execute(
+            parts,
+            &self.parallel,
+            |part| self.with_diagnostics(|| self.execute_node(part)),
+            |field, predicate, candidates| {
+                self.with_diagnostics(|| match candidates {
+                    Some(candidates) => {
+                        self.execute_filter_candidates(field, predicate, candidates)
+                    }
+                    None => self.execute_filter(field, predicate, None),
+                })
+            },
+        )
     }
 
     pub(super) fn execute_union(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {

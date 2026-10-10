@@ -30,6 +30,7 @@ mod filter;
 mod fusion;
 mod graph;
 mod graph_runtime;
+mod intersection;
 pub mod introspection;
 mod joins;
 mod phrase;
@@ -339,12 +340,40 @@ impl<'a> PhysicalRetrievalDriver<'a> {
             }
             None => self.scan_doc_ids()?,
         };
+        self.evaluate_filter_candidates(field, predicate, &candidates)
+    }
+
+    /// Restrict physical reads to intersection support while retaining the leaf's logical predicate observation.
+    fn execute_filter_candidates(
+        &self,
+        field: &str,
+        predicate: &Predicate,
+        candidates: &[DocId],
+    ) -> DriverResult<PostingList> {
+        self.require_column(field)?;
+        if let Some(indexed) = self.value_index_scan(field, predicate)? {
+            return Ok(indexed);
+        }
+        if let Some(read) = self.context.relations.serializable_read(self.table)? {
+            read.observe_scan()?;
+        }
+        self.evaluate_filter_candidates(field, predicate, candidates)
+    }
+
+    fn evaluate_filter_candidates(
+        &self,
+        field: &str,
+        predicate: &Predicate,
+        candidates: &[DocId],
+    ) -> DriverResult<PostingList> {
+        self.context.runtime.check_cancelled()?;
         let values = self
             .context
             .relations
-            .get_document_fields(self.table, &candidates, field)?;
+            .get_document_fields(self.table, candidates, field)?;
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(candidates.len());
-        for doc_id in candidates {
+        for &doc_id in candidates {
+            self.context.runtime.check_cancelled()?;
             let Some(value) = values.get(&doc_id) else {
                 return Err(SQLError::Internal(format!(
                     "Filter consistency error: candidate {doc_id} is missing from the document-field snapshot for table `{}`",

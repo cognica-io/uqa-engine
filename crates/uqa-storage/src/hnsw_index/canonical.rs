@@ -79,6 +79,6 @@ impl VectorRead for HNSWIndex {
                 )
                 .into_storage_error()
             })?;
-        copy_vector(&node.raw_vector, control).map(Some)
+        copy_vector(&self.raw_vector(node.id)?.values, control).map(Some)
     }
 }

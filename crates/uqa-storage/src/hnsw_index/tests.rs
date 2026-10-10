@@ -200,3 +200,5 @@ fn non_finite_vectors_are_rejected_before_mutation() {
     assert!(index.add(1, vec![f32::NAN, 0.0]).is_err());
     assert_eq!(index.count().unwrap(), 0);
 }
+
+mod reads;

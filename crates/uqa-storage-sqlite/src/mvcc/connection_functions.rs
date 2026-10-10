@@ -80,6 +80,7 @@ impl ConnectionFunctions {
     /// Record writes require full synchronization from the first admission onward. The token function is registered last, so a failed registration is retried in full on the next use.
     fn register(connection: &Connection) -> PhysicalResult<Arc<Self>> {
         connection.pragma_update(None, "synchronous", "FULL")?;
+        crate::btree_index::equality::register(connection)?;
         let functions = Arc::new(Self {
             write_permit: AtomicBool::new(false),
             capture: Mutex::new(None),

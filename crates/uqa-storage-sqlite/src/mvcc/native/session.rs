@@ -12,6 +12,7 @@ mod graph_labels;
 mod graph_observations;
 mod graph_selection;
 mod identity_presence;
+mod index_probe;
 mod latest;
 mod latest_documents;
 mod latest_index_entries;

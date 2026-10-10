@@ -21,7 +21,7 @@ impl HNSWIndex {
         let Some(previous_id) = node_id.checked_sub(1) else {
             return Ok(());
         };
-        if self.node(previous_id)?.is_some() && !neighbors.contains(&previous_id) {
+        if self.nodes.contains_key(u128::from(previous_id))? && !neighbors.contains(&previous_id) {
             neighbors.push(previous_id);
             neighbors.sort_unstable();
         }
@@ -50,7 +50,7 @@ impl HNSWIndex {
         let mut selected = protected.clone();
         selected.extend(
             self.select_neighbors(
-                &node.normalized_vector,
+                &self.normalized_vector(node_id)?.values,
                 current
                     .iter()
                     .copied()
@@ -93,9 +93,9 @@ impl HNSWIndex {
         for node_id in candidates {
             check(control)?;
             if Some(node_id) != exclude {
-                if let Some(node) = self.node(node_id)? {
+                if let Some(node) = self.normalized_vectors.get(u128::from(node_id))? {
                     scored.push(Candidate {
-                        distance: distance(query, &node.normalized_vector),
+                        distance: distance(query, &node.values),
                         node_id,
                     });
                 }
@@ -125,17 +125,19 @@ impl HNSWIndex {
             if Some(candidate.node_id) == exclude {
                 continue;
             }
-            let Some(candidate_node) = self.node(candidate.node_id)? else {
+            let Some(candidate_node) =
+                self.normalized_vectors.get(u128::from(candidate.node_id))?
+            else {
                 continue;
             };
             let mut diverse = true;
             for selected_id in &selected {
                 check(control)?;
-                if let Some(selected_node) = self.node(*selected_id)? {
-                    let separated = distance(
-                        &candidate_node.normalized_vector,
-                        &selected_node.normalized_vector,
-                    ) > candidate.distance;
+                if let Some(selected_node) =
+                    self.normalized_vectors.get(u128::from(*selected_id))?
+                {
+                    let separated = distance(&candidate_node.values, &selected_node.values)
+                        > candidate.distance;
                     if !separated {
                         diverse = false;
                         break;

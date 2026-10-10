@@ -45,8 +45,9 @@ impl HNSWIndex {
                     continue;
                 };
                 if !node.deleted {
+                    let vector = self.raw_vector(candidate.node_id)?;
                     let score =
-                        cosine_similarity_with_norms(query, &node.raw_vector, norm, node.norm);
+                        cosine_similarity_with_norms(query, &vector.values, norm, vector.norm);
                     let key = u128::from(node.doc_id);
                     let score = best
                         .get(key)?
@@ -114,7 +115,8 @@ impl HNSWIndex {
                     *node_id
                 ))
             })?;
-            let score = cosine_similarity_with_norms(query, &node.raw_vector, norm, node.norm);
+            let vector = self.raw_vector(*node_id)?;
+            let score = cosine_similarity_with_norms(query, &vector.values, norm, vector.norm);
             if score >= threshold {
                 match current.as_mut() {
                     Some((document, best)) if *document == node.doc_id => *best = best.max(score),
