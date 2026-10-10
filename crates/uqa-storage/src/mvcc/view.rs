@@ -81,6 +81,13 @@ pub type RecordKeyIterator<'a> = dyn Iterator<Item = VersionResult<BudgetedVec<u
 pub type RecordScanVisitor<'a> = dyn FnMut(&[u8], BorrowedRecord<'_>) -> VersionResult<bool> + 'a;
 pub type RecordKeyVisitor<'a> = dyn FnMut(&[u8], RecordMetadata) -> VersionResult<bool> + 'a;
 
+/// A lazy sequence of metadata requests. A successful `advance` exposes one key until `accept` receives its result, including absent records and tombstones. These methods are storage-internal: they must not reenter a provider or execute user callbacks. Returning `false` closes the read window; an error stops before producing another key.
+pub trait RecordMetadataRequests {
+    fn advance(&mut self) -> VersionResult<bool>;
+    fn key(&self) -> &[u8];
+    fn accept(&mut self, metadata: Option<RecordMetadata>) -> VersionResult<()>;
+}
+
 /// A retained committed view whose lease protects visible versions until this owner is dropped. Provider read windows must finish inside each call, without retaining a physical writer or calling user code.
 pub trait CommittedRecordSnapshot: Send + Sync {
     fn sequence(&self) -> CommitSequence;
@@ -117,6 +124,23 @@ pub trait CommittedRecordSnapshot: Send + Sync {
             Ok(())
         })?;
         Ok(found)
+    }
+
+    /// Resolve requested revisions in input order through `metadata`, without fetching payloads on key-only providers. Providers may share one physical read window, admitted only after the first key; the snapshot boundary, cancellation and each point-read diagnostic remain unchanged.
+    fn visit_metadata(
+        &self,
+        requests: &mut dyn RecordMetadataRequests,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        loop {
+            control.check()?;
+            if !requests.advance()? {
+                return control.check().map_err(Into::into);
+            }
+            control.check()?;
+            let metadata = self.metadata(requests.key(), control)?;
+            requests.accept(metadata)?;
+        }
     }
 
     /// Visit ordered record identities, including tombstones, without fetching values from providers with key-only access.
@@ -310,6 +334,13 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordMetadata>> {
         self.snapshot.metadata(key, control)
+    }
+    fn visit_metadata(
+        &self,
+        requests: &mut dyn RecordMetadataRequests,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.snapshot.visit_metadata(requests, control)
     }
     fn visit_keys(
         &self,

@@ -2145,6 +2145,71 @@
       "capability": "Immutable spill segments",
       "workload": "Adjacent small and multi-block values in one encrypted file, rejected append to an older segment and retained repeatable readers.",
       "invariant": "Readers stay within their own bytes, rejected append preserves file contents and pending ownership, and the final reader releases the sole file."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ordered_batch_conditions_use_one_read_window_across_resident_and_spilled_edits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/batch_metadata.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "4/128/512 ordered 512-byte records under a 128 KiB session, including spilled evaluated and private writes.",
+      "invariant": "Exactly one physical metadata read window per batch; every private and cold-reopened record matches its input."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ordered_batch_conditions_preserve_duplicate_prefix_undo_and_conflict_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/batch_metadata.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "Ordered repeated puts, point deletion, prefix deletion, recreation, savepoint undo and a later peer commit.",
+      "invariant": "Exact intermediate and restored values; the batch keeps the original snapshot revision and rejects its stale commit."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "private_only_batches_do_not_admit_a_committed_reader",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/batch_metadata.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "32 repeated delete/put pairs of an already private key.",
+      "invariant": "Zero committed-reader admissions, exact final private value and complete outer rollback."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "metadata_requests_keep_history_without_payloads_and_stop_on_error_or_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/metadata_requests.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "Live and deleted snapshots, missing and duplicate keys, a 128 KiB payload with an 8 KiB read allowance, empty input, consumer failure and cancellation.",
+      "invariant": "One read window per nonempty stream, no payload materialization, original revisions and tombstones, no later key after failure and complete reservation release."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "failed_record_metadata_stream_restores_private_root_before_later_edits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/batch/records/tests.rs",
+      "capability": "Ordered batch metadata admission",
+      "workload": "64 streamed edits followed by a metadata failure and one later edit, a spilled evaluated journal, an existing private record and its retained view under 128 KiB.",
+      "invariant": "The default point-read provider rejects the 65th condition without reading a later key or any values; atomic rollback restores exact prior state and releases every reservation."
     }
   ]
 }

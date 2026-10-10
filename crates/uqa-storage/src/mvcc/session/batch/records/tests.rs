@@ -5,6 +5,10 @@
 //
 
 use super::*;
+use crate::mvcc::{
+    CommitSequence, CommittedRecordSnapshot, RecordMetadata, RecordVersion, ScannedRecord,
+};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn records(control: &StorageReadControl) -> Records {
     Records::new(&control.memory().child(control.memory().limit() / 32))
@@ -244,4 +248,119 @@ fn evaluated_record_spill_rejects_failed_appends_without_losing_prior_edits() {
     assert_eq!(again, 2);
     drop(records);
     assert_eq!(control.memory().used(), 0);
+}
+
+struct FailingMetadata {
+    reads: Arc<AtomicUsize>,
+}
+
+impl CommittedRecordSnapshot for FailingMetadata {
+    fn sequence(&self) -> CommitSequence {
+        CommitSequence::from_u64(0)
+    }
+
+    fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordMetadata>> {
+        control.check()?;
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        if key == b"bad" {
+            return Err(VersionError::InvalidEncoding("rejected record metadata"));
+        }
+        Ok(None)
+    }
+
+    fn get(
+        &self,
+        _: &[u8],
+        _: &StorageReadControl,
+    ) -> VersionResult<Option<RecordVersion<SharedRecordValue>>> {
+        panic!("metadata application must not fetch committed values")
+    }
+
+    fn scan(
+        &self,
+        _: &[u8],
+        _: Option<&[u8]>,
+        _: usize,
+        _: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<ScannedRecord>> {
+        panic!("point application must not enumerate committed records")
+    }
+}
+
+#[test]
+fn failed_record_metadata_stream_restores_private_root_before_later_edits() {
+    let control = StorageReadControl::with_limit(128 << 10);
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut transaction = super::super::Transaction::at_snapshot(
+        Arc::new(FailingMetadata {
+            reads: Arc::clone(&reads),
+        }),
+        false,
+        &control,
+    );
+    transaction
+        .replace(b"kept", Some(b"original"), &control)
+        .unwrap();
+    let retained = transaction.view().unwrap();
+    let mut edits = records(&control);
+    for id in 0..64_u64 {
+        edits
+            .push(
+                &id.to_be_bytes(),
+                Some(&[id as u8; 512]),
+                RecordWriteKind::Canonical,
+                false,
+                &control,
+            )
+            .unwrap();
+    }
+    edits
+        .push(
+            b"bad",
+            Some(b"fail"),
+            RecordWriteKind::Canonical,
+            false,
+            &control,
+        )
+        .unwrap();
+    edits
+        .push(
+            b"later",
+            Some(b"unread"),
+            RecordWriteKind::Canonical,
+            false,
+            &control,
+        )
+        .unwrap();
+    assert!(edits.spilled.is_some());
+    reads.store(0, Ordering::Relaxed);
+    let error = transaction
+        .atomic(|transaction| edits.apply(transaction, &control))
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        VersionError::InvalidEncoding("rejected record metadata")
+    ));
+    assert_eq!(reads.load(Ordering::Relaxed), 65);
+    for view in [retained, transaction.view().unwrap()] {
+        view.visit_value(b"kept", &control, &mut |record| {
+            assert_eq!(record.unwrap().value, Some(&b"original"[..]));
+            Ok(())
+        })
+        .unwrap();
+        for id in 0..64_u64 {
+            assert!(view
+                .metadata(&id.to_be_bytes(), &control)
+                .unwrap()
+                .is_none());
+        }
+        assert!(view.metadata(b"later", &control).unwrap().is_none());
+    }
+    drop((transaction, edits));
+    assert_eq!(control.memory().used(), 0);
+    assert!(control.memory().peak() <= control.memory().limit());
 }

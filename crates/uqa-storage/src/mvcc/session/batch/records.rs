@@ -6,6 +6,7 @@
 
 //! Ordered record edits spill before an evaluated batch becomes a transaction's private changes.
 
+mod apply;
 mod file;
 #[cfg(test)]
 mod tests;
@@ -23,6 +24,7 @@ pub(super) struct Records {
     spilled: Option<file::Journal>,
 }
 
+#[derive(Clone)]
 pub(super) struct Edit {
     pub(super) key: RecordKey,
     pub(super) value: Option<SharedRecordValue>,
@@ -117,15 +119,49 @@ impl Records {
         control: &StorageReadControl,
         mut visit: impl FnMut(&Edit) -> VersionResult<()>,
     ) -> VersionResult<()> {
-        control.check()?;
-        for edit in self.resident.iter() {
-            control.check()?;
-            visit(edit)?;
-        }
-        if let Some(file) = &self.spilled {
-            return file.visit(control, visit);
+        for edit in self.cursor(control) {
+            visit(&edit?)?;
         }
         control.check()?;
         Ok(())
+    }
+
+    /// Retain only the current edit. Open the journal after the resident prefix has been consumed, preserving failure order and the prefix's shared payload owners.
+    pub(super) fn cursor<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> impl Iterator<Item = VersionResult<Edit>> + 'a {
+        let mut resident = self.resident.iter();
+        let mut reader = None;
+        let mut ended = false;
+        std::iter::from_fn(move || {
+            if ended {
+                return None;
+            }
+            let next = (|| {
+                control.check()?;
+                if let Some(edit) = resident.next() {
+                    return Ok(Some(edit.clone()));
+                }
+                let Some(file) = &self.spilled else {
+                    return Ok(None);
+                };
+                if reader.is_none() {
+                    reader = Some(file.reader()?);
+                }
+                reader.as_mut().expect("opened journal").next(control)
+            })();
+            match next {
+                Ok(Some(edit)) => Some(Ok(edit)),
+                Ok(None) => {
+                    ended = true;
+                    None
+                }
+                Err(error) => {
+                    ended = true;
+                    Some(Err(error))
+                }
+            }
+        })
     }
 }

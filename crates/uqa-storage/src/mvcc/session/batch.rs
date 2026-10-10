@@ -160,19 +160,7 @@ impl<'a> Batch<'a> {
                 }
                 Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
                 }
-                Operation::Records(records) => records.visit(control, |edit| {
-                    if edit.prefix {
-                        transaction.delete_prefix_kind(edit.key.bytes(), edit.kind, control)?;
-                    } else {
-                        transaction.write_shared_record(
-                            &edit.key,
-                            edit.value.as_ref(),
-                            edit.kind,
-                            control,
-                        )?;
-                    }
-                    Ok(())
-                })?,
+                Operation::Records(records) => records.apply(transaction, control)?,
                 Operation::OccurrenceReset(table) => {
                     let table = std::str::from_utf8(table)
                         .map_err(|_| VersionError::InvalidEncoding("invalid occurrence table"))?;

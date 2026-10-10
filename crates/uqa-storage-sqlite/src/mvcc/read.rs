@@ -16,8 +16,9 @@ use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::{
     BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordKeyIterator, RecordKeyVisitor,
-    RecordMetadata, RecordPage, RecordPointVisitor, RecordScanVisitor, RecordValueVisitor,
-    RecordVersion, ScannedRecord, SharedRecordValue, VersionError, VersionResult,
+    RecordMetadata, RecordMetadataRequests, RecordPage, RecordPointVisitor, RecordScanVisitor,
+    RecordValueVisitor, RecordVersion, ScannedRecord, SharedRecordValue, VersionError,
+    VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -207,14 +208,29 @@ impl CommittedRecordSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordMetadata>> {
         control.cancellation().check()?;
-        self.read(|connection| {
-            let _bindings = reserve_bindings(control, &[key])?;
-            let record = info(connection, key, self.sequence)?.map(|info| RecordMetadata {
-                revision: Some(CommitSequence::from_u64(info.revision)),
-                live: info.length.is_some(),
-            });
-            control.cancellation().check().map_err(VersionError::from)?;
-            Ok(record)
+        self.read(|connection| metadata(connection, key, self.sequence, control))
+    }
+
+    fn visit_metadata(
+        &self,
+        requests: &mut dyn RecordMetadataRequests,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        control.check()?;
+        // No physical admission for an empty source, including edits resolved entirely from private changes.
+        if !requests.advance()? {
+            return control.check().map_err(Into::into);
+        }
+        control.check()?;
+        self.read(|connection| loop {
+            control.check().map_err(VersionError::from)?;
+            let record = metadata(connection, requests.key(), self.sequence, control)?;
+            requests.accept(record)?;
+            control.check().map_err(VersionError::from)?;
+            if !requests.advance()? {
+                control.check().map_err(VersionError::from)?;
+                return Ok(());
+            }
         })
     }
 
@@ -275,6 +291,21 @@ impl CommittedRecordSnapshot for Snapshot {
             )
         })
     }
+}
+
+fn metadata(
+    connection: &Connection,
+    key: &[u8],
+    sequence: CommitSequence,
+    control: &StorageReadControl,
+) -> PhysicalResult<Option<RecordMetadata>> {
+    let _bindings = reserve_bindings(control, &[key])?;
+    let record = info(connection, key, sequence)?.map(|info| RecordMetadata {
+        revision: Some(CommitSequence::from_u64(info.revision)),
+        live: info.length.is_some(),
+    });
+    control.check().map_err(VersionError::from)?;
+    Ok(record)
 }
 
 pub(super) fn keys(
