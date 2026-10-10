@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Only complete immutable logical blocks enter the charged read cache.
+//! Authenticated immutable prefixes share the charged read cache across appends.
 
 use super::{io, BlockTemporaryFile, StorageBackendResult, BLOCK_BYTES};
 use std::io::{Read, Seek, SeekFrom};
@@ -13,6 +13,7 @@ use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation};
 #[derive(Clone)]
 struct Block {
     offset: Option<u64>,
+    valid: usize,
     bytes: [u8; BLOCK_BYTES],
 }
 
@@ -34,6 +35,7 @@ impl Blocks {
             entries: vec![
                 Block {
                     offset: None,
+                    valid: 0,
                     bytes: [0; BLOCK_BYTES]
                 };
                 count
@@ -60,24 +62,28 @@ impl Blocks {
             let start = offset / BLOCK_BYTES as u64 * BLOCK_BYTES as u64;
             let within = (offset - start) as usize;
             let take = output.len().min(BLOCK_BYTES - within);
-            if !self.entries.is_empty() && length.saturating_sub(start) >= BLOCK_BYTES as u64 {
-                let slot = if let Some(slot) = self
+            let available = length.saturating_sub(start).min(BLOCK_BYTES as u64) as usize;
+            if !self.entries.is_empty() && within + take <= available {
+                let cached = self
                     .entries
                     .iter()
-                    .position(|entry| entry.offset == Some(start))
-                {
-                    slot
-                } else {
+                    .position(|entry| entry.offset == Some(start));
+                let slot = cached.unwrap_or_else(|| {
                     let slot = self.next;
                     self.next = (slot + 1) % self.entries.len();
+                    slot
+                });
+                if cached.is_none() || self.entries[slot].valid < within + take {
                     let entry = &mut self.entries[slot];
-                    // An incomplete read cannot publish a cache entry.
+                    // Appends preserve earlier bytes. A cached prefix remains
+                    // usable until a request needs the newly appended suffix.
+                    // Failed appends clear the cache before addresses are reused.
                     entry.offset = None;
                     file.seek(SeekFrom::Start(start)).map_err(io)?;
-                    file.read_exact(&mut entry.bytes).map_err(io)?;
+                    file.read_exact(&mut entry.bytes[..available]).map_err(io)?;
+                    entry.valid = available;
                     entry.offset = Some(start);
-                    slot
-                };
+                }
                 output[..take].copy_from_slice(&self.entries[slot].bytes[within..within + take]);
             } else {
                 file.seek(SeekFrom::Start(offset)).map_err(io)?;

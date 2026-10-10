@@ -99,6 +99,41 @@ fn bulk_spill_publishes_each_authenticated_block_once() {
 }
 
 #[test]
+fn spilled_tail_reads_reuse_authenticated_prefixes_and_follow_appends() {
+    let control = StorageReadControl::with_limit(512 * 1024);
+    let mut map = Map::new(control.memory(), 0);
+    map.insert(0, 0_u64, Some(&control)).unwrap();
+    let retained = map.clone();
+    for id in 0..24 {
+        if id != 0 {
+            map.insert(id, id as u64, Some(&control)).unwrap();
+        }
+        assert_eq!(*map.get(id).unwrap().unwrap(), id as u64);
+        let Root::Disk(disk) = &map.root else {
+            panic!("expected spill");
+        };
+        let before = disk.read_blocks();
+        for _ in 0..8 {
+            assert_eq!(*map.get(id).unwrap().unwrap(), id as u64);
+        }
+        assert_eq!(disk.read_blocks(), before, "reread the appended tail");
+        assert_eq!(*retained.get(0).unwrap().unwrap(), 0);
+    }
+    let Root::Disk(disk) = &map.root else {
+        unreachable!();
+    };
+    disk.fail_write_after(100);
+    assert!(map.insert(23, 900, Some(&control)).is_err());
+    assert_eq!(*map.get(23).unwrap().unwrap(), 23);
+    map.insert(23, 901, Some(&control)).unwrap();
+    assert_eq!(*map.get(23).unwrap().unwrap(), 901);
+    assert_eq!(*retained.get(0).unwrap().unwrap(), 0);
+    drop((map, retained));
+    assert_eq!(control.memory().used(), 0);
+    assert!(control.memory().peak() <= control.memory().limit());
+}
+
+#[test]
 fn repeated_spilled_reads_reuse_authenticated_blocks_across_immutable_roots() {
     let control = StorageReadControl::with_limit(512 * 1024);
     let mut map = Map::new(control.memory(), 128);

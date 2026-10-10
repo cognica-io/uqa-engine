@@ -28,7 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Build unpublished spill maps with one charged block buffer and avoid rewriting already-pending HNSW identities, preserving atomic publication, complete persistence deltas and retained graphs.
 
-- Reuse complete authenticated spill-map blocks within the original memory allowance, and avoid decoding values for membership checks. Preserve immutable readers and clear cached blocks before failed append addresses can be reused.
+- Reuse authenticated spill-map block prefixes, including partially populated tails, within the original memory allowance, and avoid decoding values for membership checks. Track each cached extent, refresh it only when a read reaches newly appended bytes, preserve immutable readers and clear cached blocks before failed append addresses can be reused.
 
 - Retain certified IVF mutation candidates in Key/Value and native SQLite, derive ranked posting lists only on demand, and update only changed native assignments when centroids are unchanged. Read native vector revision summaries by field, stream unclassified revision scans, restage sorted spilled transaction writes without repeated merging, and append encrypted spill-map paths in one bounded write. Preserve undo, peer-write refresh, canonical results, encrypted spill and the original allowance.
 

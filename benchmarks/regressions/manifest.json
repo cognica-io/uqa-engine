@@ -1754,6 +1754,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_tail_reads_reuse_authenticated_prefixes_and_follow_appends",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Authenticated spill tail reads",
+      "workload": "24 successive appends across partial and complete blocks, eight repeated point reads, a retained root and an injected partial append failure.",
+      "invariant": "Warm tail reads perform zero additional block decryptions; growth and address reuse expose exactly the new bytes while old roots and the original allowance remain valid.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
