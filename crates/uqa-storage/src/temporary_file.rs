@@ -221,12 +221,15 @@ impl<const BYTES: usize> Owner<BYTES> {
             let active = self.active_slot(block)?;
             let file = self.file.as_file_mut();
             file.seek(SeekFrom::Start(slot_offset::<BYTES>(block, active)?))?;
-            let mut nonce = [0_u8; NONCE_BYTES];
-            let mut length = [0_u8; LENGTH_BYTES];
-            let mut tag = [0_u8; TAG_BYTES];
-            file.read_exact(&mut nonce)?;
-            file.read_exact(&mut length)?;
-            let length = u16::from_le_bytes(length);
+            let mut header = [0_u8; SLOT_HEADER_BYTES];
+            file.read_exact(&mut header)?;
+            let nonce: &[u8; NONCE_BYTES] = header[..NONCE_BYTES].try_into().unwrap();
+            let length = u16::from_le_bytes(
+                header[NONCE_BYTES..NONCE_BYTES + LENGTH_BYTES]
+                    .try_into()
+                    .unwrap(),
+            );
+            let tag: &[u8; TAG_BYTES] = header[NONCE_BYTES + LENGTH_BYTES..].try_into().unwrap();
             let populated = usize::from(length);
             let required = (self.length - block * BYTES as u64).min(BYTES as u64) as usize;
             if populated > BYTES || populated < required {
@@ -235,14 +238,13 @@ impl<const BYTES: usize> Owner<BYTES> {
                     "invalid authenticated temporary block length",
                 ));
             }
-            file.read_exact(&mut tag)?;
             file.read_exact(&mut plaintext[..populated])?;
             self.cipher
                 .decrypt_inout_detached(
-                    (&nonce).into(),
+                    nonce.into(),
                     &block_aad(block, length),
                     (&mut plaintext[..populated]).into(),
-                    (&tag).into(),
+                    tag.into(),
                 )
                 .map_err(|_| {
                     io::Error::new(
@@ -281,9 +283,11 @@ impl<const BYTES: usize> Owner<BYTES> {
         self.file
             .as_file_mut()
             .seek(SeekFrom::Start(slot_offset::<BYTES>(block, next)?))?;
-        self.write_physical(&nonce)?;
-        self.write_physical(&length.to_le_bytes())?;
-        self.write_physical(&tag)?;
+        let mut header = [0_u8; SLOT_HEADER_BYTES];
+        header[..NONCE_BYTES].copy_from_slice(&nonce);
+        header[NONCE_BYTES..NONCE_BYTES + LENGTH_BYTES].copy_from_slice(&length.to_le_bytes());
+        header[NONCE_BYTES + LENGTH_BYTES..].copy_from_slice(&tag);
+        self.write_physical(&header)?;
         self.write_physical(&ciphertext[..populated])?;
         if !existing {
             self.truncate_physical(record_offset::<BYTES>(block + 1)?)?;

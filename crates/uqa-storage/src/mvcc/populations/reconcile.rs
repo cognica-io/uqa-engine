@@ -352,6 +352,7 @@ fn visit(
         let Some(last) = page.last() else {
             return Ok(());
         };
+        let exhausted = page.len() < 64;
         after.clear();
         after.extend_from_slice(&last.key)?;
         for row in page.iter() {
@@ -359,6 +360,10 @@ fn visit(
             if let Some(value) = row.record.value() {
                 visit(&row.key, value)?;
             }
+        }
+        if exhausted {
+            control.check()?;
+            return Ok(());
         }
     }
 }

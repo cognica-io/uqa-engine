@@ -6,17 +6,20 @@
 
 //! Restrict residual document reads without moving filters across retrieval or reordering payload merges.
 
+use super::filter::Candidates;
 use super::{
     graph_execution_error, DocId, DriverResult, OperatorOutput, OperatorTree, PostingList,
     Predicate, SQLError,
 };
 use crate::parallel::ParallelExecutor;
 
+mod support;
+
 pub(super) fn execute(
     parts: &[OperatorTree],
     parallel: &ParallelExecutor,
     execute: impl Fn(&OperatorTree) -> DriverResult<OperatorOutput> + Sync,
-    filter: impl Fn(&str, &Predicate, Option<&[DocId]>) -> DriverResult<PostingList> + Sync,
+    filter: impl Fn(&str, &Predicate, Option<Candidates<'_>>) -> DriverResult<PostingList> + Sync,
 ) -> DriverResult<OperatorOutput> {
     let execute = &execute;
     let filter = &filter;
@@ -42,7 +45,17 @@ pub(super) fn execute(
     let outputs = parallel.execute_branches(&workers);
     // A failed or differently typed branch takes the ordinary path. In particular, a filter must still report an unknown field even when another branch is empty or fails.
     let candidates = support(&outputs);
-    let candidates = candidates.as_deref();
+    let require_documents = parts.iter().any(|part| {
+        !matches!(part, OperatorTree::Filter { source: None, .. })
+            && support::promises_documents(part)
+    });
+    let candidates = candidates.as_deref().map(|ids| {
+        if require_documents {
+            Candidates::Documents(ids)
+        } else {
+            Candidates::Intersection(ids)
+        }
+    });
     let workers: Vec<_> = parts
         .iter()
         .map(|part| {

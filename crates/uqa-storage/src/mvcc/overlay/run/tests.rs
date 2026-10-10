@@ -99,6 +99,44 @@ fn cursor_seeks_past_the_last_key_do_not_read_spilled_entries() {
 }
 
 #[test]
+fn cursor_seeks_between_blocks_do_not_decode_preceding_entries() {
+    let control = StorageReadControl::with_limit(128 << 10);
+    let (run, _) = run(1024, &control);
+    let run = Arc::new(run);
+    assert!(run.blocks.len() > 1);
+    let first = run.blocks[1].first.bytes().to_vec();
+    let index = std::str::from_utf8(&first[4..])
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    let missing = key(index - 1);
+    let previous = key(index - 2);
+    let baseline = control.memory().used();
+    for start in [
+        Bound::Included(missing.as_slice()),
+        Bound::Excluded(missing.as_slice()),
+        Bound::Excluded(previous.as_slice()),
+    ] {
+        super::read_counts::take();
+        let mut cursor = run.cursor(start);
+        assert_eq!(cursor.next(&control).unwrap().unwrap().key.bytes(), first);
+        let reads = super::read_counts::take();
+        assert_eq!(reads.blocks, 1, "{reads:?}");
+        assert_eq!(reads.entries, 1, "{reads:?}");
+        assert_eq!(reads.values, 0);
+        drop(cursor);
+        assert_eq!(control.memory().used(), baseline);
+    }
+    control.cancellation().cancel();
+    assert!(run
+        .cursor(Bound::Included(&missing))
+        .next(&control)
+        .is_err());
+    drop(run);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn point_reads_find_every_change_and_no_absent_key_across_blocks() {
     let control = StorageReadControl::with_limit(64 << 20);
     let (run, identities) = run(3000, &control);

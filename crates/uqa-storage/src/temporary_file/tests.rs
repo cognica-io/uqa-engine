@@ -38,6 +38,7 @@ pub(super) struct Faults {
     pub(super) fail_after_bytes: Option<usize>,
     pub(super) fail_truncate: bool,
     pub(super) written_bytes: u64,
+    pub(super) write_requests: usize,
     pub(super) read_blocks: usize,
 }
 
@@ -47,6 +48,7 @@ impl Faults {
         file: &mut std::fs::File,
         bytes: &[u8],
     ) -> io::Result<()> {
+        self.write_requests += 1;
         if let Some(remaining) = self.fail_after_bytes.as_mut() {
             if *remaining < bytes.len() {
                 let count = *remaining;
@@ -66,6 +68,23 @@ impl Faults {
             return Err(io::Error::other("injected temporary file truncate failure"));
         }
         Ok(())
+    }
+}
+
+#[test]
+fn authenticated_block_headers_do_not_fragment_physical_writes() {
+    for blocks in [1, 32] {
+        let mut file = BlockTemporaryFile::<1024>::new().unwrap();
+        let expected = vec![b'x'; blocks * 1024];
+        file.write_all(&expected).unwrap();
+        let requests = file.owner.lock().faults.write_requests;
+        assert!(
+            requests <= blocks * 3,
+            "{blocks} block publications issued {requests} physical write requests"
+        );
+        let mut actual = Vec::new();
+        file.reopen().unwrap().read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
     }
 }
 

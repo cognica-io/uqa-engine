@@ -10,6 +10,7 @@ use super::context::RetrievalRelations;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate};
 use uqa_sql::SQLError;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Candidates<'a> {
     /// The filter's source promises documents in the selected relation.
     Documents(&'a [DocId]),

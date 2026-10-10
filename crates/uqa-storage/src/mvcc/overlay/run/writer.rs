@@ -181,9 +181,16 @@ impl SpilledRunWriter {
         if starts_block {
             if let Some(block) = self.blocks.last_mut() {
                 block.end = position;
+                block.last = self
+                    .last
+                    .as_ref()
+                    .expect("preceding block has entries")
+                    .clone();
             }
+            let first = RecordKey::new(key, &self.memory)?;
             self.blocks.push(RunBlock {
-                first: RecordKey::new(key, &self.memory)?,
+                last: first.clone(),
+                first,
                 offset: position,
                 end: position,
             })?;
@@ -222,6 +229,7 @@ impl SpilledRunWriter {
         let end = self.entries.position();
         if let Some(block) = self.blocks.last_mut() {
             block.end = end;
+            block.last = last.clone();
         }
         Ok(Some(SpilledRun {
             entry_bytes: end,

@@ -630,13 +630,11 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
+        let start = after
+            .filter(|after| *after >= prefix)
+            .map_or(std::ops::Bound::Included(prefix), std::ops::Bound::Excluded);
+        let mut changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         while let Some(change) = changes.next(control)? {
             control.check()?;
             let key = change.key();
@@ -753,13 +751,11 @@ impl PrivateRecordSnapshot {
         visit: &mut dyn FnMut(&PreparedRecordWrite) -> VersionResult<bool>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
+        let start = after
+            .filter(|after| *after >= prefix)
+            .map_or(std::ops::Bound::Included(prefix), std::ops::Bound::Excluded);
+        let mut changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         while let Some(change) = changes.next(control)? {
             control.cancellation().check()?;
             let key = change.key();
@@ -789,13 +785,11 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut changes = TieredCursor::new(
-            Some(&self.records),
-            &self.runs,
-            std::ops::Bound::Included(start),
-            control,
-        )?;
+        let start = after
+            .filter(|after| *after >= prefix)
+            .map_or(std::ops::Bound::Included(prefix), std::ops::Bound::Excluded);
+        let mut changes =
+            TieredCursor::for_prefix(Some(&self.records), &self.runs, prefix, start, control)?;
         while let Some(change) = changes.next(control)? {
             control.cancellation().check()?;
             let key = change.key();

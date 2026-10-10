@@ -122,6 +122,44 @@ fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
 }
 
 #[test]
+fn disjoint_private_prefixes_do_not_open_spill_readers() {
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let changes = PrivateRecordChanges::new(control.memory());
+        let mut model = Model::new();
+        for id in 0..count {
+            stage(&changes, &mut model, id, Some("x".repeat(1024)), &control);
+        }
+        assert!(spilled_runs(&changes) > 0);
+        let snapshot = changes.snapshot().unwrap();
+        let read = StorageReadControl::with_limit(32 << 10);
+        let retained = control.memory().used();
+        for prefix in [b"a".as_slice(), b"j\xff", b"l", b"\xff"] {
+            super::super::run::read_counts::take();
+            let mut cursor = snapshot.cursor(prefix, None, &read).unwrap();
+            assert!(cursor.next(&read).unwrap().is_none());
+            drop(cursor);
+            assert!(snapshot.scan(prefix, None, 1, &read).unwrap().is_empty());
+            assert!(snapshot
+                .scan_keys(prefix, None, 1, &read)
+                .unwrap()
+                .is_empty());
+            let counts = super::super::run::read_counts::take();
+            assert_eq!(counts.blocks, 0, "prefix={prefix:?}: {counts:?}");
+            assert_eq!(counts.entries, 0, "prefix={prefix:?}: {counts:?}");
+            assert_eq!(counts.values, 0);
+            assert_eq!(read.memory().used(), 0);
+            assert_eq!(control.memory().used(), retained);
+        }
+        assert_streamed_matches(&snapshot, &model, &read);
+        read.cancellation().cancel();
+        assert!(snapshot.cursor(b"a", None, &read).is_err());
+        drop((snapshot, changes));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn empty_private_cursors_need_no_read_workspace_and_keep_their_snapshot() {
     let control = StorageReadControl::with_limit(1 << 20);
     let changes = PrivateRecordChanges::new(control.memory());

@@ -24,6 +24,75 @@ fn field(name: &str) -> Vec<u8> {
 }
 
 #[test]
+fn population_visits_do_not_reopen_spill_after_a_terminal_page() {
+    use crate::mvcc::MemoryVersionStore;
+    use std::sync::Arc;
+
+    for count in [1_usize, 63, 64, 65, 127, 128, 129] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let revision = PrivateRecordRevision::for_tests();
+        let mut writer =
+            SpilledRunWriter::new(count as u64 + 1, count as u64 * 8, control.memory()).unwrap();
+        for id in 0..count {
+            writer
+                .push(
+                    format!("h{id:06}").as_bytes(),
+                    None,
+                    RecordWriteKind::Canonical,
+                    revision,
+                    (!id.is_multiple_of(7)).then_some(b"header".as_slice()),
+                    &control,
+                )
+                .unwrap();
+        }
+        writer
+            .push(
+                b"z-unrelated",
+                None,
+                RecordWriteKind::Canonical,
+                revision,
+                Some(b"unrelated"),
+                &control,
+            )
+            .unwrap();
+        let changes = PrivateRecordChanges::from_spilled_run(
+            writer.finish().unwrap(),
+            revision,
+            None,
+            &control,
+        )
+        .unwrap();
+        let store = MemoryVersionStore::new(control.memory());
+        let view = MergedRecordSnapshot::new(
+            Arc::new(store.snapshot().unwrap()),
+            changes.snapshot().unwrap(),
+        );
+        read_counts::take();
+        let mut found = Vec::new();
+        visit(&view, b"h", &control, &mut |key, value| {
+            assert_eq!(value, b"header");
+            found.push(key.to_vec());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            found,
+            (0..count)
+                .filter(|id| !id.is_multiple_of(7))
+                .map(|id| format!("h{id:06}").into_bytes())
+                .collect::<Vec<_>>()
+        );
+        let reads = read_counts::take();
+        assert_eq!(reads.blocks, count / 64 + 1, "count={count}: {reads:?}");
+        assert_eq!(reads.values, found.len());
+        control.cancellation().cancel();
+        assert!(visit(&view, b"h", &control, &mut |_, _| Ok(())).is_err());
+        drop((view, changes, store));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn population_deletion_preview_does_not_admit_an_unused_origin_lookup() {
     use crate::mvcc::MemoryVersionStore;
     use std::sync::Arc;

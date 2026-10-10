@@ -51,6 +51,7 @@ impl Engine {
             schemas: self,
             registry: self,
             members: self,
+            relations: self,
             relocation: self,
             persistence: self,
             changes: self,

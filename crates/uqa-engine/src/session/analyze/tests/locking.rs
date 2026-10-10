@@ -162,3 +162,52 @@ fn automatic_analysis_acquires_its_relation_lock_before_sampling() {
         assert_eq!(second.transaction_depth(), 0);
     }
 }
+
+#[test]
+fn schema_rename_waits_for_member_statistics_and_refreshes_after_release() {
+    for provider in 0..3 {
+        for commit in [false, true] {
+            let (_directory, first, second) = sessions(provider);
+            first
+                .sql("BEGIN; INSERT INTO t VALUES (20); ANALYZE t", &[])
+                .unwrap();
+            let session = second.session_id;
+            let cancel = second.runtime.cancellation.clone();
+            let (send, done) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                let result = second.sql("ALTER SCHEMA public RENAME TO renamed", &[]);
+                let _ = send.send(result);
+                second
+            });
+            let waited = wait_for_relation(&first, session, || worker.is_finished());
+            let released = first.sql(if commit { "COMMIT" } else { "ROLLBACK" }, &[]);
+            let result = done.recv_timeout(Duration::from_secs(30));
+            if result.is_err() {
+                cancel.cancel();
+            }
+            let second = worker.join().unwrap();
+            assert!(
+                waited,
+                "provider {provider}, commit={commit}: schema rename bypassed member statistics"
+            );
+            released.unwrap();
+            result.unwrap().unwrap();
+            let catalog = second.storage.catalog.as_ref().unwrap();
+            assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
+            let expected = if commit { 2 } else { 1 };
+            assert_eq!(
+                catalog.load_column_stats("renamed.t").unwrap()[0].row_count,
+                expected
+            );
+            let count = second
+                .sql("SELECT count(*) AS n FROM renamed.t", &[])
+                .unwrap();
+            assert_eq!(count.rows.len(), 1);
+            assert_eq!(count.rows[0]["n"], Value::Int(expected));
+            second
+                .sql("ALTER SCHEMA renamed RENAME TO public", &[])
+                .unwrap();
+            assert_eq!(persisted_rows(&second), expected);
+        }
+    }
+}

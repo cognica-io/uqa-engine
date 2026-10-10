@@ -352,7 +352,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         &self,
         field: &str,
         predicate: &Predicate,
-        candidates: &[DocId],
+        candidates: filter::Candidates<'_>,
     ) -> DriverResult<PostingList> {
         self.require_column(field)?;
         if let Some(indexed) = self.value_index_scan(field, predicate)? {
@@ -361,11 +361,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         if let Some(read) = self.context.relations.serializable_read(self.table)? {
             read.observe_scan()?;
         }
-        self.evaluate_filter_candidates(
-            field,
-            predicate,
-            filter::Candidates::Intersection(candidates),
-        )
+        self.evaluate_filter_candidates(field, predicate, candidates)
     }
 
     fn evaluate_filter_candidates(

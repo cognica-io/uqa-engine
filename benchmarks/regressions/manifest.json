@@ -1858,6 +1858,98 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "authenticated_block_headers_do_not_fragment_physical_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests.rs",
+      "capability": "Authenticated spill block I/O",
+      "workload": "Publish one and 32 encrypted blocks through the ordinary temporary-file writer and read their exact bytes back.",
+      "invariant": "Each block publication issues at most three physical write requests without changing the authenticated format or active-slot publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "residual_candidates_keep_relational_promises_through_set_operations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/operator_tree/driver/intersection/tests.rs",
+      "capability": "Relational candidate provenance",
+      "workload": "Relational and graph operands nested through intersections, unions and sequential compositions under serial and parallel execution.",
+      "invariant": "Residual filters reject missing promised document identities while allowing graph identities outside the selected relation; composition preserves the provenance of its support.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "disjoint_private_prefixes_do_not_open_spill_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Disjoint private prefix reads",
+      "workload": "128/512 private records forced to spill; prefixes before and after the run range through entry, value and metadata cursors.",
+      "invariant": "Disjoint prefixes open zero blocks, decode zero entries and load zero values, while matching scans, cancellation and original allowance release remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "schema_rename_waits_for_member_statistics_and_refreshes_after_release",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/session/analyze/tests/locking.rs",
+      "capability": "Schema relocation and maintenance concurrency",
+      "workload": "Native SQLite, SQLite Key/Value and redb sessions; an open ANALYZE transaction competes with schema rename and either commits or rolls back.",
+      "invariant": "Schema relocation waits for the member relation, refreshes the released transaction outcome and preserves exact moved statistics and row counts without leftover old-name rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cursor_seeks_between_blocks_do_not_decode_preceding_entries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Spill cursor block bounds",
+      "workload": "A 1024-record spilled run; included and excluded absent keys between blocks, plus an excluded preceding block endpoint.",
+      "invariant": "Each forward seek reads only the next block and its first entry, with unchanged key selection, cancellation and allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "diskann_transaction_larger_than_its_session_allowance_commits",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/diskann/resources.rs",
+      "capability": "DiskANN transaction spill lifecycle",
+      "workload": "The unchanged native and Key/Value conformance cases insert 2048 canonical documents under the original 512 KiB session allowance, undo a replacement, commit and reopen.",
+      "invariant": "All canonical vectors, exact nearest result and population counts survive undo and publication; original allowance and complete release remain enforced under the unchanged CI stall guard.",
+      "case_names": [
+        "native_1_false",
+        "native_2_true"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "population_visits_do_not_reopen_spill_after_a_terminal_page",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/populations/reconcile/tests.rs",
+      "capability": "Population reconciliation page exhaustion",
+      "workload": "Spilled prefixes with 1/63/64/65/127/128/129 records, including tombstones, followed by an unrelated key.",
+      "invariant": "Only required pages open spill blocks; short terminal pages do not cause an extra empty query. Exact live rows, full-page boundaries, cancellation and allowance release are preserved.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

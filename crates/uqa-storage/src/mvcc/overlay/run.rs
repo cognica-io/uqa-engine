@@ -42,9 +42,10 @@ use filter::KeyFilter;
 /// The aligned span of the value file a read of a small value decrypts and keeps.
 const VALUE_CHUNK: u64 = 16 * 1024;
 
-/// One block of a run's entry file: its first key and its byte range.
+/// One block of a run's entry file: its complete key interval and byte range.
 struct RunBlock {
     first: RecordKey,
+    last: RecordKey,
     offset: u64,
     end: u64,
 }
@@ -113,6 +114,9 @@ impl SpilledRun {
         let Some(index) = self.block_at_or_before(key) else {
             return Ok(None);
         };
+        if key > self.blocks[index].last.bytes() {
+            return Ok(None);
+        }
         let mut block = reader::EntryReader::new(self, index, control)?;
         block.select(control, |candidate| match candidate.cmp(key) {
             std::cmp::Ordering::Less => reader::Selection::Skip,
@@ -159,6 +163,16 @@ impl SpilledRun {
     /// Visit the run's changes in key order from `start`.
     pub(in crate::mvcc) fn cursor(self: &Arc<Self>, start: Bound<&[u8]>) -> RunCursor {
         RunCursor::new(Arc::clone(self), start)
+    }
+
+    /// Whether the run's key interval can contain this literal prefix. A disjoint interval needs no entry reader or decoded block.
+    pub(super) fn intersects_prefix(&self, prefix: &[u8]) -> bool {
+        let index = self
+            .blocks
+            .partition_point(|block| block.last.bytes() < prefix);
+        self.blocks.get(index).is_some_and(|block| {
+            block.first.bytes() <= prefix || block.first.bytes().starts_with(prefix)
+        })
     }
 
     /// Pass the value at `location` to `sink` in chunks, without holding it whole. A value within one aligned chunk of the value file is passed from that chunk, which the run keeps for the values that follow it.
@@ -264,11 +278,12 @@ impl SpilledRun {
     fn first_block_from(&self, start: Bound<&[u8]>) -> usize {
         match start {
             Bound::Unbounded => 0,
-            Bound::Included(key) if key > self.last.bytes() => self.blocks.len(),
-            Bound::Excluded(key) if key >= self.last.bytes() => self.blocks.len(),
-            Bound::Included(key) | Bound::Excluded(key) => {
-                self.block_at_or_before(key).unwrap_or(0)
-            }
+            Bound::Included(key) => self
+                .blocks
+                .partition_point(|block| block.last.bytes() < key),
+            Bound::Excluded(key) => self
+                .blocks
+                .partition_point(|block| block.last.bytes() <= key),
         }
     }
 
