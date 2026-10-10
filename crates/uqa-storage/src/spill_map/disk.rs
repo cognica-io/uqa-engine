@@ -8,7 +8,11 @@
 
 mod cache;
 
-use super::{invalid, io, Record};
+use super::{
+    invalid, io,
+    workspace::{Reservation, Workspace},
+    Record,
+};
 use crate::{
     read_control::StorageReadControl, temporary_file::BlockTemporaryFile, StorageBackendResult,
 };
@@ -17,7 +21,7 @@ use std::{
     io::{BufWriter, IoSlice, Seek, SeekFrom, Write},
     sync::Arc,
 };
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError};
 
 const HEADER_BYTES: usize = 64;
 const LEAF: u8 = 128;
@@ -43,7 +47,7 @@ struct Pages {
     file: BlockTemporaryFile<BLOCK_BYTES>,
     cache: Vec<Cache>,
     blocks: cache::Blocks,
-    _memory: MemoryReservation,
+    _memory: Reservation,
 }
 
 #[derive(Clone)]
@@ -61,7 +65,8 @@ pub(super) struct Builder {
     path: [Header; 128],
     depth: usize,
     previous: Option<u128>,
-    _workspace: MemoryReservation,
+    _workspace: Reservation,
+    workspace: Option<Arc<Workspace>>,
 }
 
 impl Builder {
@@ -86,8 +91,16 @@ impl Builder {
     }
 
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        let mut workspace = memory.reserve(size_of::<[Header; 128]>() + BLOCK_BYTES)?;
-        let map = Map::new(memory)?;
+        Self::with_workspace(memory, None)
+    }
+
+    pub(super) fn with_workspace(
+        memory: &MemoryBudget,
+        owner: Option<&Arc<Workspace>>,
+    ) -> StorageBackendResult<Self> {
+        let mut workspace =
+            Reservation::reserve(memory, owner, size_of::<[Header; 128]>() + BLOCK_BYTES)?;
+        let map = Map::with_workspace(memory, owner)?;
         let mut writer =
             BufWriter::with_capacity(BLOCK_BYTES, map.file.lock().file.reopen().map_err(io)?);
         workspace.grow(writer.capacity() - BLOCK_BYTES)?;
@@ -100,6 +113,7 @@ impl Builder {
             depth: 0,
             previous: None,
             _workspace: workspace,
+            workspace: owner.cloned(),
         })
     }
 
@@ -110,7 +124,7 @@ impl Builder {
         memory: &MemoryBudget,
     ) -> StorageBackendResult<()> {
         let encoded = value.encoded_bytes()?;
-        let mut encoded_memory = memory.reserve(encoded)?;
+        let mut encoded_memory = Reservation::reserve(memory, self.workspace.as_ref(), encoded)?;
         let mut bytes = Vec::with_capacity(encoded);
         value.encode(&mut bytes);
         if bytes.len() != encoded {
@@ -229,15 +243,22 @@ impl Map {
         self.file.lock().file.block_io_counts().1
     }
 
-    pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
+    fn with_workspace(
+        memory: &MemoryBudget,
+        owner: Option<&Arc<Workspace>>,
+    ) -> StorageBackendResult<Self> {
         let slots = Self::cache_slots(memory);
-        let reservation = memory.reserve(size_of::<Pages>() + slots * size_of::<Cache>())?;
+        let reservation = Reservation::reserve(
+            memory,
+            owner,
+            size_of::<Pages>() + slots * size_of::<Cache>(),
+        )?;
         let file = BlockTemporaryFile::new().map_err(io)?;
         Ok(Self {
             file: Arc::new(Mutex::new(Pages {
                 file,
                 cache: vec![Cache::default(); slots],
-                blocks: cache::Blocks::new(memory)?,
+                blocks: cache::Blocks::new(memory, owner)?,
                 _memory: reservation,
             })),
             root: 0,

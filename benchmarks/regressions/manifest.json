@@ -2356,6 +2356,32 @@
         "backend_3___redb__::completion_2___ROLLBACK__",
         "backend_3___redb__::completion_3___drop__"
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resident_root_can_spill_after_a_sibling_consumes_the_remaining_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Retained spill conversion allowance",
+      "workload": "128 resident records followed by a sibling allocation consuming all unreserved bytes under 64 KiB, then one more record through both live and ordered construction.",
+      "invariant": "Previously admitted roots convert using their retained allowance, preserve all 129 records, and release every lease without exceeding the ancestor limit."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "failed_conversion_returns_reserved_workspace_to_the_resident_root",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Failed spill conversion ownership",
+      "workload": "128 resident records, full sibling pressure, a failed authenticated final flush, and a subsequent conversion of the original root under 64 KiB.",
+      "invariant": "Failure removes the unpublished file and restores exactly the prior charged bytes; successful conversion releases unused workspace and preserves all records."
     }
   ]
 }

@@ -58,6 +58,79 @@ fn resident_growth_keeps_spill_workspace_under_shared_ancestor_pressure() {
 }
 
 #[test]
+fn resident_root_can_spill_after_a_sibling_consumes_the_remaining_allowance() {
+    for ordered in [false, true] {
+        let owner = MemoryBudget::new(64 * 1024);
+        let (map, sibling) = if ordered {
+            let mut builder = Builder::new(&owner, 48 * 1024);
+            for key in 0..128_u128 {
+                builder.insert(key, key as u64, None).unwrap();
+            }
+            let sibling = owner.reserve(owner.available()).unwrap();
+            builder.insert(128, 128, None).unwrap();
+            (builder.finish(None).unwrap(), sibling)
+        } else {
+            let mut map = Map::new(&owner, 48 * 1024);
+            for key in 0..128_u128 {
+                map.insert(key, key as u64, None).unwrap();
+            }
+            assert!(!map.is_spilled());
+            // Another owner grows between calls, after resident admission completed.
+            let sibling = owner.reserve(owner.available()).unwrap();
+            map.insert(128, 128, None).unwrap();
+            (map, sibling)
+        };
+        assert!(map.is_spilled());
+        drop(sibling);
+        assert_eq!(
+            entries(&map),
+            (0..129).map(|key| (key, key as u64)).collect::<Vec<_>>()
+        );
+        drop(map);
+        assert_eq!(owner.used(), 0);
+        assert!(owner.peak() <= owner.limit());
+    }
+}
+
+#[test]
+fn failed_conversion_returns_reserved_workspace_to_the_resident_root() {
+    let memory = MemoryBudget::new(64 * 1024);
+    let mut map = Map::new(&memory, 48 * 1024);
+    for key in 0..128_u128 {
+        map.insert(key, key as u64, None).unwrap();
+    }
+    let sibling = memory.reserve(memory.available()).unwrap();
+    let before = memory.used();
+    let mut builder = disk::Builder::with_workspace(&memory, map.workspace.as_ref()).unwrap();
+    for (key, value) in map.iter().map(Result::unwrap) {
+        builder.push(key, &*value, &memory).unwrap();
+    }
+    let path = builder.path();
+    builder.fail_write_after(0);
+    assert!(builder.finish().is_err());
+    assert!(!path.exists());
+    assert_eq!(
+        memory.used(),
+        before,
+        "failed construction returns all leases"
+    );
+    assert!(!map.is_spilled());
+    map.spill(None).unwrap();
+    assert!(map.is_spilled());
+    assert!(
+        memory.used() < before,
+        "completed conversion releases its unused workspace"
+    );
+    drop(sibling);
+    assert_eq!(
+        entries(&map),
+        (0..128).map(|key| (key, key as u64)).collect::<Vec<_>>()
+    );
+    drop(map);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn ordered_construction_spills_linearly_and_preserves_unordered_replacements() {
     for count in [128_u128, 512] {
         let control = StorageReadControl::with_limit(64 * 1024);
