@@ -1,14 +1,14 @@
 # Rust workspace refactoring plan
 
-Status: Complete
+Status: Complete on 2026-09-01. The measurements and execution results below are historical completion evidence; the [verification manual](../manual/internals/09-verification.md#repository-size-snapshot) contains the current source-size snapshot and reproduction command.
 
-Current implementation position: All six implementation bundles and their local exit evidence are complete. Every governed Rust file is below 1,000 physical lines, the transition inventory has been removed, root structural lint allowances are absent, oversized production and test sources have responsibility-owned modules without adding a test executable, immutable statement catalog snapshots and narrow capabilities govern the read path, every DML command and action family uses one typed mutation protocol, lower-crate hotspots have explicit owners, and `UnifiedPlanExecutor` remains the sole dispatcher. Workspace, release-`usql`, and live PostgreSQL 18 with Apache AGE verification pass; the repository workflow still requires the change-aware pre-merge suite on each final remote head.
+Implementation position at completion: All six implementation bundles and their local exit evidence were complete. Every governed Rust file is below 1,000 physical lines, the transition inventory has been removed, root structural lint allowances are absent, oversized production and test sources have responsibility-owned modules without adding a test executable, immutable statement catalog snapshots and narrow capabilities govern the read path, every DML command and action family uses one typed mutation protocol, lower-crate hotspots have explicit owners, and `UnifiedPlanExecutor` remains the sole dispatcher. Workspace, release-`usql`, and live PostgreSQL 18 with Apache AGE verification pass; the repository workflow still requires the change-aware pre-merge suite on each final remote head.
 
 Update rule: Update this completed plan only when its ownership contract, permanent line policy, test topology, or final evidence changes. A file move or line-count reduction is not complete evidence unless the resulting owner, dependency direction, behavior contract, and focused tests satisfy this plan.
 
 ## 1. Decision
 
-UQA Engine will refactor the Rust workspace around explicit ownership boundaries rather than repeatedly splitting files just below the current 1,500-line ceiling. `uqa-engine` remains the public composition root, but SQL binding, catalog projection, relational execution, mutation coordination, transaction state, and locking algorithms must receive only the capabilities they require instead of using `&Engine` as a general service locator.
+UQA Engine will refactor the Rust workspace around explicit ownership boundaries rather than repeatedly splitting files just below the 1,500-line ceiling in effect when this plan began. `uqa-engine` remains the public composition root, but SQL binding, catalog projection, relational execution, mutation coordination, transaction state, and locking algorithms must receive only the capabilities they require instead of using `&Engine` as a general service locator.
 
 The work preserves one compiled SQL path through `UnifiedPlan` and `UnifiedPlanExecutor`, the existing public `Engine` API, persistent catalog compatibility, structural executor-only column identities, PostgreSQL 18 behavior, and the single integration-test target per crate. Refactoring must not introduce a second dispatcher, a parallel SQL dialect, fabricated internal SQL names, silent fallback, compatibility waivers, or a new crate whose only purpose is to hide line count.
 
@@ -35,7 +35,7 @@ The following are non-goals:
 - Adding test executables to make a large test target appear smaller.
 - Renaming established all-capital initialisms such as CPU, MLX, and UQA in prose or Rust identifiers.
 
-## 3. Audited current boundary
+## 3. Historical baseline and completion measurements
 
 The implementation baseline audit was performed on 2026-08-31 at commit `7571d18b2e7d8efeb5635e4bd2c276bc5adb1c20`. The worktree was clean. `python3 scripts/check-workspace-dependencies.py` passed with 94 runtime edges across 30 crates, and `python3 scripts/check-integration-test-harnesses.py` passed with 218 registered sources in 18 targets across 18 crates. The former all-or-nothing 1,500-line script failed on six files at that audit. Phase 0 replaced it with the checked-in exact-baseline transition ratchet and then resolved all six urgent entries without changing the public behavior or integration-test target topology.
 
@@ -66,7 +66,7 @@ At the 2026-08-31 baseline, the largest ownership concentrations were:
 
 The generated `uqa-pg-query/src/protobuf.rs` still contributes 9,077 code lines to the raw `cloc` total. It remains included in total repository size but excluded, together with the rest of imported `uqa-pg-query`, from hand-maintained file-size gates.
 
-The oversized-file population has grown at every measured threshold despite one focused SQL split. Counts exclude `uqa-pg-query` and use physical lines so they match the repository policy:
+Before this refactoring, the oversized-file population had grown at every measured threshold despite one focused SQL split. Counts exclude `uqa-pg-query` and use physical lines so they match the repository policy:
 
 | Minimum physical lines | 2026-08-27 | 2026-08-31 | Phase 0 boundary | Boundary change from audit |
 | --- | ---: | ---: | ---: | ---: |
@@ -262,7 +262,7 @@ The existing `uqa-engine` integration executable owns 256 Rust sources totaling 
 
 Final local evidence passes on the same tree: formatting and diff checks, all repository policy scripts, 23 policy-checker unit tests, workspace all-target compilation, workspace Clippy with warnings denied, workspace documentation with rustdoc warnings denied, dependency audit, and `cargo test --workspace --all-targets --locked`, including every registered benchmark correctness gate. The single `uqa-engine` integration executable reports 2,068 passed, two explicitly ignored release-profile probes, and no failures. A release `usql` built from the tree matched all 797 differential probes against the pinned Docker PostgreSQL 18.4 and Apache AGE 1.8.0 oracle; the stateful suites matched routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61, and the independent dblink catalog-visibility transcript matched exactly.
 
-### 3.8 Phase status at the current implementation
+### 3.8 Implementation status at completion
 
 | Phase | Status | Current evidence |
 | --- | --- | --- |

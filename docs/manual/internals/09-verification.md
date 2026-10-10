@@ -93,9 +93,33 @@ The Rust line checker loads `scripts/rust-file-line-policy.json` and rejects eve
 bash scripts/measure-rust-refactoring.sh
 ```
 
-The completed 2026-09-01 boundary uses `cloc 2.08`: `crates/` contains 1,490 Rust files, 406,927 code lines, 19,873 comment lines, and 27,566 blank lines. The hand-maintained report excludes imported `uqa-pg-query` and contains 1,485 files and 439,164 physical lines; no governed file reaches 1,000 lines, the largest is `uqa-sql/src/compiler/tree/select.rs` at 999 lines, `uqa-engine` contains 696 files and 236,259 physical lines, `uqa-engine/src/sql` contains 252 files and 90,420 physical lines, and the root structural-allowance report is empty.
+### Repository size snapshot
 
-The completed boundary's full local evidence includes workspace check, Clippy, documentation, dependency audit, and all-target tests with every registered benchmark correctness gate. The single `uqa-engine` integration executable reports 2,068 passed, two explicitly ignored release-profile probes, and no failures. The release `usql` matches 797/797 differential probes and the routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61 stateful suites against the pinned Docker PostgreSQL 18.4 with Apache AGE 1.8.0 oracle.
+Measured from main `afdf2d3bb` on 2026-10-10 with the command above and `cloc 2.08`:
+
+| Metric | Count | Scope |
+| --- | ---: | --- |
+| Rust files counted by `cloc` | 5,692 | `crates/`, including tests, benches, examples, build scripts and imported/generated Rust; default duplicate-file handling |
+| Rust code lines | 1,122,032 | Same `cloc` scope; excludes comments and blank lines |
+| Comment lines | 53,363 | Same `cloc` scope |
+| Blank lines | 69,006 | Same `cloc` scope |
+| Governed Rust files | 5,685 | Repository physical-line policy; excludes imported `uqa-pg-query` and `target/` |
+| Governed physical lines | 1,228,995 | Includes code, comments and blank lines in governed files |
+| Files at or above 1,000 physical lines | 0 | Same governed scope |
+
+The two file counts use different scopes and counting rules. Both line-count scopes include tests. The physical-line report also gives these ownership totals:
+
+| Crate | Rust files | Physical lines |
+| --- | ---: | ---: |
+| `uqa-engine` | 1,035 | 264,814 |
+| `uqa-sql` | 1,139 | 254,073 |
+| `uqa-execution` | 1,219 | 246,935 |
+| `uqa-storage` | 767 | 150,520 |
+| `uqa-core` | 157 | 30,400 |
+
+The largest governed file is `uqa-execution/src/statement/plan_executor.rs` at 999 physical lines. The old `uqa-engine/src/sql` subtree is absent; its historical size does not describe current ownership. The report finds no structural lint allowance in the inspected crate/module roots. These are source measurements at the recorded revision, not build, test or performance results; rerun the report for a later revision.
+
+The [completed refactoring plan](../../plans/0005-rust-workspace-refactoring.md#37-phase-6-boundary-measurement) preserves the 2026-09-01 code-size and execution evidence, including its then-current test and differential-probe totals. Those historical results are not current-main acceptance counts.
 
 Use the consolidated `uqa-engine` integration target as the fixed compile/link runner. An empty target directory measures a clean offline build and link; rerunning the same command in that directory records the warm no-op baseline without creating another test executable:
 
@@ -104,7 +128,7 @@ runner_target=$(mktemp -d /private/tmp/uqa-rust-fixed-runner.XXXXXX)
 env CARGO_TARGET_DIR="$runner_target" /usr/bin/time -p cargo test -p uqa-engine --test integration --no-run --locked --offline
 ```
 
-The 2026-08-31 structural baseline on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. Absolute time is machine-specific; the stable runner, locked dependency graph, offline mode, and empty-versus-warm target distinction make later measurements comparable on the same host.
+The 2026-08-31 structural baseline on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. These historical timings do not establish a current build-time bound. Later comparisons require a controlled host and an independently established noise bound in addition to the same runner, locked dependencies, offline mode and clean-versus-warm distinction.
 
 The capability, read-path, and mutation-protocol boundaries have focused executable evidence inside the existing library targets and the crate's single integration target:
 
@@ -162,7 +186,7 @@ The TPC-H-derived fixture runs all 22 queries and compares exact columns, row or
 cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
-The live compatibility runner validates the manifest and executes every side-effect-free probe against PostgreSQL 18.4 and the release `usql` binary. At this revision `probes.sql` contains 797 probes; result rows must match after the documented normalization, and rejected statements must have the same SQLSTATE:
+The live compatibility runner validates the manifest and executes every side-effect-free probe against PostgreSQL 18.4 and the release `usql` binary. The fixture inventory at main `afdf2d3bb` (2026-10-10) contains 831 probes in `probes.sql`; result rows must match after the documented normalization, and rejected statements must have the same SQLSTATE:
 
 ```sh
 cargo build --release -p uqa-cli
@@ -170,7 +194,20 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 200 routine cases, 182 role and routine-security cases, 162 constraint cases, 49 type-and-temporal cases, 609 trigger cases, 194 rewrite-rule cases, and 91 transaction cases:
+Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. The same source snapshot contains the following expected-case inventory. These are fixture counts, not a new execution result; focused `*_oracle` fixtures and the 354-test upstream corpus are separate evidence.
+
+| Suite | Expected cases |
+| --- | ---: |
+| Routines | 200 |
+| Roles and routine security | 182 |
+| Constraints | 162 |
+| Type and temporal behavior | 49 |
+| Triggers | 609 |
+| Rewrite rules | 194 |
+| Transactions | 275 |
+| Inherited CHECK constraints | 148 |
+| Indexes | 182 |
+| View definitions | 86 |
 
 The automatic-view cases include nested computed and nonautomatic rule-backed views, scalar, `EXISTS`, and `IN` subqueries in view projections and predicates, correlated and unqualified references, local-alias collisions, statement snapshots, `OLD` and `NEW` row images, check options, `MERGE`, rewrite-rule images, lazy rule input projection, `WITH CHECK OPTION` over non-updatable sources, `ONLY` partition-view insert routing, replication-independent catalog flags, no-relation star errors, and unqualified system-column rewrite cardinality.
 
@@ -184,6 +221,9 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers
 python3 tests/parity/pg18/run_routines_stateful.py --suite rules
 python3 tests/parity/pg18/run_routines_stateful.py --suite transactions
+python3 tests/parity/pg18/run_routines_stateful.py --suite check-inheritance
+python3 tests/parity/pg18/run_routines_stateful.py --suite indexes
+python3 tests/parity/pg18/run_routines_stateful.py --suite view-definitions
 ```
 
 Run the live TPC-H and driver gates when query output or PostgreSQL-facing I/O changes:

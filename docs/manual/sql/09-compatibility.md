@@ -25,6 +25,8 @@ The [official regression inventory](../internals/09-verification.md#compatibilit
 
 <!-- pg18-milestone-snapshot:start -->
 
+Manifest inventory: 144 evidence items — 91 `verified`, 52 `partial`, 0 `explicitly_rejected`, and 1 `not_audited`. These items have different scopes; their counts are not a percentage of PostgreSQL compatibility or a count of passing upstream tests.
+
 Current milestone snapshot: complete — `M2` (Protocol 3.2); in progress — `M0` (PG18 baseline), `M1` (Discovered semantic fixes), `M3` (PG18 DDL and types), `M4` (Core regression parity), `M5` (Client parity); not started — `M6` (Complete compatibility). Each milestone status is derived from its owned evidence items and remains bounded by its exit gate.
 
 <!-- pg18-milestone-snapshot:end -->
@@ -121,7 +123,7 @@ Supported declarations retain distinct `SMALLINT`, `INTEGER`, `BIGINT`, `OID`, `
 Domain declarations and conversions now have 145 PostgreSQL 18.4 comparisons covering defaults, nested constraints, arrays, quoted identities, catalog owners, typed routine arguments and locals, anonymous blocks, trigger record fields and returns, constraint-function effects, rollback, and SQLite reopen. Scalar domain identity is retained internally and flattened to its base type in wire results; domain arrays keep their array identity. Declared time/timestamp precision and interval field modifiers are retained through casts, assignments, result descriptors, catalogs, and persistence. See [domain declarations](02-ddl.md#domain-declarations-and-deletion) and [data types](01-data-types.md) for the implemented contracts.
 
 - The complete implicit, assignment, and explicit cast-context matrix is not implemented for every source and target pair.
-- User-defined enum and composite declarations, domain constraint lifecycle, composite ADD ATTRIBUTE, and the six built-in range and multirange families are implemented; see [data types](01-data-types.md) and [type DDL](02-ddl.md#composite-types). Composite DROP/ALTER/RENAME ATTRIBUTE and complete record ordering remain open.
+- User-defined enum and composite declarations, domain constraint lifecycle, composite ADD/DROP/RENAME ATTRIBUTE and ALTER ATTRIBUTE TYPE, and the six built-in range and multirange families are implemented; see [data types](01-data-types.md) and [type DDL](02-ddl.md#composite-types). Named-record comparisons and retained physical values have focused PostgreSQL coverage; the complete record comparison and type-evolution matrix remains open. Retained composite reads beyond their owned tuple raise `XX001` under the maintainer-approved [boundary contract](02-ddl.md#changing-composite-attribute-types); defined in-bounds values and lazy-read behavior retain PostgreSQL semantics.
 - User-defined range and multirange declarations and host-defined base types remain open. Implemented enum and built-in range carriers support the corresponding [polymorphic routine families](08-transactions-and-routines.md#polymorphic-and-variadic-routines).
 - Large declared `NUMERIC` precision is bounded by the engine decimal carrier in actual values.
 - Collation and locale behavior is not a complete PostgreSQL collation implementation.

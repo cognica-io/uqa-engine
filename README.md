@@ -255,6 +255,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor checks, [crate ownership]
 
 ## PostgreSQL 18 compatibility
 
+Compatibility remains incomplete. The [manual](docs/manual/sql/09-compatibility.md) and [manifest-derived ledger](docs/plans/0003-postgresql-18-compatibility.md#current-implementation-status-and-open-postgresql-18-bugs) distinguish verified behavior from remaining SQL, type, protocol and client work. The unmodified [upstream regression corpus](tests/parity/pg18/upstream/README.md) has PostgreSQL reference evidence; its complete UQA execution is still unaudited.
+
 The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixture with all 22 default queries. The self-contained correctness gate compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 results:
 
 ```sh
@@ -271,16 +273,7 @@ python3 tests/parity/pg18/run_diff.py
 
 Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](docs/plans/0003-postgresql-18-compatibility.md).
 
-Release-mode timing uses a machine-readable runner rather than test-profile execution:
-
-```sh
-cargo build --release -p uqa-engine --example tpch_runner --locked
-target/release/examples/tpch_runner --iterations 201
-```
-
-In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](docs/design/performance.md).
-
-The 2026-08-11 clustered-posting pass measured release-profile persisted Block-Max WAND at 1.0142 ms and WAND at 0.9337 ms on the direct 5,000-document reopened-SQLite probe, down 73.7% and 76.5% from the preceding 3.8584 ms and 3.9801 ms baselines. The 2026-08-12 pinned SciFact run separately measured the current exact `hybrid_log_odds` contract at 0.7226 NDCG@10, 0.6820 MAP@10, 0.8322 Recall@10, and 3.29 ms per query; it passed every absolute and comparative gate. Commands, measured boundaries, validity rules, complete tables, and limitations are recorded in the [performance design document](docs/design/performance.md#clustered-posting-pass-2026-08-11).
+Current performance verification uses the [deterministic regression inventory](benchmarks/regressions/README.md) and the separate [controlled-runner protocol](benchmarks/regressions/controlled-runner.md). Dated TPC-H, posting and relevance measurements remain in the [TPC-H benchmark](benchmarks/tpch/README.md) and [performance design](docs/design/performance.md); they are not current-release measurements.
 
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
