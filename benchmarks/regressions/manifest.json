@@ -1873,6 +1873,19 @@
       ]
     },
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "appending_authenticated_blocks_does_not_resize_the_existing_file",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests.rs",
+      "capability": "Authenticated spill extent growth",
+      "workload": "Append 1, 32 and 257 authenticated blocks, read exact bytes, truncate inside a block and grow across its boundary.",
+      "invariant": "Append performs zero physical resizes; explicit truncation performs one, subsequent growth performs none, physical framing is exact and newly visible bytes are zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "residual_candidates_keep_relational_promises_through_set_operations",

@@ -31,9 +31,10 @@ fn ordered_construction_spills_linearly_and_preserves_unordered_replacements() {
         };
         let logical_bytes = count as u64 * 136;
         assert_eq!(disk.read_blocks(), 0);
+        // One authenticated header, one extent byte and one selector per new block.
         assert_eq!(
             disk.written_bytes(),
-            logical_bytes + logical_bytes.div_ceil(1024) * 43
+            logical_bytes + logical_bytes.div_ceil(1024) * 44
         );
         assert_eq!(
             entries(&map),
@@ -76,7 +77,7 @@ fn bulk_spill_publishes_each_authenticated_block_once() {
         assert_eq!(disk.read_blocks(), 0);
         assert_eq!(
             disk.written_bytes(),
-            logical_bytes + blocks * (24 + 2 + 16 + 1)
+            logical_bytes + blocks * (24 + 2 + 16 + 2)
         );
         for key in 0..count {
             assert_eq!(*disk.get::<u64>(key, &memory).unwrap().unwrap(), key as u64);
