@@ -2063,7 +2063,7 @@
       "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
       "capability": "Payload-free occurrence source selection",
       "workload": "4/128/512 paired term clusters and one canonical format marker in an immutable spill under 128 KiB, through command refresh and publication.",
-      "invariant": "Only the ordered input cursor reads values, exactly once per record; marker metadata does not evict its payload block. Every output key, value, condition, canonical kind and final allowance release remains exact.",
+      "invariant": "Only the ordered input cursor reads values, exactly once per record; marker metadata does not evict its payload block. Every output key, value, condition, canonical kind and final allowance release remains exact. Command conditions share one metadata window with zero scalar reads; publication opens none.",
       "case_names": [
         ""
       ]
@@ -2236,6 +2236,71 @@
       "capability": "Ordered batch metadata admission",
       "workload": "64 streamed edits followed by a metadata failure and one later edit, a spilled evaluated journal, an existing private record and its retained view under 128 KiB.",
       "invariant": "The default point-read provider rejects the 65th condition without reading a later key or any values; atomic rollback restores exact prior state and releases every reservation."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "occurrence_validation_closes_its_window_before_derived_reads",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/validation.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "Canonical/derived/canonical replacements in command and publication modes.",
+      "invariant": "Command validation opens exactly two windows and never reenters a provider while active; publication opens none. All values, conditions and kinds remain exact and all memory releases."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "occurrence_validation_preserves_first_error_and_releases_admission",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/validation.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "An ordered successful condition, conflicting condition and later invalid occurrence key, with cancellation injected after the first request.",
+      "invariant": "First conflict ordinal and revisions remain exact, later invalid input is not reached, cancellation stops further requests, admission closes and failed output releases all temporary memory."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "refreshed_conditions_share_one_window_without_reading_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/refresh/validation/tests.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "4/128/512 spilled write conditions under 128 KiB against retained live, tombstone and absent records after a newer peer commit.",
+      "invariant": "Exactly one metadata window and zero scalar or payload reads; every original condition observes the retained sequence and all memory releases."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "refreshed_conditions_stop_at_the_first_conflict_or_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/refresh/validation/tests.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "128 spilled conditions conflicting at ordinal 0, 2 or 127, plus cancellation after the first request.",
+      "invariant": "Exact first conflicting ordinal and expected/actual revisions, no later requests, zero payload reads and complete admission and memory release."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "empty_refreshed_conditions_do_not_admit_a_read_window",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/refresh/validation/tests.rs",
+      "capability": "Ordered refresh metadata validation",
+      "workload": "Empty prepared conditions with active and cancelled read controls.",
+      "invariant": "Empty input opens no physical window, still honors cancellation and releases all memory."
     }
   ]
 }

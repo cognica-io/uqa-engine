@@ -34,6 +34,8 @@ mod restore;
 mod retention;
 mod serializable;
 mod session;
+#[cfg(test)]
+mod test_support;
 mod tombstones;
 mod types;
 mod vector;

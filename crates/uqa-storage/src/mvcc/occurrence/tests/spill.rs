@@ -106,6 +106,7 @@ fn structural_occurrence_resolution_reads_each_spilled_value_once() {
             let control = StorageReadControl::with_limit(128 << 10);
             let store = MemoryVersionStore::new(control.memory());
             let base = store.snapshot().unwrap();
+            let current = crate::mvcc::test_support::WindowSnapshot::new(store.snapshot().unwrap());
             let values = payload();
             let mut records = BTreeMap::new();
             records.insert(
@@ -151,12 +152,13 @@ fn structural_occurrence_resolution_reads_each_spilled_value_once() {
             let resolved = resolve(
                 &original,
                 &base,
-                &base,
+                &current,
                 &crate::key_value::KeyValueOccurrenceRecords,
                 mode,
                 &control,
             )
             .unwrap();
+            current.assert_reads(usize::from(mode == ResolutionMode::Command), 0);
             assert_eq!(
                 read_counts::take().values,
                 records.len(),
@@ -172,7 +174,7 @@ fn structural_occurrence_resolution_reads_each_spilled_value_once() {
             }
             assert!(cursor.next(&control).unwrap().is_none());
             drop(cursor);
-            drop((resolved, original, base, store));
+            drop((resolved, original, current, base, store));
             assert_eq!(control.memory().used(), 0);
         }
     }

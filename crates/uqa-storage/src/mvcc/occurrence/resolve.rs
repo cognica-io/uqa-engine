@@ -21,6 +21,7 @@ use uqa_core::memory::BudgetedVec;
 
 mod writes;
 use writes::ResolvedChanges;
+mod stream;
 
 pub(in crate::mvcc) fn resolve(
     original: &PreparedRecordCommit,
@@ -40,32 +41,7 @@ pub(in crate::mvcc) fn resolve(
         changes: &changes,
         control,
     };
-    let mut originals = original.writes();
-    let mut mutation = 0;
-    while let Some(write) = originals.next(control)? {
-        let write = &write;
-        match write.kind() {
-            RecordWriteKind::Canonical => {
-                resolver.validate(mutation, write)?;
-                changes.preserve(write.clone(), control)?;
-            }
-            RecordWriteKind::GraphCache
-            | RecordWriteKind::GraphPreview
-            | RecordWriteKind::IVFPreview
-            | RecordWriteKind::HNSWPreview
-            | RecordWriteKind::Marker
-            | RecordWriteKind::DiskANNOrigin
-            | RecordWriteKind::DiskANNPopulationPreview
-            | RecordWriteKind::IdempotentDelete
-            | RecordWriteKind::StatisticsMaintenance => {
-                changes.preserve(write.clone(), control)?;
-            }
-            RecordWriteKind::Occurrence | RecordWriteKind::OccurrenceCache => {
-                resolver.merge_write(mutation, write, &writes)?;
-            }
-        }
-        mutation += 1;
-    }
+    stream::apply(original, &writes, &resolver)?;
     Ok(changes
         .finish(control)?
         .retain_graph_effects(original, control)?
@@ -79,6 +55,14 @@ pub(super) struct Resolver<'a> {
     mode: ResolutionMode,
     changes: &'a ResolvedChanges,
     pub(super) control: &'a StorageReadControl,
+}
+
+struct Source {
+    kind: Kind,
+    fence: BudgetedVec<u8>,
+    marker: BudgetedVec<u8>,
+    marker_kind: RecordWriteKind,
+    structural: bool,
 }
 
 pub(super) fn revision(
@@ -99,17 +83,13 @@ impl Resolver<'_> {
         )
     }
 
-    fn merge_write(
+    /// Select only immutable prepared metadata; this never reenters a committed provider.
+    fn source(
         &self,
-        mutation: usize,
         write: &PreparedRecordWrite,
         writes: &PreparedLookup<'_>,
-    ) -> VersionResult<()> {
+    ) -> VersionResult<Source> {
         let control = self.control;
-        let changes = self.changes;
-        let base = self.base;
-        let current = self.current;
-
         let kind = self.layout.kind(write.key(), control)?;
         let fence = self
             .layout
@@ -122,12 +102,36 @@ impl Resolver<'_> {
             .ok_or(VersionError::InvalidEncoding(
                 "occurrence changes lack their source marker",
             ))?;
-        if writes.contains(&fence, control)? || source.kind() == RecordWriteKind::Canonical {
-            self.validate(mutation, write)?;
-            changes.preserve(write.clone().with_kind(RecordWriteKind::Canonical), control)?;
-            return Ok(());
-        }
-        if source.kind() != RecordWriteKind::Occurrence {
+        let structural =
+            writes.contains(&fence, control)? || source.kind() == RecordWriteKind::Canonical;
+        Ok(Source {
+            kind,
+            fence,
+            marker,
+            marker_kind: source.kind(),
+            structural,
+        })
+    }
+
+    fn merge_write(
+        &self,
+        mutation: usize,
+        write: &PreparedRecordWrite,
+        writes: &PreparedLookup<'_>,
+        source: Source,
+    ) -> VersionResult<()> {
+        let control = self.control;
+        let changes = self.changes;
+        let base = self.base;
+        let current = self.current;
+        let Source {
+            kind,
+            fence,
+            marker,
+            marker_kind,
+            ..
+        } = source;
+        if marker_kind != RecordWriteKind::Occurrence {
             return Err(VersionError::InvalidEncoding(
                 "invalid occurrence source marker",
             ));
