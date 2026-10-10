@@ -10,7 +10,6 @@ use super::NativeVectorRead;
 use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner};
 use crate::Result;
 use rusqlite::types::ValueRef;
-use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::{CommitSequence, PrivateRecordRevision};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -60,21 +59,11 @@ pub(in crate::vector_index) fn identity(
     for &family in families {
         let prefix = NativeRecordIdentity::new(family, owner)?
             .encode_prefix(&[read.field()], &snapshot.control)?;
-        let mut after = BudgetedVec::new(snapshot.control.memory());
-        loop {
-            let page = snapshot.view.private_keys(
-                &prefix,
-                (!after.is_empty()).then_some(&*after),
-                64,
-                &snapshot.control,
-            )?;
-            let Some(last) = page.last() else { break };
-            after.clear();
-            after.extend_from_slice(last.key())?;
-            for key in page.iter() {
-                private = private.max(Some(key.revision()));
-            }
-        }
+        private = private.max(
+            snapshot
+                .view
+                .private_scope_revision(&prefix, &snapshot.control)?,
+        );
     }
     Ok(Some(VectorIdentity {
         owner,

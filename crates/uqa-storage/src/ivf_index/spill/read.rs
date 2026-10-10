@@ -25,7 +25,7 @@ use uqa_core::{
 
 pub(crate) struct IVFReadIndex {
     candidate: IVFPreparedMetadata,
-    lists: Map<VectorAddress>,
+    lists: parking_lot::Mutex<Option<Map<VectorAddress>>>,
 }
 
 impl Deref for IVFReadIndex {
@@ -39,19 +39,46 @@ impl IVFReadIndex {
     pub(crate) fn new(candidate: IVFPreparedMetadata) -> StorageBackendResult<Budgeted<Self>> {
         let control = &candidate.control;
         let memory = control.memory().reserve(size_of::<Self>())?;
-        let mut lists = Map::new(control.memory(), control.memory().limit() / 16);
-        for (position, entry) in candidate.assignments().enumerate() {
-            control.check()?;
-            let (document, ordinal, centroid) = entry?;
-            let position =
-                u64::try_from(position).map_err(|_| uqa_core::memory::MemoryError::SizeOverflow)?;
-            lists.insert(
-                (centroid as u128) << 64 | u128::from(position),
-                VectorAddress(key(document, ordinal)),
-                Some(control),
-            )?;
+        Ok(Budgeted::new(
+            Self {
+                candidate,
+                lists: parking_lot::Mutex::new(None),
+            },
+            memory,
+        ))
+    }
+
+    /// Posting lists serve ranked reads, so write-only generations do not construct them. Only the generation's own allowance may retain a derived list; independent readers keep their own construction scratch and cancellation.
+    fn lists(&self, control: &StorageReadControl) -> StorageBackendResult<Map<VectorAddress>> {
+        control.check()?;
+        let mut cached = self.lists.lock();
+        if let Some(lists) = cached.as_ref() {
+            return Ok(lists.clone());
         }
-        Ok(Budgeted::new(Self { candidate, lists }, memory))
+        let mut lists = Map::new(control.memory(), control.memory().limit() / 16);
+        let mut after = None;
+        let mut position = 0_u64;
+        while let Some((found, vector)) = self.vectors.next_with_memory(after, control.memory())? {
+            control.check()?;
+            if let Some(centroid) = vector.centroid {
+                lists.insert(
+                    (centroid as u128) << 64 | u128::from(position),
+                    VectorAddress(found),
+                    Some(control),
+                )?;
+                position = position
+                    .checked_add(1)
+                    .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+            }
+            after = Some(found);
+        }
+        control.check()?;
+        #[cfg(test)]
+        LIST_BUILDS.set(LIST_BUILDS.get() + 1);
+        if self.control.memory().shares_allowance(control.memory()) {
+            *cached = Some(lists.clone());
+        }
+        Ok(lists)
     }
 
     fn top_k(
@@ -76,6 +103,7 @@ impl IVFReadIndex {
         if self.snapshot.centroids.is_empty() {
             self.scan_scores(query, norm, None, &mut scores, control)?;
         } else {
+            let lists = self.lists(control)?;
             let probes = nearest_normalized_centroids(
                 &normalized,
                 &self.snapshot.centroids,
@@ -87,8 +115,7 @@ impl IVFReadIndex {
                 let mut after = prefix.checked_sub(1);
                 loop {
                     control.check()?;
-                    let Some((found, address)) =
-                        self.lists.next_with_memory(after, control.memory())?
+                    let Some((found, address)) = lists.next_with_memory(after, control.memory())?
                     else {
                         break;
                     };
@@ -135,6 +162,14 @@ impl IVFReadIndex {
         Ok(())
     }
 }
+
+#[cfg(test)]
+thread_local! {
+    static LIST_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod tests;
 
 impl VectorIndex for IVFReadIndex {
     fn contains_document(&self, document: DocId) -> StorageBackendResult<bool> {

@@ -171,6 +171,33 @@ fn native_revision_scopes_keep_names_and_separate_family_owner_and_generation() 
         }
     }
     for family in [
+        Family::Vectors,
+        Family::HNSWIndexes,
+        Family::HNSWNodes,
+        Family::HNSWEdges,
+        Family::IVFIndexes,
+        Family::IVFCentroids,
+        Family::IVFAssignments,
+    ] {
+        for owner in [owner(1, 1), owner(2, 1), owner(1, 2)] {
+            for field in ["a", "ab", "a\0日本語"] {
+                let prefix = key(family, owner, &[text(field)]);
+                for id in [1, 2] {
+                    let mut components = vec![text(field)];
+                    if family.layout().identity_columns.len() > 1 {
+                        components.push(ValueRef::Integer(id));
+                    }
+                    let record = key(family, owner, &components);
+                    assert_eq!(
+                        NativeRecordIdentity::revision_scope(&record),
+                        Some(&*prefix)
+                    );
+                }
+                assert!(scopes.insert(prefix.to_vec()));
+            }
+        }
+    }
+    for family in [
         Family::TableOwners,
         Family::GraphLookups,
         Family::GraphPathPairs,

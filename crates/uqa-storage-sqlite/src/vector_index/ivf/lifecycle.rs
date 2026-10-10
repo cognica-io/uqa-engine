@@ -59,6 +59,7 @@ impl SQLiteIVFIndex {
         Self {
             persistent: SQLiteVectorIndex::new(conn, table, field, dimensions),
             params,
+            native_state: Arc::default(),
         }
     }
 
@@ -136,6 +137,7 @@ impl VectorIndex for SQLiteIVFIndex {
         Ok(Arc::new(Self {
             persistent: self.persistent.retained_snapshot()?,
             params: self.params,
+            native_state: Arc::default(),
         }))
     }
     fn vector_read_snapshot(

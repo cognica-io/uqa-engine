@@ -30,6 +30,10 @@ impl RunSet {
         Self(None)
     }
 
+    pub(super) fn from_run(run: Arc<SpilledRun>) -> Self {
+        Self(Some(StrongArc::new(vec![run])))
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.0.is_none()
     }

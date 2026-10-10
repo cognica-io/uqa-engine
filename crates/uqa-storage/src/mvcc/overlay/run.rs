@@ -15,6 +15,8 @@ pub(in crate::mvcc) mod read_counts;
 mod reader;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(in crate::mvcc) mod write_counts;
 mod writer;
 
 pub(in crate::mvcc) use cache::RunCacheReader;

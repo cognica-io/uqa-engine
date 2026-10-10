@@ -12,10 +12,10 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::{
-    io::{Read, Seek, SeekFrom, Write},
+    io::{IoSlice, Read, Seek, SeekFrom, Write},
     sync::Arc,
 };
-use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError, MemoryReservation};
+use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
 
 const HEADER_BYTES: usize = 64;
 const LEAF: u8 = 128;
@@ -143,6 +143,11 @@ impl Map {
     #[cfg(test)]
     pub(super) fn fail_write_after(&self, bytes: usize) {
         self.file.lock().file.fail_write_after(bytes);
+    }
+
+    #[cfg(test)]
+    pub(super) fn written_bytes(&self) -> u64 {
+        self.file.lock().file.block_io_counts().1
     }
 
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
@@ -301,11 +306,24 @@ impl Map {
                 depth += 1;
                 previous = if right { header.right } else { header.left };
             }
-            let mut root = file.append_value(key, retained, &bytes)?;
+            let mut root = original;
+            let parent_start = original
+                .checked_add(HEADER_BYTES as u64)
+                .and_then(|offset| offset.checked_add(bytes.len() as u64))
+                .ok_or(MemoryError::SizeOverflow)?;
+            let mut parents = BudgetedVec::new(memory);
+            parents.reserve((depth + 1) * HEADER_BYTES)?;
+            let mut append_parent = |header| -> StorageBackendResult<u64> {
+                let offset = parent_start
+                    .checked_add(parents.len() as u64)
+                    .ok_or(MemoryError::SizeOverflow)?;
+                parents.extend_from_slice(&encode_header(header))?;
+                Ok(offset)
+            };
             let replaced = existing.filter(|(_, leaf)| leaf.key == key);
             if previous != 0 && replaced.is_none() {
                 let right = bit(key, differing);
-                root = file.append_header(Header {
+                root = append_parent(Header {
                     bit: differing,
                     key,
                     left: if right { previous } else { root },
@@ -321,8 +339,9 @@ impl Map {
                 } else {
                     header.left = root;
                 }
-                root = file.append_header(header)?;
+                root = append_parent(header)?;
             }
+            file.append_path(key, retained, &bytes, &parents)?;
             let removed = replaced.map_or(0, |(_, leaf)| leaf.length + HEADER_BYTES as u64);
             let added = bytes.len() as u64
                 + HEADER_BYTES as u64
@@ -436,6 +455,28 @@ fn bit(key: u128, position: u8) -> bool {
     key & (1_u128 << (127 - position)) != 0
 }
 
+fn encode_header(header: Header) -> [u8; HEADER_BYTES] {
+    let mut bytes = [0; HEADER_BYTES];
+    bytes[0] = header.bit;
+    bytes[1..17].copy_from_slice(&header.key.to_le_bytes());
+    bytes[17..25].copy_from_slice(&header.left.to_le_bytes());
+    bytes[25..33].copy_from_slice(&header.right.to_le_bytes());
+    bytes[33..41].copy_from_slice(&header.length.to_le_bytes());
+    bytes[41..49].copy_from_slice(&header.memory.to_le_bytes());
+    bytes
+}
+
+fn decode_header(bytes: &[u8]) -> Header {
+    Header {
+        bit: bytes[0],
+        key: u128::from_le_bytes(bytes[1..17].try_into().unwrap()),
+        left: u64::from_le_bytes(bytes[17..25].try_into().unwrap()),
+        right: u64::from_le_bytes(bytes[25..33].try_into().unwrap()),
+        length: u64::from_le_bytes(bytes[33..41].try_into().unwrap()),
+        memory: u64::from_le_bytes(bytes[41..49].try_into().unwrap()),
+    }
+}
+
 impl Pages {
     fn cache_position(&self, offset: u64) -> Option<usize> {
         if self.cache.is_empty() {
@@ -456,14 +497,7 @@ impl Pages {
         self.file.seek(SeekFrom::Start(offset)).map_err(io)?;
         let mut bytes = [0; HEADER_BYTES];
         self.file.read_exact(&mut bytes).map_err(io)?;
-        let header = Header {
-            bit: bytes[0],
-            key: u128::from_le_bytes(bytes[1..17].try_into().unwrap()),
-            left: u64::from_le_bytes(bytes[17..25].try_into().unwrap()),
-            right: u64::from_le_bytes(bytes[25..33].try_into().unwrap()),
-            length: u64::from_le_bytes(bytes[33..41].try_into().unwrap()),
-            memory: u64::from_le_bytes(bytes[41..49].try_into().unwrap()),
-        };
+        let header = decode_header(&bytes);
         if header.bit > LEAF || offset == 0 {
             return Err(invalid("tree header"));
         }
@@ -509,18 +543,55 @@ impl Pages {
 
     fn append_header(&mut self, header: Header) -> StorageBackendResult<u64> {
         let offset = self.file.seek(SeekFrom::End(0)).map_err(io)?;
-        let mut bytes = [0; HEADER_BYTES];
-        bytes[0] = header.bit;
-        bytes[1..17].copy_from_slice(&header.key.to_le_bytes());
-        bytes[17..25].copy_from_slice(&header.left.to_le_bytes());
-        bytes[25..33].copy_from_slice(&header.right.to_le_bytes());
-        bytes[33..41].copy_from_slice(&header.length.to_le_bytes());
-        bytes[41..49].copy_from_slice(&header.memory.to_le_bytes());
+        let bytes = encode_header(header);
         self.file.write_all(&bytes).map_err(io)?;
         if let Some(position) = self.cache_position(offset) {
             self.cache[position] = Cache { offset, header };
         }
         Ok(offset)
+    }
+
+    /// Append a complete immutable replacement path in one vectored write. Adjacent ancestors share their authenticated block publication instead of re-encrypting it for every 64-byte header.
+    fn append_path(
+        &mut self,
+        key: u128,
+        memory: usize,
+        value: &[u8],
+        parents: &[u8],
+    ) -> StorageBackendResult<()> {
+        let offset = self.file.seek(SeekFrom::End(0)).map_err(io)?;
+        let leaf = Header {
+            bit: LEAF,
+            key,
+            left: offset + HEADER_BYTES as u64,
+            length: value.len() as u64,
+            memory: memory as u64,
+            ..Header::default()
+        };
+        self.file
+            .write_all_vectored(&mut [
+                IoSlice::new(&encode_header(leaf)),
+                IoSlice::new(value),
+                IoSlice::new(parents),
+            ])
+            .map_err(io)?;
+        if let Some(position) = self.cache_position(offset) {
+            self.cache[position] = Cache {
+                offset,
+                header: leaf,
+            };
+        }
+        let start = offset + HEADER_BYTES as u64 + value.len() as u64;
+        for (index, bytes) in parents.chunks_exact(HEADER_BYTES).enumerate() {
+            let offset = start + (index * HEADER_BYTES) as u64;
+            if let Some(position) = self.cache_position(offset) {
+                self.cache[position] = Cache {
+                    offset,
+                    header: decode_header(bytes),
+                };
+            }
+        }
+        Ok(())
     }
 
     fn append_value(

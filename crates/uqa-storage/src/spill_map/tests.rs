@@ -18,6 +18,48 @@ fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
 }
 
 #[test]
+fn disk_replacements_publish_adjacent_path_headers_once_per_block() {
+    for count in [128, 512] {
+        let control = StorageReadControl::with_limit(32 * 1024);
+        let mut map = Map::new(control.memory(), 128);
+        for id in 0..count {
+            map.insert(id, id as u64, Some(&control)).unwrap();
+        }
+        let retained = map.clone();
+        let Root::Disk(disk) = &map.root else {
+            panic!("expected spill")
+        };
+        let before = disk.written_bytes();
+        map.insert(73, 900, Some(&control)).unwrap();
+        let Root::Disk(disk) = &map.root else {
+            unreachable!()
+        };
+        let written = disk.written_bytes() - before;
+        // One 72-byte leaf and at most nine 64-byte ancestors span at most two
+        // 1024-byte blocks, each with nonce/length/tag and one publication byte.
+        assert!(written <= 2 * (1024 + 24 + 2 + 16 + 1), "{written}");
+        assert_eq!(
+            entries(&retained),
+            (0..count).map(|id| (id, id as u64)).collect::<Vec<_>>()
+        );
+        let expected = (0..count)
+            .map(|id| (id, if id == 73 { 900 } else { id as u64 }))
+            .collect::<Vec<_>>();
+        assert_eq!(entries(&map), expected);
+        for failed_after in [0, 42, 100] {
+            let Root::Disk(disk) = &map.root else {
+                unreachable!()
+            };
+            disk.fail_write_after(failed_after);
+            assert!(map.insert(73, 901, Some(&control)).is_err());
+            assert_eq!(entries(&map), expected);
+        }
+        drop((map, retained));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn resident_and_spilled_roots_preserve_ordered_lookup_and_independent_mutations() {
     let memory = MemoryBudget::new(256 * 1024);
     let mut resident = Map::new(&memory, 128 * 1024);

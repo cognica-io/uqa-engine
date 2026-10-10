@@ -8,6 +8,7 @@
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 use triomphe::Arc as StrongArc;
@@ -233,6 +234,32 @@ impl PrivateRecordChanges {
         Self::with_revision_scope(memory, None)
     }
 
+    /// Adopt a sorted derived run without copying its payloads. Its writes share `revision`; subsequent changes and savepoints use the ordinary private-root lifecycle.
+    pub(in crate::mvcc) fn from_spilled_run(
+        run: Option<run::SpilledRun>,
+        revision: PrivateRecordRevision,
+        scope: Option<PrivateRevisionScope>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        let changes = Self::with_revision_scope(control.memory(), scope);
+        if let Some(run) = run {
+            let run = Arc::new(run);
+            let mut state = changes.owner.state.lock();
+            if let Some(mut scopes) = state.scopes.take() {
+                let mut cursor = run.cursor(std::ops::Bound::Unbounded);
+                while let Some(entry) = cursor.next(control)? {
+                    let key = PreparedRecordWrite::from_shared(entry.key, None, None);
+                    scopes = scopes.with_writes(&[key], revision, control)?;
+                }
+                state.scopes = Some(scopes);
+            }
+            state.runs = RunSet::from_run(run);
+            state.revision = Some(revision);
+        }
+        control.check()?;
+        Ok(changes)
+    }
+
     pub(in crate::mvcc) fn with_revision_scope(
         memory: &MemoryBudget,
         scope: Option<PrivateRevisionScope>,
@@ -341,17 +368,25 @@ impl PrivateRecordChanges {
         Ok(())
     }
 
-    /// Stage every write of `prepared` one at a time, so that a batch larger than the allowance spills as it is staged. Unlike `apply`, a failure can leave a prefix of the writes staged; it serves changes that are discarded when it fails.
-    pub(in crate::mvcc) fn apply_prepared(
-        &self,
+    /// Copy a prepared replacement map into an independent private root. Sorted spilled writes go directly to one fresh run; failure exposes no partially staged root.
+    pub(in crate::mvcc) fn from_prepared(
         prepared: &PreparedRecordCommit,
+        scope: Option<PrivateRevisionScope>,
         control: &StorageReadControl,
-    ) -> VersionResult<()> {
+    ) -> VersionResult<Self> {
+        if let Some(writes) = prepared.resident() {
+            let changes = Self::with_revision_scope(control.memory(), scope);
+            for write in writes {
+                changes.apply_owned(std::slice::from_ref(write), control)?;
+            }
+            return Ok(changes);
+        }
+        let mut builder = super::commit::PreparedWritesBuilder::like(prepared, control)?;
         let mut writes = prepared.writes();
         while let Some(write) = writes.next(control)? {
-            self.apply_owned(std::slice::from_ref(&write), control)?;
+            builder.push(write, control)?;
         }
-        Ok(())
+        builder.finish_changes(scope, control)
     }
 
     pub fn has_written(&self) -> bool {

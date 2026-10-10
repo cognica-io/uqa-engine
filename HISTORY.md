@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain certified IVF mutation candidates in Key/Value and native SQLite, derive ranked posting lists only on demand, and update only changed native assignments when centroids are unchanged. Read native vector revision summaries by field, stream unclassified revision scans, restage sorted spilled transaction writes without repeated merging, and append encrypted spill-map paths in one bounded write. Preserve undo, peer-write refresh, canonical results, encrypted spill and the original allowance.
+
 - Separate spilled HNSW topology from canonical and normalized vector pages so validation and edge restoration do not decode or rewrite dense vectors, while preserving graph integrity, canonical scores, encrypted spill and the original allowance.
 
 - Restrict unindexed scalar filters in retrieval intersections to selected candidate documents without changing KNN boundaries, payload merge order, column validation or error precedence.

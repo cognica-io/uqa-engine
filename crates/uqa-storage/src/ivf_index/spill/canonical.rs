@@ -85,10 +85,8 @@ impl IVFCanonicalBuilder {
 }
 
 impl IVFPreparedMetadata {
-    pub(crate) fn clone_controlled(
-        &self,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Self> {
+    /// Clone an immutable generation under the requested control, sharing roots only when the memory allowance is unchanged.
+    pub fn clone_controlled(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {
         control.check()?;
         let bytes = self.snapshot.centroids.iter().try_fold(
             self.snapshot

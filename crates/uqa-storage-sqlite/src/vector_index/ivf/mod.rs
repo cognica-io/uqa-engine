@@ -24,4 +24,5 @@ mod writing;
 pub struct SQLiteIVFIndex {
     pub(super) persistent: SQLiteVectorIndex,
     pub(super) params: IVFIndexParams,
+    native_state: std::sync::Arc<parking_lot::RwLock<Option<native::CachedState>>>,
 }

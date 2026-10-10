@@ -9,7 +9,9 @@
 use uqa_core::memory::BudgetedVec;
 
 use crate::mvcc::overlay::run::SpilledRunWriter;
-use crate::mvcc::{PrivateRecordRevision, VersionResult};
+use crate::mvcc::{
+    PrivateRecordChanges, PrivateRecordRevision, PrivateRevisionScope, VersionResult,
+};
 use crate::read_control::StorageReadControl;
 
 use super::{PreparedRecordCommit, PreparedRecordWrite};
@@ -66,6 +68,27 @@ impl PreparedWritesBuilder {
                 write.value(),
                 control,
             ),
+        }
+    }
+
+    /// Adopt the derived writes as an independent private root. A sorted spilled input becomes one run directly, without restaging and repeatedly merging its values.
+    pub(in crate::mvcc) fn finish_changes(
+        self,
+        scope: Option<PrivateRevisionScope>,
+        control: &StorageReadControl,
+    ) -> VersionResult<PrivateRecordChanges> {
+        match self.target {
+            Target::Resident(writes) => {
+                let changes = PrivateRecordChanges::with_revision_scope(control.memory(), scope);
+                for write in &*writes {
+                    changes.apply_owned(std::slice::from_ref(write), control)?;
+                }
+                Ok(changes)
+            }
+            Target::Spilled { writer, identity } => {
+                control.check()?;
+                PrivateRecordChanges::from_spilled_run(writer.finish()?, identity, scope, control)
+            }
         }
     }
 

@@ -130,6 +130,8 @@ impl SpilledRunWriter {
                     len: bytes.len() as u64,
                 };
                 self.values.append(bytes)?;
+                #[cfg(test)]
+                super::write_counts::value(bytes.len() as u64, false);
                 Some(location)
             }
             None => None,
@@ -154,6 +156,8 @@ impl SpilledRunWriter {
                 };
                 let values = &mut self.values;
                 source.copy_value(location, &mut |chunk| values.append(chunk), control)?;
+                #[cfg(test)]
+                super::write_counts::value(location.len, true);
                 Some(copied)
             }
             None => None,
