@@ -204,7 +204,7 @@ fn writes_keep_index_entries_equal_to_persistent_documents() {
 }
 
 #[test]
-fn a_reopened_database_loads_carried_columns_from_their_postings() {
+fn a_reopened_database_probes_cold_and_restores_carried_postings_on_demand() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("reopened.db");
     {
@@ -232,10 +232,34 @@ fn a_reopened_database_loads_carried_columns_from_their_postings() {
         agreed(&engine, "SELECT b FROM covered WHERE a = 5 ORDER BY b"),
         [[s("b25")], [s("b35")], [s("b5")], [s("changed")]]
     );
-    // The read loaded what it projected and what its predicate searched.
+    // A bounded cold equality uses durable candidates and selected documents,
+    // without hydrating either complete column accelerator.
+    assert_eq!(held_fields(&engine, "covered"), []);
+    let table = engine.table("covered").unwrap().unwrap();
+    for field in ["a", "b"] {
+        assert_eq!(
+            engine
+                .read_value_index_state(
+                    "covered",
+                    &table,
+                    &ValueIndexKey::Column(field.into()),
+                    |_| Ok(Some(())),
+                )
+                .unwrap(),
+            Some(())
+        );
+    }
     assert_eq!(
         held_fields(&engine, "covered"),
         [("a".into(), false), ("b".into(), true)]
+    );
+    diverge_documents(&engine);
+    assert_eq!(
+        column(
+            &run(&engine, "SELECT b FROM covered WHERE a = 5 ORDER BY b"),
+            "b"
+        ),
+        ["b25", "b35", "b5", "changed"].map(s)
     );
     run(&engine, "DROP INDEX covered_a");
     drop(engine);

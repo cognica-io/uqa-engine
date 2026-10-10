@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Avoid unchanged HNSW adjacency writes and tentative connect/prune publications; skip vector comparisons when all validated neighbors fit, preserving final topology, reciprocal removals and canonical search results.
 
+- Build unpublished spill maps with one charged block buffer and avoid rewriting already-pending HNSW identities, preserving atomic publication, complete persistence deltas and retained graphs.
+
 - Reuse complete authenticated spill-map blocks within the original memory allowance, and avoid decoding values for membership checks. Preserve immutable readers and clear cached blocks before failed append addresses can be reused.
 
 - Retain certified IVF mutation candidates in Key/Value and native SQLite, derive ranked posting lists only on demand, and update only changed native assignments when centroids are unchanged. Read native vector revision summaries by field, stream unclassified revision scans, restage sorted spilled transaction writes without repeated merging, and append encrypted spill-map paths in one bounded write. Preserve undo, peer-write refresh, canonical results, encrypted spill and the original allowance.

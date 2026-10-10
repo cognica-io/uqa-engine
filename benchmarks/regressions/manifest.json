@@ -1610,6 +1610,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "bulk_spill_publishes_each_authenticated_block_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Encrypted bulk spill construction",
+      "workload": "127/512 ordered keys under 32 KiB and an injected final-flush failure.",
+      "invariant": "Each complete block is published once without re-reading prior bytes; complete values and resource cleanup are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repeated_node_edits_do_not_rewrite_the_spilled_dirty_set",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW pending persistence",
+      "workload": "128 spilled 256-dimensional nodes, repeated edits and a retained graph under 128 KiB.",
+      "invariant": "Already pending identities add zero encrypted dirty-set writes; complete deltas include every changed node exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "a_reopened_database_probes_cold_and_restores_carried_postings_on_demand",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/index_only.rs",
+      "capability": "Cold and retained covering index reads",
+      "workload": "Reopened covering index, cold equality, explicit restoration, divergent document source and DROP.",
+      "invariant": "Cold equality hydrates no complete accelerator; results agree, restored index-only reads use carried postings and DROP removes them.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

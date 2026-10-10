@@ -61,7 +61,10 @@ impl HNSWIndex {
     ) -> StorageBackendResult<()> {
         let id = u128::from(node.id);
         self.nodes.insert(id, node, control)?;
-        self.dirty_nodes.insert(id, 0, control)
+        if !self.dirty_nodes.contains_key(id)? {
+            self.dirty_nodes.insert(id, 0, control)?;
+        }
+        Ok(())
     }
 
     pub(super) fn modify_node(

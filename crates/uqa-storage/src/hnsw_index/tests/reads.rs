@@ -142,6 +142,40 @@ fn assert_same_graph(first: &HNSWIndex, second: &HNSWIndex, control: &StorageRea
 }
 
 #[test]
+fn repeated_node_edits_do_not_rewrite_the_spilled_dirty_set() {
+    let control = StorageReadControl::with_limit(128 * 1024);
+    let mut graph = ring(256, 128, &control).finish().unwrap().into_parts().0;
+    for id in 1..=128 {
+        graph
+            .modify_node(id, Some(&control), |node| node.deleted = true)
+            .unwrap();
+    }
+    assert!(graph.dirty_nodes.is_spilled());
+    let retained = graph.clone();
+    let written = graph.dirty_nodes.written_bytes();
+    for id in 1..=128 {
+        graph
+            .modify_node(id, Some(&control), |node| node.deleted = false)
+            .unwrap();
+        assert!(!graph.node(id).unwrap().unwrap().deleted);
+        assert!(retained.node(id).unwrap().unwrap().deleted);
+    }
+    assert_eq!(graph.dirty_nodes.written_bytes(), written);
+    assert_eq!(graph.dirty_nodes.len(), 128);
+    assert_eq!(
+        graph
+            .take_persistence_delta()
+            .nodes()
+            .map(|node| node.unwrap().node_id)
+            .collect::<Vec<_>>(),
+        (1..=128).collect::<Vec<_>>()
+    );
+    assert!(graph.take_persistence_delta().nodes().next().is_none());
+    drop((graph, retained));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn unchanged_pruning_writes_no_topology_and_combined_connections_preserve_the_graph() {
     let control = StorageReadControl::with_limit(128 * 1024);
     let mut combined = ring(256, 128, &control).finish().unwrap().into_parts().0;

@@ -18,6 +18,42 @@ fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
 }
 
 #[test]
+fn bulk_spill_publishes_each_authenticated_block_once() {
+    for count in [127_u128, 512] {
+        let memory = MemoryBudget::new(32 * 1024);
+        let mut builder = disk::Builder::new(&memory).unwrap();
+        for key in 0..count {
+            builder.push(key, &(key as u64), &memory).unwrap();
+        }
+        let disk = builder.finish().unwrap();
+        let logical_bytes = count as u64 * (64 + 8) + (count as u64 - 1) * 64 + 64;
+        let blocks = logical_bytes.div_ceil(1024);
+        assert_eq!(disk.read_blocks(), 0);
+        assert_eq!(
+            disk.written_bytes(),
+            logical_bytes + blocks * (24 + 2 + 16 + 1)
+        );
+        for key in 0..count {
+            assert_eq!(*disk.get::<u64>(key, &memory).unwrap().unwrap(), key as u64);
+        }
+        assert!(memory.peak() <= memory.limit());
+        drop(disk);
+        assert_eq!(memory.used(), 0);
+    }
+    let memory = MemoryBudget::new(32 * 1024);
+    let mut builder = disk::Builder::new(&memory).unwrap();
+    builder.push(1, &17_u64, &memory).unwrap();
+    let path = builder.path();
+    builder.fail_write_after(13);
+    assert!(builder.finish().is_err());
+    assert!(
+        !path.exists(),
+        "a failed final flush must not retain the unpublished map"
+    );
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn repeated_spilled_reads_reuse_authenticated_blocks_across_immutable_roots() {
     let control = StorageReadControl::with_limit(512 * 1024);
     let mut map = Map::new(control.memory(), 128);

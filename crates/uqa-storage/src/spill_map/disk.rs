@@ -14,7 +14,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::{
-    io::{IoSlice, Seek, SeekFrom, Write},
+    io::{BufWriter, IoSlice, Seek, SeekFrom, Write},
     sync::Arc,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
@@ -56,6 +56,8 @@ pub(super) struct Map {
 /// Ordered input builds each branch once, without retaining obsolete insertion paths in the new file.
 pub(super) struct Builder {
     map: Map,
+    writer: BufWriter<BlockTemporaryFile<BLOCK_BYTES>>,
+    position: u64,
     path: [Header; 128],
     depth: usize,
     previous: Option<u128>,
@@ -63,10 +65,27 @@ pub(super) struct Builder {
 }
 
 impl Builder {
+    #[cfg(test)]
+    pub(super) fn fail_write_after(&self, bytes: usize) {
+        self.map.fail_write_after(bytes);
+    }
+
+    #[cfg(test)]
+    pub(super) fn path(&self) -> std::path::PathBuf {
+        self.map.path()
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        let workspace = memory.reserve(size_of::<[Header; 128]>())?;
+        let mut workspace = memory.reserve(size_of::<[Header; 128]>() + BLOCK_BYTES)?;
+        let map = Map::new(memory)?;
+        let mut writer =
+            BufWriter::with_capacity(BLOCK_BYTES, map.file.lock().file.reopen().map_err(io)?);
+        workspace.grow(writer.capacity() - BLOCK_BYTES)?;
+        writer.write_all(&[0; HEADER_BYTES]).map_err(io)?;
         Ok(Self {
-            map: Map::new(memory)?,
+            map,
+            writer,
+            position: HEADER_BYTES as u64,
             path: [Header::default(); 128],
             depth: 0,
             previous: None,
@@ -88,7 +107,6 @@ impl Builder {
             return Err(invalid("encoded size"));
         }
         encoded_memory.grow(bytes.capacity() - encoded)?;
-        let mut file = self.map.file.lock();
         if let Some(previous) = self.previous {
             if key <= previous {
                 return Err(invalid("unordered bulk input"));
@@ -98,7 +116,7 @@ impl Builder {
                 self.depth -= 1;
                 let mut branch = self.path[self.depth];
                 branch.right = self.map.root;
-                self.map.root = file.append_header(branch)?;
+                self.map.root = self.append_header(branch)?;
             }
             self.path[self.depth] = Header {
                 bit: differing,
@@ -113,7 +131,19 @@ impl Builder {
                 .checked_add(HEADER_BYTES as u64)
                 .ok_or(MemoryError::SizeOverflow)?;
         }
-        self.map.root = file.append_value(key, value.memory_bytes()?, &bytes)?;
+        let offset = self.position;
+        self.append_header(Header {
+            bit: LEAF,
+            key,
+            left: offset
+                .checked_add(HEADER_BYTES as u64)
+                .ok_or(MemoryError::SizeOverflow)?,
+            length: bytes.len() as u64,
+            memory: value.memory_bytes()? as u64,
+            ..Header::default()
+        })?;
+        self.append_bytes(&bytes)?;
+        self.map.root = offset;
         self.map.logical_bytes = self
             .map
             .logical_bytes
@@ -124,16 +154,38 @@ impl Builder {
     }
 
     pub(super) fn finish(mut self) -> StorageBackendResult<Map> {
-        {
-            let mut file = self.map.file.lock();
-            while self.depth > 0 {
-                self.depth -= 1;
-                let mut branch = self.path[self.depth];
-                branch.right = self.map.root;
-                self.map.root = file.append_header(branch)?;
+        while self.depth > 0 {
+            self.depth -= 1;
+            let mut branch = self.path[self.depth];
+            branch.right = self.map.root;
+            self.map.root = self.append_header(branch)?;
+        }
+        self.writer.flush().map_err(io)?;
+        Ok(self.map)
+    }
+
+    fn append_header(&mut self, header: Header) -> StorageBackendResult<u64> {
+        let offset = self.position;
+        self.append_bytes(&encode_header(header))?;
+        Ok(offset)
+    }
+
+    fn append_bytes(&mut self, mut bytes: &[u8]) -> StorageBackendResult<()> {
+        while !bytes.is_empty() {
+            let count = bytes
+                .len()
+                .min(BLOCK_BYTES - (self.position % BLOCK_BYTES as u64) as usize);
+            self.writer.write_all(&bytes[..count]).map_err(io)?;
+            self.position = self
+                .position
+                .checked_add(count as u64)
+                .ok_or(MemoryError::SizeOverflow)?;
+            bytes = &bytes[count..];
+            if self.position.is_multiple_of(BLOCK_BYTES as u64) {
+                self.writer.flush().map_err(io)?;
             }
         }
-        Ok(self.map)
+        Ok(())
     }
 }
 
@@ -162,8 +214,7 @@ impl Map {
         let slots = (memory.limit() / 64 / size_of::<Cache>()).min(256);
         let slots = if slots == 0 { 0 } else { 1 << slots.ilog2() };
         let reservation = memory.reserve(size_of::<Pages>() + slots * size_of::<Cache>())?;
-        let mut file = BlockTemporaryFile::new().map_err(io)?;
-        file.write_all(&[0; HEADER_BYTES]).map_err(io)?;
+        let file = BlockTemporaryFile::new().map_err(io)?;
         Ok(Self {
             file: Arc::new(Mutex::new(Pages {
                 file,
@@ -599,28 +650,6 @@ impl Pages {
             }
         }
         Ok(())
-    }
-
-    fn append_value(
-        &mut self,
-        key: u128,
-        memory: usize,
-        bytes: &[u8],
-    ) -> StorageBackendResult<u64> {
-        let offset = self.file.metadata().map_err(io)?.len();
-        let payload = offset
-            .checked_add(HEADER_BYTES as u64)
-            .ok_or(MemoryError::SizeOverflow)?;
-        self.append_header(Header {
-            bit: LEAF,
-            key,
-            left: payload,
-            length: bytes.len() as u64,
-            memory: memory as u64,
-            ..Header::default()
-        })?;
-        self.file.write_all(bytes).map_err(io)?;
-        Ok(offset)
     }
 
     fn rollback(&mut self, length: u64) -> StorageBackendResult<()> {

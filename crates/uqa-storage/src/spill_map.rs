@@ -333,6 +333,14 @@ impl<V: Record> Map<V> {
     pub(crate) fn is_spilled(&self) -> bool {
         matches!(self.root, Root::Disk(_))
     }
+
+    #[cfg(test)]
+    pub(crate) fn written_bytes(&self) -> u64 {
+        match &self.root {
+            Root::Memory(_) => 0,
+            Root::Disk(map) => map.written_bytes(),
+        }
+    }
 }
 
 pub(crate) struct Iter<'a, V> {
