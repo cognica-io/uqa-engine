@@ -374,7 +374,14 @@ pub(super) fn eval_dispatched_builtin_with_control(
             super::json::json_extract_operator_with_control(evaluated, as_text, path, control)
         }
         FunctionDispatch::ArraySortJson => {
-            scalar_array::eval_dispatched_json_array_sort_with_control(evaluated, control)
+            let catalog = context.engine.map(super::EngineValueCatalog);
+            scalar_array::eval_dispatched_json_array_sort_with_control(
+                evaluated,
+                control,
+                catalog
+                    .as_ref()
+                    .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+            )
         }
         FunctionDispatch::ArrayConcat
         | FunctionDispatch::ArrayAppend

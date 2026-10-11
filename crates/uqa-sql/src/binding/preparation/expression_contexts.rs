@@ -92,6 +92,11 @@ impl Preparation<'_> {
                 ),
             ));
         }
+        if source.ty.as_ref().is_some_and(|source| {
+            crate::type_resolution::preserves_record_identity(source, &target)
+        }) {
+            return Ok(source.ty.expect("known composite source"));
+        }
         Ok(target)
     }
 

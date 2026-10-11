@@ -18,7 +18,21 @@ pub(super) fn sorted_elements(
     nulls_first: bool,
     declared_json: bool,
     control: &ProductionControl<'_>,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
 ) -> Result<Produced<Vec<Value>>> {
+    if array.elements().len() > 1 {
+        crate::expr::binary::require_array_element_support(
+            array,
+            catalog,
+            control,
+            crate::expr::binary::ComparisonSupport::Ordering,
+            if array.dimensions().len() <= 1 {
+                "0A000"
+            } else {
+                "42883"
+            },
+        )?;
+    }
     if array.elements().len() > 1
         && array.dimensions().len() <= 1
         && (declared_json
@@ -27,7 +41,10 @@ pub(super) fn sorted_elements(
                 .iter()
                 .any(|element| matches!(element, Value::Json(_))))
     {
-        return Err(comparison_error("0A000"));
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "could not identify a comparison function for type json".into(),
+        });
     }
     let mut order = ProductionVec::new(*control);
     for (index, value) in array.elements().iter().enumerate() {
@@ -45,7 +62,9 @@ pub(super) fn sorted_elements(
                 (_, Value::Null) if nulls_first => Ordering::Greater,
                 (_, Value::Null) => Ordering::Less,
                 (left, right) => {
-                    let order = compare_values(left, right, control)?;
+                    let order = crate::expr::binary::compare_typed_values_with_enum_catalog(
+                        left, right, control, catalog, None,
+                    )?;
                     if descending {
                         order.reverse()
                     } else {
@@ -58,75 +77,4 @@ pub(super) fn sorted_elements(
         },
     )?;
     copy_elements(order.iter().map(|(_, value)| *value), control)
-}
-
-fn compare_values(
-    left: &Value,
-    right: &Value,
-    control: &ProductionControl<'_>,
-) -> Result<Ordering> {
-    control.check()?;
-    match (left, right) {
-        (Value::Null, Value::Null) => Ok(Ordering::Equal),
-        (Value::Null, _) => Ok(Ordering::Greater),
-        (_, Value::Null) => Ok(Ordering::Less),
-        (Value::Json(_), Value::Json(_)) => Err(comparison_error("42883")),
-        (Value::List(left), Value::List(right)) => compare_slices(left, right, control),
-        (Value::Row(left), Value::Row(right)) => compare_slices(left, right, control),
-        (Value::Record(left), Value::Record(right)) => compare_records(left, right, control),
-        (Value::Array(left), Value::Array(right)) => compare_arrays(left, right, control),
-        _ => Ok(left.cmp_with_control(right, control)?),
-    }
-}
-
-fn compare_records(
-    left: &[(String, Value)],
-    right: &[(String, Value)],
-    control: &ProductionControl<'_>,
-) -> Result<Ordering> {
-    for ((_, left), (_, right)) in left.iter().zip(right) {
-        let ordering = compare_values(left, right, control)?;
-        if ordering != Ordering::Equal {
-            return Ok(ordering);
-        }
-    }
-    Ok(left.len().cmp(&right.len()))
-}
-
-fn compare_slices(
-    left: &[Value],
-    right: &[Value],
-    control: &ProductionControl<'_>,
-) -> Result<Ordering> {
-    for (left, right) in left.iter().zip(right) {
-        let ordering = compare_values(left, right, control)?;
-        if ordering != Ordering::Equal {
-            return Ok(ordering);
-        }
-    }
-    Ok(left.len().cmp(&right.len()))
-}
-
-fn compare_arrays(
-    left: &ArrayValue,
-    right: &ArrayValue,
-    control: &ProductionControl<'_>,
-) -> Result<Ordering> {
-    let ordering = compare_slices(left.elements(), right.elements(), control)?;
-    if ordering != Ordering::Equal {
-        return Ok(ordering);
-    }
-    Ok(left
-        .dimensions()
-        .len()
-        .cmp(&right.dimensions().len())
-        .then_with(|| left.dimensions().cmp(right.dimensions()))
-        .then_with(|| left.lower_bounds().cmp(right.lower_bounds())))
-}
-
-fn comparison_error(sqlstate: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: "could not identify a comparison function for type json".into(),
-    }
 }

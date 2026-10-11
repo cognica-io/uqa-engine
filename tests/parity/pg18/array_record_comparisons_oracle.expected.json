@@ -1,0 +1,2103 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE ac_plain AS(n integer,t text); CREATE TYPE ac_json AS(n integer,j json); CREATE DOMAIN ac_json_domain AS json; CREATE TYPE ac_domain_json AS(n integer,j ac_json_domain); CREATE TYPE ac_enum AS ENUM('z','a'); CREATE TYPE ac_enum_record AS(n integer,e ac_enum); CREATE TYPE ac_numeric AS(n numeric,b jsonb); CREATE DOMAIN ac_composite_domain AS ac_json; CREATE SCHEMA ac_scope; CREATE TYPE ac_scope.record AS(n integer,t text)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE DOMAIN",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE DOMAIN",
+        "CREATE SCHEMA",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup"
+    },
+    {
+      "sql": "CREATE TYPE ac_refcursor AS(c refcursor)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup_refcursor_record"
+    },
+    {
+      "sql": "CREATE TYPE ac_xid AS(x xid)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup_xid_record"
+    },
+    {
+      "sql": "CREATE TYPE ac_aclitem AS(a aclitem)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "setup_aclitem_record"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int,NULL::int),ROW(1::int,NULL::text)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types integer and text at record column 2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_reached_null_types"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int),ROW(1::int,2::int)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare record types with different numbers of columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_reached_width"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(2::int),ROW(1::int,2::int)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,2)\",(2)}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_deciding_prefix"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1::int)],ROW(1::bigint))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types bigint and integer at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_type_mismatch"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(1::int)],ROW(1::bigint))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types integer and bigint at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "remove_type_mismatch"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW('{}'::json)],ROW('{}'::json))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_json"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW('{}'::json)],ROW('{}'::json))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "remove_json"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(10::numeric),ROW(2::numeric)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{(2),(10)}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_numeric_record"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(ROW(NULL::int)),ROW(ROW(NULL::text))])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types integer and text at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_nested_null_types"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int),ROW(1::int,2::int)],true)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare record types with different numbers of columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_width_reached_desc"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(2::int,NULL::int),ROW(1::int,NULL::text)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,)\",\"(2,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_prefix_types_decided"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int,NULL::text),ROW(1::int,NULL::text)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,)\",\"(1,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_equal_names"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1::int,NULL::int)],ROW(2::int,NULL::text))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_types_decided"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(1::int,NULL::int)],ROW(2::int,NULL::text))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_types_decided"
+    },
+    {
+      "sql": "SELECT array_positions(ARRAY[ROW(1::int)],ROW(1::bigint))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types bigint and integer at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "positions_type_mismatch"
+    },
+    {
+      "sql": "SELECT array_replace(ARRAY[ROW(1::int)],ROW(1::bigint),ROW(2::bigint))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types integer and bigint at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "replace_type_mismatch"
+    },
+    {
+      "sql": "SELECT array_positions(ARRAY[ROW('{}'::json)],ROW('{}'::json))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "positions_json"
+    },
+    {
+      "sql": "SELECT array_replace(ARRAY[ROW('{}'::json)],ROW('{}'::json),ROW('[]'::json))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "replace_json"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(2,'later')::ac_plain,ROW(1,'early')::ac_plain,NULL::ac_plain])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,early)\",\"(2,later)\",NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_named"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(2,'later')::ac_plain,ROW(1,'early')::ac_plain,NULL::ac_plain],true,false)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(2,later)\",\"(1,early)\",NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_named_desc"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain],ROW(2,NULL)::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_named"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain],ROW(2,NULL)::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,early)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_named"
+    },
+    {
+      "sql": "SELECT array_positions(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain,ROW(2,NULL)::ac_plain],ROW(2,NULL)::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,3}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "positions_named"
+    },
+    {
+      "sql": "SELECT array_replace(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain],ROW(2,NULL)::ac_plain,ROW(3,'new')::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(3,new)\",\"(1,early)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "replace_named"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(2,'{}'::json)::ac_json,ROW(1,'[]'::json)::ac_json])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_named_json_decided"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1,'{}'::json)::ac_json,ROW(1,'[]'::json)::ac_json])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_named_json_reached"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1,NULL)::ac_json,ROW(1,NULL)::ac_json])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_named_json_nulls"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1,NULL)::ac_json],ROW(1,NULL)::ac_json)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_named_json_nulls"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1,'{}'::json)::ac_json],ROW(2,'[]'::json)::ac_json)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_named_json_decided"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(1,'{}'::ac_json_domain)::ac_domain_json],ROW(1,'{}'::ac_json_domain)::ac_domain_json)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_domain_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "remove_named_domain_json"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1,'{}'::ac_json_domain)::ac_domain_json,ROW(1,'[]'::ac_json_domain)::ac_domain_json])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_domain_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_named_domain_json"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1,'a'::ac_enum)::ac_enum_record,ROW(1,'z'::ac_enum)::ac_enum_record])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,z)\",\"(1,a)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_named_enum"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1,'z'::ac_enum)::ac_enum_record],ROW(1,'z'::ac_enum)::ac_enum_record)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_named_enum"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(10,'{}'::jsonb)::ac_numeric,ROW(2,'[]'::jsonb)::ac_numeric])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(2,[])\",\"(10,{})\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_named_numeric"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(1.00,'{}'::jsonb)::ac_numeric],ROW(1.0,'{}'::jsonb)::ac_numeric)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_numeric_scale"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW('NaN'::numeric,'{}'::jsonb)::ac_numeric],ROW('NaN'::numeric,'{}'::jsonb)::ac_numeric)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_numeric_nan"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(ROW(10::numeric)),ROW(ROW(2::numeric))])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(\\\"(2)\\\")\",\"(\\\"(10)\\\")\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_nested_numeric"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(ARRAY[1::int]),ROW(ARRAY[1::bigint])])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types integer[] and bigint[] at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_nested_array_metadata"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(ARRAY[1::int])],ROW(ARRAY[1::bigint]))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types bigint[] and integer[] at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_nested_array_metadata"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(NULL::int),NULL::record],ROW(NULL::int))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_anonymous_null_record"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::int),NULL::record],ROW(NULL::int))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_anonymous_null_record"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[ROW(NULL::int),NULL::record],NULL::record)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{()}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_outer_null"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::int),NULL::record],NULL::record)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_outer_null"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW('{}'::json)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"({})\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_json_records_singleton"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[]::ac_json[])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_json_records_empty"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[]::ac_json[],ROW(1,'{}'::json)::ac_json)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_json_records_empty"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[]::ac_json[],ROW(1,'{}'::json)::ac_json)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_json_records_empty"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int),ROW(1::bigint)],NULL)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_null_argument"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1::int)],ROW(1::int),NULL)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "initial position must not be null",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_null_start"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(1::int)],ROW(1::bigint),4)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_start_past_end"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[]::json[],'{}'::json)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_direct_json_empty"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[]::json[],'{}'::json)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_direct_json_empty"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[NULL::json],NULL::json)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "remove_direct_json_null"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[NULL::json],NULL::json)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_direct_json_null"
+    },
+    {
+      "sql": "SELECT array_position(NULL::ac_plain[],ROW(1,'x')::ac_plain,NULL)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "position_null_array"
+    },
+    {
+      "sql": "SELECT array_positions(NULL::ac_plain[],ROW(1,'x')::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "positions_null_array"
+    },
+    {
+      "sql": "SELECT array_sort('[4:6]={\"(2,x)\",\"(1,y)\",NULL}'::ac_plain[])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[4:6]={\"(1,y)\",\"(2,x)\",NULL}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_lower_bounds"
+    },
+    {
+      "sql": "SELECT array_remove('[4:6]={\"(2,x)\",\"(1,y)\",\"(2,x)\"}'::ac_plain[],ROW(2,'x')::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[4:4]={\"(1,y)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "remove_lower_bounds"
+    },
+    {
+      "sql": "SELECT array_positions('[4:6]={\"(2,x)\",\"(1,y)\",\"(2,x)\"}'::ac_plain[],ROW(2,'x')::ac_plain)::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{4,6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "positions_lower_bounds"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL)::ac_json=ROW(1,NULL)::ac_json AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "named_json_equality"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL)::ac_json<ROW(1,NULL)::ac_json AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "named_json_order"
+    },
+    {
+      "sql": "SELECT ROW(ROW(NULL::int))=ROW(ROW(NULL::int)) AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_row_equality"
+    },
+    {
+      "sql": "SELECT ROW(NULL::int)=ROW(NULL::int) AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "anonymous_null_equality"
+    },
+    {
+      "sql": "CREATE TABLE ac_values(id integer PRIMARY KEY,a ac_plain[]); INSERT INTO ac_values VALUES(1,ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'first')::ac_plain,ROW(2,NULL)::ac_plain]); CREATE VIEW ac_ordered AS SELECT array_sort(a) AS a FROM ac_values",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "stored_setup"
+    },
+    {
+      "sql": "SELECT array_sort(a)::text AS v FROM ac_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,first)\",\"(2,)\",\"(2,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_sort",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT array_position(a,ROW(2,NULL)::ac_plain)::text AS v FROM ac_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_position",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT array_positions(a,ROW(2,NULL)::ac_plain)::text AS v FROM ac_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,3}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_positions",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT array_remove(a,ROW(2,NULL)::ac_plain)::text AS v FROM ac_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,first)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_remove",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT array_replace(a,ROW(2,NULL)::ac_plain,ROW(5,'new')::ac_plain)::text AS v FROM ac_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(5,new)\",\"(1,first)\",\"(5,new)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_replace",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT a::text AS v FROM ac_ordered",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"(1,first)\",\"(2,)\",\"(2,)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_view",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW('a'),ROW('b')])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type unknown",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_unknown_fields"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW('a')],ROW('a'))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type unknown",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_unknown_fields"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL),ROW(NULL)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type unknown",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_unknown_nulls"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL)],ROW(NULL))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type unknown",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_unknown_nulls"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[(ROW(2,'{}'::json)::ac_json)::record,(ROW(1,'[]'::json)::ac_json)::record])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_named_as_record_decided"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[(ROW(1,'{}'::json)::ac_json)::record],(ROW(2,'[]'::json)::ac_json)::record)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_named_as_record_decided"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[(ROW(1,NULL)::ac_json)::record],(ROW(1,NULL)::ac_json)::record)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_named_as_record_nulls"
+    },
+    {
+      "sql": "SELECT pg_typeof((ROW(1,NULL)::ac_json)::record)::text AS named,pg_typeof((ROW(1,NULL)::ac_composite_domain)::record)::text AS domain,pg_typeof(ROW(1)::record)::text AS anonymous",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "named",
+            "domain",
+            "anonymous"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ac_json",
+              "ac_composite_domain",
+              "record"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_cast_type_identity"
+    },
+    {
+      "sql": "SELECT pg_typeof((ROW(1,NULL)::ac_json)::\"pg_catalog\".\"record\")::text AS named,pg_typeof((ROW(1,NULL)::ac_composite_domain)::\"pg_catalog\".\"record\")::text AS domain",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "named",
+            "domain"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ac_json",
+              "ac_composite_domain"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_cast_quoted_type_identity"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[(ROW(2,NULL)::ac_json)::\"pg_catalog\".\"record\",(ROW(1,NULL)::ac_json)::\"pg_catalog\".\"record\"])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_named_as_quoted_record"
+    },
+    {
+      "sql": "SELECT array_remove(ARRAY[(ROW(1,NULL)::ac_composite_domain)::record],(ROW(1,NULL)::ac_composite_domain)::record)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_composite_domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "remove_domain_as_record"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[(ROW(2,NULL)::ac_composite_domain)::record,(ROW(1,NULL)::ac_composite_domain)::record])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_composite_domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "sort_domain_as_record"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[(ROW(1,NULL)::ac_composite_domain)::record],(ROW(1,NULL)::ac_composite_domain)::record)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_composite_domain",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "position_domain_as_record_nulls"
+    },
+    {
+      "sql": "SELECT pg_typeof(ARRAY[NULL::\"pg_catalog\".\"record\"])::text AS type,array_position(ARRAY[NULL::\"pg_catalog\".\"record\"],NULL::\"pg_catalog\".\"record\")::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "record[]",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_null_array"
+    },
+    {
+      "sql": "SELECT pg_typeof(ARRAY[ROW(2,'b')::ac_scope.\"record\",ROW(1,'a')::ac_scope.\"record\"])::text AS type,array_sort(ARRAY[ROW(2,'b')::ac_scope.\"record\",ROW(1,'a')::ac_scope.\"record\"])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ac_scope.record[]",
+              "{\"(1,a)\",\"(2,b)\"}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "sort_user_type_named_record"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::refcursor)],ROW(NULL::refcursor))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type refcursor",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "refcursor_null_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::refcursor),ROW(NULL::refcursor)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type refcursor",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "refcursor_null_ordering"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::pg_node_tree)],ROW(NULL::pg_node_tree))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pg_node_tree_null_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::pg_node_tree),ROW(NULL::pg_node_tree)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{(),()}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pg_node_tree_null_ordering"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::xid)],ROW(NULL::xid))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_null_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::xid),ROW(NULL::xid)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type xid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "xid_null_ordering"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::aclitem)],ROW(NULL::aclitem))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "aclitem_null_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::aclitem),ROW(NULL::aclitem)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type aclitem",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "aclitem_null_ordering"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::int2vector)],ROW(NULL::int2vector))::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "int2vector_null_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::int2vector),ROW(NULL::int2vector)])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{(),()}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "int2vector_null_ordering"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::void)],ROW(NULL::void))::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type void",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "void_null_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::void),ROW(NULL::void)])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type void",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "void_null_ordering"
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[ROW(NULL)::ac_refcursor],ROW(NULL)::ac_refcursor)::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type ac_refcursor",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "named_refcursor_equality"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL)::ac_refcursor])::text AS v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{()}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_refcursor_singleton"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL)::ac_xid,ROW(NULL)::ac_xid])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_xid",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "named_xid_ordering"
+    },
+    {
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL)::ac_aclitem,ROW(NULL)::ac_aclitem])::text AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not identify a comparison function for type ac_aclitem",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "named_aclitem_ordering"
+    }
+  ],
+  "provenance": {
+    "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "326817106012cd3843a160352d658439328aa19a6c1e72d83da85e9aec5430d5",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "fresh_connection_cases": 6,
+    "fresh_connection_output_sha256": "1162befdbac18295a82aacd4da36fc7c3fc95d899db75870f8535c76838a9c46"
+  }
+}

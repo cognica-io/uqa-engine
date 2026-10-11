@@ -12,6 +12,8 @@ use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
 mod records;
+mod support;
+pub(in crate::expr) use support::{require_array_element_support, ComparisonSupport};
 
 #[cfg(test)]
 pub(in crate::expr) fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
@@ -511,6 +513,10 @@ fn compare_typed_values_for_purpose(
                 right,
                 enums,
                 control,
+                match enum_order {
+                    EnumKeyOrder::Declaration => ComparisonSupport::Ordering,
+                    EnumKeyOrder::Identity => ComparisonSupport::Equality,
+                },
                 Ordering::Equal,
                 |left, right| {
                     let order =
@@ -532,6 +538,9 @@ fn compare_typed_values_for_purpose(
                 comparison_operand_type(left),
                 comparison_operand_type(right)
             )));
+        }
+        (Value::Json(_), Value::Json(_)) => {
+            return Err(ComparisonSupport::Ordering.error("42883", "json".into()));
         }
         _ => {}
     }
@@ -651,13 +660,20 @@ fn equal_values(
                 equal_values(left, right, control, enums, typed)
             })
         }
-        (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => {
-            records::compare(left, right, enums, control, true, |left, right| {
-                Ok((!equal_values(left, right, control, enums, typed)?).then_some(false))
-            })
-        }
+        (Value::Record(_) | Value::Row(_), Value::Record(_) | Value::Row(_)) => records::compare(
+            left,
+            right,
+            enums,
+            control,
+            ComparisonSupport::Equality,
+            true,
+            |left, right| Ok((!equal_values(left, right, control, enums, typed)?).then_some(false)),
+        ),
         (Value::List(left), Value::List(right)) => {
             equal_sequence(left.iter(), right.iter(), control, enums, typed)
+        }
+        (Value::Json(_), Value::Json(_)) => {
+            Err(ComparisonSupport::Equality.error("42883", "json".into()))
         }
         _ if typed => Ok(compare_typed_values_with_control(left, right, control)?.is_eq()),
         _ => Ok(compare_sql_values(left, right, control, enums)?.is_eq()),

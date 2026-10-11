@@ -23,6 +23,15 @@ pub(super) fn eval_array_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    eval_array_functions_with_catalog(name, args, control, None)
+}
+
+pub(super) fn eval_array_functions_with_catalog(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Option<Result<Produced<Value>>> {
     const NAMES: &[&str] = &[
         "array_length",
         "array_upper",
@@ -41,14 +50,15 @@ pub(super) fn eval_array_functions_with_control(
     ];
     NAMES
         .contains(&name)
-        .then(|| eval_array_function(name, args, false, control))
+        .then(|| eval_array_function(name, args, false, control, catalog))
 }
 
 pub(super) fn eval_dispatched_json_array_sort_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
 ) -> Result<Produced<Value>> {
-    eval_array_function("array_sort", args, true, control)
+    eval_array_function("array_sort", args, true, control, catalog)
 }
 
 fn ordinary(value: Produced<Value>) -> Value {
@@ -64,6 +74,7 @@ fn eval_array_function(
     args: &[Value],
     json_sort: bool,
     control: &ProductionControl<'_>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
 ) -> Result<Produced<Value>> {
     control.check()?;
     match name {
@@ -90,9 +101,9 @@ fn eval_array_function(
             }
         }
         "array_append" | "array_prepend" => append(name, args, control),
-        "array_remove" => remove(args, control),
-        "array_position" => position(args, control),
-        "array_reverse" | "array_sort" => reordered(name, args, json_sort, control),
+        "array_remove" => remove(args, control, catalog),
+        "array_position" => position(args, control, catalog),
+        "array_reverse" | "array_sort" => reordered(name, args, json_sort, control, catalog),
         "unnest" => {
             require_arity(name, args, 1)?;
             let mut values = ProductionVec::new(*control);
@@ -190,29 +201,48 @@ fn append(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
     }
 }
 
-fn remove(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn remove(
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<Produced<Value>> {
     require_arity("array_remove", args, 2)?;
     let array = match &args[0] {
         Value::Null => return inline(Value::Null, control),
         Value::Array(array) if array.dimensions().len() <= 1 => array,
         Value::LegacyVector(vector) => vector.as_array(),
         Value::Array(_) => {
-            return Err(SQLError::TypeMismatch(
-                "removing elements from multidimensional arrays is not supported".into(),
-            ))
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "removing elements from multidimensional arrays is not supported".into(),
+            })
         }
         other => return Err(not_an_array("array_remove", other)),
     };
+    if !array.elements().is_empty() {
+        super::binary::require_array_element_support(
+            array,
+            catalog,
+            control,
+            super::binary::ComparisonSupport::Equality,
+            "42883",
+        )?;
+    }
     let mut elements = ProductionVec::new(*control);
     for value in array.elements() {
-        if !value.cmp_with_control(&args[1], control)?.is_eq() {
+        if !super::binary::equal_typed_values_with_enum_catalog(value, &args[1], control, catalog)?
+        {
             elements.push_produced(control.copy_value(value)?)?;
         }
     }
     rebuild_array(array, elements.finish()?, control)
 }
 
-fn position(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn position(
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<Produced<Value>> {
     if !(2..=3).contains(&args.len()) {
         return Err(SQLError::TypeMismatch(
             "array_position takes 2 or 3 args".into(),
@@ -223,22 +253,41 @@ fn position(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<
         Value::Array(array) if array.dimensions().len() <= 1 => array,
         Value::LegacyVector(vector) => vector.as_array(),
         Value::Array(_) => {
-            return Err(SQLError::TypeMismatch(
-                "searching for elements in multidimensional arrays is not supported".into(),
-            ))
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "searching for elements in multidimensional arrays is not supported"
+                    .into(),
+            })
         }
         other => return Err(not_an_array("array_position", other)),
     };
+    if array.elements().is_empty()
+        || (matches!(args[1], Value::Null) && !contains_null(array, control)?)
+    {
+        return inline(Value::Null, control);
+    }
     let lower = i64::from(array.lower_bound(0).unwrap_or(1));
     let start = match args.get(2) {
-        Some(Value::Null) => return inline(Value::Null, control),
+        Some(Value::Null) => {
+            return Err(SQLError::Routine {
+                sqlstate: "22004".into(),
+                message: "initial position must not be null".into(),
+            })
+        }
         Some(value) => to_i64_with_control(value, control)?,
         None => lower,
     };
+    super::binary::require_array_element_support(
+        array,
+        catalog,
+        control,
+        super::binary::ComparisonSupport::Equality,
+        "42883",
+    )?;
     let offset = usize::try_from(start.saturating_sub(lower).max(0))
         .map_err(|_| out_of_range("array position"))?;
     for (index, value) in array.elements().iter().enumerate().skip(offset) {
-        if value.cmp_with_control(&args[1], control)?.is_eq() {
+        if super::binary::equal_typed_values_with_enum_catalog(&args[1], value, control, catalog)? {
             return inline(
                 i64::try_from(index)
                     .ok()
@@ -252,11 +301,25 @@ fn position(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<
     inline(Value::Null, control)
 }
 
+pub(in crate::expr) fn contains_null(
+    array: &ArrayValue,
+    control: &ProductionControl<'_>,
+) -> Result<bool> {
+    for value in array.elements() {
+        control.check()?;
+        if matches!(value, Value::Null) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn reordered(
     name: &str,
     args: &[Value],
     json_sort: bool,
     control: &ProductionControl<'_>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
 ) -> Result<Produced<Value>> {
     if name == "array_reverse" {
         require_arity(name, args, 1)?;
@@ -277,7 +340,7 @@ fn reordered(
         let descending = boolean_option(args.get(1), "array_sort: descending")?.unwrap_or(false);
         let nulls_first =
             boolean_option(args.get(2), "array_sort: nulls_first")?.unwrap_or(descending);
-        order::sorted_elements(array, descending, nulls_first, json_sort, control)?
+        order::sorted_elements(array, descending, nulls_first, json_sort, control, catalog)?
     };
     let output = finish_array(
         ArrayValue::with_lower_bounds_with_control(

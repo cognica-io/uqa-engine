@@ -90,6 +90,150 @@ fn constructor_cast_sources_keep_their_catalog_identity_under_the_output_budget(
 }
 
 #[test]
+fn record_cast_names_preserve_named_sources_but_not_anonymous_nulls() {
+    let composite = ColumnType::Composite(crate::ast::CompositeTypeReference {
+        schema: "app".into(),
+        name: "pair".into(),
+        oid: 20_001,
+        array_oid: 20_002,
+        relation_oid: 20_003,
+    });
+    let domain = domain(composite.clone());
+    let schema = RowSchema::with_types(
+        vec!["named".into(), "domain".into()],
+        vec![Some(composite.clone()), Some(domain.clone())],
+    );
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(8192);
+    let control = ProductionControl::new(&budget, &token, &token);
+    for target in ["record", "pg_catalog.record"] {
+        for (source, expected_source, expected_operand) in [
+            (
+                ScalarExpr::Position(0),
+                composite.sql_name(),
+                composite.sql_name(),
+            ),
+            (
+                ScalarExpr::Position(1),
+                domain.sql_name(),
+                composite.sql_name(),
+            ),
+            (
+                ScalarExpr::Literal(Value::Null),
+                target.into(),
+                target.into(),
+            ),
+        ] {
+            let expression = ScalarExpr::Cast {
+                implicit: false,
+                expr: Box::new(source),
+                ty: target.into(),
+            };
+            for (preserve_domain, expected) in [(true, expected_source), (false, expected_operand)]
+            {
+                let name =
+                    operand_type_name(&expression, &schema, &[], None, &control, preserve_domain)
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(&*name, &expected);
+                assert_eq!(budget.used(), name.reserved_bytes());
+                drop(name);
+                assert_eq!(budget.used(), 0);
+            }
+        }
+    }
+    let typed_null = ScalarExpr::Cast {
+        implicit: false,
+        expr: Box::new(ScalarExpr::Literal(Value::Null)),
+        ty: "record".into(),
+    };
+    assert_eq!(
+        scalar_array_element_oid_with_control(
+            std::slice::from_ref(&typed_null),
+            &schema,
+            &[],
+            None,
+            &control
+        )
+        .unwrap(),
+        Some(2249)
+    );
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    assert_eq!(
+        scalar_array_element_oid_with_control(&[typed_null], &schema, &[], None, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn array_constructor_type_selection_resolves_aliases_and_checks_catalog_absence() {
+    struct Catalog<'a> {
+        ty: ColumnType,
+        token: &'a CancellationToken,
+    }
+    impl crate::expr::EngineHook for Catalog<'_> {
+        fn nextval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn currval(&self, _: &str) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn setval(&self, _: &str, _: i64, _: bool) -> Result<i64, SQLError> {
+            unreachable!()
+        }
+        fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, String> {
+            if matches!(name, "composite#20001" | "app.pair") {
+                Ok(Some(self.ty.clone()))
+            } else {
+                self.token.cancel();
+                Ok(None)
+            }
+        }
+    }
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(8192);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let schema = RowSchema::default();
+    let catalog = Catalog {
+        ty: ColumnType::Composite(crate::ast::CompositeTypeReference {
+            schema: "app".into(),
+            name: "pair".into(),
+            oid: 20001,
+            array_oid: 20002,
+            relation_oid: 20003,
+        }),
+        token: &token,
+    };
+    let items = ["composite#20001", "app.pair"].map(|ty| ScalarExpr::Cast {
+        implicit: false,
+        expr: Box::new(ScalarExpr::Literal(Value::Null)),
+        ty: ty.into(),
+    });
+    assert_eq!(
+        scalar_array_element_oid_with_control(&items, &schema, &[], Some(&catalog), &control)
+            .unwrap(),
+        Some(20001)
+    );
+    assert_eq!(budget.used(), 0);
+    let absent = ScalarExpr::Cast {
+        implicit: false,
+        expr: Box::new(ScalarExpr::Literal(Value::Null)),
+        ty: "absent".into(),
+    };
+    assert_eq!(
+        scalar_array_element_oid_with_control(&[absent], &schema, &[], Some(&catalog), &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators() {
     let budget = MemoryBudget::new(65_536);
     let token = CancellationToken::new();

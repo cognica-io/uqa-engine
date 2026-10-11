@@ -31,6 +31,48 @@ fn arithmetic_oracle() -> serde_json::Value {
 }
 
 #[test]
+fn array_constructors_retain_declared_element_identity_before_values_erase_it() {
+    let schema = crate::RowSchema::default();
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let row = ResultRow::default();
+    let context = ScalarEvalContext::from_row_lookup(&row, &[]).with_row_schema(&schema);
+    for (source, oid) in [
+        ("ARRAY[NULL::json]", 114),
+        ("ARRAY[ROW(1)]", 2249),
+        ("ARRAY[ARRAY[1],ARRAY[2]]", 23),
+    ] {
+        let expression = expression(source, &schema);
+        let output = eval_scalar_inner(&expression, &context, &control).unwrap();
+        assert_eq!(
+            output.array_view().unwrap().element_type_oid(),
+            Some(oid),
+            "{source}"
+        );
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+    let expression = expression("array_remove(ARRAY[NULL::json],NULL::json)", &schema);
+    let error = eval_scalar_inner(&expression, &context, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    assert_eq!(
+        error.to_string(),
+        "could not identify an equality operator for type json"
+    );
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    assert_eq!(
+        eval_scalar_inner(&expression, &context, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn nested_numeric_arithmetic_keeps_exact_results_with_a_small_allowance() {
     let oracle = arithmetic_oracle();
     let numeric = ColumnType::Numeric {

@@ -16,7 +16,7 @@ use super::conversion::to_f64;
 use super::diagnostics::{unknown_function_error, value_type_name};
 use super::json::{jsonpath_candidate, jsonpath_match};
 use super::random;
-use super::scalar_dispatch::{eval_scalar_function, eval_sequence_function};
+use super::scalar_dispatch::{eval_scalar_function_with_context, eval_sequence_function};
 
 mod named;
 mod production;
@@ -225,7 +225,7 @@ fn eval_function_call_inner(
             &call_args,
             &uqa_core::memory::ProductionControl::uncontrolled(),
         )? {
-            return eval_scalar_function(lower, &positional);
+            return eval_scalar_function_with_context(lower, &positional, ctx);
         }
         if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
             if let Some(result) = engine.call_user_function(lower, &call_args) {
@@ -268,7 +268,7 @@ fn eval_function_call_inner(
                 .expect("ordinary selection result")
         });
     }
-    match eval_scalar_function(lower, &evaluated) {
+    match eval_scalar_function_with_context(lower, &evaluated, ctx) {
         // Unknown built-in: fall through to user-defined functions,
         // mirroring PostgreSQL's search-path order.
         Err(SQLError::UnknownFunction(_)) => {

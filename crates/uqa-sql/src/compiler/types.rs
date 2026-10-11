@@ -398,6 +398,7 @@ pub(super) fn compile_pg_type_name(
             "xid" => Ok(ColumnType::Xid),
             "void" => Ok(ColumnType::Void),
             "text" => Ok(ColumnType::Text),
+            "refcursor" => Ok(ColumnType::RefCursor),
             "name" => Ok(ColumnType::Name),
             "uuid" => Ok(ColumnType::Uuid),
             "varchar" | "character varying" => {

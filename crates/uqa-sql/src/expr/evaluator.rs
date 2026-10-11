@@ -79,15 +79,28 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 ))
             }),
         Expr::Array(elements) => {
+            let scalar = crate::plan::ExpressionPlan::lower(Expr::Array(elements.clone())).scalar;
+            let crate::ScalarExpr::Array(items) = scalar else {
+                unreachable!("array lowering")
+            };
+            let element_oid = crate::type_resolution::scalar_array_element_oid_with_control(
+                &items,
+                &crate::RowSchema::default(),
+                ctx.params,
+                ctx.engine,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
             let mut out = Vec::with_capacity(elements.len());
             for e in elements {
                 out.push(eval(e, ctx)?);
             }
-            ArrayValue::try_new(out).map(Value::Array).ok_or_else(|| {
-                SQLError::TypeMismatch(
-                    "multidimensional arrays must have matching dimensions".into(),
-                )
-            })
+            ArrayValue::try_new(out)
+                .map(|array| Value::Array(array.with_element_type_oid(element_oid)))
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })
         }
         Expr::CompositeRow { items, binding } => {
             let control = uqa_core::memory::ProductionControl::uncontrolled();

@@ -25,6 +25,7 @@ pub use comparison::{
     type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
 };
+pub(in crate::expr) use comparison::{require_array_element_support, ComparisonSupport};
 
 pub(super) fn eval_binary(
     op: BinaryOp,

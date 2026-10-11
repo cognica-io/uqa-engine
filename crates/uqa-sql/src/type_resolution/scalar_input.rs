@@ -31,16 +31,89 @@ pub fn scalar_record_field_type_with_control(
             type_modifier: -1,
         }));
     }
-    let Some(name) =
-        scalar_cast_source_type_name_with_control(expression, schema, params, control)?
-    else {
+    let Some(name) = operand_type_name(expression, schema, params, engine, control, true)? else {
         return Ok(None);
     };
-    let ty = match ColumnType::from_sql_name_with_control(&name, control) {
+    let ty = resolve_operand_type(&name, engine, control)?;
+    Ok(ty.map(|ty| uqa_core::RecordFieldType {
+        oid: crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
+        type_modifier: crate::catalog::type_metadata::pg_type_modifier(&ty) as i32,
+    }))
+}
+
+/// Retain an ARRAY constructor's analyzed scalar element identity without evaluating its items or repeating any input or domain checks. Bound item signatures take precedence over erased value carriers, including typed NULL and explicit record coercions.
+pub fn scalar_array_element_oid_with_control(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<u32>, SQLError> {
+    control.check()?;
+    if items.is_empty() {
+        return Ok(None);
+    }
+    let ty = array_element_type_from_bound_inputs(items, schema, params, engine, control)?;
+    Ok(ty.map(|ty| {
+        let mut element = &*ty;
+        while let Some(inner) = super::common::array_element_type(element) {
+            element = inner;
+        }
+        crate::catalog::type_metadata::pg_type_oid(element) as u32
+    }))
+}
+
+fn array_element_type_from_bound_inputs(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let mut element = None;
+    let mut unresolved = false;
+    for item in items {
+        control.check()?;
+        if super::is_unknown_literal(item) {
+            continue;
+        }
+        let ty = if let ScalarExpr::Array(nested) = item {
+            array_element_type_from_bound_inputs(nested, schema, params, engine, control)?
+                .map(|element| ColumnType::array_with_control(element, control))
+                .transpose()?
+        } else if let Some(ty) = inferred_type(item, schema, params, control)? {
+            Some(ty)
+        } else {
+            operand_type_name(item, schema, params, engine, control, true)?
+                .as_deref()
+                .map(|name| resolve_operand_type(name, engine, control))
+                .transpose()?
+                .flatten()
+        };
+        unresolved |= ty.is_none();
+        element = super::common::merge_value_types_in(
+            super::common::CommonTypeContext::Array,
+            element,
+            ty,
+            control,
+        )?;
+    }
+    if element.is_none() && !unresolved {
+        element = Some(ColumnType::Text.clone_with_control(control)?);
+    }
+    Ok(element)
+}
+
+fn resolve_operand_type(
+    name: &str,
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let ty = match ColumnType::from_sql_name_with_control(name, control) {
         Ok(ty) => Some(ty),
         Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
         Err(_) => engine
-            .map(|engine| engine.resolve_type_name(&name).map_err(SQLError::Internal))
+            .map(|engine| engine.resolve_type_name(name).map_err(SQLError::Internal))
             .transpose()?
             .flatten()
             .map(|ty| {
@@ -49,10 +122,8 @@ pub fn scalar_record_field_type_with_control(
             })
             .transpose()?,
     };
-    Ok(ty.map(|ty| uqa_core::RecordFieldType {
-        oid: crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
-        type_modifier: crate::catalog::type_metadata::pg_type_modifier(&ty) as i32,
-    }))
+    control.check()?;
+    Ok(ty)
 }
 
 pub fn scalar_operand_type_name(
@@ -81,7 +152,7 @@ pub fn scalar_operand_type_name_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>, SQLError> {
-    operand_type_name(expression, schema, params, control, false)
+    operand_type_name(expression, schema, params, None, control, false)
 }
 
 /// Casts retain a source domain's identity so an identity cast cannot re-run its constraints. Operator consumers continue to use the underlying type.
@@ -91,13 +162,14 @@ pub fn scalar_cast_source_type_name_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>, SQLError> {
-    operand_type_name(expression, schema, params, control, true)
+    operand_type_name(expression, schema, params, None, control, true)
 }
 
 fn operand_type_name(
     expression: &ScalarExpr,
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
     preserve_domain: bool,
 ) -> Result<Option<Produced<String>>, SQLError> {
@@ -111,6 +183,31 @@ fn operand_type_name(
         ty.sql_name_with_control(control).map_err(SQLError::from)
     };
     let name = match expression {
+        ScalarExpr::Cast { expr, ty, .. } => {
+            if let Some(target) = resolve_operand_type(ty, engine, control)? {
+                if matches!(*target, ColumnType::Record) {
+                    let source_name =
+                        operand_type_name(expr, schema, params, engine, control, true)?;
+                    let source = match inferred_type(expr, schema, params, control)? {
+                        Some(source) => Some(source),
+                        None => source_name
+                            .as_deref()
+                            .map(|name| resolve_operand_type(name, engine, control))
+                            .transpose()?
+                            .flatten(),
+                    };
+                    if source.as_deref().is_some_and(|source| {
+                        super::cast_compatibility::preserves_record_identity(source, &target)
+                    }) {
+                        if preserve_domain {
+                            return Ok(source_name);
+                        }
+                        return source.as_deref().map(type_name).transpose();
+                    }
+                }
+            }
+            Some(ty.as_str())
+        }
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..
@@ -130,8 +227,7 @@ fn operand_type_name(
                 .as_ref()
                 .and_then(|invocation| invocation.return_type.as_deref())
         }
-        ScalarExpr::Cast { ty, .. }
-        | ScalarExpr::TypedLiteral { ty, .. }
+        ScalarExpr::TypedLiteral { ty, .. }
         | ScalarExpr::CompositeRow {
             binding: crate::ast::CompositeRowBinding { ty, .. },
             ..
@@ -140,7 +236,7 @@ fn operand_type_name(
             return scalar_operand_type_name_with_control(inner, schema, params, control);
         }
         ScalarExpr::Array(items) => {
-            match array_source_name(items, schema, params, control)? {
+            match array_source_name(items, schema, params, engine, control)? {
                 ArraySource::Known(name) => return Ok(Some(name)),
                 ArraySource::Unknown => return Ok(None),
                 ArraySource::Infer => {}
@@ -170,13 +266,14 @@ fn array_source_name(
     items: &[ScalarExpr],
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<ArraySource, SQLError> {
     let mut selected: Option<Produced<String>> = None;
     let mut unresolved = false;
     for item in items {
         control.check()?;
-        let Some(name) = operand_type_name(item, schema, params, control, true)? else {
+        let Some(name) = operand_type_name(item, schema, params, engine, control, true)? else {
             unresolved |= !super::is_unknown_literal(item);
             continue;
         };

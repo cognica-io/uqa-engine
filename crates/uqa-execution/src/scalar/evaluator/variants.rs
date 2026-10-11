@@ -23,13 +23,25 @@ pub(super) fn array(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let element_oid = context.with_type_schema(|schema| {
+        uqa_sql::type_resolution::scalar_array_element_oid_with_control(
+            items,
+            schema,
+            context.params(),
+            context.function_hook(),
+            control,
+        )
+    })?;
     let items = evaluate_items(items, context, control)?;
     let array = ArrayValue::try_new_with_control(items, control)?.ok_or_else(|| {
         SQLError::TypeMismatch("multidimensional arrays must have matching dimensions".into())
     })?;
     let (array, memory) = array.into_parts();
     control
-        .finish(Value::Array(array), memory)
+        .finish(
+            Value::Array(array.with_element_type_oid(element_oid)),
+            memory,
+        )
         .map_err(Into::into)
 }
 
