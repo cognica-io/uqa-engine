@@ -38,7 +38,7 @@ fn equality_index_upgrade_preserves_history_and_rolls_back_with_its_format_marke
         for (name, _) in crate::btree_index::coverage::TABLES {
             transaction.execute_batch(&format!("DROP TABLE {name}"))?;
         }
-        transaction.execute_batch("DROP INDEX _btree_index_equal_v1; CREATE INDEX _btree_index_value_idx ON _btree_index_entries(table_name, field, value_json, doc_id); DROP TABLE _uqa_mvcc_native_format")?;
+        transaction.execute_batch("CREATE INDEX _btree_index_value_idx ON _btree_index_entries(table_name, field, value_json, doc_id); DROP TABLE _uqa_mvcc_native_format")?;
         transaction.execute_batch(FORMAT_FIFTEEN)?;
         transaction.execute(
             "INSERT INTO _uqa_mvcc_native_format VALUES(1,15,49,?1)",
