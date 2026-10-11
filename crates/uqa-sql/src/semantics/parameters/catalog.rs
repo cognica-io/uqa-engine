@@ -87,6 +87,13 @@ const XML_OPTIONS: &[EnumOption] = &[
     EnumOption::listed("document", 0),
 ];
 
+const INTERVAL_STYLES: &[EnumOption] = &[
+    EnumOption::listed("postgres", 0),
+    EnumOption::listed("postgres_verbose", 1),
+    EnumOption::listed("sql_standard", 2),
+    EnumOption::listed("iso_8601", 3),
+];
+
 /// The version the engine reports as `server_version_num`.
 pub const SERVER_VERSION_NUM: i32 = 180_000;
 
@@ -295,6 +302,15 @@ static PARAMETERS: &[ParameterDefinition] = &[
         ParameterContext::Internal,
         PRESET_OPTIONS,
         "Shows whether datetimes are integer based.",
+        None,
+        ParameterFlags::REPORT,
+    ),
+    define(
+        "IntervalStyle",
+        enumerated(0, INTERVAL_STYLES),
+        ParameterContext::User,
+        LOCALE_AND_FORMATTING,
+        "Sets the display format for interval values.",
         None,
         ParameterFlags::REPORT,
     ),

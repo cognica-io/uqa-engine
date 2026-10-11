@@ -91,7 +91,7 @@ pub fn aggregate_value_with_args(
         "sum" => {
             if acc.count == 0 {
                 Value::Null
-            } else if let Some(sum) = acc.interval_sum {
+            } else if let Some(sum) = acc.interval_result()? {
                 Value::Temporal(sum.value())
             } else if acc.numeric_inputs.decimal_without_float() {
                 acc.decimal_sum.clone().map_or(Value::Null, Value::Decimal)
@@ -106,7 +106,7 @@ pub fn aggregate_value_with_args(
         "avg" => {
             if acc.count == 0 {
                 Value::Null
-            } else if let Some(sum) = acc.interval_sum {
+            } else if let Some(sum) = acc.interval_result()? {
                 // `interval_avg` divides the sum by the count as a double precision factor.
                 Value::Temporal(sum.divide(acc.count as f64)?.value())
             } else if acc.numeric_inputs.decimal_without_float() {
@@ -320,9 +320,10 @@ pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Enum(value) => return Err(uqa_sql::expr::catalog_output_required(value)),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-        Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Array(_) | Value::LegacyVector(_) => uqa_sql::expr::value_to_string(value)?,
+        Value::Temporal(_) | Value::Array(_) | Value::LegacyVector(_) => {
+            uqa_sql::expr::value_to_string(value)?
+        }
         Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
             serde_json::to_string(&core_value_to_json(value)?).map_err(|error| {
                 SQLError::Internal(format!("cannot render JSON object aggregate key: {error}"))

@@ -52,6 +52,12 @@ pub fn eval_builtin_function_call_with_control(
     if let (Some(binding), Some(hook)) = (binding, context.engine) {
         hook.require_builtin_execute(binding)?;
     }
+    let _interval_style = super::super::interval_style::call_scope(
+        binding.map_or(name, |binding| binding.name.as_str()),
+        &arguments,
+        context.engine,
+        control,
+    )?;
     if let Some((binding, dispatch)) =
         binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
     {

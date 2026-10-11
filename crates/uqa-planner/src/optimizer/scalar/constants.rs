@@ -6,7 +6,7 @@
 
 //! Evaluation of immutable constants without erasing their declared SQL type.
 
-use uqa_sql::ast::{ColumnType, FunctionBinding};
+use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionVolatility};
 use uqa_sql::SQLError;
 use uqa_sql::{scalar_type, FunctionTypeResolver, RowSchema, ScalarExpr};
 
@@ -140,14 +140,25 @@ fn is_constant(
         }
         // A named ROW constructor reads its current catalog descriptor even when every argument is a constant.
         ScalarExpr::CompositeRow { .. } => false,
-        ScalarExpr::Binary { lhs, rhs, .. } => constant(lhs) && constant(rhs),
+        ScalarExpr::Binary { op, lhs, rhs } => {
+            constant(lhs) && constant(rhs) && immutable_binary(*op, lhs, rhs, resolver)
+        }
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. } => constant(inner),
         ScalarExpr::Between { expr, low, high } => {
-            constant(expr) && constant(low) && constant(high)
+            constant(expr)
+                && constant(low)
+                && constant(high)
+                && immutable_binary(BinaryOp::LessEqual, low, expr, resolver)
+                && immutable_binary(BinaryOp::LessEqual, expr, high, resolver)
         }
-        ScalarExpr::InList { expr, list, .. } => constant(expr) && list.iter().all(constant),
+        ScalarExpr::InList { expr, list, .. } => {
+            constant(expr)
+                && list.iter().all(|item| {
+                    constant(item) && immutable_binary(BinaryOp::Equal, expr, item, resolver)
+                })
+        }
         ScalarExpr::Case {
             base,
             when,
@@ -200,6 +211,23 @@ fn constant_scalar_type(
         Some(resolver) => uqa_sql::scalar_type_with_resolver(expression, &schema, &[], resolver),
         None => scalar_type(expression, &schema, &[]),
     }
+}
+
+fn immutable_binary(
+    op: BinaryOp,
+    left: &ScalarExpr,
+    right: &ScalarExpr,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> bool {
+    let [Ok(left), Ok(right)] = [left, right].map(|expr| constant_scalar_type(expr, resolver))
+    else {
+        // The ordinary typed fold reports analysis errors before evaluating a constant.
+        return true;
+    };
+    uqa_sql::type_resolution::binary_operator_volatility(op, left.as_ref(), right.as_ref())
+        .map_or(true, |volatility| {
+            volatility == FunctionVolatility::Immutable
+        })
 }
 
 #[cfg(test)]

@@ -676,6 +676,14 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             | FunctionDispatch::Enum { .. } => {}
         }
     }
+    if let Some(name) = range::containment_name(name, binding) {
+        return containment::resolve_operator_type_with_control(
+            name,
+            args,
+            &argument_types,
+            control,
+        );
+    }
     if let Some(ty) = range::function_type(name, binding, &argument_types) {
         return inline(ty, control);
     }
@@ -841,9 +849,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "jsonb_build_array" => inline(ColumnType::JsonB, control),
         "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" | "aclexplode" => {
             inline(ColumnType::Record, control)
-        }
-        "contains_op" | "contained_by_op" => {
-            containment::resolve_operator_type_with_control(name, args, &argument_types, control)
         }
         "bool_and" | "bool_or" | "every" => single_argument_aggregate_type(
             name,

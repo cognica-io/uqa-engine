@@ -173,7 +173,15 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
             Node::String(utf8_lossy_with_control(bytes, control)?)
         }
         Value::Bytes(bytes) => binary_node(bytes, control)?,
-        Value::Temporal(value) => Node::String(value.to_sql_string_with_control(control)?),
+        Value::Temporal(value) if core_carrier => {
+            Node::String(value.to_sql_string_with_control(control)?)
+        }
+        Value::Temporal(value) => {
+            Node::String(value.to_sql_string_in_interval_style_with_control(
+                super::super::temporal_interval_style(),
+                control,
+            )?)
+        }
         Value::Json(text) | Value::JsonB(text) => match parsed::parse_optional(text, control)? {
             Some(value) => value,
             None => Node::String(control.copy_text(text)?),

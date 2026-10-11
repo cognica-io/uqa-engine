@@ -4,9 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Interval arithmetic as `PostgreSQL` 18's `timestamp.c` performs it on finite intervals: negation (`interval_um_internal`), field-wise addition and subtraction (`finite_interval_pl`, `finite_interval_mi`), and scaling by a double precision factor (`interval_mul`, `interval_div`). Every function reports overflow as `interval out of range` (SQLSTATE 22008), including a result that lands on the field values reserved for `-infinity` and `infinity`.
+//! Interval arithmetic as `PostgreSQL` 18's `timestamp.c` performs it: negation, field-wise addition and subtraction, and scaling by a double precision factor. Infinite operands retain their signs except for indeterminate operations; finite overflow, including a finite operation landing on a reserved endpoint, reports `interval out of range` (SQLSTATE 22008).
 
-use uqa_core::TemporalValue;
+use uqa_core::{TemporalInfinity, TemporalValue};
 
 use super::super::{datetime_out_of_range, division_by_zero};
 use crate::error::Result;
@@ -58,8 +58,11 @@ impl IntervalFields {
 
     /// `INTERVAL_NOT_FINITE`: the field values `interval '-infinity'` and `interval 'infinity'` are stored as.
     fn is_reserved(self) -> bool {
-        (self.months == i32::MIN && self.days == i32::MIN && self.micros == i64::MIN)
-            || (self.months == i32::MAX && self.days == i32::MAX && self.micros == i64::MAX)
+        !self.value().is_finite()
+    }
+
+    fn infinite(infinity: TemporalInfinity) -> Self {
+        Self::of(&infinity.interval()).expect("interval endpoint")
     }
 
     fn finite(self) -> Result<Self> {
@@ -72,6 +75,9 @@ impl IntervalFields {
 
     /// `interval_um_internal`.
     pub fn negate(self) -> Result<Self> {
+        if let Some(infinity) = self.value().infinity() {
+            return Ok(Self::infinite(infinity.negate()));
+        }
         match (
             self.months.checked_neg(),
             self.days.checked_neg(),
@@ -89,6 +95,13 @@ impl IntervalFields {
 
     /// `finite_interval_pl`.
     pub fn plus(self, other: Self) -> Result<Self> {
+        if let Some(infinity) = super::infinite::add(
+            self.value().infinity(),
+            other.value().infinity(),
+            "interval",
+        )? {
+            return Ok(Self::infinite(infinity));
+        }
         match (
             self.months.checked_add(other.months),
             self.days.checked_add(other.days),
@@ -106,6 +119,11 @@ impl IntervalFields {
 
     /// `finite_interval_mi`.
     pub fn minus(self, other: Self) -> Result<Self> {
+        if let Some(infinity) =
+            super::infinite::subtract(self.value().infinity(), other.value().infinity())?
+        {
+            return Ok(Self::infinite(infinity));
+        }
         match (
             self.months.checked_sub(other.months),
             self.days.checked_sub(other.days),
@@ -121,15 +139,38 @@ impl IntervalFields {
         }
     }
 
-    /// `interval_mul` of a finite interval.
+    /// `interval_mul`, including sign propagation and indeterminate products.
     pub fn multiply(self, factor: f64) -> Result<Self> {
-        if factor.is_nan() || factor.is_infinite() {
+        if factor.is_nan() {
             return Err(datetime_out_of_range("interval"));
+        }
+        if let Some(infinity) = self.value().infinity() {
+            if factor == 0.0 {
+                return Err(datetime_out_of_range("interval"));
+            }
+            return Ok(Self::infinite(if factor < 0.0 {
+                infinity.negate()
+            } else {
+                infinity
+            }));
+        }
+        if factor.is_infinite() {
+            let ordering = self.value().cmp(&Self::ZERO.value());
+            if ordering.is_eq() {
+                return Err(datetime_out_of_range("interval"));
+            }
+            return Ok(Self::infinite(
+                if ordering.is_lt() == factor.is_sign_negative() {
+                    TemporalInfinity::Positive
+                } else {
+                    TemporalInfinity::Negative
+                },
+            ));
         }
         self.scale(|field| field * factor)
     }
 
-    /// `interval_div` of a finite interval.
+    /// `interval_div`; zero division precedes non-finite result checks.
     pub fn divide(self, factor: f64) -> Result<Self> {
         if factor == 0.0 {
             return Err(division_by_zero());
@@ -137,11 +178,24 @@ impl IntervalFields {
         if factor.is_nan() {
             return Err(datetime_out_of_range("interval"));
         }
+        if let Some(infinity) = self.value().infinity() {
+            if factor.is_infinite() {
+                return Err(datetime_out_of_range("interval"));
+            }
+            return Ok(Self::infinite(if factor < 0.0 {
+                infinity.negate()
+            } else {
+                infinity
+            }));
+        }
         self.scale(|field| field / factor)
     }
 
     /// `interval_justify_hours`: whole days of the time field move into the day field, then a day and a time of opposite signs trade one day so that both take one sign.
     pub fn justify_hours(self) -> Result<Self> {
+        if self.is_reserved() {
+            return Ok(self);
+        }
         let whole_days = self.micros / USECS_PER_DAY;
         let days = self
             .days
@@ -157,6 +211,9 @@ impl IntervalFields {
 
     /// `interval_justify_days`: whole 30-day months of the day field move into the month field, then a month and a day of opposite signs trade one month.
     pub fn justify_days(self) -> Result<Self> {
+        if self.is_reserved() {
+            return Ok(self);
+        }
         let (months, days) = carry_whole_months(self.months, self.days)?;
         let (months, days) = if months > 0 && days < 0 {
             (months - 1, days + DAYS_PER_MONTH_INT)
@@ -174,6 +231,9 @@ impl IntervalFields {
 
     /// `interval_justify_interval`: `justify_hours` and `justify_days` together, so that all three fields take one sign. Days are carried into months first when day and time share a sign, which keeps the day field from overflowing.
     pub fn justify_interval(self) -> Result<Self> {
+        if self.is_reserved() {
+            return Ok(self);
+        }
         let (mut months, mut days) = (self.months, self.days);
         if (days > 0 && self.micros > 0) || (days < 0 && self.micros < 0) {
             (months, days) = carry_whole_months(months, days)?;

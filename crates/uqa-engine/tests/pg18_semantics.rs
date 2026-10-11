@@ -18,6 +18,8 @@ use uqa_engine::Engine;
 mod interval_arithmetic;
 #[path = "pg18_semantics/jsonb_comparisons.rs"]
 mod jsonb_comparisons;
+#[path = "pg18_semantics/temporal_consumers.rs"]
+mod temporal_consumers;
 
 fn engine() -> Engine {
     Engine::new()
@@ -88,6 +90,8 @@ mod comparisons_and_arrays;
 mod floating_point_width;
 #[path = "pg18_semantics/gamma_functions.rs"]
 mod gamma_functions;
+#[path = "pg18_semantics/interval_style.rs"]
+mod interval_style;
 #[path = "pg18_semantics/json_strip_nulls.rs"]
 mod json_strip_nulls;
 #[path = "pg18_semantics/md5_overloads.rs"]
@@ -104,6 +108,8 @@ mod ordered_mode;
 mod pattern_escape;
 #[path = "pg18_semantics/pg18_additions.rs"]
 mod pg18_additions;
+#[path = "pg18_semantics/range_elements.rs"]
+mod range_elements;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
@@ -118,6 +124,8 @@ mod strings_and_bytea;
 mod temporal;
 #[path = "pg18_semantics/temporal_comparisons.rs"]
 mod temporal_comparisons;
+#[path = "pg18_semantics/temporal_infinity.rs"]
+mod temporal_infinity;
 #[path = "pg18_semantics/three_valued_logic.rs"]
 mod three_valued_logic;
 #[path = "pg18_semantics/to_reg_lookups.rs"]
@@ -176,3 +184,6 @@ mod multiple_column_assignment;
 
 #[path = "pg18_semantics/relation_attribute_slots.rs"]
 mod relation_attribute_slots;
+
+#[path = "pg18_semantics/zoned_interval.rs"]
+mod zoned_interval;

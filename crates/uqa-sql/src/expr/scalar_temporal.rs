@@ -8,8 +8,8 @@
 
 use super::{
     coerce_temporal, datetime_out_of_range, format_pg_number, format_temporal,
-    generate_random_uuid, generate_uuid_v7, pg_to_chrono_fmt, typeof_value, value_to_string,
-    DecimalValue, Result, SQLError, TemporalValue, Value,
+    generate_random_uuid, pg_to_chrono_fmt, typeof_value, value_to_string, DecimalValue, Result,
+    SQLError, TemporalValue, Value,
 };
 use uqa_core::memory::ProductionControl;
 
@@ -60,6 +60,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     value @ (Value::Int(_) | Value::Float(_) | Value::Decimal(_)) => {
                         format_pg_number(value, &fmt).map(Value::Str)
                     }
+                    Value::Temporal(t) if !t.is_finite() => Ok(Value::Null),
                     Value::Temporal(t) => Ok(Value::Str(format_temporal(t, &fmt)?)),
                     Value::Str(s) => {
                         let temporal = coerce_temporal(&Value::Str(s.clone()))?;
@@ -121,17 +122,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 }
                 generate_random_uuid().map(Value::Str)
             }
-            "uuidv7" => match args {
-                [] => generate_uuid_v7(None).map(Value::Str),
-                [Value::Temporal(interval @ TemporalValue::Interval { .. })] => {
-                    generate_uuid_v7(Some(interval)).map(Value::Str)
-                }
-                [Value::Null] => Ok(Value::Null),
-                [_] => Err(SQLError::TypeMismatch(
-                    "uuidv7 shift must be an interval".into(),
-                )),
-                _ => Err(SQLError::TypeMismatch("uuidv7 takes 0 or 1 args".into())),
-            },
+            "uuidv7" => super::uuid::eval_uuid_v7(args, None),
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())

@@ -98,6 +98,8 @@ fn encode_accumulator(accumulator: AggregateAccumulator) -> Value {
         accumulator
             .interval_sum
             .map_or(Value::Null, |sum| Value::Temporal(sum.value())),
+        unsigned_bytes(accumulator.interval_positive_infinity),
+        unsigned_bytes(accumulator.interval_negative_infinity),
     ])
 }
 
@@ -116,9 +118,9 @@ fn decode_accumulator(
             "partial aggregate accumulator is not a list".into(),
         ));
     };
-    if fields.len() != 20 {
+    if fields.len() != 22 {
         return Err(SQLError::Internal(format!(
-            "partial aggregate accumulator has {} fields, expected 20",
+            "partial aggregate accumulator has {} fields, expected 22",
             fields.len()
         )));
     }
@@ -175,6 +177,10 @@ fn decode_accumulator(
             ))
         }
     };
+    accumulator.interval_positive_infinity =
+        decode_unsigned(next(&mut fields)?, "positive interval infinity count")?;
+    accumulator.interval_negative_infinity =
+        decode_unsigned(next(&mut fields)?, "negative interval infinity count")?;
     Ok(accumulator)
 }
 
@@ -212,6 +218,14 @@ pub(super) fn merge_accumulators(
         (Some(sum), None) | (None, Some(sum)) => Some(sum),
         (None, None) => None,
     };
+    target.interval_positive_infinity = target
+        .interval_positive_infinity
+        .checked_add(source.interval_positive_infinity)
+        .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+    target.interval_negative_infinity = target
+        .interval_negative_infinity
+        .checked_add(source.interval_negative_infinity)
+        .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
     target.numeric_inputs = numeric_kind(has_decimal, has_float);
     target.decimal_sum = if has_decimal {
         Some(match (target_decimal, source_decimal) {

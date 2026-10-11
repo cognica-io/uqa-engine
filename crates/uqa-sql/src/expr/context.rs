@@ -197,6 +197,16 @@ pub trait EngineHook {
         ))
     }
 
+    /// The live interval input/output convention. A catalog-only hook leaves the calling statement's captured style in force.
+    fn temporal_interval_style(&self) -> Result<Option<uqa_core::TemporalIntervalStyle>> {
+        Ok(None)
+    }
+
+    /// The validated zone of a live session. Detached value evaluation uses UTC.
+    fn temporal_time_zone(&self) -> Result<Option<uqa_core::TemporalTimeZone>> {
+        Ok(None)
+    }
+
     /// Sleep in the session for `duration`, ending at once when the statement is canceled or times out (`pg_sleep`).
     fn sleep(&self, _duration: std::time::Duration) -> Result<()> {
         Err(SQLError::Unsupported(

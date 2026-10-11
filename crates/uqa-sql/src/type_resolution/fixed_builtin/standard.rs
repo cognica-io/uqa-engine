@@ -76,6 +76,14 @@ declarations! { pub(super) fn lookup(name);
             Signature::new(&[T::Text, T::TimestampTz, T::Text], T::TimestampTz),
             Signature::new(&[T::Text, T::Interval], T::Interval),
         ],
+        "timezone" => &[
+            Signature::new(&[T::Text, T::Timestamp], T::TimestampTz),
+            Signature::new(&[T::Text, T::TimestampTz], T::Timestamp),
+            Signature::new(&[T::Interval, T::Timestamp], T::TimestampTz),
+            Signature::new(&[T::Interval, T::TimestampTz], T::Timestamp),
+            Signature::new(&[T::Timestamp], T::TimestampTz),
+            Signature::new(&[T::TimestampTz], T::Timestamp),
+        ],
         "generate_series" => &[
             Signature::new(&[T::Integer, T::Integer], T::Integer),
             Signature::new(&[T::Integer, T::Integer, T::Integer], T::Integer),

@@ -7,6 +7,8 @@
 use super::*;
 use crate::{memory::MemoryBudget, CancellationToken};
 
+mod interval_limits;
+
 #[test]
 fn controlled_temporal_production_preserves_fractional_and_interval_spelling() {
     let budget = MemoryBudget::new(4096);

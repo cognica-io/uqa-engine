@@ -7,9 +7,9 @@
 //! Temporal producers use admitted text and borrowed parser tokens.
 
 use super::{
-    epoch_date, parse_interval_literal, wall_clock_micros, DateTime, Duration, ProductionControl,
-    ProductionString, TemporalDateOrder, TemporalInputError, TemporalValue, ValueRetentionError,
-    MICROS_PER_DAY, MICROS_PER_SECOND,
+    epoch_date, wall_clock_micros, DateTime, Duration, ProductionControl, ProductionString,
+    TemporalDateOrder, TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY,
+    MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
 use chrono::{Datelike, NaiveDate, NaiveTime};
@@ -250,13 +250,30 @@ impl TemporalValue {
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         control.check()?;
-        parse_interval_literal(text, control)
+        Self::interval_input_in_style_with_control(
+            text,
+            super::TemporalIntervalStyle::Postgres,
+            control,
+        )
+    }
+
+    /// Read an interval with the selected SQL sign convention; ISO 8601 input is recognized in every style.
+    pub fn interval_input_in_style_with_control(
+        text: &str,
+        style: super::TemporalIntervalStyle,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        control.check()?;
+        super::interval_input::parse_interval_literal(text, style, control)
     }
 
     pub fn to_sql_string_with_control(
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
+        if let Some(infinity) = self.infinity() {
+            return control.copy_text(infinity.as_str());
+        }
         match self {
             Self::Date { days } => {
                 match epoch_date().checked_add_signed(Duration::days(i64::from(*days))) {
@@ -292,7 +309,13 @@ impl TemporalValue {
                 months,
                 days,
                 micros,
-            } => format_interval(*months, *days, *micros, control),
+            } => super::interval_style::format_interval(
+                *months,
+                *days,
+                *micros,
+                super::TemporalIntervalStyle::Postgres,
+                control,
+            ),
         }
     }
 }
@@ -305,7 +328,7 @@ fn check_input(input: &str, control: &ProductionControl<'_>) -> Result<(), Value
     Ok(())
 }
 
-fn append_fraction(
+pub(super) fn append_fraction(
     out: &mut ProductionString<'_>,
     mut fraction: u64,
     control: &ProductionControl<'_>,
@@ -395,49 +418,6 @@ fn push_era(out: &mut ProductionString<'_>, date: NaiveDate) -> Result<(), Value
         out.push_str(" BC")?;
     }
     Ok(())
-}
-
-fn format_interval(
-    months: i32,
-    days: i32,
-    micros: i64,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<String>, ValueRetentionError> {
-    let mut out = ProductionString::new(*control);
-    let mut is_before = false;
-    for (value, unit) in [(months / 12, "year"), (months % 12, "mon"), (days, "day")] {
-        if value == 0 {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push(' ')?;
-        }
-        if is_before && value > 0 {
-            out.push('+')?;
-        }
-        out.push_str(&control.format(format_args!("{value} {unit}"))?)?;
-        if value != 1 {
-            out.push('s')?;
-        }
-        is_before |= value < 0;
-    }
-    if micros != 0 || out.is_empty() {
-        if !out.is_empty() {
-            out.push(' ')?;
-        }
-        if micros < 0 {
-            out.push('-')?;
-        } else if is_before {
-            out.push('+')?;
-        }
-        let abs = micros.unsigned_abs();
-        let hours = abs / 3_600_000_000;
-        let minutes = abs % 3_600_000_000 / 60_000_000;
-        let seconds = abs % 60_000_000 / 1_000_000;
-        out.push_str(&control.format(format_args!("{hours:02}:{minutes:02}:{seconds:02}"))?)?;
-        append_fraction(&mut out, abs % 1_000_000, control)?;
-    }
-    out.finish()
 }
 
 #[cfg(test)]

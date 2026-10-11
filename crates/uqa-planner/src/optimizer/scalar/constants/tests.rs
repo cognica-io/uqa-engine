@@ -9,6 +9,69 @@ use super::*;
 mod catalog_types;
 
 #[test]
+fn session_dependent_temporal_operators_remain_executable_after_parameter_binding() {
+    use uqa_core::TemporalValue;
+    let zoned = ScalarExpr::Literal(Value::Temporal(TemporalValue::TimestampTz { micros: 0 }));
+    let plain = ScalarExpr::Literal(Value::Temporal(TemporalValue::Timestamp { micros: 0 }));
+    let span = ScalarExpr::Literal(Value::Temporal(TemporalValue::Interval {
+        months: 0,
+        days: 1,
+        micros: 0,
+    }));
+    for expression in [
+        ScalarExpr::Binary {
+            op: BinaryOp::Add,
+            lhs: Box::new(zoned.clone()),
+            rhs: Box::new(span.clone()),
+        },
+        ScalarExpr::Binary {
+            op: BinaryOp::Subtract,
+            lhs: Box::new(zoned.clone()),
+            rhs: Box::new(span.clone()),
+        },
+        ScalarExpr::Binary {
+            op: BinaryOp::Add,
+            lhs: Box::new(span.clone()),
+            rhs: Box::new(zoned.clone()),
+        },
+        ScalarExpr::Binary {
+            op: BinaryOp::Equal,
+            lhs: Box::new(plain.clone()),
+            rhs: Box::new(zoned.clone()),
+        },
+        ScalarExpr::Between {
+            expr: Box::new(zoned.clone()),
+            low: Box::new(plain.clone()),
+            high: Box::new(plain.clone()),
+        },
+        ScalarExpr::InList {
+            expr: Box::new(zoned),
+            list: vec![plain.clone()],
+            negated: false,
+        },
+    ] {
+        assert_eq!(
+            fold_literal_expression(expression.clone(), |_| panic!("session setting required"))
+                .unwrap(),
+            expression
+        );
+    }
+    let immutable = ScalarExpr::Binary {
+        op: BinaryOp::Add,
+        lhs: Box::new(plain),
+        rhs: Box::new(span),
+    };
+    let folded =
+        fold_literal_expression(immutable, uqa_execution::scalar::eval_constant_scalar).unwrap();
+    assert_eq!(
+        literal_value(&folded),
+        Some(&Value::Temporal(TemporalValue::Timestamp {
+            micros: 86_400_000_000,
+        }))
+    );
+}
+
+#[test]
 fn constant_folding_retains_row_and_record_comparison_selection() {
     for coerced_conditionals in [false, true] {
         let mut config =

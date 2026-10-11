@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Finite temporal extraction keeps exact numeric coefficients separate from floating-point evaluation.
+//! Temporal extraction keeps exact numeric coefficients separate from floating-point evaluation.
 
 use chrono::{Datelike, NaiveDate, Timelike};
 use uqa_core::{
@@ -51,32 +51,37 @@ pub(in crate::expr) fn extract_from_value_with_offset(
     let unit = name
         .extraction()
         .ok_or_else(|| name.unrecognized(type_name))?;
-    let part = match temporal {
-        TemporalValue::Interval {
-            months,
-            days,
-            micros,
-        } => interval_part(unit, months, days, micros),
-        TemporalValue::Time { micros } => time_part(unit, micros, None),
-        TemporalValue::TimeTz {
-            micros,
-            offset_minutes,
-        } => time_part(unit, micros, Some(i64::from(offset_minutes) * 60)),
-        TemporalValue::Date { days } if as_numeric => date_part(unit, days)?,
-        TemporalValue::Date { days } => {
-            // `date_part(text, date)` is PostgreSQL's SQL wrapper around a midnight timestamp.
-            let micros = i64::from(days)
-                .checked_mul(MICROS_PER_DAY)
-                .ok_or_else(|| datetime_out_of_range("timestamp"))?;
-            timestamp_part(unit, micros, None)?
-        }
-        TemporalValue::Timestamp { micros } => timestamp_part(unit, micros, None)?,
-        TemporalValue::TimestampTz { micros } => {
-            timestamp_part(unit, micros, Some(offset_seconds))?
+    let part = if let Some(infinity) = temporal.infinity() {
+        infinite_part(unit, &temporal, as_numeric, infinity)
+    } else {
+        match temporal {
+            TemporalValue::Interval {
+                months,
+                days,
+                micros,
+            } => interval_part(unit, months, days, micros),
+            TemporalValue::Time { micros } => time_part(unit, micros, None),
+            TemporalValue::TimeTz {
+                micros,
+                offset_minutes,
+            } => time_part(unit, micros, Some(i64::from(offset_minutes) * 60)),
+            TemporalValue::Date { days } if as_numeric => date_part(unit, days)?,
+            TemporalValue::Date { days } => {
+                // `date_part(text, date)` is PostgreSQL's SQL wrapper around a midnight timestamp.
+                let micros = i64::from(days)
+                    .checked_mul(MICROS_PER_DAY)
+                    .ok_or_else(|| datetime_out_of_range("timestamp"))?;
+                timestamp_part(unit, micros, None)?
+            }
+            TemporalValue::Timestamp { micros } => timestamp_part(unit, micros, None)?,
+            TemporalValue::TimestampTz { micros } => {
+                timestamp_part(unit, micros, Some(offset_seconds))?
+            }
         }
     };
     let part = part.ok_or_else(|| {
         if unit == Unit::Reserved
+            && temporal.is_finite()
             && matches!(
                 temporal,
                 TemporalValue::Interval { .. }
@@ -90,6 +95,34 @@ pub(in crate::expr) fn extract_from_value_with_offset(
         }
     })?;
     part.finish(as_numeric, control)
+}
+
+fn infinite_part(
+    unit: Unit,
+    value: &TemporalValue,
+    as_numeric: bool,
+    infinity: uqa_core::TemporalInfinity,
+) -> Option<Part> {
+    let interval = matches!(value, TemporalValue::Interval { .. });
+    let date = matches!(value, TemporalValue::Date { .. }) && as_numeric;
+    Some(match unit {
+        Unit::Year | Unit::Decade | Unit::Century | Unit::Millennium | Unit::Epoch => {
+            Part::Infinity(infinity)
+        }
+        Unit::IsoYear | Unit::Julian if !interval => Part::Infinity(infinity),
+        Unit::Hour | Unit::Day if interval => Part::Infinity(infinity),
+        Unit::Month | Unit::Quarter | Unit::Week | Unit::Day => Part::Null,
+        Unit::Microseconds | Unit::Milliseconds | Unit::Second | Unit::Minute | Unit::Hour
+            if !date =>
+        {
+            Part::Null
+        }
+        Unit::Dow | Unit::IsoDow | Unit::Doy if !interval => Part::Null,
+        Unit::Timezone | Unit::TimezoneHour | Unit::TimezoneMinute if !interval && !date => {
+            Part::Null
+        }
+        _ => return None,
+    })
 }
 
 fn extraction_type_name(value: &TemporalValue, as_numeric: bool) -> &'static str {

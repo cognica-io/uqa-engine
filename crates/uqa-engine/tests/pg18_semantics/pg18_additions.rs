@@ -295,7 +295,13 @@ fn pg18_uuid_generators_set_rfc_bits_and_monotonic_submillisecond_time() {
     };
     assert_eq!(shifted.as_bytes()[14], b'7');
     assert!(unshifted < shifted);
-    assert!(scalar_err(&eng, "SELECT uuidv7(interval '-100 years')").contains("out of range"));
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT uuid_extract_version(uuidv7(interval '-100 years'))"
+        ),
+        Value::Int(7)
+    );
 }
 
 #[test]

@@ -24,6 +24,10 @@ pub struct TemporalTimeZone(Zone);
 #[derive(Clone, Copy, Debug)]
 enum Zone {
     Named(&'static TimeZoneRef<'static>),
+    Abbreviated {
+        zone: &'static TimeZoneRef<'static>,
+        name: &'static str,
+    },
     Fixed(i32),
     Posix(posix::PosixTimeZone),
 }
@@ -59,6 +63,15 @@ impl TemporalTimeZone {
         abbreviations::lookup(name).or_else(|| Self::named(name))
     }
 
+    /// Resolve a Default abbreviation, retaining its historical offset meanings.
+    ///
+    /// Unlike resolving the abbreviation to its whole zone, this selects the
+    /// abbreviation's own offset even outside the season when it was in use.
+    #[must_use]
+    pub fn abbreviation(name: &str) -> Option<Self> {
+        abbreviations::resolve(name)
+    }
+
     /// Return the case-correct spelling of a bundled name, preserving alias identity.
     #[must_use]
     pub fn canonical_name(name: &str) -> Option<&'static str> {
@@ -78,6 +91,7 @@ impl TemporalTimeZone {
     }
 
     /// Look up the UTC offset at an absolute Unix timestamp, in seconds.
+    /// Dynamic abbreviations use their own history and `PostgreSQL`'s civil-time fallback.
     #[must_use]
     pub fn offset_at(self, unix_seconds: i64) -> Option<i32> {
         match self.0 {
@@ -86,7 +100,26 @@ impl TemporalTimeZone {
                 .find_local_time_type(unix_seconds)
                 .ok()
                 .map(tz::timezone::LocalTimeType::ut_offset),
+            Zone::Abbreviated { zone, name } => abbreviations::offset_at(zone, name, unix_seconds)
+                .or_else(|| abbreviated_fallback_offset(zone, unix_seconds)),
             Zone::Posix(zone) => zone.offset_at(unix_seconds),
+        }
+    }
+
+    /// Select a UTC offset from Unix microseconds, retaining `PostgreSQL`'s
+    /// dynamic-abbreviation probe at second precision relative to the 2000 epoch.
+    #[must_use]
+    pub fn offset_at_micros(self, unix_micros: i64) -> Option<i32> {
+        let seconds = unix_micros.div_euclid(1_000_000);
+        if let Zone::Abbreviated { zone, name } = self.0 {
+            // timestamptz_to_time_t truncates toward zero at the PostgreSQL
+            // epoch; timestamp2tm (including the fallback) floors civil time.
+            let probe = seconds
+                + i64::from(unix_micros < 946_684_800_000_000 && unix_micros % 1_000_000 != 0);
+            abbreviations::offset_at(zone, name, probe)
+                .or_else(|| abbreviated_fallback_offset(zone, seconds))
+        } else {
+            self.offset_at(seconds)
         }
     }
 
@@ -99,9 +132,22 @@ impl TemporalTimeZone {
         match self.0 {
             Zone::Fixed(offset) => Some(offset),
             Zone::Named(zone) => named_local_offset(*zone, local_unix_seconds),
+            Zone::Abbreviated { zone, name } => {
+                let offset = named_local_offset(*zone, local_unix_seconds)?;
+                let utc = local_unix_seconds.checked_sub(i64::from(offset))?;
+                Some(abbreviations::offset_at(zone, name, utc).unwrap_or(offset))
+            }
             Zone::Posix(zone) => zone.offset_for_local(local_unix_seconds),
         }
     }
+}
+
+fn abbreviated_fallback_offset(zone: &TimeZoneRef<'_>, seconds: i64) -> Option<i32> {
+    // An abbreviation absent from the zone data uses PostgreSQL's civil-time
+    // fallback: derive the local time, then resolve its offset again. At a fold
+    // this selects the later side, including when the input instant is earlier.
+    let offset = zone.find_local_time_type(seconds).ok()?.ut_offset();
+    named_local_offset(*zone, seconds.checked_add(i64::from(offset))?)
 }
 
 fn named_local_offset(zone: TimeZoneRef<'_>, local_seconds: i64) -> Option<i32> {

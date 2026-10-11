@@ -1,0 +1,74 @@
+[
+  {
+    "base": "date",
+    "check": "VALUE = 'infinity'::date",
+    "conbin": "{OPEXPR :opno 1093 :opfuncid 1086 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1082 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 255 255 255 127 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE = 'infinity'::date)",
+    "pretty": "VALUE = 'infinity'::date",
+    "sql_nonstandard": "(VALUE = 'infinity'::date)",
+    "pretty_nonstandard": "VALUE = 'infinity'::date"
+  },
+  {
+    "base": "date",
+    "check": "VALUE = '-infinity'::date",
+    "conbin": "{OPEXPR :opno 1093 :opfuncid 1086 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1082 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 128 255 255 255 255 ]}) :location -1}",
+    "sql": "(VALUE = '-infinity'::date)",
+    "pretty": "VALUE = '-infinity'::date",
+    "sql_nonstandard": "(VALUE = '-infinity'::date)",
+    "pretty_nonstandard": "VALUE = '-infinity'::date"
+  },
+  {
+    "base": "timestamp",
+    "check": "VALUE = 'infinity'::timestamp",
+    "conbin": "{OPEXPR :opno 2060 :opfuncid 2052 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1114 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 255 255 255 255 255 255 255 127 ]}) :location -1}",
+    "sql": "(VALUE = 'infinity'::timestamp without time zone)",
+    "pretty": "VALUE = 'infinity'::timestamp without time zone",
+    "sql_nonstandard": "(VALUE = 'infinity'::timestamp without time zone)",
+    "pretty_nonstandard": "VALUE = 'infinity'::timestamp without time zone"
+  },
+  {
+    "base": "timestamp",
+    "check": "VALUE = '-infinity'::timestamp",
+    "conbin": "{OPEXPR :opno 2060 :opfuncid 2052 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1114 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 0 0 0 0 0 0 0 128 ]}) :location -1}",
+    "sql": "(VALUE = '-infinity'::timestamp without time zone)",
+    "pretty": "VALUE = '-infinity'::timestamp without time zone",
+    "sql_nonstandard": "(VALUE = '-infinity'::timestamp without time zone)",
+    "pretty_nonstandard": "VALUE = '-infinity'::timestamp without time zone"
+  },
+  {
+    "base": "timestamptz",
+    "check": "VALUE = 'infinity'::timestamptz",
+    "conbin": "{OPEXPR :opno 1320 :opfuncid 1152 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1184 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1184 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 255 255 255 255 255 255 255 127 ]}) :location -1}",
+    "sql": "(VALUE = 'infinity'::timestamp with time zone)",
+    "pretty": "VALUE = 'infinity'::timestamp with time zone",
+    "sql_nonstandard": "(VALUE = 'infinity'::timestamp with time zone)",
+    "pretty_nonstandard": "VALUE = 'infinity'::timestamp with time zone"
+  },
+  {
+    "base": "timestamptz",
+    "check": "VALUE = '-infinity'::timestamptz",
+    "conbin": "{OPEXPR :opno 1320 :opfuncid 1152 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1184 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1184 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 0 0 0 0 0 0 0 128 ]}) :location -1}",
+    "sql": "(VALUE = '-infinity'::timestamp with time zone)",
+    "pretty": "VALUE = '-infinity'::timestamp with time zone",
+    "sql_nonstandard": "(VALUE = '-infinity'::timestamp with time zone)",
+    "pretty_nonstandard": "VALUE = '-infinity'::timestamp with time zone"
+  },
+  {
+    "base": "interval",
+    "check": "VALUE = 'infinity'::interval",
+    "conbin": "{OPEXPR :opno 1330 :opfuncid 1162 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1186 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1186 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 255 255 255 255 255 255 255 127 255 255 255 127 255 255 255 127 ]}) :location -1}",
+    "sql": "(VALUE = 'infinity'::interval)",
+    "pretty": "VALUE = 'infinity'::interval",
+    "sql_nonstandard": "(VALUE = 'infinity'::interval)",
+    "pretty_nonstandard": "VALUE = 'infinity'::interval"
+  },
+  {
+    "base": "interval",
+    "check": "VALUE = '-infinity'::interval",
+    "conbin": "{OPEXPR :opno 1330 :opfuncid 1162 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1186 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1186 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 0 0 0 0 0 0 0 128 0 0 0 128 0 0 0 128 ]}) :location -1}",
+    "sql": "(VALUE = '-infinity'::interval)",
+    "pretty": "VALUE = '-infinity'::interval",
+    "sql_nonstandard": "(VALUE = '-infinity'::interval)",
+    "pretty_nonstandard": "VALUE = '-infinity'::interval"
+  }
+]

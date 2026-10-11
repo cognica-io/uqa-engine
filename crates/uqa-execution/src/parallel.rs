@@ -223,14 +223,19 @@ impl Default for ParallelExecutor {
 #[cfg(test)]
 mod temporal_tests {
     #[test]
-    fn date_order_and_transaction_clock_reach_each_worker() {
+    fn temporal_input_and_output_context_reaches_each_worker() {
         let _input = uqa_sql::expr::TemporalInputContext {
             transaction_clock_micros: Some(123),
             date_order: uqa_core::TemporalDateOrder::DayMonthYear,
+            interval_style: uqa_core::TemporalIntervalStyle::SqlStandard,
         }
         .enter();
         let check = || {
             assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(123));
+            assert_eq!(
+                uqa_sql::expr::temporal_interval_style(),
+                uqa_core::TemporalIntervalStyle::SqlStandard
+            );
             let uqa_core::Value::Temporal(date) =
                 uqa_sql::expr::cast_value(&uqa_core::Value::Str("02/03/2020".into()), "date")
                     .unwrap()

@@ -23,6 +23,7 @@ pub(crate) fn start_session_portal_worker(
             &engine,
             uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: Some(engine.transaction_timestamp_micros()),
+                interval_style: engine.session.interval_style(),
                 date_order: uqa_sql::semantics::parameters::datestyle::date_order(
                     &engine.session.setting("DateStyle"),
                 ),

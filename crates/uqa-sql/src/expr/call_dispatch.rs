@@ -59,6 +59,12 @@ fn eval_function_call_inner(
 ) -> Result<Value> {
     let lower = normalized_function_name(name);
     let lower = lower.as_ref();
+    let _interval_style = super::interval_style::call_scope(
+        lower,
+        &call_args,
+        ctx.engine,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?;
     let call_args = if super::enums::call_applies_output_functions(lower, &call_args)
         && call_args
             .iter()

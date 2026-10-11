@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Finite `timestamp_trunc` and `interval_trunc` with `DecodeUnits` names and diagnostics.
+//! `timestamp_trunc` and `interval_trunc` with `DecodeUnits` names and diagnostics.
 
 use super::{
     coerce_temporal_with_control, datetime_out_of_range, micros_from_naive, temporal_naive,
@@ -28,6 +28,13 @@ pub(super) fn truncate(
         _ => "timestamp without time zone",
     };
     let unit = decode_unit(units, type_name)?;
+    if let Some(infinity) = temporal.infinity() {
+        return Ok(Value::Temporal(match temporal {
+            TemporalValue::Interval { .. } => infinity.interval(),
+            TemporalValue::TimestampTz { .. } => infinity.timestamp_tz(),
+            _ => infinity.timestamp(),
+        }));
+    }
     if let Some(interval) = IntervalFields::of(&temporal) {
         return Ok(Value::Temporal(truncate_interval(unit, interval).value()));
     }

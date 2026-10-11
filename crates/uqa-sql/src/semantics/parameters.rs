@@ -14,6 +14,7 @@ pub mod custom;
 pub mod datestyle;
 pub mod definition;
 pub mod identifier_list;
+pub mod intervalstyle;
 pub mod setting;
 pub(crate) mod timezone;
 pub mod units;

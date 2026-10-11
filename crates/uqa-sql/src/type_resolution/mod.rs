@@ -111,10 +111,11 @@ pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
 pub use operators::{
     binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
-    binary_operator_types_with_control, binary_result_type, binary_result_type_with_control,
-    numeric_operator_types, numeric_operator_types_with_control, require_equality_operator,
-    require_ordering_operator, unary_minus_catalog_entry, unary_operator_by_oid,
-    BinaryOperatorCatalogEntry, NumericOperatorTypes, UnaryOperatorCatalogEntry,
+    binary_operator_types_with_control, binary_operator_volatility, binary_result_type,
+    binary_result_type_with_control, numeric_operator_types, numeric_operator_types_with_control,
+    require_equality_operator, require_ordering_operator, unary_minus_catalog_entry,
+    unary_operator_by_oid, BinaryOperatorCatalogEntry, NumericOperatorTypes,
+    UnaryOperatorCatalogEntry,
 };
 #[doc(hidden)]
 pub use overload_resolution::{

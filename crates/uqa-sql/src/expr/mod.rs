@@ -47,8 +47,8 @@ use time::{
     parse_timestamp, pg_to_chrono_fmt,
 };
 pub(crate) use uuid::format_uuid;
+use uuid::generate_random_uuid;
 pub use uuid::parse_uuid_bytes;
-use uuid::{generate_random_uuid, generate_uuid_v7};
 mod binary;
 mod casting;
 pub mod composites;
@@ -57,6 +57,7 @@ mod current_time;
 pub mod enums;
 pub(crate) mod hashing;
 pub(crate) mod internal_char;
+pub(crate) mod interval_style;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;
@@ -80,13 +81,13 @@ pub use binary::{
     compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
     compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
     compare_with_control, equal_typed_values_with_enum_catalog, eval_binary_values,
-    eval_binary_values_with_control, eval_binary_values_with_integer_width,
-    eval_binary_values_with_integer_width_with_control, eval_comparison_truth,
-    eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
-    eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
-    eval_record_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
-    integer_width_for_literal, integer_width_for_type, truthy, type_comparison_can_fail,
-    validate_legacy_vector_comparison, value_comparison_can_fail,
+    eval_binary_values_with_control, eval_binary_values_with_engine,
+    eval_binary_values_with_integer_width, eval_binary_values_with_integer_width_with_control,
+    eval_comparison_truth, eval_comparison_truth_with_control,
+    eval_comparison_truth_with_deferred_state, eval_comparison_truth_with_engine,
+    eval_comparison_truth_with_enum_catalog, eval_record_comparison_truth_with_engine,
+    eval_value_comparison_truth_with_engine, integer_width_for_literal, integer_width_for_type,
+    truthy, type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
@@ -114,14 +115,15 @@ pub use current_time::{clock_timestamp_micros, transaction_clock_micros, Transac
 pub use floating::{
     eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
 };
-pub use in_range::in_range;
+pub use in_range::{in_range, in_range_with_engine};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
 pub(crate) use scalar_helpers::append_sql_literal;
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 pub use temporal_input::{
-    temporal_date_order, DateOrderScope, TemporalInputContext, TemporalInputScope,
+    temporal_date_order, temporal_interval_style, DateOrderScope, IntervalStyleScope,
+    TemporalInputContext, TemporalInputScope,
 };
 
 mod builtin;

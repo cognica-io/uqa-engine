@@ -90,6 +90,38 @@ fn temporal_metadata_matches_postgresql() {
 }
 
 #[test]
+fn timestamp_zone_metadata_matches_postgresql() {
+    let expected: Vec<Vec<String>> = serde_json::from_str(include_str!("timezone.json")).unwrap();
+    assert_eq!(expected.len(), 6);
+    for row in expected {
+        let oid = row[0].parse::<i64>().unwrap();
+        let routine = PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|routine| routine.oid == oid)
+            .unwrap();
+        assert_eq!(
+            vec![
+                routine.oid.to_string(),
+                routine.name.into(),
+                routine.source.into(),
+                routine.volatility.into(),
+                routine.strict.to_string(),
+                routine.parallel.into(),
+                routine.return_type.to_string(),
+                routine
+                    .argument_types
+                    .iter()
+                    .map(i64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ],
+            row
+        );
+    }
+}
+
+#[test]
 fn extraction_metadata_and_sql_wrapper_match_postgresql() {
     let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
