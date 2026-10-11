@@ -14,12 +14,14 @@ use crate::{
 
 mod infinite;
 mod input;
+mod interval_style;
 mod keys;
 mod production;
 mod timezone;
 
 pub use infinite::TemporalInfinity;
 pub use input::{TemporalDateOrder, TemporalInputError};
+pub use interval_style::TemporalIntervalStyle;
 pub use timezone::TemporalTimeZone;
 
 pub(super) const MICROS_PER_SECOND: i64 = 1_000_000;

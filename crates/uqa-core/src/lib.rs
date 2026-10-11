@@ -46,9 +46,9 @@ pub use types::{
     EnumLabelKeyParseError, EnumValue, FieldName, GeneralizedPayload, GeneralizedPostingEntry,
     IndexStats, JsonValueDecoder, JsonbKeyError, LegacyVectorKind, LegacyVectorValue, PathExpr,
     PathSegment, Payload, PostingEntry, RecordFieldType, RecordValue, RowValue, TemporalDateOrder,
-    TemporalInfinity, TemporalInputError, TemporalTimeZone, TemporalValue, TokenOccurrence,
-    TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError, VectorGeneration,
-    VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
+    TemporalInfinity, TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
+    TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError,
+    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
     MAX_ENUM_LABEL_KEY_BYTES,
 };
 

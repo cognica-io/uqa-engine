@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match PostgreSQL's interval sign prefixes after mixed negative and positive fields, without changing stored interval values or their comparisons.
+
 - Select range and multirange element containment from both declared operand types, preserving PostgreSQL endpoints, NULLs, incompatible-type diagnostics and domain distinctions through stored expressions and persistent reopening.
 
 - Preserve PostgreSQL ROW and record comparison operators through joins, DISTINCT predicates, ANY/ALL, CASE, NULLIF, GREATEST/LEAST and constant folding, including NULL fields, reached field errors, equality-only keys and FULL JOIN diagnostics. NULLIF retains its selected equality operand's result type; bare NULL comparisons test the outer value without requiring equality. Stored ROW comparisons keep their selected field operations, predicate grouping and actual type dependencies. Hash joins retain the statement value catalog for physical enum identities in direct, duplicate, computed and spilled keys.

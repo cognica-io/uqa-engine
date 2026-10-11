@@ -77,7 +77,8 @@ pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingE
 pub use record::RecordValue;
 pub use row::{RecordFieldType, RowValue};
 pub use temporal::{
-    TemporalDateOrder, TemporalInfinity, TemporalInputError, TemporalTimeZone, TemporalValue,
+    TemporalDateOrder, TemporalInfinity, TemporalInputError, TemporalIntervalStyle,
+    TemporalTimeZone, TemporalValue,
 };
 pub use value::{JsonValueDecoder, Value, ValueRetentionError};
 
