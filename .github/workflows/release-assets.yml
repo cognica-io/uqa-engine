@@ -38,6 +38,18 @@ jobs:
           ref: ${{ inputs.tag }}
           persist-credentials: false
 
+      - name: Check out reviewed publication tools
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: release-tools
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
@@ -142,6 +154,26 @@ jobs:
           fi
           python3 scripts/check-release-licenses.py --require-nori --require-kuromoji "${archives[@]}"
 
+      - name: Verify the complete npm archive contents before announcing the release
+        id: npm
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          result="$RUNNER_TEMP/npm-root-repair.json"
+          python3 release-tools/scripts/npm-release.py repair-root \
+            --source-dir crates/uqa-node --version "$version" \
+            --archive "dist/cognica-io-uqa-${version}.tgz" --result-file "$result"
+          python3 release-tools/scripts/npm-release.py check --version "$version" dist/*.tgz
+          UQA_NPM_RELEASE_ARCHIVE="$GITHUB_WORKSPACE/dist/cognica-io-uqa-${version}.tgz" \
+            node --test --test-name-pattern="installed npm package loads both entry points" \
+            release-tools/tests/node/test_http_engine.mjs
+          python3 - "$result" <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json, sys
+          print("repaired=" + str(json.load(open(sys.argv[1]))["repaired"]).lower())
+          PYTHON
+
       - name: Build release notes from HISTORY.md
         shell: bash
         env:
@@ -206,11 +238,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          NPM_ROOT_REPAIRED: ${{ steps.npm.outputs.repaired }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" > /dev/null 2>&1; then
             for archive in dist/*; do
-              if ! grep -Fxq "${archive##*/}" existing-release-assets.txt; then
+              if [ "${archive##*/}" = "cognica-io-uqa-${TAG#v}.tgz" ] && [ "$NPM_ROOT_REPAIRED" = 'true' ]; then
+                gh release upload "$TAG" "$archive" --clobber
+              elif ! grep -Fxq "${archive##*/}" existing-release-assets.txt; then
                 gh release upload "$TAG" "$archive"
               fi
             done
