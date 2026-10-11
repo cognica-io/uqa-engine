@@ -23,6 +23,11 @@ pub trait ExpressionNames {
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
 
+    /// The invoking session's string-literal rule for reconstructed SQL.
+    fn standard_conforming_strings(&self) -> Result<bool, SQLError> {
+        Ok(true)
+    }
+
     /// SQL spelling of an external parameter after the renderer validates its positive number.
     fn parameter(&self, number: i64) -> Result<String, SQLError> {
         Ok(format!("${number}"))
@@ -193,7 +198,13 @@ impl Renderer<'_> {
             return Err(invalid("invalid by-value Datum length"));
         }
         let quoted = |value: &str| -> Result<String, SQLError> {
-            Ok(format!("{}::{}", literal(value), type_name()?))
+            let mut output = String::new();
+            crate::expr::append_sql_literal(
+                &mut output,
+                value,
+                self.names.standard_conforming_strings()?,
+            );
+            Ok(format!("{output}::{}", type_name()?))
         };
         match oid {
             16 => match bytes.first() {
@@ -245,6 +256,7 @@ impl Renderer<'_> {
                 std::str::from_utf8(values::varlena_payload(*length, bytes)?)
                     .map_err(|_| invalid("invalid string Datum"))?,
             ),
+            17 | 114 | 2950 | 3802 => quoted(&values::scalar_text(node)?),
             1700 => {
                 let text = values::numeric::decode(values::varlena_payload(*length, bytes)?)?;
                 if text.as_bytes().first().is_some_and(u8::is_ascii_digit) && text.contains('.') {
@@ -294,14 +306,5 @@ fn parentheses(text: String, required: bool) -> String {
         format!("({text})")
     } else {
         text
-    }
-}
-
-fn literal(value: &str) -> String {
-    let value = value.replace('\'', "''");
-    if value.contains('\\') {
-        format!("E'{}'", value.replace('\\', "\\\\"))
-    } else {
-        format!("'{value}'")
     }
 }
