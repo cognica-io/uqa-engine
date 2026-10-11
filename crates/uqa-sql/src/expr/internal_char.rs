@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL's internal char is one unsigned byte, with signed integer conversion and octal high-byte output.
+//! `PostgreSQL`'s internal char is one unsigned byte, with signed integer conversion and octal high-byte output.
 
 use uqa_core::{
     memory::{Produced, ProductionControl},

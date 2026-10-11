@@ -214,13 +214,12 @@ pub(super) fn add_constant_reference(ty: &str, oid: i64, references: &mut Refere
     let Ok(oid) = u32::try_from(oid) else {
         return;
     };
-    let name = ty.strip_prefix("pg_catalog.").unwrap_or(ty);
-    match name.to_ascii_lowercase().as_str() {
-        "regclass" => references.add_relation(oid),
-        "regtype" => references.add_type(oid),
-        "regproc" | "regprocedure" => references.add_routine(oid),
-        "regnamespace" => references.add(ObjectAddress::whole(NAMESPACE_CLASS, oid)),
-        "regcollation" => references.add(ObjectAddress::whole(COLLATION_CLASS, oid)),
+    match ColumnType::from_sql_name(ty) {
+        Ok(ColumnType::Regclass) => references.add_relation(oid),
+        Ok(ColumnType::Regtype) => references.add_type(oid),
+        Ok(ColumnType::Regproc | ColumnType::Regprocedure) => references.add_routine(oid),
+        Ok(ColumnType::Regnamespace) => references.add(ObjectAddress::whole(NAMESPACE_CLASS, oid)),
+        Ok(ColumnType::Regcollation) => references.add(ObjectAddress::whole(COLLATION_CLASS, oid)),
         _ => {}
     }
 }

@@ -32,12 +32,12 @@ pub fn format_postgres_text(
     if matches!(ty, ColumnType::InternalChar) {
         let byte = crate::expr::internal_char::value_byte(value)
             .ok_or_else(|| SQLError::Internal("invalid internal char result carrier".into()))?;
-        return Ok(crate::expr::internal_char::output_with_control(
+        return crate::expr::internal_char::output_with_control(
             byte,
             &uqa_core::memory::ProductionControl::uncontrolled(),
         )?
         .into_uncontrolled()
-        .map_err(|_| SQLError::Internal("ordinary internal char output owner".into()))?);
+        .map_err(|_| SQLError::Internal("ordinary internal char output owner".into()));
     }
     if let Some(text) = format_regtype_value(value, ty, engine)? {
         return Ok(text);

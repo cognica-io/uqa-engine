@@ -39,3 +39,37 @@ fn a_relation_without_referenced_columns_stays_whole() {
         ]
     );
 }
+
+#[test]
+fn constant_dependencies_use_catalog_alias_identities_including_quoted_names() {
+    use uqa_sql::catalog::dependencies::{COLLATION_CLASS, NAMESPACE_CLASS};
+    use uqa_sql::ColumnType;
+
+    for (ty, class) in [
+        (ColumnType::Regclass, RELATION_CLASS),
+        (ColumnType::Regtype, TYPE_CLASS),
+        (ColumnType::Regproc, PROCEDURE_CLASS),
+        (ColumnType::Regprocedure, PROCEDURE_CLASS),
+        (ColumnType::Regnamespace, NAMESPACE_CLASS),
+        (ColumnType::Regcollation, COLLATION_CLASS),
+    ] {
+        for name in [ty.sql_name(), ty.catalog_name()] {
+            let mut references = References::default();
+            super::super::expressions::add_constant_reference(&name, 20_000, &mut references);
+            assert_eq!(
+                references.deduplicated(),
+                [ObjectAddress::whole(class, 20_000)],
+                "{name}",
+            );
+        }
+    }
+    for name in [
+        "pg_catalog.\"REGCLASS\"",
+        "domain#50001",
+        "pg_catalog.integer",
+    ] {
+        let mut references = References::default();
+        super::super::expressions::add_constant_reference(name, 20_000, &mut references);
+        assert!(references.is_empty(), "{name}");
+    }
+}

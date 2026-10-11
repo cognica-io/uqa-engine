@@ -13,12 +13,16 @@ use crate::{
 use std::collections::BTreeSet;
 use uqa_core::Value;
 
+#[cfg(test)]
+mod tests;
+
 pub trait RoutineRelationOids {
     fn bound_regclass_oid(&self, name: &str) -> Result<Option<i64>, SQLError>;
 }
 
 pub fn is_regclass(name: &str) -> bool {
-    name.eq_ignore_ascii_case("regclass") || name.eq_ignore_ascii_case("pg_catalog.regclass")
+    crate::ast::ColumnType::from_sql_name(name)
+        .is_ok_and(|ty| matches!(ty, crate::ast::ColumnType::Regclass))
 }
 
 pub fn regclass_oid(expression: &Expr) -> Option<i64> {

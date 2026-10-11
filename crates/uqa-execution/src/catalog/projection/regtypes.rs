@@ -668,7 +668,7 @@ pub(crate) struct AliasConstantOutput {
 }
 
 impl AliasConstantOutput {
-    /// Type spelling reuses format_type's modifiers and the same visible catalog identity as OID-alias output.
+    /// Type spelling reuses `format_type`'s modifiers and the same visible catalog identity as OID-alias output.
     pub(crate) fn type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
         let oid = uqa_sql::catalog::type_metadata::pg_type_oid(ty);
         if oid == 0 {

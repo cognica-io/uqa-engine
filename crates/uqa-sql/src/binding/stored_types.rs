@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Stored plans and syntax keep selected type identities: user-defined types by OID and builtins by qualified catalog identifier, so renames, schema moves and search_path changes cannot reinterpret a binding.
+//! Stored plans and syntax keep selected type identities: user-defined types by OID and builtins by qualified catalog identifier, so renames, schema moves and `search_path` changes cannot reinterpret a binding.
 
 use crate::ast::{ColumnType, Expr, Statement, UserTypeIdentity};
 use crate::catalog::stored_ast::StoredAstVisitor;

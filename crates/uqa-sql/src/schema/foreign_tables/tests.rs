@@ -140,7 +140,7 @@ fn loaded_sequence_binding_does_not_consult_the_session_search_path() {
         panic!("expected function")
     };
     assert!(
-        matches!(&args[0],Expr::TypedLiteral {value: Value::Int(41), ty, .. } if ty=="regclass")
+        matches!(&args[0],Expr::TypedLiteral {value: Value::Int(41), ty, .. } if ty==&ColumnType::Regclass.catalog_name())
     );
     assert_eq!(binding.unwrap().argument_types, ["regclass"]);
 }

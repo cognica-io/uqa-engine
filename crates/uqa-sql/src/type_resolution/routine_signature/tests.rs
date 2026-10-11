@@ -110,9 +110,9 @@ fn invocation_types_keep_catalog_identities_separate_from_overload_keys() {
             .unwrap();
         assert_eq!(matched.argument_targets, [canonical_column_type_name(&ty)]);
         let invocation = matched.invocation_binding(Some(&name));
-        assert_eq!(invocation.argument_targets, [name.clone()]);
+        assert_eq!(invocation.argument_targets, std::slice::from_ref(&name));
         assert_eq!(invocation.argument_sources, [Some(name.clone())]);
-        assert_eq!(invocation.parameter_types, [name.clone()]);
+        assert_eq!(invocation.parameter_types, std::slice::from_ref(&name));
         assert_eq!(invocation.return_type, Some(name));
     }
 }

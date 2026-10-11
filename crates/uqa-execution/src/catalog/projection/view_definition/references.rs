@@ -312,7 +312,9 @@ fn sequence_argument<'a>(name: &str, args: &'a [ScalarExpr]) -> Option<&'a str> 
     }
     let mut argument = args.first()?;
     while let ScalarExpr::Cast { expr, ty, .. } = argument {
-        if !ty.eq_ignore_ascii_case("regclass") && !ty.eq_ignore_ascii_case("pg_catalog.regclass") {
+        if !uqa_sql::ColumnType::from_sql_name(ty)
+            .is_ok_and(|ty| matches!(ty, uqa_sql::ColumnType::Regclass))
+        {
             return None;
         }
         argument = expr;

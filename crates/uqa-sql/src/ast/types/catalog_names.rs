@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bound type names preserve catalog identity and modifiers independently of search_path.
+//! Bound type names preserve catalog identity and modifiers independently of `search_path`.
 
 use super::ColumnType;
 use std::fmt;

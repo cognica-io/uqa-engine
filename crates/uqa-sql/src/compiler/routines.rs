@@ -27,7 +27,7 @@ struct CompiledFunctionTypeName {
     reference: Option<crate::ast::RoutineColumnTypeReference>,
 }
 
-/// Keep a routine TypeName's parser-selected namespace, named-type qualification and structured %TYPE reference for catalog binding.
+/// Keep a routine `TypeName`'s parser-selected namespace, named-type qualification and structured %TYPE reference for catalog binding.
 fn compile_function_type_name(
     t: &pg_query::protobuf::TypeName,
 ) -> Result<CompiledFunctionTypeName> {
