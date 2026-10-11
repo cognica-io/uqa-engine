@@ -35,10 +35,10 @@ fn recorded_oids_carry_exactly_the_companions_of_their_kind() {
         array_type: Some(16_385),
         rule: None,
     };
-    assert!(table.is_valid_for(RelationOidKind::Table));
-    assert!(table.is_valid_for(RelationOidKind::ForeignTable));
-    assert!(!table.is_valid_for(RelationOidKind::View));
-    assert!(!table.is_valid_for(RelationOidKind::Sequence));
+    assert!(table.is_valid_for(RelationOidKind::Table, &[7; 16]));
+    assert!(table.is_valid_for(RelationOidKind::ForeignTable, &[7; 16]));
+    assert!(!table.is_valid_for(RelationOidKind::View, &[7; 16]));
+    assert!(!table.is_valid_for(RelationOidKind::Sequence, &[7; 16]));
     assert_eq!(
         table.claimed().collect::<Vec<_>>(),
         [16_384, 16_386, 16_385]
@@ -49,10 +49,40 @@ fn recorded_oids_carry_exactly_the_companions_of_their_kind() {
         array_type: None,
         rule: None,
     };
-    assert!(sequence.is_valid_for(RelationOidKind::Sequence));
+    assert!(sequence.is_valid_for(RelationOidKind::Sequence, &[7; 16]));
     let system = RelationCatalogOids {
         relation: 1259,
         ..sequence
     };
-    assert!(!system.is_valid_for(RelationOidKind::Sequence));
+    assert!(!system.is_valid_for(RelationOidKind::Sequence, &[7; 16]));
+}
+
+#[test]
+fn low_legacy_oids_require_exact_original_companions_and_a_normal_array_oid() {
+    for (kind, identity, low_oid) in [
+        (RelationOidKind::Table, 248_721_u128, 10_274),
+        (RelationOidKind::ForeignTable, 44_683, 10_938),
+        (RelationOidKind::View, 2_270, 11_015),
+        (RelationOidKind::Sequence, 248_721, 10_274),
+        (RelationOidKind::CompositeType, 44_683, 10_938),
+    ] {
+        let object_id = identity.to_le_bytes();
+        let mut recorded = RelationCatalogOids::legacy(kind, &object_id);
+        assert!(recorded.claimed().any(|oid| oid == low_oid));
+        let has_array = kind != RelationOidKind::Sequence;
+        recorded.array_type = has_array.then_some(16_384);
+        assert!(recorded.is_valid_for(kind, &object_id), "{kind:?}");
+        assert!(!recorded.is_valid_for(kind, &[7; 16]), "{kind:?}");
+
+        let mut replaced = recorded;
+        replaced.relation += 1;
+        assert!(!replaced.is_valid_for(kind, &object_id), "{kind:?}");
+        if has_array {
+            replaced = recorded;
+            replaced.array_type = Some(16_383);
+            assert!(!replaced.is_valid_for(kind, &object_id), "{kind:?}");
+            replaced.array_type = None;
+            assert!(!replaced.is_valid_for(kind, &object_id), "{kind:?}");
+        }
+    }
 }

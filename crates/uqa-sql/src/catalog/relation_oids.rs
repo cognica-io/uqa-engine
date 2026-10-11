@@ -70,16 +70,25 @@ impl RelationCatalogOids {
         .flatten()
     }
 
-    /// Whether the OIDs are well formed for the kind: every recorded OID is a user OID, and exactly the companions the kind has are present.
+    /// Whether the OIDs are well formed for the kind and object identity. Newly allocated OIDs use the normal user range; a legacy relation may retain its exact identity-derived companions below that range. Its array OID is always newly allocated.
     #[must_use]
-    pub fn is_valid_for(&self, kind: RelationOidKind) -> bool {
+    pub fn is_valid_for(&self, kind: RelationOidKind, object_id: &[u8; 16]) -> bool {
         let user = |oid: u32| oid >= super::oids::FIRST_NORMAL_OBJECT_ID;
         let has_row_type = kind != RelationOidKind::Sequence;
-        user(self.relation)
-            && self.row_type.is_some() == has_row_type
-            && self.array_type.is_some() == has_row_type
-            && self.rule.is_some() == (kind == RelationOidKind::View)
-            && self.claimed().all(user)
+        if self.row_type.is_some() != has_row_type
+            || self.array_type.is_some() != has_row_type
+            || self.rule.is_some() != (kind == RelationOidKind::View)
+            || !self.array_type.is_none_or(user)
+        {
+            return false;
+        }
+        if self.claimed().all(user) {
+            return true;
+        }
+        let legacy = Self::legacy(kind, object_id);
+        self.relation == legacy.relation
+            && self.row_type == legacy.row_type
+            && self.rule == legacy.rule
     }
 }
 
