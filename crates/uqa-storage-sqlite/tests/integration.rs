@@ -20,6 +20,8 @@ mod occurrence_scoring;
 mod occurrences;
 #[path = "cases/persistent_graph.rs"]
 mod persistent_graph;
+#[path = "cases/schema_functions.rs"]
+mod schema_functions;
 #[path = "cases/skip_blockmax_coverage.rs"]
 mod skip_blockmax_coverage;
 #[path = "cases/sqlite_document_store.rs"]

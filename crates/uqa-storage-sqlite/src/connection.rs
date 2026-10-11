@@ -111,6 +111,12 @@ pub enum SQLiteError {
 
 pub type Result<T> = std::result::Result<T, SQLiteError>;
 
+/// Register the deterministic functions referenced by persisted UQA `SQLite` schemas on a caller-owned connection. Apply any `SQLCipher` key first, then call this before integrity checks, exports or other schema operations. Repeated calls are safe and retain existing registrations. This does not migrate the database, change its journal or transaction state, or authorize writes to protected MVCC records.
+pub fn register_schema_functions(connection: &Connection) -> Result<()> {
+    crate::btree_index::equality::register(connection)?;
+    Ok(())
+}
+
 const MIN_POOL_CONNECTIONS: usize = 4;
 const MAX_POOL_CONNECTIONS: usize = 32;
 
@@ -153,7 +159,7 @@ impl ConnectionSpec {
                 if let Some(key) = key {
                     ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
                 }
-                crate::btree_index::equality::register(&conn)?;
+                register_schema_functions(&conn)?;
                 if matches!(self, Self::Auxiliary { .. }) {
                     // Registry writers already serialize their transactions.
                     // Retain the original journal mode instead of racing to
@@ -177,7 +183,7 @@ impl ConnectionSpec {
             } => {
                 let conn =
                     Connection::open_with_flags_and_vfs(path, flags, compressed_vfs::VFS_NAME)?;
-                crate::btree_index::equality::register(&conn)?;
+                register_schema_functions(&conn)?;
                 if initialize_database {
                     conn.pragma_update(None, "page_size", compression.page_size)?;
                     ManagedConnection::enable_compressed_journal(&conn)?;
@@ -187,7 +193,7 @@ impl ConnectionSpec {
             }
             Self::Memory => {
                 let conn = Connection::open_in_memory()?;
-                crate::btree_index::equality::register(&conn)?;
+                register_schema_functions(&conn)?;
                 if initialize_database {
                     ManagedConnection::enable_wal(&conn)?;
                 }
