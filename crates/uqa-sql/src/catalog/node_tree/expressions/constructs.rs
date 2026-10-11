@@ -24,22 +24,7 @@ impl ExpressionContext<'_> {
     ) -> Result<Option<TypedNode>, SQLError> {
         match binding.and_then(|binding| binding.dispatch) {
             Some(FunctionDispatch::ValueNullTest { negated }) => {
-                let [argument] = args else {
-                    return Err(SQLError::Internal("invalid outer NULL test".into()));
-                };
-                let argument = self.encode(argument, None)?;
-                return Ok(Some(TypedNode {
-                    node: Node::new(
-                        "NULLTEST",
-                        [
-                            ("arg", argument.node.into()),
-                            ("nulltesttype", i64::from(negated).into()),
-                            ("argisrow", false.into()),
-                            ("location", (-1).into()),
-                        ],
-                    ),
-                    ty: ColumnType::Boolean,
-                }));
+                return self.value_null_test(args, negated).map(Some);
             }
             Some(FunctionDispatch::NumericOperator(operator)) => {
                 return self.numeric_operator(operator, args).map(Some);
@@ -88,6 +73,9 @@ impl ExpressionContext<'_> {
         if binding.is_some_and(|binding| binding.object_id.is_some()) {
             return Ok(None);
         }
+        if name == "nullif" && binding.is_some_and(|binding| binding.builtin) {
+            return self.null_if(args).map(Some);
+        }
         if !matches!(name, "coalesce" | "greatest" | "least") {
             return Ok(None);
         }
@@ -122,6 +110,48 @@ impl ExpressionContext<'_> {
             )
         };
         Ok(Some(TypedNode { node, ty }))
+    }
+
+    fn value_null_test(&self, args: &[Expr], negated: bool) -> Result<TypedNode, SQLError> {
+        let [argument] = args else {
+            return Err(SQLError::Internal("invalid outer NULL test".into()));
+        };
+        let argument = self.encode(argument, None)?;
+        Ok(TypedNode {
+            node: Node::new(
+                "NULLTEST",
+                [
+                    ("arg", argument.node.into()),
+                    ("nulltesttype", i64::from(negated).into()),
+                    ("argisrow", false.into()),
+                    ("location", (-1).into()),
+                ],
+            ),
+            ty: ColumnType::Boolean,
+        })
+    }
+
+    fn null_if(&self, args: &[Expr]) -> Result<TypedNode, SQLError> {
+        let [lhs, rhs] = args else {
+            return Err(SQLError::Internal("invalid NULLIF operands".into()));
+        };
+        let types = [self.expression_type(lhs)?, self.expression_type(rhs)?];
+        let [left, right, _] = crate::type_resolution::binary_operator_types(
+            BinaryOp::Equal,
+            types[0].as_ref(),
+            types[1].as_ref(),
+        )?;
+        let identity = crate::type_resolution::binary_operator_catalog_entry(
+            BinaryOp::Equal,
+            [&left, &right],
+        )?;
+        let left = self.encode(lhs, Some(&left))?;
+        let right = self.encode(rhs, Some(&right))?;
+        let result = left.ty.clone();
+        let mut value =
+            super::operator_node(identity.oid, identity.function_oid, [left, right], result);
+        value.node.kind = "NULLIFEXPR".into();
+        Ok(value)
     }
 
     pub(super) fn case(
