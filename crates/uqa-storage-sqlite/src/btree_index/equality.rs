@@ -12,7 +12,33 @@ use uqa_core::memory::BudgetedVec;
 use uqa_storage::read_control::StorageReadControl;
 
 pub(crate) const INDEX_NAME: &str = "_btree_index_equal_v1";
-pub(crate) const INDEX_SQL: &str = "CREATE INDEX _btree_index_equal_v1 ON _btree_index_entries(table_name, field, __uqa_btree_equal_v1(value_json), doc_id)";
+pub(crate) const LEGACY_INDEX_SQL: &str = "CREATE INDEX _btree_index_equal_v1 ON _btree_index_entries(table_name, field, __uqa_btree_equal_v1(value_json), doc_id)";
+pub(crate) const TABLE_NAME: &str = "_btree_equality_keys";
+pub(crate) const TABLE_SQL: &str = "CREATE TABLE _btree_equality_keys (table_name TEXT NOT NULL, field TEXT NOT NULL, doc_id INTEGER NOT NULL, equality_key BLOB, PRIMARY KEY(table_name, field, doc_id)) WITHOUT ROWID";
+pub(crate) const INDEX_SQL: &str = "CREATE INDEX _btree_index_equal_v1 ON _btree_equality_keys(table_name, field, equality_key, doc_id)";
+
+/// Maintain the derived projection inside the same guarded transaction as its source posting. Maintenance tools copy stored keys and never evaluate the private encoding function.
+pub(crate) fn triggers() -> Vec<(String, String)> {
+    let insert = "INSERT INTO _btree_equality_keys(table_name, field, doc_id, equality_key) VALUES(NEW.table_name, NEW.field, NEW.doc_id, __uqa_btree_equal_v1(NEW.value_json));";
+    let delete = "DELETE FROM _btree_equality_keys WHERE table_name = OLD.table_name AND field = OLD.field AND doc_id = OLD.doc_id;";
+    [
+        ("insert", "INSERT", insert.to_owned()),
+        ("delete", "DELETE", delete.to_owned()),
+        (
+            "update",
+            "UPDATE OF table_name, field, doc_id, value_json",
+            format!("{delete} {insert}"),
+        ),
+    ]
+    .into_iter()
+    .map(|(action, event, body)| {
+        let name = format!("_btree_equality_{action}");
+        let sql =
+            format!("CREATE TRIGGER {name} AFTER {event} ON _btree_index_entries BEGIN {body} END");
+        (name, sql)
+    })
+    .collect()
+}
 
 /// Register once per physical connection, before any schema or statement uses the function. Replacing it on every probe would invalidate the prepared statement cache.
 pub(crate) fn register(connection: &Connection) -> rusqlite::Result<()> {
@@ -43,14 +69,22 @@ pub(crate) fn register(connection: &Connection) -> rusqlite::Result<()> {
 
 pub(crate) fn install(connection: &Connection) -> Result<()> {
     register(connection)?;
-    connection.execute_batch("DROP INDEX IF EXISTS _btree_index_value_idx")?;
-    let exists: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?1)",
-        [INDEX_NAME],
-        |row| row.get(0),
+    connection.execute_batch(
+        "DROP INDEX IF EXISTS _btree_index_value_idx; DROP INDEX IF EXISTS _btree_index_equal_v1;",
     )?;
-    if !exists {
-        connection.execute_batch(INDEX_SQL)?;
+    connection.execute_batch(&TABLE_SQL.replacen(
+        "CREATE TABLE",
+        "CREATE TABLE IF NOT EXISTS",
+        1,
+    ))?;
+    connection.execute_batch("DELETE FROM _btree_equality_keys; INSERT INTO _btree_equality_keys SELECT table_name, field, doc_id, __uqa_btree_equal_v1(value_json) FROM _btree_index_entries;")?;
+    connection.execute_batch(INDEX_SQL)?;
+    for (_, sql) in triggers() {
+        connection.execute_batch(&sql.replacen(
+            "CREATE TRIGGER",
+            "CREATE TRIGGER IF NOT EXISTS",
+            1,
+        ))?;
     }
     Ok(())
 }

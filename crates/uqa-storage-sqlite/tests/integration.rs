@@ -14,14 +14,14 @@ mod analyzer_revisions;
 mod catalog;
 #[path = "cases/inverted_index_analyzer.rs"]
 mod inverted_index_analyzer;
+#[path = "cases/native_maintenance.rs"]
+mod native_maintenance;
 #[path = "cases/occurrence_scoring.rs"]
 mod occurrence_scoring;
 #[path = "cases/occurrences.rs"]
 mod occurrences;
 #[path = "cases/persistent_graph.rs"]
 mod persistent_graph;
-#[path = "cases/schema_functions.rs"]
-mod schema_functions;
 #[path = "cases/skip_blockmax_coverage.rs"]
 mod skip_blockmax_coverage;
 #[path = "cases/sqlite_document_store.rs"]

@@ -4,19 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Caller-owned maintenance connections retain native expression indexes without acquiring logical writer authority.
+//! Ordinary `SQLite` maintenance preserves native indexes without registering engine functions or acquiring logical writer authority.
 
 use std::{collections::BTreeMap, path::Path};
 
 use rusqlite::{Connection, OpenFlags};
 use uqa_core::Value;
 use uqa_storage::{mvcc::VersionedSessionOptions, DocumentStore, ValueIndexKey};
-use uqa_storage_sqlite::{
-    register_schema_functions, Catalog, ManagedConnection, SQLiteBTreeIndexStore,
-    SQLiteDocumentStore,
-};
+use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore};
 
-const KEY: &str = "schema function fixture key";
+const KEY: &str = "native maintenance fixture key";
 
 fn managed(path: &Path, encrypted: bool) -> ManagedConnection {
     if encrypted {
@@ -46,6 +43,19 @@ fn fixture(path: &Path, encrypted: bool) {
     connection
         .bind_native_records(VersionedSessionOptions::default())
         .unwrap();
+    SQLiteDocumentStore::new(connection.clone(), "items")
+        .put(2, BTreeMap::from([("n".into(), Value::Int(20))]))
+        .unwrap();
+    SQLiteBTreeIndexStore::new(connection)
+        .apply_write(
+            "items",
+            2,
+            Some(&BTreeMap::from([(
+                ValueIndexKey::Column("n".into()),
+                Value::Int(20),
+            )])),
+        )
+        .unwrap();
 }
 
 fn raw(path: &Path, encrypted: bool, flags: OpenFlags) -> Connection {
@@ -53,6 +63,16 @@ fn raw(path: &Path, encrypted: bool, flags: OpenFlags) -> Connection {
     if encrypted {
         connection.pragma_update(None, "key", KEY).unwrap();
     }
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM pragma_function_list WHERE name GLOB '__uqa_*'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
     connection
 }
 
@@ -66,18 +86,12 @@ fn integrity(connection: &Connection) {
 }
 
 #[test]
-fn read_only_integrity_checks_support_native_expression_indexes() {
+fn read_only_integrity_checks_need_no_engine_functions() {
     for encrypted in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("source.db");
         fixture(&path, encrypted);
         let connection = raw(&path, encrypted, OpenFlags::SQLITE_OPEN_READ_ONLY);
-        let error = connection
-            .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
-            .unwrap_err();
-        assert!(error.to_string().contains("__uqa_btree_equal_v1"));
-        register_schema_functions(&connection).unwrap();
-        register_schema_functions(&connection).unwrap();
         integrity(&connection);
         let error = connection
             .execute("CREATE TABLE forbidden (id INTEGER)", [])
@@ -90,7 +104,7 @@ fn read_only_integrity_checks_support_native_expression_indexes() {
 }
 
 #[test]
-fn registration_preserves_transaction_configuration_and_write_guards() {
+fn raw_maintenance_preserves_transaction_configuration_and_write_guards() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("source.db");
     fixture(&path, false);
@@ -119,8 +133,6 @@ fn registration_preserves_transaction_configuration_and_write_guards() {
             .unwrap()
     };
     let before = state(&connection);
-    register_schema_functions(&connection).unwrap();
-    register_schema_functions(&connection).unwrap();
     assert!(!connection.is_autocommit());
     assert_eq!(state(&connection), before);
     integrity(&connection);
@@ -129,6 +141,9 @@ fn registration_preserves_transaction_configuration_and_write_guards() {
         .is_err());
     assert!(connection
         .execute("DELETE FROM _uqa_mvcc_transactions", [])
+        .is_err());
+    assert!(connection
+        .execute("DELETE FROM _btree_equality_keys", [])
         .is_err());
     connection.execute_batch("ROLLBACK").unwrap();
 }
@@ -145,7 +160,6 @@ fn sqlcipher_export_preserves_native_indexes_in_both_encryption_directions() {
             source_encrypted,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
         );
-        register_schema_functions(&connection).unwrap();
         connection
             .execute(
                 "ATTACH DATABASE ?1 AS exported KEY ?2",
@@ -159,7 +173,6 @@ fn sqlcipher_export_preserves_native_indexes_in_both_encryption_directions() {
             .execute_batch("SELECT sqlcipher_export('exported'); DETACH DATABASE exported;")
             .unwrap();
         let exported = raw(&target, !source_encrypted, OpenFlags::SQLITE_OPEN_READ_ONLY);
-        register_schema_functions(&exported).unwrap();
         integrity(&exported);
         drop(exported);
 
@@ -173,14 +186,46 @@ fn sqlcipher_export_preserves_native_indexes_in_both_encryption_directions() {
                 .probe_equal(
                     "items",
                     &ValueIndexKey::Column("n".into()),
-                    &Value::Float(2.0)
+                    &Value::Float(20.0)
                 )
                 .unwrap(),
             Some(vec![2])
         );
         assert_eq!(
             SQLiteDocumentStore::new(reopened, "items").get(2).unwrap(),
-            Some(BTreeMap::from([("n".into(), Value::Int(2))]))
+            Some(BTreeMap::from([("n".into(), Value::Int(20))]))
+        );
+    }
+}
+
+#[test]
+fn raw_vacuum_and_reindex_need_no_engine_functions() {
+    for encrypted in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.db");
+        fixture(&path, encrypted);
+        let connection = raw(&path, encrypted, OpenFlags::SQLITE_OPEN_READ_WRITE);
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(FULL); VACUUM; REINDEX;")
+            .unwrap();
+        integrity(&connection);
+        drop(connection);
+        let reopened = managed(&path, encrypted);
+        reopened
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let indexes = SQLiteBTreeIndexStore::new(reopened);
+        assert_eq!(
+            indexes
+                .probe_equal("items", &"n".into(), &Value::Float(20.0))
+                .unwrap(),
+            Some(vec![2])
+        );
+        assert_eq!(
+            indexes
+                .probe_equal("items", &"n".into(), &Value::Int(2))
+                .unwrap(),
+            Some(vec![])
         );
     }
 }

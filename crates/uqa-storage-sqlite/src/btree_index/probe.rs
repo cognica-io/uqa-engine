@@ -48,7 +48,7 @@ impl EqualityProbe {
             return Ok(None);
         }
         let mut ids = BudgetedVec::new(control.memory());
-        let mut statement = connection.prepare_cached("SELECT doc_id FROM _btree_index_entries WHERE table_name = ?1 AND field = ?2 AND __uqa_btree_equal_v1(value_json) = ?3 ORDER BY doc_id")?;
+        let mut statement = connection.prepare_cached("SELECT doc_id FROM _btree_equality_keys WHERE table_name = ?1 AND field = ?2 AND equality_key = ?3 ORDER BY doc_id")?;
         control.check()?;
         let mut rows = statement.query(params![table, ToSqlOutput::Borrowed(field), &*self.key])?;
         while let Some(row) = rows.next()? {
@@ -87,7 +87,7 @@ fn supported_domain(
     control: &StorageReadControl,
 ) -> Result<bool> {
     control.check()?;
-    let mut statement = connection.prepare_cached("SELECT EXISTS(SELECT 1 FROM _btree_index_entries WHERE table_name = ?1 AND field = ?2 AND __uqa_btree_equal_v1(value_json) IS NULL)")?;
+    let mut statement = connection.prepare_cached("SELECT EXISTS(SELECT 1 FROM _btree_equality_keys WHERE table_name = ?1 AND field = ?2 AND equality_key IS NULL)")?;
     let found: bool = statement.query_row(params![table, ToSqlOutput::Borrowed(field)], |row| {
         row.get(0)
     })?;
