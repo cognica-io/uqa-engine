@@ -143,7 +143,9 @@ fn eval_scalar(
             name, arguments, control, context,
         );
     }
-    super::super::scalar_dispatch::eval_generated_scalar_function(name, arguments, control)
+    super::super::scalar_dispatch::eval_generated_scalar_function_with_context(
+        name, arguments, control, context,
+    )
 }
 
 /// Moving positional values must not make a second payload copy. The new vector's complete capacity is admitted by Core before movement; the original argument buffer and payload lease remain with this guard until dispatch finishes. Both vectors precede the shared lease on every failure path.

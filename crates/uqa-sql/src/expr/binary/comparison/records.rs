@@ -6,6 +6,7 @@
 
 //! Record operators check corresponding live attribute identities only as each field is reached.
 
+use super::ComparisonSupport;
 use crate::{
     catalog::type_metadata::pg_type_oid,
     expr::{composites::CompositeTypeDescriptor, SQLValueCatalog},
@@ -79,12 +80,7 @@ impl<'a> Record<'a> {
         if let Some(descriptor) = &self.descriptor {
             return Ok(descriptor.attributes[index].ty.display_name());
         }
-        let ty = catalog
-            .map(|catalog| catalog.value_type_by_oid(oid))
-            .transpose()?
-            .flatten()
-            .or_else(|| crate::catalog::type_metadata::builtin_scalar_type(oid).cloned());
-        Ok(ty.map_or_else(|| format!("type with OID {oid}"), |ty| ty.display_name()))
+        super::support::comparison_type_name(oid, catalog)
     }
 }
 
@@ -94,6 +90,7 @@ pub(super) fn compare<T>(
     right: &Value,
     catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
+    support: ComparisonSupport,
     equal: T,
     mut compare: impl FnMut(&Value, &Value) -> Result<Option<T>, SQLError>,
 ) -> Result<T, SQLError> {
@@ -124,6 +121,9 @@ pub(super) fn compare<T>(
                         index + 1,
                     ),
                 });
+            }
+            if !support.available_for_oid(left_oid, catalog, control)? {
+                return Err(support.error("42883", left.type_name(index, left_oid, catalog)?));
             }
         }
         if let Some(result) = compare(left_value, right_value)? {
@@ -196,5 +196,41 @@ mod tests {
             Some("57014")
         );
         assert_eq!(memory.used(), 0);
+    }
+
+    #[test]
+    fn record_field_operator_lookup_precedes_null_equality_and_ordering() {
+        let control = ProductionControl::uncontrolled();
+        let value = row(vec![Value::Int(1), Value::Null], &[23, 114]);
+        let error =
+            equal_typed_values_with_enum_catalog(&value, &value, &control, None).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"));
+        assert_eq!(
+            error.to_string(),
+            "could not identify an equality operator for type json"
+        );
+        let error =
+            crate::expr::binary::compare_typed_values_with_control(&value, &value, &control)
+                .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"));
+        assert_eq!(
+            error.to_string(),
+            "could not identify a comparison function for type json"
+        );
+        let different = row(vec![Value::Int(2), Value::Null], &[23, 114]);
+        assert!(!equal_typed_values_with_enum_catalog(&value, &different, &control, None).unwrap());
+        assert!(crate::expr::binary::compare_typed_values_with_control(
+            &value, &different, &control
+        )
+        .unwrap()
+        .is_lt());
+        let unknown = row(vec![Value::Null], &[705]);
+        let error =
+            equal_typed_values_with_enum_catalog(&unknown, &unknown, &control, None).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"));
+        assert_eq!(
+            error.to_string(),
+            "could not identify an equality operator for type unknown"
+        );
     }
 }

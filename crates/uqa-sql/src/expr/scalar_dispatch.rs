@@ -126,6 +126,62 @@ pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> 
     Err(SQLError::UnknownFunction(name.to_string()))
 }
 
+pub(super) fn eval_scalar_function_with_context(
+    name: &str,
+    args: &[Value],
+    context: &EvalContext<'_>,
+) -> Result<Value> {
+    if let Some(result) = eval_array_comparison_with_context(
+        name.strip_prefix("pg_catalog.").unwrap_or(name),
+        args,
+        &ProductionControl::uncontrolled(),
+        context,
+    ) {
+        return result.map(|value| value.into_uncontrolled().expect("ordinary array result"));
+    }
+    eval_scalar_function(name, args)
+}
+
+fn eval_array_comparison_with_context(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    context: &EvalContext<'_>,
+) -> Option<Result<Produced<Value>>> {
+    if !matches!(
+        name,
+        "array_sort" | "array_remove" | "array_position" | "array_positions" | "array_replace"
+    ) {
+        return None;
+    }
+    let catalog = context.engine.map(super::EngineValueCatalog);
+    let catalog = catalog
+        .as_ref()
+        .map(|catalog| catalog as &dyn super::SQLValueCatalog);
+    if matches!(name, "array_sort" | "array_remove" | "array_position") {
+        super::scalar_array::eval_array_functions_with_catalog(name, args, control, catalog)
+    } else {
+        super::scalar_postgres::eval_postgres_arrays_with_catalog(name, args, control, catalog)
+    }
+}
+
+pub(super) fn eval_generated_scalar_function_with_context(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    context: &EvalContext<'_>,
+) -> Result<Produced<Value>> {
+    if let Some(result) = eval_array_comparison_with_context(
+        name.strip_prefix("pg_catalog.").unwrap_or(name),
+        args,
+        control,
+        context,
+    ) {
+        return result;
+    }
+    eval_generated_scalar_function(name, args, control)
+}
+
 /// Built-in families accepted by generated expressions use their existing admitted kernels in the same dispatch order. Stateful dispatch remains outside this interface.
 pub(super) fn eval_generated_scalar_function(
     name: &str,

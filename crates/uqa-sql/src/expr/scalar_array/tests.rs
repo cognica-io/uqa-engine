@@ -142,7 +142,7 @@ fn controlled_array_order_is_stable_and_preserves_json_comparison_errors() {
     }
     let json = array(vec![Value::Json("1".into()), Value::Json("2".into())], 1);
     assert_eq!(
-        eval_dispatched_json_array_sort_with_control(&[json], &control)
+        eval_dispatched_json_array_sort_with_control(&[json], &control, None)
             .unwrap_err()
             .sqlstate(),
         Some("0A000")
@@ -162,6 +162,133 @@ fn controlled_array_order_is_stable_and_preserves_json_comparison_errors() {
         Some("42883")
     );
     assert_eq!(budget.used(), 0);
+}
+
+fn typed_row(values: Vec<Value>, oids: &[u32]) -> Value {
+    Value::Row(
+        uqa_core::RowValue::typed(
+            values,
+            oids.iter()
+                .map(|oid| uqa_core::RecordFieldType {
+                    oid: *oid,
+                    type_modifier: -1,
+                })
+                .collect(),
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn array_record_comparisons_preserve_reached_types_and_operand_order() {
+    let context = crate::expr::EvalContext::new(None, &[]);
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let source = array(vec![typed_row(vec![Value::Int(1)], &[23])], -2);
+    let needle = typed_row(vec![Value::Int(1)], &[20]);
+    for (name, args, types) in [
+        (
+            "array_position",
+            vec![source.clone(), needle.clone()],
+            "bigint and integer",
+        ),
+        (
+            "array_positions",
+            vec![source.clone(), needle.clone()],
+            "bigint and integer",
+        ),
+        (
+            "array_remove",
+            vec![source.clone(), needle.clone()],
+            "integer and bigint",
+        ),
+        (
+            "array_replace",
+            vec![source.clone(), needle.clone(), needle],
+            "integer and bigint",
+        ),
+    ] {
+        let error = crate::expr::scalar_dispatch::eval_generated_scalar_function_with_context(
+            name, &args, &control, &context,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"));
+        assert_eq!(
+            error.to_string(),
+            format!("cannot compare dissimilar column types {types} at record column 1")
+        );
+        assert_eq!(budget.used(), 0, "{name}");
+    }
+    let equal_prefix = array(
+        vec![
+            typed_row(vec![Value::Int(1), Value::Null], &[23, 23]),
+            typed_row(vec![Value::Int(1), Value::Null], &[23, 25]),
+        ],
+        1,
+    );
+    let error = eval_array_functions_with_control("array_sort", &[equal_prefix], &control)
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        error.to_string(),
+        "cannot compare dissimilar column types integer and text at record column 2"
+    );
+    assert_eq!(budget.used(), 0);
+    let deciding_prefix = array(
+        vec![
+            typed_row(vec![Value::Int(2), Value::Null], &[23, 23]),
+            typed_row(vec![Value::Int(1), Value::Null], &[23, 25]),
+        ],
+        1,
+    );
+    let output = evaluate("array_sort", &[deciding_prefix], &control);
+    assert_eq!(
+        output.array_view().unwrap().elements()[0],
+        typed_row(vec![Value::Int(1), Value::Null], &[23, 25])
+    );
+    drop(output);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn array_search_start_and_unsupported_null_elements_match_postgresql() {
+    let control = ProductionControl::uncontrolled();
+    let source = array(vec![Value::Int(1)], 1);
+    let error = eval_array_functions_with_control(
+        "array_position",
+        &[source, Value::Int(1), Value::Null],
+        &control,
+    )
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22004"));
+    assert_eq!(error.to_string(), "initial position must not be null");
+    let empty = array(vec![], 1);
+    assert_eq!(
+        *evaluate(
+            "array_position",
+            &[empty, Value::Int(1), Value::Null],
+            &control
+        ),
+        Value::Null
+    );
+    let json = Value::Array(
+        ArrayValue::try_new(vec![Value::Null])
+            .unwrap()
+            .with_element_type_oid(Some(114)),
+    );
+    for name in ["array_position", "array_remove"] {
+        let error = eval_array_functions_with_control(name, &[json.clone(), Value::Null], &control)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"));
+        assert_eq!(
+            error.to_string(),
+            "could not identify an equality operator for type json"
+        );
+    }
 }
 
 #[test]

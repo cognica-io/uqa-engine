@@ -18,6 +18,15 @@ pub(in crate::expr) fn eval_postgres_arrays_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    eval_postgres_arrays_with_catalog(name, args, control, None)
+}
+
+pub(in crate::expr) fn eval_postgres_arrays_with_catalog(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+) -> Option<Result<Produced<Value>>> {
     if !matches!(
         name,
         "array_positions"
@@ -34,8 +43,8 @@ pub(in crate::expr) fn eval_postgres_arrays_with_control(
     Some((|| {
         control.check()?;
         match name {
-            "array_positions" => positions(args, control),
-            "array_replace" => replace(args, control),
+            "array_positions" => positions(args, control, catalog),
+            "array_replace" => replace(args, control, catalog),
             "array_to_string" => join(args, control),
             "array_fill" => fill(args, control),
             "trim_array" => trim(args, control),
@@ -50,7 +59,11 @@ fn inline(value: Value, control: &ProductionControl<'_>) -> Result<Produced<Valu
     Ok(control.finish(value, control.empty_reservation())?)
 }
 
-fn positions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn positions(
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+) -> Result<Produced<Value>> {
     if args.len() != 2 {
         return Err(SQLError::TypeMismatch(
             "array_positions takes 2 args".into(),
@@ -59,9 +72,29 @@ fn positions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
     match args[0].array_view() {
         Some(array) if array.dimensions().len() <= 1 => {
             let lower = i64::from(array.lower_bound(0).unwrap_or(1));
+            if array.elements().is_empty()
+                || (matches!(args[1], Value::Null)
+                    && !crate::expr::scalar_array::contains_null(array, control)?)
+            {
+                return build(
+                    ProductionVec::new(*control).finish()?,
+                    None,
+                    control,
+                    "invalid array result",
+                );
+            }
+            crate::expr::binary::require_array_element_support(
+                array,
+                catalog,
+                control,
+                crate::expr::binary::ComparisonSupport::Equality,
+                "42883",
+            )?;
             let mut positions = ProductionVec::new(*control);
             for (index, value) in array.elements().iter().enumerate() {
-                if value.cmp_with_control(&args[1], control)?.is_eq() {
+                if crate::expr::binary::equal_typed_values_with_enum_catalog(
+                    &args[1], value, control, catalog,
+                )? {
                     let position = i64::try_from(index)
                         .ok()
                         .and_then(|index| lower.checked_add(index))
@@ -71,9 +104,10 @@ fn positions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
             }
             build(positions.finish()?, None, control, "invalid array result")
         }
-        Some(_) => Err(SQLError::TypeMismatch(
-            "searching for elements in multidimensional arrays is not supported".into(),
-        )),
+        Some(_) => Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "searching for elements in multidimensional arrays is not supported".into(),
+        }),
         None if matches!(args[0], Value::Null) => inline(Value::Null, control),
         None => Err(SQLError::TypeMismatch(format!(
             "array_positions: not an array {:?}",
@@ -82,13 +116,27 @@ fn positions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
     }
 }
 
-fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn replace(
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+) -> Result<Produced<Value>> {
     if args.len() != 3 {
         return Err(SQLError::TypeMismatch("array_replace takes 3 args".into()));
     }
     match args[0].array_view() {
         Some(array) => {
-            let elements = replace_elements(array.elements(), &args[1], &args[2], control)?;
+            if !array.elements().is_empty() {
+                crate::expr::binary::require_array_element_support(
+                    array,
+                    catalog,
+                    control,
+                    crate::expr::binary::ComparisonSupport::Equality,
+                    "42883",
+                )?;
+            }
+            let elements =
+                replace_elements(array.elements(), &args[1], &args[2], control, catalog)?;
             let output = build(
                 elements,
                 Some(bounds(array.lower_bounds(), control)?),
@@ -110,13 +158,23 @@ fn replace_elements(
     from: &Value,
     to: &Value,
     control: &ProductionControl<'_>,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
 ) -> Result<Produced<Vec<Value>>> {
     let mut output = ProductionVec::new(*control);
     output.reserve(elements.len())?;
     for value in elements {
         let value = match value {
-            Value::List(nested) => list(replace_elements(nested, from, to, control)?, control)?,
-            value if value.cmp_with_control(from, control)?.is_eq() => control.copy_value(to)?,
+            Value::List(nested) => list(
+                replace_elements(nested, from, to, control, catalog)?,
+                control,
+            )?,
+            value
+                if crate::expr::binary::equal_typed_values_with_enum_catalog(
+                    value, from, control, catalog,
+                )? =>
+            {
+                control.copy_value(to)?
+            }
             value => control.copy_value(value)?,
         };
         output.push_produced(value)?;
