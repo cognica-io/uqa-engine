@@ -32,6 +32,19 @@ def main():
         else:
             raise AssertionError("expected SQL rejection")
         if sql.startswith("SELECT"):
+            if category == "syntax":
+                try:
+                    list(engine.sql_stream(sql))
+                except uqa.HttpEngineError as error:
+                    assert error.status == 400
+                    assert error.code == "SQL_EXECUTION_FAILED"
+                    assert error.diagnostic["sqlstate"] == state
+                    assert error.diagnostic["category"] == category
+                    assert error.diagnostic["position"] == position
+                    assert "py_diagnostic_private" not in str(error)
+                else:
+                    raise AssertionError("expected stream syntax admission rejection")
+                continue
             frames = list(engine.sql_stream(sql))
             assert len(frames) == 1
             assert frames[0]["type"] == "error"
