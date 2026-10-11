@@ -53,6 +53,36 @@ fn caller_record_types_distinguish_sql_target_columns_from_whole_records() {
 
 struct Types;
 
+#[test]
+fn trigger_results_require_exact_descriptors_and_keep_diagnostic_detail() {
+    let target = [
+        super::SQLFunctionResultColumn {
+            name: "id".into(),
+            ty: ColumnType::Integer,
+        },
+        super::SQLFunctionResultColumn {
+            name: "c".into(),
+            ty: ColumnType::InternalChar,
+        },
+    ];
+    let source = [Some(ColumnType::Integer), Some(ColumnType::InternalChar)];
+    super::validate_trigger_record_result(&Types, &source, &target).unwrap();
+    let incompatible = [Some(ColumnType::BigInteger), Some(ColumnType::InternalChar)];
+    let error = super::validate_trigger_record_result(&Types, &incompatible, &target).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        error.to_string(),
+        "returned row structure does not match the structure of the triggering table"
+    );
+    assert_eq!(error.detail(), Some("Returned type bigint does not match expected type integer in column \"id\" (position 1)."));
+    let error = super::validate_trigger_record_result(&Types, &source[..1], &target).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        error.detail(),
+        Some("Number of returned columns (1) does not match expected column count (2).")
+    );
+}
+
 impl RoutineTypeCatalog for Types {
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Ok(None)
