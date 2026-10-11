@@ -2058,6 +2058,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "incremental_occurrence_resolution_reads_spill_in_linear_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",
+      "capability": "Bounded occurrence delta spill reads",
+      "workload": "128/512/1024 distinct paired occurrence clusters in an immutable spill under 2 MiB, with unchanged and advanced snapshots through command refresh and publication.",
+      "invariant": "Authenticated source reads stay within eight passes over the source blocks; exact keys, payloads, original conditions, write kinds and full allowance release remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ordered_values_do_not_evict_related_point_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/run/tests.rs",
+      "capability": "Independent spill value streams",
+      "workload": "An ordered 256-record prefix alternates with a related point read in another authenticated value chunk, followed by cancellation and 2 KiB remaining workspace.",
+      "invariant": "Exactly three value blocks are authenticated before pressure, while exact results, bounded retention, cancellation and complete reader cleanup are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "structural_occurrence_resolution_reads_each_spilled_value_once",
       "cases": 1,
       "source": "crates/uqa-storage/src/mvcc/occurrence/tests/spill.rs",

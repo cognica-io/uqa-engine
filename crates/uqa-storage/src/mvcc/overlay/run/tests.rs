@@ -180,6 +180,67 @@ fn unaligned_entry_ranges_decrypt_each_physical_block_once() {
 }
 
 #[test]
+fn ordered_values_do_not_evict_related_point_reads() {
+    let control = StorageReadControl::with_limit(256 << 10);
+    let mut writer = SpilledRunWriter::new(512, 5120, control.memory()).unwrap();
+    for id in 0..512 {
+        writer
+            .push(
+                &key(id),
+                None,
+                RecordWriteKind::Canonical,
+                PrivateRecordRevision::for_tests(),
+                Some(&[(id % 251) as u8; 128]),
+                &control,
+            )
+            .unwrap();
+    }
+    let run = Arc::new(writer.finish().unwrap().unwrap());
+    let baseline = control.memory().used();
+    let lookup = run.cache_reader();
+    let mut cursor = run.cursor(Bound::Unbounded);
+    let before = run.read_io_counts();
+    for id in 0..256 {
+        let entry = cursor.next(&control).unwrap().unwrap();
+        assert_eq!(entry.key.bytes(), key(id));
+        assert_eq!(entry.expected, None);
+        assert!(entry.kind == RecordWriteKind::Canonical);
+        let bytes = cursor.load_value(entry.value.unwrap(), &control).unwrap();
+        assert_eq!(&bytes[..], &[(id % 251) as u8; 128]);
+        let peer = run.get(&key(400), &control).unwrap().unwrap();
+        let bytes = run.load_value(peer.value.unwrap(), &control).unwrap();
+        assert_eq!(&bytes[..], &[149; 128]);
+    }
+    assert_eq!(
+        run.read_io_counts().1 - before.1,
+        3,
+        "two ordered chunks and one related chunk, each authenticated once"
+    );
+    let peer = run.get(&key(400), &control).unwrap().unwrap();
+    control.cancellation().cancel();
+    assert!(cursor.next(&control).is_err());
+    assert!(run.load_value(peer.value.unwrap(), &control).is_err());
+    control.cancellation().reset();
+    drop(peer);
+
+    let pressure = control
+        .memory()
+        .reserve(control.memory().available() - 2048)
+        .unwrap();
+    for id in 256..264 {
+        let entry = cursor.next(&control).unwrap().unwrap();
+        assert_eq!(entry.key.bytes(), key(id));
+        let bytes = cursor.load_value(entry.value.unwrap(), &control).unwrap();
+        assert_eq!(&bytes[..], &[(id % 251) as u8; 128]);
+    }
+    assert!(control.memory().peak() <= control.memory().limit());
+    drop((pressure, lookup, cursor));
+    assert_eq!(control.memory().used(), baseline);
+    drop(run);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn unaligned_value_ranges_decrypt_each_physical_block_once() {
     let control = StorageReadControl::with_limit(256 << 10);
     let value: Vec<_> = (0..(2 * super::VALUE_CHUNK as usize + 19))

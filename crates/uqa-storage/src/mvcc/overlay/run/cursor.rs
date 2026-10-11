@@ -9,9 +9,12 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use uqa_core::memory::BudgetedVec;
+
 use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
 
+use super::{cache::ValueCache, entry::ValueLocation};
 use super::{entry::RunEntry, reader::EntryReader};
 use super::{RunCacheReader, SpilledRun};
 
@@ -23,6 +26,7 @@ pub(in crate::mvcc) struct RunCursor {
     start: Option<(Vec<u8>, bool)>,
     reader: Option<RunCacheReader>,
     block_limit: usize,
+    values: ValueCache,
 }
 
 impl RunCursor {
@@ -40,6 +44,7 @@ impl RunCursor {
             block: None,
             start,
             block_limit: usize::MAX,
+            values: ValueCache::default(),
         }
     }
 
@@ -52,6 +57,16 @@ impl RunCursor {
     /// The run this cursor reads.
     pub(in crate::mvcc) fn run(&self) -> &Arc<SpilledRun> {
         &self.run
+    }
+
+    /// Load one selected value without displacing a related-key lookup's stream. The chunk keeps the original run allowance and is released when this cursor ends.
+    pub(in crate::mvcc) fn load_value(
+        &mut self,
+        location: ValueLocation,
+        control: &StorageReadControl,
+    ) -> VersionResult<Arc<BudgetedVec<u8>>> {
+        self.run
+            .load_value_cached(location, Some(&mut self.values), control)
     }
 
     /// The next change in key order, or `None` after the last.
@@ -85,6 +100,7 @@ impl RunCursor {
             control.cancellation().check()?;
             if self.block.is_none() {
                 if self.next_block >= self.run.blocks.len() {
+                    self.values.clear();
                     self.reader = None;
                     return Ok(None);
                 }
