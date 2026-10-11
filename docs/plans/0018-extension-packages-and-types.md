@@ -433,15 +433,18 @@ SQL owns descriptor-aware record equality and ordering in `expr/binary/compariso
 
 Explicit cast namespace retention is the next independent correction: [#748](https://github.com/cognica-io/uqa-engine/issues/748) reproduces the compiler erasing `pg_catalog` before catalog binding and choosing a user type through `search_path`. Complete this correction immediately after PR #746, carrying the same inherited ledger forward.
 
-#### Array builtin correction
+### Array builtin correction
 
 - [x] Capture 106 independent PostgreSQL 18.4 messages, including six durable observations, in `array_record_comparisons_oracle.expected.json`; retain the exact collector, input and container provenance.
 - [x] Reproduce 48 diagnostic differences against the published 0.5.3 native engine and track their shared comparison defects in issue #747.
 - [x] Reuse SQL's typed equality and ordering, preserve search versus transform operand order, and validate selected field operators before reached NULL handling; all 1,605 SQL owner tests pass.
 - [x] Verify all 106 reference messages on memory, native SQLite, SQLite Key/Value and redb, including six persistent-reopen observations. The 165 existing affected composite, array and binding tests pass, as do all four expanded provider tests and the manual SQL harness.
-- [ ] Complete public documentation, compatibility evidence, review, merge and branch cleanup for PR #746.
+- [x] Complete public documentation, compatibility evidence and review for PR #746.
+- [ ] Merge PR #746 and remove its branch before starting #748.
 
 Array constructors retain their analyzed scalar element OID before values erase typed NULLs and field widths. Element selection uses resolved `ColumnType` identities and SQL's existing common-type rules; an OID-bound name and a written name of the same composite are the same type. Record coercion preserves a named composite's declared identity, including a domain over it, while an anonymous or NULL record keeps the record pseudotype. Target classification uses the existing type resolver and no name-specific record branch. Metadata inspection does not evaluate expressions, invoke type input or recheck domain constraints. Array element support is selected from the declared element type before iteration when PostgreSQL does so. The shared SQL capability rules reject equality and ordering for `refcursor`, and ordering for `xid` and `aclitem`; `pg_node_tree` and `int2vector` retain both supported operations. Column declarations recognize the existing `refcursor` type instead of leaving it as an unresolved user type. Named composite support requires every live field's selected operator, including domain and array bases; anonymous record support checks each reached field at runtime. Empty and singleton sort inputs, empty searches and searches for an outer NULL in an array without NULLs preserve PostgreSQL's earlier exits. Array search passes the needle first, while removal and replacement pass the element first. Sorting retains stable ties, dimensions and lower bounds and uses the existing controlled scratch and output owners. These corrections do not establish completion of the still-open hash, index and full relational-consumer matrix above.
+
+Focused source verification also passes all eight Execution constructor/control tests, the manual SQL harness, strict Clippy for SQL/Execution/Engine, workspace formatting, dependency direction, Engine ownership, integration registration, Rust headers/line ceiling and manifest validation. The automatic PR Checks workflow passes on product commit `ccca51b4c`; CodeRabbit reviewed the 37 changed files and found no material code issue. Its sole low-value heading finding is corrected here. Copilot did not review because its requester quota was exhausted. Full workspace and package builds remain owned by the automatic workflows.
 
 ### Comparison preservation argument
 
