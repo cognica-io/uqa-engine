@@ -18,6 +18,9 @@ use uqa_core::Value;
 
 use super::{RuleColumnMetadata, RuleRowValues, RuntimeRuleResolver};
 
+#[cfg(test)]
+mod tests;
+
 type BindRuleAction<'a> = dyn Fn(&mut dyn VariableResolver) -> Result<Statement, SQLError> + 'a;
 
 pub fn bind_insert_values_action(
@@ -180,21 +183,21 @@ fn rule_row_source(
             let resolver = runtime_rule_resolver(row, columns);
             let mut values = Vec::with_capacity(internal_column_types.len());
             for column in columns.keys() {
-                values.push(resolved_variable_expr(resolver.record_field(
+                values.push(ResolvedVariable::into_expression(resolver.record_field(
                     row.old_row(),
                     row.old_doc_id(),
                     column,
                 )?));
-                values.push(resolved_variable_expr(resolver.record_field(
+                values.push(ResolvedVariable::into_expression(resolver.record_field(
                     row.new_row(),
                     row.new_doc_id(),
                     column,
                 )?));
             }
-            values.push(resolved_variable_expr(
+            values.push(ResolvedVariable::into_expression(
                 resolver.record(row.old_row(), row.old_doc_id())?,
             ));
-            values.push(resolved_variable_expr(
+            values.push(ResolvedVariable::into_expression(
                 resolver.record(row.new_row(), row.new_doc_id())?,
             ));
             let row_index = i64::try_from(*row_index).map_err(|_| {
@@ -219,21 +222,6 @@ fn rule_row_source(
         new_row,
         source_index,
     })
-}
-
-fn resolved_variable_expr(variable: ResolvedVariable) -> Expr {
-    let ResolvedVariable {
-        value,
-        declared_type,
-    } = variable;
-    match declared_type {
-        Some(ty) => Expr::Cast {
-            implicit: true,
-            expr: Box::new(Expr::Literal(value)),
-            ty,
-        },
-        None => Expr::Literal(value),
-    }
 }
 
 struct RuleSourceResolver<'a> {

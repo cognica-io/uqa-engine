@@ -101,8 +101,14 @@ pub fn capture_rule_returning_result(
                             "rewrite-rule RETURNING provider lost a positional value".into(),
                         )
                     })?;
-                uqa_sql::assignment::conversion::convert_value_to_column_type_with_context(
-                    assignment, value, &column.ty,
+                uqa_sql::assignment::conversion::coerce_assignment_value(
+                    assignment,
+                    value,
+                    &column.ty,
+                    result
+                        .column_types
+                        .get(offset + position)
+                        .and_then(Option::as_ref),
                 )
             })
             .collect::<Result<Vec<_>, SQLError>>()
