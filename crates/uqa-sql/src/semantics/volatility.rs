@@ -197,7 +197,7 @@ fn builtin_overload_is_stable(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> bool {
-    (name == "age" && argument_count == 1)
+    (matches!(name, "age" | "timezone") && argument_count == 1)
         || (name == "to_timestamp" && argument_count == 2)
         || (matches!(name, "quote_literal" | "quote_nullable")
             && binding.is_none_or(|binding| binding.argument_types.as_slice() != ["text"]))
@@ -640,6 +640,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn timestamp_zone_volatility_preserves_session_dependence() {
+        assert_eq!(
+            super::builtin_function_volatility("timezone", None, 1),
+            FunctionVolatility::Stable
+        );
+        assert_eq!(
+            super::builtin_function_volatility("timezone", None, 2),
+            FunctionVolatility::Immutable
+        );
     }
 
     #[test]

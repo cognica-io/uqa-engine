@@ -126,7 +126,7 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
         Value::Bytes(value) => {
             serde_json::Value::String(format!("0x{}", hex_encode(value))).to_string()
         }
-        Value::Temporal(value) => serde_json::Value::String(value.to_sql_string()).to_string(),
+        Value::Temporal(_) => serde_json::Value::String(super::value_to_string(value)?).to_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
         Value::Datum(value) => return value_to_json_text(&super::datums::read(value)?),

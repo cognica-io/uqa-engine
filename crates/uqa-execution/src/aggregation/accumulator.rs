@@ -10,6 +10,7 @@ use super::{
     value_as_f64, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
     RegisteredAggregateBuffer, SQLAggregateFunction, SQLAggregateState, SQLError, Value,
 };
+use uqa_core::TemporalInfinity;
 use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
 use uqa_sql::expr::IntervalFields;
 
@@ -21,8 +22,10 @@ pub struct AggregateAccumulator {
     pub(super) sum: f64,
     pub(super) integer_sum: i128,
     pub(super) decimal_sum: Option<DecimalValue>,
-    /// `sumX` of `sum(interval)` and `avg(interval)`, added field by field as `interval_avg_accum` adds each input.
+    /// The finite `sumX` of `sum(interval)` and `avg(interval)`; infinite inputs are counted separately.
     pub(super) interval_sum: Option<IntervalFields>,
+    pub(super) interval_positive_infinity: u64,
+    pub(super) interval_negative_infinity: u64,
     pub(super) numeric_inputs: NumericInputKind,
     pub(super) min: Option<Value>,
     pub(super) max: Option<Value>,
@@ -173,6 +176,8 @@ impl Default for AggregateAccumulator {
             integer_sum: 0,
             decimal_sum: None,
             interval_sum: None,
+            interval_positive_infinity: 0,
+            interval_negative_infinity: 0,
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
@@ -208,6 +213,8 @@ impl AggregateAccumulator {
             integer_sum: 0,
             decimal_sum: None,
             interval_sum: None,
+            interval_positive_infinity: 0,
+            interval_negative_infinity: 0,
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
@@ -490,6 +497,16 @@ impl AggregateAccumulator {
                     "SUM/AVG requires a numeric or interval value, got {value:?}"
                 ))
             })?;
+            if let Some(infinity) = temporal.infinity() {
+                let count = match infinity {
+                    TemporalInfinity::Positive => &mut self.interval_positive_infinity,
+                    TemporalInfinity::Negative => &mut self.interval_negative_infinity,
+                };
+                *count = count
+                    .checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+                return Ok(());
+            }
             self.interval_sum = Some(
                 self.interval_sum
                     .unwrap_or(IntervalFields::ZERO)
@@ -572,6 +589,27 @@ impl AggregateAccumulator {
             }
         }
         Ok(())
+    }
+
+    /// Select the interval result after all transitions, preserving finite overflow and later input errors even when both signs of infinity have been seen.
+    pub(super) fn interval_result(&self) -> Result<Option<IntervalFields>, SQLError> {
+        let infinity = match (
+            self.interval_positive_infinity != 0,
+            self.interval_negative_infinity != 0,
+        ) {
+            (true, true) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "22008".into(),
+                    message: "interval out of range".into(),
+                })
+            }
+            (true, false) => Some(TemporalInfinity::Positive),
+            (false, true) => Some(TemporalInfinity::Negative),
+            (false, false) => None,
+        };
+        Ok(infinity.map_or(self.interval_sum, |value| {
+            IntervalFields::of(&value.interval())
+        }))
     }
 
     pub(super) fn combine_float_sum(&self, left: f64, right: f64) -> Result<f64, SQLError> {

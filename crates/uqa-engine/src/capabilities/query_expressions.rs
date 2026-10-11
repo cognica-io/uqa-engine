@@ -300,6 +300,18 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         Ok(self.engine.session_execution_view().runtime_parameter(name))
     }
 
+    fn temporal_interval_style(
+        &self,
+    ) -> std::result::Result<Option<uqa_core::TemporalIntervalStyle>, SQLError> {
+        Ok(Some(self.engine.session.interval_style()))
+    }
+
+    fn temporal_time_zone(
+        &self,
+    ) -> std::result::Result<Option<uqa_core::TemporalTimeZone>, SQLError> {
+        Ok(Some(self.engine.session.time_zone()))
+    }
+
     fn sleep(&self, duration: std::time::Duration) -> std::result::Result<(), SQLError> {
         Ok(self.engine.runtime.cancellation.sleep(duration)?)
     }

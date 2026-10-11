@@ -12,9 +12,7 @@ mod legacy_vector;
 mod temporal;
 
 use super::conversion::value_to_string_with_control;
-use super::{
-    datetime_out_of_range, out_of_range, ArrayValue, Result, SQLError, TemporalValue, Value,
-};
+use super::{out_of_range, ArrayValue, Result, SQLError, TemporalValue, Value};
 use crate::ast::RangeSubtype;
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
@@ -521,24 +519,14 @@ pub fn negate_value_with_control(
             let (value, memory) = value.negated_with_control(control)?.into_parts();
             return Ok(control.finish(Value::Decimal(value), memory)?);
         }
-        (
-            "interval",
-            Value::Temporal(TemporalValue::Interval {
-                months,
-                days,
-                micros,
-            }),
-        ) => Ok(Value::Temporal(TemporalValue::Interval {
-            months: months
-                .checked_neg()
-                .ok_or_else(|| datetime_out_of_range("interval"))?,
-            days: days
-                .checked_neg()
-                .ok_or_else(|| datetime_out_of_range("interval"))?,
-            micros: micros
-                .checked_neg()
-                .ok_or_else(|| datetime_out_of_range("interval"))?,
-        })),
+        ("interval", Value::Temporal(interval @ TemporalValue::Interval { .. })) => {
+            Ok(Value::Temporal(
+                super::IntervalFields::of(interval)
+                    .expect("interval operand")
+                    .negate()?
+                    .value(),
+            ))
+        }
         _ => Err(crate::type_resolution::undefined_prefix_operator(
             "-",
             postgres_type_display_name(source.as_str()),

@@ -50,13 +50,17 @@ pub(super) fn resolve_operator_type_with_control(
             {
                 super::common::same_operator_type_with_control(left, right, control)?
             }
-            (
-                ColumnType::Range(left) | ColumnType::Multirange(left),
-                ColumnType::Range(right) | ColumnType::Multirange(right),
-            ) => left == right,
-            _ => false,
+            _ => super::range::containment_dispatch_with_control(name, left, right, control)?
+                .is_some(),
         },
-        (Some(known), None) | (None, Some(known)) => supported_type(known),
+        (Some(known), None) | (None, Some(known)) if supported_type(known) => true,
+        (Some(_), None) if name == "contained_by_op" => {
+            return Err(super::ambiguous_binary_operator(left, symbol, right));
+        }
+        (None, Some(_)) if name == "contains_op" => {
+            return Err(super::ambiguous_binary_operator(left, symbol, right));
+        }
+        (Some(_), None) | (None, Some(_)) => false,
         (None, None) => {
             return Err(super::ambiguous_binary_operator(None, symbol, None));
         }

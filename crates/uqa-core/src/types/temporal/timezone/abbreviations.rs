@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::TemporalTimeZone;
+use super::{TemporalTimeZone, Zone};
 
 enum Abbreviation {
     Fixed(i32),
@@ -12,6 +12,24 @@ enum Abbreviation {
 }
 
 pub(super) fn lookup(name: &str) -> Option<TemporalTimeZone> {
+    match &find(name)?.1 {
+        Abbreviation::Fixed(offset) => TemporalTimeZone::fixed(*offset),
+        Abbreviation::Named(name) => TemporalTimeZone::named(name),
+    }
+}
+
+pub(super) fn resolve(name: &str) -> Option<TemporalTimeZone> {
+    let (name, definition) = find(name)?;
+    match definition {
+        Abbreviation::Fixed(offset) => TemporalTimeZone::fixed(*offset),
+        Abbreviation::Named(zone_name) => {
+            let zone = tzdb_data::find_tz(zone_name.as_bytes())?;
+            Some(TemporalTimeZone(Zone::Abbreviated { zone, name }))
+        }
+    }
+}
+
+fn find(name: &str) -> Option<&'static (&'static str, Abbreviation)> {
     let index = DEFAULT
         .binary_search_by(|(candidate, _)| {
             candidate
@@ -19,10 +37,28 @@ pub(super) fn lookup(name: &str) -> Option<TemporalTimeZone> {
                 .cmp(name.bytes().map(|byte| byte.to_ascii_uppercase()))
         })
         .ok()?;
-    match DEFAULT[index].1 {
-        Abbreviation::Fixed(offset) => TemporalTimeZone::fixed(offset),
-        Abbreviation::Named(name) => TemporalTimeZone::named(name),
-    }
+    Some(&DEFAULT[index])
+}
+
+pub(super) fn offset_at(zone: &tz::TimeZoneRef<'_>, name: &str, unix_seconds: i64) -> Option<i32> {
+    let transitions = zone.transitions();
+    // Bundled IANA zones have no leap corrections. Search the last definition
+    // used before the instant, then the pre-transition era, then the first later
+    // definition, as PostgreSQL's pg_interpret_timezone_abbrev does.
+    let cutoff = transitions.partition_point(|entry| entry.unix_leap_time() <= unix_seconds);
+    transitions[..cutoff]
+        .iter()
+        .rev()
+        .map(tz::timezone::Transition::local_time_type_index)
+        .chain(std::iter::once(0))
+        .chain(
+            transitions[cutoff..]
+                .iter()
+                .map(tz::timezone::Transition::local_time_type_index),
+        )
+        .map(|index| &zone.local_time_types()[index])
+        .find(|local| local.time_zone_designation() == name)
+        .map(tz::timezone::LocalTimeType::ut_offset)
 }
 
 // PostgreSQL 18 src/timezone/tznames/Default; dynamic abbreviations keep their

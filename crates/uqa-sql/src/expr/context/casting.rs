@@ -19,6 +19,7 @@ use crate::{
 };
 
 mod datestyle;
+mod intervalstyle;
 mod timezone;
 
 /// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
@@ -297,6 +298,7 @@ pub fn cast_value_with_type_resolution_with_control(
     };
     let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
+    let _interval_style = intervalstyle::cast_scope(value, target_column_type, engine, control)?;
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
         if let Some(value) = record_identity_cast(
             value,

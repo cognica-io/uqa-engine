@@ -16,13 +16,14 @@ use uqa_core::{
 
 use crate::error::{Result, SQLError};
 
-use super::{out_of_range, time::timestamp_plus_interval};
+use super::{
+    out_of_range, time::timestamp_tz_plus_interval, EngineHook, EvalContext, IntervalFields,
+};
 
 const NANOS_PER_MICROSECOND: i64 = 1_000;
 const NANOS_PER_MILLISECOND: i64 = 1_000_000;
 const UUID_V1_UNIX_EPOCH_OFFSET_TICKS: i128 = 0x01b2_1dd2_1381_4000;
 const UUID_V7_SUBMILLISECOND_BITS: u32 = 12;
-const UUID_V7_MAX_UNIX_MILLISECONDS: i64 = 0x0000_ffff_ffff_ffff;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const UUID_V7_CLOCK_PRECISION_BITS: u32 = 10;
@@ -74,8 +75,31 @@ pub(super) fn generate_random_uuid() -> Result<String> {
     Ok(format_uuid(bytes))
 }
 
-pub(super) fn generate_uuid_v7(shift: Option<&TemporalValue>) -> Result<String> {
-    let now_nanos = real_time_nanos_ascending()?;
+pub(super) fn eval_uuid_v7(args: &[Value], context: Option<&EvalContext<'_>>) -> Result<Value> {
+    let shift = match args {
+        [] => None,
+        [Value::Temporal(interval @ TemporalValue::Interval { .. })] => Some(interval),
+        [Value::Null] => return Ok(Value::Null),
+        [_] => {
+            return Err(SQLError::TypeMismatch(
+                "uuidv7 shift must be an interval".into(),
+            ))
+        }
+        _ => return Err(SQLError::TypeMismatch("uuidv7 takes 0 or 1 args".into())),
+    };
+    generate_uuid_v7_at_clock(
+        real_time_nanos_ascending()?,
+        shift,
+        context.and_then(|context| context.engine),
+    )
+    .map(Value::Str)
+}
+
+fn generate_uuid_v7_at_clock(
+    now_nanos: i64,
+    shift: Option<&TemporalValue>,
+    engine: Option<&dyn EngineHook>,
+) -> Result<String> {
     let now_micros = now_nanos.div_euclid(NANOS_PER_MICROSECOND);
     let sub_microsecond_nanos = now_nanos.rem_euclid(NANOS_PER_MICROSECOND);
     let timestamp_micros = match shift {
@@ -84,25 +108,43 @@ pub(super) fn generate_uuid_v7(shift: Option<&TemporalValue>) -> Result<String> 
             months,
             days,
             micros,
-        }) => timestamp_plus_interval(now_micros, *months, *days, *micros)?,
+        }) => timestamp_tz_plus_interval(
+            now_micros,
+            IntervalFields {
+                months: *months,
+                days: *days,
+                micros: *micros,
+            },
+            engine,
+            &ProductionControl::uncontrolled(),
+        )?,
         Some(other) => {
             return Err(SQLError::TypeMismatch(format!(
                 "uuidv7: expected interval, got {other:?}"
             )));
         }
     };
-    let unix_millis = timestamp_micros.div_euclid(1_000);
-    if !(0..=UUID_V7_MAX_UNIX_MILLISECONDS).contains(&unix_millis) {
-        return Err(out_of_range("uuidv7 timestamp"));
-    }
-    let sub_millisecond_nanos = timestamp_micros
-        .rem_euclid(1_000)
-        .checked_mul(NANOS_PER_MICROSECOND)
-        .and_then(|nanos| nanos.checked_add(sub_microsecond_nanos))
-        .ok_or_else(|| out_of_range("uuidv7 timestamp"))?;
+    let timestamp = TemporalValue::TimestampTz {
+        micros: timestamp_micros,
+    };
+    // uuidv7_interval adds the Unix epoch to PostgreSQL's raw timestamp after
+    // arithmetic, including its infinity bit patterns, with signed wrapping.
+    let unix_micros = match timestamp.infinity() {
+        Some(uqa_core::TemporalInfinity::Positive) => i64::MAX.wrapping_add(946_684_800_000_000),
+        Some(uqa_core::TemporalInfinity::Negative) => i64::MIN.wrapping_add(946_684_800_000_000),
+        None => timestamp_micros,
+    };
+    // PostgreSQL truncates signed division toward zero before narrowing the
+    // millisecond and fractional parts to the generator's unsigned arguments.
+    let unix_millis = (unix_micros / 1_000).cast_unsigned();
     let sub_millisecond_nanos =
-        u32::try_from(sub_millisecond_nanos).map_err(|_| out_of_range("uuidv7 timestamp"))?;
-    generate_uuid_v7_at(unix_millis as u64, sub_millisecond_nanos)
+        (unix_micros % 1_000) * NANOS_PER_MICROSECOND + sub_microsecond_nanos;
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "PostgreSQL narrows the signed sub-millisecond expression to uint32"
+    )]
+    generate_uuid_v7_at(unix_millis, sub_millisecond_nanos as u32)
 }
 
 /// Parse every UUID input spelling accepted by `PostgreSQL` into network-order bytes.
@@ -208,19 +250,14 @@ fn real_time_nanos_ascending() -> Result<i64> {
 }
 
 fn generate_uuid_v7_at(unix_millis: u64, sub_millisecond_nanos: u32) -> Result<String> {
-    if unix_millis > UUID_V7_MAX_UNIX_MILLISECONDS as u64
-        || sub_millisecond_nanos >= NANOS_PER_MILLISECOND as u32
-    {
-        return Err(out_of_range("uuidv7 timestamp"));
-    }
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes[8..])
         .map_err(|error| SQLError::Internal(format!("failed to obtain random bytes: {error}")))?;
     let timestamp = unix_millis.to_be_bytes();
     bytes[..6].copy_from_slice(&timestamp[2..]);
-    let increased_clock_precision = (u64::from(sub_millisecond_nanos)
-        * (1_u64 << UUID_V7_SUBMILLISECOND_BITS))
-        / NANOS_PER_MILLISECOND as u64;
+    let increased_clock_precision = sub_millisecond_nanos
+        .wrapping_mul(1_u32 << UUID_V7_SUBMILLISECOND_BITS)
+        / NANOS_PER_MILLISECOND as u32;
     bytes[6] = (increased_clock_precision >> 8) as u8;
     bytes[7] = increased_clock_precision as u8;
 
@@ -269,3 +306,6 @@ fn invalid_uuid(text: &str) -> SQLError {
         message: format!("invalid input syntax for type uuid: \"{text}\""),
     }
 }
+
+#[cfg(test)]
+mod tests;

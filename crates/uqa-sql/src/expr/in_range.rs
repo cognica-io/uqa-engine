@@ -8,17 +8,26 @@
 
 use std::cmp::Ordering;
 
-use uqa_core::memory::ProductionControl;
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{DecimalValue, TemporalInfinity, TemporalValue, Value};
 
 use super::IntervalFields;
 
 use crate::error::{Result, SQLError};
 
-const MICROS_PER_DAY: i64 = 86_400_000_000;
-
 /// `in_range(val, base, offset, sub, less)` for a non-null `val` and `base` of one ordering type and an `offset` of the type `transformFrameOffset` selected for it.
 pub fn in_range(val: &Value, base: &Value, offset: &Value, sub: bool, less: bool) -> Result<bool> {
+    in_range_with_engine(val, base, offset, sub, less, None)
+}
+
+/// Apply the ordering family's frame predicate with live session calendar arithmetic.
+pub fn in_range_with_engine(
+    val: &Value,
+    base: &Value,
+    offset: &Value,
+    sub: bool,
+    less: bool,
+    engine: Option<&dyn super::EngineHook>,
+) -> Result<bool> {
     match (val, base, offset) {
         (Value::Int(val), Value::Int(base), Value::Int(offset)) => {
             integer_in_range(*val, *base, *offset, sub, less)
@@ -30,7 +39,7 @@ pub fn in_range(val: &Value, base: &Value, offset: &Value, sub: bool, less: bool
             numeric_in_range(val, base, offset, sub, less)
         }
         (Value::Temporal(val), Value::Temporal(base), Value::Temporal(offset)) => {
-            temporal_in_range(val, base, offset, sub, less)
+            temporal_in_range(val, base, offset, sub, less, engine)
         }
         _ => Err(SQLError::Internal(format!(
             "RANGE frame offset {offset:?} does not apply to ordering values {val:?} and {base:?}"
@@ -158,6 +167,7 @@ fn temporal_in_range(
     offset: &TemporalValue,
     sub: bool,
     less: bool,
+    engine: Option<&dyn super::EngineHook>,
 ) -> Result<bool> {
     use TemporalValue as T;
     let offset = interval_fields(offset)?;
@@ -179,7 +189,10 @@ fn temporal_in_range(
             Ok(bound(val.cmp(&target), less))
         }
         (
-            T::TimeTz { .. },
+            T::TimeTz {
+                micros: val,
+                offset_minutes: val_offset,
+            },
             T::TimeTz {
                 micros: base,
                 offset_minutes,
@@ -196,44 +209,63 @@ fn temporal_in_range(
                     None => return Ok(less),
                 }
             };
-            let target = Value::Temporal(T::TimeTz {
-                micros: target,
-                offset_minutes: *offset_minutes,
-            });
-            let ordering = crate::expr::compare_typed_values_with_control(
-                &Value::Temporal(val.clone()),
-                &target,
-                &ProductionControl::uncontrolled(),
-            )?;
+            // This synthetic frame bound can exceed a stored time's domain. PostgreSQL's
+            // timetz_cmp_internal uses signed 64-bit wrap for its UTC adjustment even here.
+            let utc_micros =
+                |time: i64, offset: i32| time.wrapping_sub(i64::from(offset) * 60 * 1_000_000);
+            let ordering = utc_micros(*val, *val_offset)
+                .cmp(&utc_micros(target, *offset_minutes))
+                .then_with(|| offset_minutes.cmp(val_offset));
             Ok(bound(ordering, less))
         }
         (T::Interval { .. }, T::Interval { .. }) => {
-            if interval_span(offset) < 0 {
+            if offset.value() < IntervalFields::ZERO.value() {
                 return Err(invalid_offset());
             }
-            let (val, base) = (interval_fields(val)?, interval_fields(base)?);
+            if indeterminate_infinite_bound(base, offset, sub) {
+                return Ok(true);
+            }
+            let base = interval_fields(base)?;
             let target = if sub {
                 base.minus(offset)?
             } else {
                 base.plus(offset)?
             };
-            Ok(bound(interval_span(val).cmp(&interval_span(target)), less))
+            Ok(bound(val.cmp(&target.value()), less))
         }
         _ => {
-            if interval_span(offset) < 0 {
+            let zoned = matches!(base, T::TimestampTz { .. });
+            // date2timestamp promotes both dates before validating the offset.
+            let val = T::Timestamp {
+                micros: timestamp_micros(val)?,
+            };
+            let base = T::Timestamp {
+                micros: timestamp_micros(base)?,
+            };
+            if offset.value() < IntervalFields::ZERO.value() {
                 return Err(invalid_offset());
             }
-            let val = timestamp_micros(val)?;
-            let base = timestamp_micros(base)?;
+            if indeterminate_infinite_bound(&base, offset, sub) {
+                return Ok(true);
+            }
             // `timestamp_mi_interval` adds the interval that `interval_um` negates.
             let offset = if sub { offset.negate()? } else { offset };
-            let target = super::time::timestamp_plus_interval(
-                base,
-                offset.months,
-                offset.days,
-                offset.micros,
-            )?;
-            Ok(bound(val.cmp(&target), less))
+            let target = if zoned {
+                super::time::timestamp_tz_plus_interval(
+                    timestamp_micros(&base)?,
+                    offset,
+                    engine,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )?
+            } else {
+                super::time::timestamp_plus_interval(
+                    timestamp_micros(&base)?,
+                    offset.months,
+                    offset.days,
+                    offset.micros,
+                )?
+            };
+            Ok(bound(val.cmp(&T::Timestamp { micros: target }), less))
         }
     }
 }
@@ -244,16 +276,25 @@ fn interval_fields(value: &TemporalValue) -> Result<IntervalFields> {
     })
 }
 
-/// The interval as `interval_cmp_value` orders it: a month is 30 days and a day is 24 hours.
-fn interval_span(interval: IntervalFields) -> i128 {
-    (i128::from(interval.months) * 30 + i128::from(interval.days)) * i128::from(MICROS_PER_DAY)
-        + i128::from(interval.micros)
+fn indeterminate_infinite_bound(base: &TemporalValue, offset: IntervalFields, sub: bool) -> bool {
+    offset.value().infinity() == Some(TemporalInfinity::Positive)
+        && base.infinity()
+            == Some(if sub {
+                TemporalInfinity::Positive
+            } else {
+                TemporalInfinity::Negative
+            })
 }
 
 /// A date as the timestamp at its midnight, as `date2timestamp` converts it, or a timestamp's own microseconds.
 fn timestamp_micros(value: &TemporalValue) -> Result<i64> {
     match value {
-        TemporalValue::Date { days } => Ok(i64::from(*days) * MICROS_PER_DAY),
+        TemporalValue::Date { .. } => {
+            super::time::temporal_timestamp_micros(value).map_err(|_| SQLError::Routine {
+                sqlstate: "22008".into(),
+                message: "date out of range for timestamp".into(),
+            })
+        }
         TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros } => Ok(*micros),
         other => Err(SQLError::Internal(format!(
             "RANGE frame ordering value {other:?} is not a date or timestamp"

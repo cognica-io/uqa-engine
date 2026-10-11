@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve physical array constants in the typed catalog expression codec, including dimensions, lower bounds, NULLs, element modifiers and domain/enum/composite identities across catalog changes. Share typed output through borrowed metadata while retaining live interval formatting.
+
+- Apply PostgreSQL `IntervalStyle` to interval input and SQL output, including prepared casts, arrays, records, JSON, assignment, cursors and stored definitions. Preserve exact input fields, fractional carries, ISO 8601 forms, duplicate-field checks, mixed signs and overflow diagnostics, with unchanged stored carriers and comparisons and ordinary transaction-local settings.
+- Apply session `TimeZone` to calendar months and days in timestamptz interval arithmetic and `RANGE` frames. Preserve daylight-saving transitions and elapsed hours separately, including prepared parameters, function settings and persistent definitions; Planner shares SQL operator volatility instead of folding session-dependent results.
+- Preserve calendar and infinite-value semantics in `pg_sleep_for`, `pg_sleep_until` and `uuidv7(interval)`: prevent raw timestamp subtraction overflow, keep positive-infinity waits cancellable and retain PostgreSQL timestamp-bit wrapping for accepted UUID shifts.
+
+- Select range and multirange element containment from both declared operand types, preserving PostgreSQL endpoints, NULLs, incompatible-type diagnostics and domain distinctions through stored expressions and persistent reopening.
+
 - Preserve PostgreSQL ROW and record comparison operators through joins, DISTINCT predicates, ANY/ALL, CASE, NULLIF, GREATEST/LEAST and constant folding, including NULL fields, reached field errors, equality-only keys and FULL JOIN diagnostics. NULLIF retains its selected equality operand's result type; bare NULL comparisons test the outer value without requiring equality. Stored ROW comparisons keep their selected field operations, predicate grouping and actual type dependencies. Hash joins retain the statement value catalog for physical enum identities in direct, duplicate, computed and spilled keys.
 
 - Preserve typed ROW field operators in exact document and transaction-overlay lookups, including equality-only fields and reached NULL-field errors. Retain B-tree ordering requirements and original frame masking.

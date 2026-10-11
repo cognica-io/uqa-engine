@@ -208,13 +208,13 @@ SELECT round(2.71828::numeric, 2) AS rounded,
 | Function | Result |
 | --- | --- |
 | `gen_random_uuid()`, `uuidv4()` | Random RFC variant version 4 UUID |
-| `uuidv7([shift interval])` | Time-ordered RFC variant version 7 UUID |
+| `uuidv7([shift interval])` | RFC variant version 7 UUID with an optional timestamp shift |
 | `uuid_extract_version(uuid)` | RFC 9562 version nibble as `smallint`, or NULL for a non-RFC variant including the nil UUID |
 | `uuid_extract_timestamp(uuid)` | Version 1 or version 7 timestamp as `timestamp with time zone`, or NULL for every other version or variant |
 
 The extraction functions are strict and immutable. Version 1 timestamps use the UUID 100-nanosecond epoch and are floored to PostgreSQL's microsecond precision, while version 7 timestamps use the leading 48-bit Unix millisecond field; sub-millisecond random or counter bits do not affect the extracted timestamp.
 
-`gen_random_uuid()` and `uuidv4()` accept no arguments. `uuidv7()` also accepts one `interval` argument whose declared name is `shift`; unsupported argument types, names, and arities report SQLSTATE `42883`. The three generator functions are volatile and therefore unavailable in generated expressions. This signature contract does not assert byte-for-byte UUID output or PostgreSQL's complete interval-shift edge semantics.
+`gen_random_uuid()` and `uuidv4()` accept no arguments. `uuidv7()` also accepts one `interval` argument whose declared name is `shift`; unsupported argument types, names, and arities report SQLSTATE `42883`. The three generator functions are volatile and therefore unavailable in generated expressions. UUIDv7 shifts apply interval months and days through the invoking session's `TimeZone`, followed by elapsed microseconds. PostgreSQL retains only the low 48 bits of the shifted Unix millisecond timestamp: accepted pre-1970 or distant-future shifts wrap in that field, and infinite shifts use PostgreSQL's raw timestamp conversion. These shifts need not preserve timestamp ordering. A NULL shift returns NULL; an interval operation outside the valid timestamp domain reports `22008`. Random UUID bits are not reproducible across calls.
 
 ## Array functions
 
@@ -353,12 +353,16 @@ User SQL and PL/pgSQL routines may declare `anyrange`, `anymultirange`, `anycomp
 | `range_merge(multirange)` | Return the smallest range covering every member |
 | `multirange(range)`, family multirange constructors | Construct the paired normalized multirange |
 
-The implemented range and multirange operators are `&&` for overlap, `@>` for range-set containment, `<@` for contained-by, and `-|-` for adjacency. These operators require range or multirange operands from the same built-in subtype family; scalar-element containment, complete ordering and arithmetic operators, user-defined range families, and index-backed operator classes remain open compatibility bugs.
+The implemented range and multirange operators are `&&` for overlap, `@>` for containment, `<@` for contained-by, and `-|-` for adjacency. Two range or multirange operands must have the same built-in subtype. `range @> element`, `multirange @> element` and their reversed `<@` forms require the element's declared type to match that subtype; integer widths, numeric and temporal types remain distinct. Numeric precision and temporal precision do not change the selected type. A domain over the container is accepted, but a domain over the element is a distinct polymorphic type and requires an explicit cast to the subtype. Complete ordering and arithmetic operators, user-defined range families, and index-backed operator classes remain open compatibility bugs.
+
+Containment returns a boolean and does not change state. Included endpoints belong to a range, excluded endpoints do not, an empty range contains no element, and a multirange contains an element if any member does. A NULL operand returns NULL after type validation; incompatible types report `42883` even when their values are NULL. An untyped literal opposite a known range or multirange is read as that container type, so a scalar spelling such as `'2'` reports `22P02`; write `2` or `'2'::integer` to select an integer element. An untyped container opposite an element is ambiguous (`42725`).
 
 ```sql execute
 SELECT lower('[1,5)'::int4range) AS lower_bound,
        '[1,5)'::int4range && '[4,8)'::int4range AS overlaps,
        '[1,5)'::int4range -|- '[5,8)'::int4range AS adjacent,
+       '[1,5)'::int4range @> 2 AS contains_element,
+       4 <@ '{[1,3),[4,6)}'::int4multirange AS element_contained,
        range_merge('{[1,3),[8,10)}'::int4multirange) AS covering_range;
 ```
 

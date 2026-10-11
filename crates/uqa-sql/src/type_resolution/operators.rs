@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::ast::{BinaryOp, ColumnType};
+use crate::ast::{BinaryOp, ColumnType, FunctionVolatility};
 use crate::SQLError;
 use uqa_core::memory::{Produced, ProductionControl};
 
@@ -61,6 +61,40 @@ pub struct BinaryOperatorCatalogEntry {
     pub function_oid: i64,
 }
 
+impl BinaryOperatorCatalogEntry {
+    /// Volatility of this exact built-in overload, from `PostgreSQL` 18 `pg_proc`.
+    #[must_use]
+    pub fn volatility(&self) -> FunctionVolatility {
+        match self.function_oid {
+            1189 | 1190 | 2549 | 2351..=2356 | 2377..=2382 | 2520..=2525 | 2527..=2532 => {
+                FunctionVolatility::Stable
+            }
+            _ => FunctionVolatility::Immutable,
+        }
+    }
+}
+
+/// Volatility of the selected overload and the coercions its operands require.
+/// Unknown literals are converted during analysis and add no runtime cast.
+pub fn binary_operator_volatility(
+    op: BinaryOp,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+) -> Result<FunctionVolatility, SQLError> {
+    let [target_left, target_right, _] = binary_operator_types(op, left, right)?;
+    if [(left, &target_left), (right, &target_right)]
+        .into_iter()
+        .any(|(source, target)| {
+            source.is_some_and(|source| {
+                super::cast_volatility(source, target) != FunctionVolatility::Immutable
+            })
+        })
+    {
+        return Ok(FunctionVolatility::Stable);
+    }
+    binary_operator_catalog_entry(op, [&target_left, &target_right]).map(|entry| entry.volatility())
+}
+
 pub fn binary_operator_by_oid(oid: i64) -> Option<BinaryOperatorCatalogEntry> {
     catalog::SIGNATURES.iter().find_map(
         |&(name, left, right, result_type, candidate, function_oid)| {
@@ -109,6 +143,7 @@ fn named_binary_operator_catalog_entry(
                                 ),
                                 "anyrange" => matches!(actual, ColumnType::Range(_)),
                                 "anymultirange" => matches!(actual, ColumnType::Multirange(_)),
+                                "anyenum" => matches!(actual, ColumnType::Enum(_)),
                                 _ => false,
                             }
                     })

@@ -19,15 +19,20 @@ use crate::error::{Result, SQLError};
 use super::conversion::to_f64_with_control;
 use super::{datetime_out_of_range, float_to_i64_rounded, out_of_range};
 
+mod calendar;
 mod date_trunc;
 mod extract;
+mod infinite;
 mod interval;
 mod number_format;
+mod timezone;
 mod units;
 
+pub(super) use calendar::timestamp_tz_plus_interval;
 pub(super) use date_trunc::zone::{truncate_explicit_zone, truncate_session_zone};
 pub(super) use extract::{extract_from_value, extract_from_value_with_offset};
 pub use interval::IntervalFields;
+pub(super) use timezone::eval_timezone;
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
@@ -89,15 +94,14 @@ pub(super) fn timestamp_plus_interval(
     days: i32,
     micros: i64,
 ) -> Result<i64> {
-    let naive = naive_from_micros(ts_micros)?;
-    let date = shift_months(naive.date(), months)?;
-    let date = date
-        .checked_add_signed(chrono::Duration::days(i64::from(days)))
-        .ok_or_else(|| datetime_out_of_range("timestamp"))?;
-    let shifted = NaiveDateTime::new(date, naive.time());
-    micros_from_naive(shifted)
-        .checked_add(micros)
-        .ok_or_else(|| datetime_out_of_range("timestamp"))
+    calendar::timestamp_plus_interval(
+        ts_micros,
+        IntervalFields {
+            months,
+            days,
+            micros,
+        },
+    )
 }
 
 /// Binary arithmetic when either operand is temporal. Handles the full
@@ -107,13 +111,26 @@ pub(super) fn temporal_arith_with_control(
     a: &Value,
     b: &Value,
     op: BinaryOp,
+    engine: Option<&dyn super::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     control.check()?;
     let to_f64 = |value| to_f64_with_control(value, control);
     use TemporalValue as T;
     match (a, b) {
-        (Value::Temporal(x), Value::Temporal(y)) => temporal_pair_arith(a, b, x, y, op),
+        (Value::Temporal(x), Value::Temporal(y)) => {
+            temporal_pair_arith(a, b, x, y, op, engine, control)
+        }
+        (Value::Temporal(date @ T::Date { .. }), Value::Int(_))
+            if !date.is_finite() && matches!(op, BinaryOp::Add | BinaryOp::Subtract) =>
+        {
+            Ok(Value::Temporal(date.clone()))
+        }
+        (Value::Int(_), Value::Temporal(date @ T::Date { .. }))
+            if !date.is_finite() && matches!(op, BinaryOp::Add) =>
+        {
+            Ok(Value::Temporal(date.clone()))
+        }
         // date +/- integer days.
         (Value::Temporal(T::Date { days }), Value::Int(n)) => match op {
             BinaryOp::Add => i64::from(*days)
@@ -167,10 +184,18 @@ fn temporal_pair_arith(
     x: &TemporalValue,
     y: &TemporalValue,
     op: BinaryOp,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
 ) -> Result<Value> {
     use TemporalValue as T;
     match (x, y, op) {
         (T::Date { days: d1 }, T::Date { days: d2 }, BinaryOp::Subtract) => {
+            if !x.is_finite() || !y.is_finite() {
+                return Err(SQLError::Routine {
+                    sqlstate: "22008".into(),
+                    message: "cannot subtract infinite dates".into(),
+                });
+            }
             Ok(Value::Int(i64::from(*d1) - i64::from(*d2)))
         }
         (T::Interval { .. }, T::Interval { .. }, BinaryOp::Add | BinaryOp::Subtract) => {
@@ -214,13 +239,13 @@ fn temporal_pair_arith(
             )?,
         })),
         (_, T::Interval { .. }, BinaryOp::Add) => {
-            add_interval_to_temporal(x, interval_fields(y)?, false)
+            add_interval_to_temporal(x, interval_fields(y)?, false, engine, control)
         }
         (_, T::Interval { .. }, BinaryOp::Subtract) => {
-            add_interval_to_temporal(x, interval_fields(y)?, true)
+            add_interval_to_temporal(x, interval_fields(y)?, true, engine, control)
         }
         (T::Interval { .. }, _, BinaryOp::Add) => {
-            add_interval_to_temporal(y, interval_fields(x)?, false)
+            add_interval_to_temporal(y, interval_fields(x)?, false, engine, control)
         }
         (T::Time { micros: t1 }, T::Time { micros: t2 }, BinaryOp::Subtract) => {
             Ok(Value::Temporal(T::Interval {
@@ -229,29 +254,37 @@ fn temporal_pair_arith(
                 micros: t1 - t2,
             }))
         }
-        (_, _, BinaryOp::Subtract) => {
-            let lhs = temporal_timestamp_micros(x)?;
-            let rhs = temporal_timestamp_micros(y)?;
-            let diff = lhs
-                .checked_sub(rhs)
-                .ok_or_else(|| datetime_out_of_range("interval"))?;
-            // PostgreSQL justifies full 24h chunks into days but
-            // never synthesizes months from a timestamp difference.
-            Ok(Value::Temporal(T::Interval {
-                months: 0,
-                days: i32::try_from(diff / MICROS_PER_DAY)
-                    .map_err(|_| datetime_out_of_range("interval"))?,
-                micros: diff % MICROS_PER_DAY,
-            }))
-        }
+        (_, _, BinaryOp::Subtract) => subtract_timestamps(x, y),
         _ => Err(SQLError::TypeMismatch(format!(
             "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
         ))),
     }
 }
 
+fn subtract_timestamps(x: &TemporalValue, y: &TemporalValue) -> Result<Value> {
+    let lhs = temporal_timestamp_micros(x)?;
+    let rhs = temporal_timestamp_micros(y)?;
+    if let Some(infinity) = infinite::subtract(x.infinity(), y.infinity())? {
+        return Ok(Value::Temporal(infinity.interval()));
+    }
+    let diff = lhs
+        .checked_sub(rhs)
+        .ok_or_else(|| datetime_out_of_range("interval"))?;
+    // PostgreSQL justifies full 24h chunks into days but
+    // never synthesizes months from a timestamp difference.
+    Ok(Value::Temporal(TemporalValue::Interval {
+        months: 0,
+        days: i32::try_from(diff / MICROS_PER_DAY)
+            .map_err(|_| datetime_out_of_range("interval"))?,
+        micros: diff % MICROS_PER_DAY,
+    }))
+}
+
 /// The instant at `time` of day on the date `days` after the epoch, `offset` microseconds east of UTC, or `timestamp out of range` when it leaves the carrier.
 fn date_time_micros(days: i32, time: i64, offset: i64) -> Result<i64> {
+    if let Some(infinity) = (TemporalValue::Date { days }).infinity() {
+        return Ok(infinite::timestamp_micros(infinity));
+    }
     i64::from(days)
         .checked_mul(MICROS_PER_DAY)
         .and_then(|date| date.checked_add(time))
@@ -275,13 +308,26 @@ fn add_interval_to_temporal(
     base: &TemporalValue,
     span: IntervalFields,
     subtract: bool,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
 ) -> Result<Value> {
     use TemporalValue as T;
+    if matches!(base, T::Time { .. } | T::TimeTz { .. }) && !span.value().is_finite() {
+        return Err(SQLError::Routine {
+            sqlstate: "22008".into(),
+            message: if subtract {
+                "cannot subtract infinite interval from time"
+            } else {
+                "cannot add infinite interval to time"
+            }
+            .into(),
+        });
+    }
     let calendar_span = || if subtract { span.negate() } else { Ok(span) };
     match base {
         // date +/- interval promotes to timestamp in PostgreSQL.
         T::Date { days: base_days } => {
-            let ts = i64::from(*base_days) * MICROS_PER_DAY;
+            let ts = date_time_micros(*base_days, 0, 0)?;
             let span = calendar_span()?;
             Ok(Value::Temporal(T::Timestamp {
                 micros: timestamp_plus_interval(ts, span.months, span.days, span.micros)?,
@@ -296,7 +342,7 @@ fn add_interval_to_temporal(
         T::TimestampTz { micros: ts } => {
             let span = calendar_span()?;
             Ok(Value::Temporal(T::TimestampTz {
-                micros: timestamp_plus_interval(*ts, span.months, span.days, span.micros)?,
+                micros: timestamp_tz_plus_interval(*ts, span, engine, control)?,
             }))
         }
         // time +/- interval wraps within the day; months/days vanish.
@@ -327,10 +373,10 @@ fn wrap_time(time: i64, span: i64, subtract: bool) -> i64 {
 }
 
 /// Absolute timestamp microseconds for datetime-like temporal values.
-fn temporal_timestamp_micros(t: &TemporalValue) -> Result<i64> {
+pub(super) fn temporal_timestamp_micros(t: &TemporalValue) -> Result<i64> {
     use TemporalValue as T;
     match t {
-        T::Date { days } => Ok(i64::from(*days) * MICROS_PER_DAY),
+        T::Date { days } => date_time_micros(*days, 0, 0),
         T::Timestamp { micros } | T::TimestampTz { micros } => Ok(*micros),
         other => Err(SQLError::TypeMismatch(format!(
             "expected date or timestamp, got {other:?}"
@@ -387,6 +433,9 @@ fn temporal_naive(t: &TemporalValue) -> Result<NaiveDateTime> {
 pub(super) fn age_between(a: &TemporalValue, b: &TemporalValue) -> Result<Value> {
     let am = temporal_timestamp_micros(a)?;
     let bm = temporal_timestamp_micros(b)?;
+    if let Some(infinity) = infinite::subtract(a.infinity(), b.infinity())? {
+        return Ok(Value::Temporal(infinity.interval()));
+    }
     let sign: i64 = if am >= bm { 1 } else { -1 };
     let (hi, lo) = if am >= bm { (am, bm) } else { (bm, am) };
     let hi_dt = naive_from_micros(hi)?;

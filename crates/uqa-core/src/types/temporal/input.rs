@@ -6,7 +6,7 @@
 
 //! Date and time input as `PostgreSQL`'s input functions read it: ISO 8601 dates, times and timestamps with a UTC offset and an `AD` or `BC` era, the special values `now`, `today`, `tomorrow`, `yesterday`, `epoch` and `allballs`, and the diagnostics `DecodeDateTime`, `DecodeTimeOnly`, `DecodeTimezone` and `ValidateDate` report, each kept apart so the SQL layer names the type and the text.
 
-use super::{epoch_date, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
+use super::{epoch_date, TemporalInfinity, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
 use chrono::NaiveDate;
 
 /// Field order for ambiguous numeric calendar dates. ISO and compact dates retain year-first interpretation.
@@ -33,6 +33,8 @@ pub enum TemporalInputError {
     UnknownZone(String),
     /// An interval field does not fit its carrier (`22015`).
     IntervalFieldOverflow,
+    /// The combined year/month fields do not fit an interval (`22008`).
+    IntervalOutOfRange,
 }
 
 type Input<T> = Result<T, TemporalInputError>;
@@ -40,6 +42,7 @@ type Input<T> = Result<T, TemporalInputError>;
 /// The reserved words `DecodeSpecial` recognizes, each a `DTK_*` value.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Special {
+    Infinity(TemporalInfinity),
     Now,
     Today,
     Tomorrow,
@@ -49,6 +52,9 @@ enum Special {
 }
 
 fn special(token: &str) -> Option<Special> {
+    if let Some(infinity) = infinite_token(token) {
+        return Some(Special::Infinity(infinity));
+    }
     let lowered = token.to_ascii_lowercase();
     Some(match lowered.as_str() {
         "now" => Special::Now,
@@ -59,6 +65,16 @@ fn special(token: &str) -> Option<Special> {
         "allballs" => Special::Allballs,
         _ => return None,
     })
+}
+
+pub(super) fn infinite_token(token: &str) -> Option<TemporalInfinity> {
+    if token.eq_ignore_ascii_case("infinity") || token.eq_ignore_ascii_case("+infinity") {
+        Some(TemporalInfinity::Positive)
+    } else if token.eq_ignore_ascii_case("-infinity") {
+        Some(TemporalInfinity::Negative)
+    } else {
+        None
+    }
 }
 
 /// A calendar date read from the text, validated as `ValidateDate` validates it.
@@ -89,6 +105,15 @@ struct Fields {
     era: Option<bool>,
 }
 
+impl Fields {
+    fn infinity(&self) -> Option<TemporalInfinity> {
+        match self.date {
+            Some(DatePart::Special(Special::Infinity(infinity))) => Some(infinity),
+            _ => None,
+        }
+    }
+}
+
 impl TemporalValue {
     /// `date_in`: a calendar date, or `now`, `today`, `tomorrow`, `yesterday` or `epoch` resolved against `now_micros`; a time of day or zone after the date is read and ignored.
     pub fn date_input(text: &str, now_micros: i64) -> Input<Self> {
@@ -102,6 +127,9 @@ impl TemporalValue {
         order: TemporalDateOrder,
     ) -> Input<Self> {
         let fields = decode(text, order)?;
+        if let Some(infinity) = fields.infinity() {
+            return Ok(infinity.date());
+        }
         let days = match fields.date {
             Some(DatePart::Calendar(calendar)) => calendar_days(calendar)?,
             Some(DatePart::Special(special)) => special_days(special, now_micros)?,
@@ -163,6 +191,9 @@ impl TemporalValue {
         order: TemporalDateOrder,
     ) -> Input<Self> {
         let fields = decode(text, order)?;
+        if let Some(infinity) = fields.infinity() {
+            return Ok(infinity.timestamp());
+        }
         let micros = instant(&fields, now_micros)?;
         if !Self::timestamp_micros_in_range(micros) {
             return Err(TemporalInputError::OutOfRange);
@@ -182,6 +213,9 @@ impl TemporalValue {
         order: TemporalDateOrder,
     ) -> Input<Self> {
         let fields = decode(text, order)?;
+        if let Some(infinity) = fields.infinity() {
+            return Ok(infinity.timestamp_tz());
+        }
         let local = instant(&fields, now_micros)?;
         let offset = fields.zone.unwrap_or(0) * MICROS_PER_SECOND;
         let micros = local
@@ -235,7 +269,7 @@ fn special_days(special: Special, now_micros: i64) -> Input<i32> {
         Special::Tomorrow => today + 1,
         Special::Yesterday => today - 1,
         Special::Epoch => 0,
-        Special::Allballs => return Err(TemporalInputError::InvalidSyntax),
+        Special::Allballs | Special::Infinity(_) => return Err(TemporalInputError::InvalidSyntax),
     };
     i32::try_from(days).map_err(|_| TemporalInputError::OutOfRange)
 }
@@ -266,7 +300,10 @@ fn decode(text: &str, order: TemporalDateOrder) -> Input<Fields> {
             continue;
         }
         if let Some(special) = special(token) {
-            if fields.date.is_some() || fields.time.is_some() {
+            if fields.date.is_some()
+                || fields.time.is_some()
+                || (matches!(special, Special::Infinity(_)) && fields.zone.is_some())
+            {
                 return Err(TemporalInputError::InvalidSyntax);
             }
             fields.date = Some(DatePart::Special(special));
@@ -278,7 +315,7 @@ fn decode(text: &str, order: TemporalDateOrder) -> Input<Fields> {
         }
         if token.contains(':') {
             let (time, zone) = split_glued_zone(token);
-            if fields.time.is_some() {
+            if fields.time.is_some() || fields.infinity().is_some() {
                 return Err(TemporalInputError::InvalidSyntax);
             }
             fields.time = Some(decode_time(time)?);
@@ -324,10 +361,10 @@ fn decode(text: &str, order: TemporalDateOrder) -> Input<Fields> {
     }
     if let Some(DatePart::Calendar(calendar)) = &mut fields.date {
         validate_date(calendar, fields.era == Some(true))?;
-    } else if fields.era == Some(true) {
+    } else if fields.era == Some(true) && fields.infinity().is_none() {
         return Err(TemporalInputError::InvalidSyntax);
     }
-    if let Some(afternoon) = fields.meridian {
+    if let Some(afternoon) = fields.meridian.filter(|_| fields.infinity().is_none()) {
         let Some(micros) = fields.time else {
             return Err(TemporalInputError::InvalidSyntax);
         };
@@ -399,7 +436,7 @@ fn split_glued_zone(token: &str) -> (&str, Option<&str>) {
 }
 
 fn set_zone(fields: &mut Fields, zone: i64) -> Input<()> {
-    if fields.zone.is_some() {
+    if fields.zone.is_some() || fields.infinity().is_some() {
         return Err(TemporalInputError::InvalidSyntax);
     }
     fields.zone = Some(zone);

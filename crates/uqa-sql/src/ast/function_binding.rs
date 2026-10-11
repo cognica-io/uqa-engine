@@ -138,6 +138,10 @@ pub enum RangeFunctionOperation {
     Overlap,
     Contains,
     ContainedBy,
+    /// The range operand is first; the second operand has its declared subtype.
+    ContainsElement,
+    /// The range operand is second; the first operand has its declared subtype.
+    ElementContainedBy,
     Adjacent,
 }
 
@@ -304,6 +308,8 @@ impl RangeFunctionOperation {
             Self::Overlap => "range overlap operator",
             Self::Contains => "range contains operator",
             Self::ContainedBy => "range contained-by operator",
+            Self::ContainsElement => "range contains element operator",
+            Self::ElementContainedBy => "element contained-by range operator",
             Self::Adjacent => "range adjacent operator",
         }
     }

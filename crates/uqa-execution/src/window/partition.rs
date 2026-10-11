@@ -117,6 +117,18 @@ impl<'a> PartitionRows<'a> {
         self.hook.enum_labels()
     }
 
+    /// Frame support functions use the partition's invoking session.
+    pub(super) fn in_range(
+        &self,
+        value: &Value,
+        base: &Value,
+        offset: &Value,
+        subtract: bool,
+        less: bool,
+    ) -> Result<bool, SQLError> {
+        uqa_sql::expr::in_range_with_engine(value, base, offset, subtract, less, Some(self.hook))
+    }
+
     /// Evaluate an expression on the row at `position`.
     pub(super) fn evaluate(
         &mut self,

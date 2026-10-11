@@ -74,6 +74,10 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn temporal_date_order(&self) -> Option<uqa_core::TemporalDateOrder> {
         None
     }
+    /// The live interval input/output style; None preserves a caller's context.
+    fn temporal_interval_style(&self) -> Option<uqa_core::TemporalIntervalStyle> {
+        None
+    }
     /// The session's `statement_timeout`, which a statement starts with; `None` lets a statement run without a limit. Reading it captures none of the statement's execution inputs.
     fn statement_timeout(&self) -> Option<std::time::Duration>;
     /// Capture scanner settings at the SQL message boundary, before its first SET can execute.
@@ -96,6 +100,9 @@ pub(super) fn temporal_input_scope<S: Clone + 'static>(
 ) -> uqa_sql::expr::TemporalInputScope {
     uqa_sql::expr::TemporalInputContext {
         transaction_clock_micros: statements.transaction_timestamp_micros(),
+        interval_style: statements
+            .temporal_interval_style()
+            .unwrap_or_else(uqa_sql::expr::temporal_interval_style),
         date_order: statements
             .temporal_date_order()
             .unwrap_or_else(uqa_sql::expr::temporal_date_order),

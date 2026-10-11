@@ -35,6 +35,39 @@ fn temporal_input_range_errors_name_the_postgresql_input_type() {
 }
 
 #[test]
+fn interval_input_keeps_postgresql_final_range_and_field_errors_distinct() {
+    // Independently captured interval_in observations are recorded in Core's interval_style oracle.
+    for (input, sqlstate, message) in [
+        ("178956970 years 8 mons", "22008", "interval out of range"),
+        ("P178956970Y8M", "22008", "interval out of range"),
+        (
+            "2147483648 years",
+            "22015",
+            "interval field value out of range: \"2147483648 years\"",
+        ),
+        (
+            "1 mon 2 mons",
+            "22007",
+            "invalid input syntax for type interval: \"1 mon 2 mons\"",
+        ),
+        (
+            "PT1e-400S",
+            "22007",
+            "invalid input syntax for type interval: \"PT1e-400S\"",
+        ),
+    ] {
+        let error = cast_value(&Value::Str(input.into()), "interval").unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{input}"
+        );
+        assert_eq!(error.detail(), None);
+        assert_eq!(error.hint(), None);
+    }
+}
+
+#[test]
 fn void_casts_are_limited_to_postgresql_string_categories() {
     assert_eq!(
         cast_value_from(&Value::Str("ignored".into()), "void", Some("text")).unwrap(),

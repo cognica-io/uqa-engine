@@ -90,10 +90,21 @@ fn select_binding(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<FunctionBinding>>, SQLError> {
     control.check()?;
-    if binding.is_some() {
+    let previous = binding
+        .filter(|binding| binding.builtin)
+        .and_then(|binding| match binding.dispatch {
+            Some(FunctionDispatch::Range {
+                operation: RangeFunctionOperation::Contains | RangeFunctionOperation::ContainedBy,
+                subtype,
+                ..
+            }) => Some(subtype),
+            _ => None,
+        });
+    if binding.is_some() && previous.is_none() {
         return Ok(None);
     }
-    let Some(operation) = function_operation(name) else {
+    let containment = containment_name(name, binding);
+    let Some(operation) = function_operation(containment.unwrap_or(name)) else {
         return Ok(None);
     };
     let Some(first) = args.first() else {
@@ -104,17 +115,112 @@ fn select_binding(
         Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
         Ok(None) | Err(_) => return Ok(None),
     };
-    let Some((subtype, _, multirange)) = range_identity(&first_type) else {
-        return Ok(None);
-    };
-    Ok(Some(FunctionBinding::dispatched_with_control(
+    let dispatch = if let Some(name) = containment.filter(|_| args.len() == 2) {
+        let second_type = match super::call::infer_with_control(&args[1], infer, control) {
+            Ok(Some(ty)) => ty,
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Ok(None) | Err(_) => return Ok(None),
+        };
+        let Some(dispatch) =
+            containment_dispatch_with_control(name, &first_type, &second_type, control)?
+        else {
+            return Ok(None);
+        };
+        dispatch
+    } else {
+        let Some((subtype, _, multirange)) = range_identity(&first_type) else {
+            return Ok(None);
+        };
         FunctionDispatch::Range {
             operation,
             subtype,
             multirange,
-        },
-        control,
+        }
+    };
+    if let FunctionDispatch::Range { subtype, .. } = dispatch {
+        if previous.is_some_and(|previous| previous != subtype) {
+            return Ok(None);
+        }
+    }
+    if binding.is_some_and(|binding| binding.dispatch == Some(dispatch)) {
+        return Ok(None);
+    }
+    Ok(Some(FunctionBinding::dispatched_with_control(
+        dispatch, control,
     )?))
+}
+
+/// Retained compiler bindings keep their structural operator identity even when their diagnostic label is not a SQL call name.
+pub(super) fn containment_name<'a>(
+    name: &'a str,
+    binding: Option<&FunctionBinding>,
+) -> Option<&'a str> {
+    if super::containment::is_operator(name) {
+        return Some(name);
+    }
+    match binding.and_then(|binding| binding.dispatch) {
+        Some(FunctionDispatch::Range { operation, .. }) => match operation {
+            RangeFunctionOperation::Contains | RangeFunctionOperation::ContainsElement => {
+                Some("contains_op")
+            }
+            RangeFunctionOperation::ContainedBy | RangeFunctionOperation::ElementContainedBy => {
+                Some("contained_by_op")
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Select the polymorphic signature before text carriers erase operand identity.
+pub(super) fn containment_dispatch_with_control(
+    name: &str,
+    left: &ColumnType,
+    right: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<FunctionDispatch>, SQLError> {
+    control.check()?;
+    let contains = name == "contains_op";
+    let (container, element) = if contains {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let Some((subtype, _, multirange)) = range_identity(container) else {
+        return Ok(None);
+    };
+    let (operation, multirange) = if let Some((other, _, _)) = range_identity(element) {
+        if subtype != other {
+            return Ok(None);
+        }
+        let (_, _, left_multirange) = range_identity(left).expect("both operands are ranges");
+        (
+            if contains {
+                RangeFunctionOperation::Contains
+            } else {
+                RangeFunctionOperation::ContainedBy
+            },
+            left_multirange,
+        )
+    } else {
+        // `anyelement` retains domain identity, unlike the range operand's domain-to-base lookup. Numeric and temporal modifiers do not change its type OID.
+        if *element.without_type_modifiers_with_control(control)? != subtype.scalar_type() {
+            return Ok(None);
+        }
+        (
+            if contains {
+                RangeFunctionOperation::ContainsElement
+            } else {
+                RangeFunctionOperation::ElementContainedBy
+            },
+            multirange,
+        )
+    };
+    Ok(Some(FunctionDispatch::Range {
+        operation,
+        subtype,
+        multirange,
+    }))
 }
 
 fn function_operation(name: &str) -> Option<RangeFunctionOperation> {
@@ -159,6 +265,8 @@ pub(super) fn function_type(
             | RangeFunctionOperation::Overlap
             | RangeFunctionOperation::Contains
             | RangeFunctionOperation::ContainedBy
+            | RangeFunctionOperation::ContainsElement
+            | RangeFunctionOperation::ElementContainedBy
             | RangeFunctionOperation::Adjacent => ColumnType::Boolean,
         });
     }

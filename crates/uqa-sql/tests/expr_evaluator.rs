@@ -18,6 +18,12 @@ use uqa_sql::{compile, ResultRow};
 #[path = "expr_evaluator/json_extraction.rs"]
 mod json_extraction;
 
+#[path = "expr_evaluator/temporal_infinity.rs"]
+mod temporal_infinity;
+
+#[path = "expr_evaluator/timezone.rs"]
+mod timezone;
+
 fn projection_expr(sql: &str) -> Expr {
     let stmts = compile(sql).expect("compile");
     let stmt = match stmts.into_iter().next().expect("at least one stmt") {

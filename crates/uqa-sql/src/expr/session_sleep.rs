@@ -8,7 +8,7 @@
 
 use super::{EvalContext, Result, SQLError, Value};
 use std::time::Duration;
-use uqa_core::TemporalValue;
+use uqa_core::{memory::ProductionControl, TemporalValue};
 
 /// Evaluate a sleep function, or `None` for another name.
 pub(super) fn eval_session_sleep(
@@ -33,29 +33,12 @@ fn sleep(name: &str, args: &[Value], ctx: &EvalContext<'_>) -> Result<Value> {
     if matches!(argument, Value::Null) {
         return Ok(Value::Null);
     }
-    let seconds = match (name, argument) {
-        ("pg_sleep", value) => super::conversion::to_f64(value)?,
-        (
-            "pg_sleep_for",
-            Value::Temporal(TemporalValue::Interval {
-                months,
-                days,
-                micros,
-            }),
-        ) => {
-            let now = super::current_time::clock_timestamp_micros();
-            let until = super::time::timestamp_plus_interval(now, *months, *days, *micros)?;
-            (until - now) as f64 / 1_000_000.0
-        }
-        ("pg_sleep_until", Value::Temporal(TemporalValue::TimestampTz { micros })) => {
-            (*micros - super::current_time::clock_timestamp_micros()) as f64 / 1_000_000.0
-        }
-        (_, other) => {
-            return Err(SQLError::TypeMismatch(format!(
-                "{name} does not accept {other:?}"
-            )))
-        }
-    };
+    let seconds = sleep_seconds(
+        name,
+        argument,
+        ctx.engine,
+        &mut super::clock_timestamp_micros,
+    )?;
     let duration = if seconds > 0.0 {
         Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
     } else {
@@ -67,3 +50,61 @@ fn sleep(name: &str, args: &[Value], ctx: &EvalContext<'_>) -> Result<Value> {
     engine.sleep(duration)?;
     Ok(Value::Void)
 }
+
+fn sleep_seconds(
+    name: &str,
+    argument: &Value,
+    engine: Option<&dyn super::EngineHook>,
+    clock: &mut impl FnMut() -> i64,
+) -> Result<f64> {
+    match (name, argument) {
+        ("pg_sleep", value) => super::conversion::to_f64(value),
+        (
+            "pg_sleep_for",
+            Value::Temporal(TemporalValue::Interval {
+                months,
+                days,
+                micros,
+            }),
+        ) => {
+            let until = super::time::timestamp_tz_plus_interval(
+                clock(),
+                super::IntervalFields {
+                    months: *months,
+                    days: *days,
+                    micros: *micros,
+                },
+                engine,
+                &ProductionControl::uncontrolled(),
+            )?;
+            remaining_seconds(until, clock())
+        }
+        ("pg_sleep_until", Value::Temporal(TemporalValue::TimestampTz { micros })) => {
+            remaining_seconds(*micros, clock())
+        }
+        (_, other) => Err(SQLError::TypeMismatch(format!(
+            "{name} does not accept {other:?}"
+        ))),
+    }
+}
+
+fn remaining_seconds(until: i64, now: i64) -> Result<f64> {
+    // PostgreSQL's SQL wrappers subtract numeric epoch values, then convert the
+    // difference to float8. Raw timestamp subtraction loses infinities and can overflow.
+    let control = ProductionControl::uncontrolled();
+    let epoch = |micros| {
+        super::time::extract_from_value(
+            "epoch",
+            &Value::Temporal(TemporalValue::TimestampTz { micros }),
+            true,
+            &control,
+        )
+    };
+    let until = epoch(until)?;
+    let now = epoch(now)?;
+    let difference = super::eval_binary_values(crate::ast::BinaryOp::Subtract, &until, &now)?;
+    super::conversion::to_f64(&difference)
+}
+
+#[cfg(test)]
+mod tests;

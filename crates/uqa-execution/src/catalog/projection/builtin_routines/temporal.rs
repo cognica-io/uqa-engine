@@ -34,6 +34,26 @@ const fn routine(
 }
 
 pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
+    routine(
+        1026,
+        "timezone",
+        "i",
+        1114,
+        &[1186, 1184],
+        "timestamptz_izone",
+    ),
+    routine(1159, "timezone", "i", 1114, &[25, 1184], "timestamptz_zone"),
+    routine(2069, "timezone", "i", 1184, &[25, 1114], "timestamp_zone"),
+    routine(
+        2070,
+        "timezone",
+        "i",
+        1184,
+        &[1186, 1114],
+        "timestamp_izone",
+    ),
+    routine(6334, "timezone", "s", 1114, &[1184], "timestamptz_at_local"),
+    routine(6335, "timezone", "s", 1184, &[1114], "timestamp_at_local"),
     routine(1171, "date_part", "s", 701, &[25, 1184], "timestamptz_part"),
     routine(1172, "date_part", "i", 701, &[25, 1186], "interval_part"),
     routine(1273, "date_part", "i", 701, &[25, 1266], "timetz_part"),

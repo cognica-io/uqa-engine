@@ -176,6 +176,15 @@ impl deparse::ExpressionNames for Routines {
 
 #[test]
 fn typed_check_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/checks.json"));
+}
+
+#[test]
+fn infinite_temporal_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/temporal.json"));
+}
+
+fn check_typed_nodes(fixtures: &str) {
     #[derive(serde::Deserialize)]
     struct Fixture {
         base: String,
@@ -187,7 +196,7 @@ fn typed_check_nodes_and_sql_match_postgresql() {
         pretty_nonstandard: Option<String>,
     }
     // PostgreSQL 18.4 reference; fixtures retain expected expressions, not machine reports.
-    let fixtures: Vec<Fixture> = serde_json::from_str(include_str!("tests/checks.json")).unwrap();
+    let fixtures: Vec<Fixture> = serde_json::from_str(fixtures).unwrap();
     let mut failures = Vec::new();
     for fixture in fixtures {
         let base = if fixture.base == "d_base" {

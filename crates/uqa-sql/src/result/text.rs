@@ -16,12 +16,17 @@ use crate::expr::{
 use crate::SQLError;
 use uqa_core::{memory::ProductionControl, Value};
 
-/// Format a non-NULL result value using its declared type and optional catalog resolver. NULL remains separate from text in the calling result protocol.
+/// Format a result with its live session output style and declared type.
 pub fn format_postgres_text(
     value: &Value,
     ty: &ColumnType,
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
+    let _interval_style = if crate::expr::interval_style::output_can_contain_interval(value) {
+        crate::expr::interval_style::live_scope(engine, &ProductionControl::uncontrolled())?
+    } else {
+        None
+    };
     let catalog = engine.map(EngineValueCatalog);
     format_postgres_text_with_catalog(
         value,

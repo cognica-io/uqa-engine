@@ -18,7 +18,8 @@ pub(super) fn extract_session_zone(
     if !matches!(name, "extract" | "date_part") {
         return None;
     }
-    let [field, value @ Value::Temporal(TemporalValue::TimestampTz { micros })] = args else {
+    let [field, value @ Value::Temporal(temporal @ TemporalValue::TimestampTz { micros })] = args
+    else {
         return None;
     };
     Some((|| {
@@ -36,9 +37,12 @@ pub(super) fn extract_session_zone(
             sqlstate: "22023".into(),
             message: format!("time zone \"{zone}\" not recognized"),
         })?;
-        let offset = zone
-            .offset_at(micros.div_euclid(1_000_000))
-            .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
+        let offset = if temporal.is_finite() {
+            zone.offset_at(micros.div_euclid(1_000_000))
+                .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?
+        } else {
+            0
+        };
         let result = extract_from_value_with_offset(
             &field,
             value,

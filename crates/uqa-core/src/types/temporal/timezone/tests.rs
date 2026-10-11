@@ -111,6 +111,47 @@ fn local_gap_and_fold_choose_postgresql_offsets_without_dst_labels() {
 }
 
 #[test]
+fn dynamic_abbreviations_retain_their_own_historical_meanings() {
+    // PostgreSQL 18.4 timezone.json contains both conversion directions and
+    // instants before the first, between, and after the recorded definitions.
+    for (name, year, expected) in [
+        ("MSK", 1800, 10_800),
+        ("MSK", 2012, 14_400),
+        ("MSK", 2024, 10_800),
+        ("MSD", 2024, 14_400),
+        ("amst", 1800, 10_680),
+        ("AMST", 1980, 14_400),
+        ("AMST", 2024, 14_400),
+    ] {
+        let zone = TemporalTimeZone::abbreviation(name).unwrap();
+        assert_eq!(
+            zone.offset_at(seconds(year, 1, 15)),
+            Some(expected),
+            "{name} {year}"
+        );
+        assert_eq!(
+            zone.offset_for_local(seconds(year, 1, 15)),
+            Some(expected),
+            "{name} {year}"
+        );
+    }
+    assert_eq!(
+        TemporalTimeZone::named_or_abbreviation("MSK")
+            .unwrap()
+            .offset_at(seconds(1990, 7, 15)),
+        Some(14_400)
+    );
+    assert_eq!(
+        TemporalTimeZone::abbreviation("MSK")
+            .unwrap()
+            .offset_at(seconds(1990, 7, 15)),
+        Some(10_800)
+    );
+    assert!(TemporalTimeZone::abbreviation("Europe/Moscow").is_none());
+    assert!(TemporalTimeZone::abbreviation("MSK\0").is_none());
+}
+
+#[test]
 fn historical_seconds_and_dates_beyond_four_digit_years_are_preserved() {
     for (name, past, future) in [
         ("Europe/Amsterdam", 1_172, 7_200),
@@ -205,6 +246,11 @@ fn name_rule_and_local_resolution_do_not_allocate() {
             assert!(zone.offset_for_local(1_710_037_800).is_some());
         }
         assert!(TemporalTimeZone::named_or_abbreviation("MSK").is_some());
+        for name in ["MSK", "LKT"] {
+            let zone = TemporalTimeZone::abbreviation(name).unwrap();
+            assert!(zone.offset_at_micros(846_266_399_999_999).is_some());
+            assert!(zone.offset_for_local(846_266_399).is_some());
+        }
         assert!(TemporalTimeZone::canonical_name("asia/seoul").is_some());
     });
     assert_eq!(measured.count_total, 0);

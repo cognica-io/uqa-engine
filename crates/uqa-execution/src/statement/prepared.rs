@@ -31,6 +31,7 @@ pub struct PreparedRegistrationContext<'a> {
     /// The session's active transaction clock, including direct host registration.
     pub transaction_timestamp_micros: Option<i64>,
     pub date_order: Option<uqa_core::TemporalDateOrder>,
+    pub interval_style: Option<uqa_core::TemporalIntervalStyle>,
     pub clock: fn() -> i64,
 }
 
@@ -52,6 +53,9 @@ pub fn register_plan(
 ) -> Result<(), SQLError> {
     let _temporal_input = uqa_sql::expr::TemporalInputContext {
         transaction_clock_micros: context.transaction_timestamp_micros,
+        interval_style: context
+            .interval_style
+            .unwrap_or_else(uqa_sql::expr::temporal_interval_style),
         date_order: context
             .date_order
             .unwrap_or_else(uqa_sql::expr::temporal_date_order),

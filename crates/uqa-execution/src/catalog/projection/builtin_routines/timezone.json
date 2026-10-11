@@ -1,0 +1,8 @@
+[
+  ["1026", "timezone", "timestamptz_izone", "i", "true", "s", "1114", "1186 1184"],
+  ["1159", "timezone", "timestamptz_zone", "i", "true", "s", "1114", "25 1184"],
+  ["2069", "timezone", "timestamp_zone", "i", "true", "s", "1184", "25 1114"],
+  ["2070", "timezone", "timestamp_izone", "i", "true", "s", "1184", "1186 1114"],
+  ["6334", "timezone", "timestamptz_at_local", "s", "true", "s", "1114", "1184"],
+  ["6335", "timezone", "timestamp_at_local", "s", "true", "s", "1184", "1114"]
+]
