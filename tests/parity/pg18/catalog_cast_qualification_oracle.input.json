@@ -1,0 +1,317 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE SCHEMA cq_scope; CREATE TYPE cq_scope.record AS(n integer,t text); CREATE DOMAIN cq_scope.text AS pg_catalog.text CHECK(length(VALUE)>1); CREATE DOMAIN cq_scope.int4 AS pg_catalog.int4 CHECK(VALUE>10); CREATE DOMAIN cq_scope.\"integer\" AS pg_catalog.int4 CHECK(VALUE>20); CREATE DOMAIN cq_scope.float8 AS pg_catalog.float8 CHECK(VALUE>0); CREATE DOMAIN cq_scope.interval AS pg_catalog.interval CHECK(VALUE>INTERVAL '0 seconds'); CREATE DOMAIN cq_scope.varchar AS pg_catalog.text CHECK(VALUE='ok'); CREATE DOMAIN cq_scope.\"TEXT\" AS pg_catalog.text CHECK(length(VALUE)>1); CREATE TABLE public.cq_input(id integer PRIMARY KEY, v integer, s text); INSERT INTO public.cq_input VALUES(1,12,'x')"
+    },
+    {
+      "id": "path",
+      "sql": "SET search_path=cq_scope,pg_catalog,public"
+    },
+    {
+      "id": "record_shadow",
+      "sql": "SELECT pg_typeof(ROW(1,'a')::record)='cq_scope.record'::regtype AS v"
+    },
+    {
+      "id": "record_catalog",
+      "sql": "SELECT pg_typeof(ROW(1,'a')::pg_catalog.record)='pg_catalog.record'::regtype AS v"
+    },
+    {
+      "id": "record_catalog_quoted",
+      "sql": "SELECT pg_typeof(ROW(1,'a')::\"pg_catalog\".\"record\")='pg_catalog.record'::regtype AS v"
+    },
+    {
+      "id": "keyword_integer",
+      "sql": "SELECT pg_typeof(1::integer)='pg_catalog.int4'::regtype AS v"
+    },
+    {
+      "id": "catalog_integer",
+      "sql": "SELECT pg_typeof(1::pg_catalog.int4)='pg_catalog.int4'::regtype AS v"
+    },
+    {
+      "id": "quoted_integer",
+      "sql": "SELECT pg_typeof(23::\"integer\")='cq_scope.integer'::regtype AS v"
+    },
+    {
+      "id": "catalog_keyword_alias",
+      "sql": "SELECT 1::pg_catalog.integer"
+    },
+    {
+      "id": "named_int4",
+      "sql": "SELECT pg_typeof(12::int4)='cq_scope.int4'::regtype AS v"
+    },
+    {
+      "id": "keyword_int",
+      "sql": "SELECT pg_typeof(1::int)='pg_catalog.int4'::regtype AS v"
+    },
+    {
+      "id": "catalog_int4_array",
+      "sql": "SELECT pg_typeof('{1,2}'::pg_catalog.int4[])='pg_catalog.int4[]'::regtype AS v,('{1,2}'::pg_catalog.int4[])::text AS a"
+    },
+    {
+      "id": "named_int4_array",
+      "sql": "SELECT pg_typeof('{12,13}'::int4[])='cq_scope.int4[]'::regtype AS v"
+    },
+    {
+      "id": "named_text_domain",
+      "sql": "SELECT 'x'::text"
+    },
+    {
+      "id": "catalog_text",
+      "sql": "SELECT 'x'::pg_catalog.text AS v"
+    },
+    {
+      "id": "catalog_text_quoted",
+      "sql": "SELECT 'x'::\"pg_catalog\".\"text\" AS v"
+    },
+    {
+      "id": "named_text_identity",
+      "sql": "SELECT pg_typeof('ok'::text)='cq_scope.text'::regtype AS v"
+    },
+    {
+      "id": "catalog_text_array",
+      "sql": "SELECT '{x,y}'::pg_catalog.text[]::pg_catalog.text AS v"
+    },
+    {
+      "id": "keyword_float",
+      "sql": "SELECT pg_typeof((-1)::double precision)='pg_catalog.float8'::regtype AS v"
+    },
+    {
+      "id": "named_float8_domain",
+      "sql": "SELECT (-1)::float8"
+    },
+    {
+      "id": "catalog_float",
+      "sql": "SELECT (-1)::pg_catalog.float8 AS v"
+    },
+    {
+      "id": "keyword_varchar",
+      "sql": "SELECT 'abcd'::varchar(2)::pg_catalog.text AS v"
+    },
+    {
+      "id": "catalog_varchar",
+      "sql": "SELECT 'abcd'::pg_catalog.varchar(2)::pg_catalog.text AS v"
+    },
+    {
+      "id": "quoted_varchar_domain",
+      "sql": "SELECT 'bad'::\"varchar\""
+    },
+    {
+      "id": "catalog_numeric",
+      "sql": "SELECT 1.234::pg_catalog.numeric(3,1)::pg_catalog.text AS v"
+    },
+    {
+      "id": "keyword_interval",
+      "sql": "SELECT INTERVAL '-1 day'::interval day to second(3)::pg_catalog.text AS v"
+    },
+    {
+      "id": "catalog_interval_mask",
+      "sql": "SELECT '1 day 12:13:14.1234'::pg_catalog.interval(8)::pg_catalog.text AS v"
+    },
+    {
+      "id": "catalog_interval_precision",
+      "sql": "SELECT '1 day 12:13:14.1234'::pg_catalog.interval(32767,3)::pg_catalog.text AS v"
+    },
+    {
+      "id": "catalog_char",
+      "sql": "SELECT 'abc'::pg_catalog.\"char\"::pg_catalog.text AS v"
+    },
+    {
+      "id": "char_empty",
+      "sql": "SELECT ''::pg_catalog.\"char\" AS v,''::pg_catalog.\"char\"::pg_catalog.text AS t"
+    },
+    {
+      "id": "char_multibyte",
+      "sql": "SELECT 'é'::pg_catalog.\"char\" AS v,'é'::pg_catalog.\"char\"::pg_catalog.text AS t"
+    },
+    {
+      "id": "char_octal",
+      "sql": "SELECT '\\377'::pg_catalog.\"char\" AS v,'\\377'::pg_catalog.text::pg_catalog.\"char\"::pg_catalog.text AS t"
+    },
+    {
+      "id": "char_integer",
+      "sql": "SELECT (-1)::pg_catalog.\"char\" AS v,(-1)::pg_catalog.\"char\"::pg_catalog.int4 AS n"
+    },
+    {
+      "id": "char_integer_high",
+      "sql": "SELECT 128::pg_catalog.\"char\""
+    },
+    {
+      "id": "char_integer_low",
+      "sql": "SELECT (-129)::pg_catalog.\"char\""
+    },
+    {
+      "id": "char_unsigned_order",
+      "sql": "SELECT 'a'::pg_catalog.\"char\" < '\\377'::pg_catalog.\"char\" AS lt,'\\377'::pg_catalog.\"char\" > 'é'::pg_catalog.\"char\" AS gt"
+    },
+    {
+      "id": "create_char_storage",
+      "sql": "CREATE TYPE cq_scope.byte_holder AS(c pg_catalog.\"char\"); CREATE TABLE public.cq_bytes(id integer PRIMARY KEY,c pg_catalog.\"char\",a pg_catalog.\"char\"[],r cq_scope.byte_holder); INSERT INTO public.cq_bytes VALUES(1,'\\377',ARRAY['\\377'::pg_catalog.\"char\",'é'::pg_catalog.\"char\"],ROW('é'::pg_catalog.\"char\")::cq_scope.byte_holder); CREATE VIEW public.cq_byte_view AS SELECT id,c,c::pg_catalog.\"char\" AS same,c::pg_catalog.text AS rendered,a,r FROM public.cq_bytes"
+    },
+    {
+      "id": "char_storage_values",
+      "sql": "SELECT c,c::pg_catalog.int4 AS i,a,r,(r).c::pg_catalog.text AS field FROM public.cq_byte_view"
+    },
+    {
+      "id": "char_view_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_byte_view'::regclass,true) AS v"
+    },
+    {
+      "id": "create_narrow_storage",
+      "sql": "CREATE TABLE public.cq_narrow(id smallint PRIMARY KEY,t pg_catalog.varchar(4)); INSERT INTO public.cq_narrow VALUES(1,'abcd'); CREATE VIEW public.cq_narrow_view AS SELECT id::pg_catalog.int2 AS id,t::pg_catalog.varchar(4) AS same,t::pg_catalog.varchar(2) AS limited FROM public.cq_narrow"
+    },
+    {
+      "id": "narrow_values",
+      "sql": "SELECT id,same,limited FROM public.cq_narrow_view"
+    },
+    {
+      "id": "narrow_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_narrow_view'::regclass,true) AS v"
+    },
+    {
+      "id": "create_cte_view",
+      "sql": "CREATE VIEW public.cq_cte AS WITH q AS (SELECT v,s FROM public.cq_input) SELECT v::pg_catalog.int4 AS v,s::pg_catalog.text AS s FROM q"
+    },
+    {
+      "id": "cte_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_cte'::regclass,true) AS v"
+    },
+    {
+      "id": "catalog_uppercase_missing",
+      "sql": "SELECT 'ok'::pg_catalog.\"TEXT\""
+    },
+    {
+      "id": "user_uppercase",
+      "sql": "SELECT pg_typeof('ok'::\"TEXT\")='cq_scope.\"TEXT\"'::regtype AS v"
+    },
+    {
+      "id": "generated_domain_array",
+      "sql": "SELECT pg_typeof('{ok,ok}'::cq_scope._text)='cq_scope.text[]'::regtype AS v"
+    },
+    {
+      "id": "builtin_output_shadow",
+      "sql": "SELECT 'pg_catalog.text'::regtype::pg_catalog.text AS text, 'pg_catalog.int4'::regtype::pg_catalog.text AS integer, 'pg_catalog.record'::regtype::pg_catalog.text AS record, 'pg_catalog.float8'::regtype::pg_catalog.text AS float"
+    },
+    {
+      "id": "implicit_text_shadow",
+      "sql": "SELECT COALESCE(s,'x') AS v, GREATEST(s,'x') AS g FROM public.cq_input"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW public.cq_bound AS SELECT id,(v)::integer AS i,(s)::pg_catalog.text AS t,(v)::pg_catalog.float8 AS f FROM public.cq_input"
+    },
+    {
+      "id": "view_value",
+      "sql": "SELECT id,i,t,f::pg_catalog.text AS f FROM public.cq_bound"
+    },
+    {
+      "id": "view_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_bound'::regclass,true) AS v"
+    },
+    {
+      "id": "prepare_catalog",
+      "sql": "PREPARE cq_bound_parameter AS SELECT pg_typeof($1::pg_catalog.text)='pg_catalog.text'::regtype AS v"
+    },
+    {
+      "id": "prepared_metadata",
+      "sql": "SELECT parameter_types::pg_catalog.text AS v FROM pg_prepared_statements WHERE name='cq_bound_parameter'"
+    },
+    {
+      "id": "prepared_execute",
+      "sql": "EXECUTE cq_bound_parameter('x')"
+    },
+    {
+      "id": "create_routine",
+      "sql": "CREATE FUNCTION public.cq_cast(i integer) RETURNS integer LANGUAGE SQL RETURN i::pg_catalog.int4"
+    },
+    {
+      "id": "routine_execute",
+      "sql": "SELECT public.cq_cast(1) AS v"
+    },
+    {
+      "id": "create_char_literal_view",
+      "sql": "CREATE VIEW public.cq_byte_literal AS SELECT 'é'::pg_catalog.\"char\" AS c"
+    },
+    {
+      "id": "char_literal_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_byte_literal'::regclass,true) AS v"
+    },
+    {
+      "id": "create_bpchar_shadow",
+      "sql": "CREATE DOMAIN cq_scope.bpchar AS pg_catalog.text"
+    },
+    {
+      "id": "bpchar_catalog_spelling",
+      "sql": "SELECT format_type(1042,-1) AS explicit,format_type(1042,NULL) AS implicit"
+    },
+    {
+      "id": "hide_types",
+      "sql": "SET search_path=pg_catalog,public"
+    },
+    {
+      "id": "view_definition_hidden",
+      "sql": "SELECT pg_get_viewdef('public.cq_bound'::regclass,true) AS v"
+    },
+    {
+      "id": "view_hidden",
+      "sql": "SELECT id,i,t,f::text AS f FROM public.cq_bound"
+    },
+    {
+      "id": "create_builtin_text_routine",
+      "sql": "CREATE FUNCTION public.cq_text() RETURNS text LANGUAGE SQL RETURN 'x'::text"
+    },
+    {
+      "id": "routine_search_path_shadow",
+      "sql": "SET search_path=cq_scope,pg_catalog,public; SELECT public.cq_text() AS v"
+    },
+    {
+      "id": "reopen_view",
+      "sql": "SET search_path=cq_scope,pg_catalog,public; SELECT id,i,t,f::pg_catalog.text AS f FROM public.cq_bound",
+      "reopen": true
+    },
+    {
+      "id": "reopen_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_bound'::regclass,true) AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_routine",
+      "sql": "SELECT public.cq_cast(1) AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_char_storage",
+      "sql": "SELECT c,c::pg_catalog.int4 AS i,a,r,(r).c::pg_catalog.text AS field FROM public.cq_byte_view",
+      "reopen": true
+    },
+    {
+      "id": "reopen_char_view_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_byte_view'::regclass,true) AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_narrow_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_narrow_view'::regclass,true) AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_cte_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_cte'::regclass,true) AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_char_literal_definition",
+      "sql": "SELECT pg_get_viewdef('public.cq_byte_literal'::regclass,true) AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_builtin_text_routine",
+      "sql": "SELECT public.cq_text() AS v",
+      "reopen": true
+    }
+  ]
+}
