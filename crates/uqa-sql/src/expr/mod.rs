@@ -149,7 +149,10 @@ pub use context::{
     read_catalog_array_input, read_catalog_input, CatalogInputFunctions, EngineHook, EvalContext,
     RowLookup,
 };
-pub(crate) use context::{requires_catalog_constant_input, requires_domain_array_input};
+pub(crate) use context::{
+    format_regtype_value_with_catalog_and_control, requires_catalog_constant_input,
+    requires_domain_array_input,
+};
 pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
 mod numeric_operator;

@@ -23,6 +23,11 @@ pub trait ExpressionNames {
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
 
+    /// Type identities and current output metadata for admitted physical constants.
+    fn value_catalog(&self) -> Option<&dyn crate::expr::SQLValueCatalog> {
+        None
+    }
+
     /// The invoking session's string-literal rule for reconstructed SQL.
     fn standard_conforming_strings(&self) -> Result<bool, SQLError> {
         Ok(true)
@@ -285,16 +290,12 @@ impl Renderer<'_> {
             1082 | 1083 | 1114 | 1184 | 1186 | 1266 => {
                 quoted(&values::temporal::decode(bytes, oid)?.to_sql_string())
             }
-            _ if u32::try_from(oid)
-                .ok()
-                .and_then(crate::catalog::type_metadata::builtin_array_element)
-                .is_some() =>
-            {
-                quoted(&values::array_text(node)?)
-            }
-            _ => Err(SQLError::Unsupported(format!(
-                "catalog expression Datum deparser for type {oid}"
-            ))),
+            _ => match values::catalog_text(node, self.names.value_catalog())? {
+                Some(text) => quoted(&text),
+                None => Err(SQLError::Unsupported(format!(
+                    "catalog expression Datum deparser for type {oid}"
+                ))),
+            },
         }
     }
     fn constant_literal(

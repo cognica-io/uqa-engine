@@ -13,14 +13,41 @@ use super::{invalid, Field, Node};
 use crate::catalog::type_metadata::{
     pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier, pg_type_oid,
 };
+use crate::expr::composites::{
+    retained::{capture_type, Descriptors},
+    CompositeConstantSource, CompositeTypeCatalog,
+};
 use crate::{ColumnType, SQLError};
 use uqa_core::Value;
 
 pub(super) fn constant(value: &Value, ty: &ColumnType) -> Result<Node, SQLError> {
+    constant_with_source(value, ty, None, None)
+}
+
+pub(super) fn constant_with_source(
+    value: &Value,
+    ty: &ColumnType,
+    source: Option<&CompositeConstantSource>,
+    catalog: Option<&dyn CompositeTypeCatalog>,
+) -> Result<Node, SQLError> {
+    let value = source.map_or(value, |source| &source.value);
     let bytes = if matches!(value, Value::Null) {
         Field::Null
     } else {
-        datum(value, ty)?
+        let descriptors = if let Some(source) = source {
+            source
+                .descriptors
+                .iter()
+                .map(|descriptor| (descriptor.type_oid, std::sync::Arc::new(descriptor.clone())))
+                .collect()
+        } else if matches!(value, Value::Datum(_)) {
+            Descriptors::new()
+        } else {
+            let mut descriptors = Descriptors::new();
+            capture_type(ty, catalog, &mut descriptors)?;
+            descriptors
+        };
+        datum(value, ty, &descriptors)?
     };
     Ok(Node::new(
         "CONST",
@@ -37,7 +64,7 @@ pub(super) fn constant(value: &Value, ty: &ColumnType) -> Result<Node, SQLError>
     ))
 }
 
-fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
+fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Field, SQLError> {
     let mut representation = ty;
     while let ColumnType::Domain { base, .. } = representation {
         representation = base;
@@ -88,18 +115,23 @@ fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
             varlena(&crate::expr::encode_jsonb_datum(value)?)?
         }
         (Value::Array(array), ColumnType::Array(element)) => {
-            let payload = crate::expr::composites::retained::array_payload(
-                array,
-                element,
-                &crate::expr::composites::retained::Descriptors::new(),
-            )
-            .ok_or_else(|| {
-                SQLError::Unsupported(format!(
-                    "catalog array Datum encoding for {}",
-                    ty.sql_name()
-                ))
-            })?;
+            let payload =
+                crate::expr::composites::retained::array_payload(array, element, descriptors)
+                    .ok_or_else(|| {
+                        SQLError::Unsupported(format!(
+                            "catalog array Datum encoding for {}",
+                            ty.sql_name()
+                        ))
+                    })?;
             varlena(&payload)?
+        }
+        (Value::Datum(_), ColumnType::Array(_)) => {
+            let Value::Datum(owned) = crate::expr::datums::copy_constant_field(value, ty)? else {
+                return Err(SQLError::Internal(
+                    "physical array constant changed carrier".into(),
+                ));
+            };
+            owned.bytes().to_vec()
         }
         (Value::Decimal(value), ColumnType::Numeric { .. }) => varlena(&numeric::encode(value)?)?,
         (Value::Temporal(value), _) => temporal::encode(value, pg_type_oid(representation))?,
@@ -168,20 +200,40 @@ pub(super) fn varlena_payload(length: usize, bytes: &[u8]) -> Result<&[u8], SQLE
     Ok(&bytes[4..])
 }
 
-pub(super) fn array_text(node: &Node) -> Result<String, SQLError> {
+pub(super) fn catalog_text(
+    node: &Node,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+) -> Result<Option<String>, SQLError> {
     let oid = u32::try_from(node.integer("consttype")?)
-        .map_err(|_| invalid("invalid array constant type"))?;
-    let element = crate::catalog::type_metadata::builtin_array_element(oid)
-        .ok_or_else(|| invalid("unknown array constant type"))?;
-    if node.boolean("constbyval")? || node.integer("constlen")? != -1 {
-        return Err(invalid("invalid array constant layout"));
+        .map_err(|_| invalid("invalid catalog constant type"))?;
+    let ty = if let Some(element) = crate::catalog::type_metadata::builtin_array_element(oid) {
+        ColumnType::Array(Box::new(element.clone()))
+    } else if let Some(ty) = catalog
+        .map(|catalog| catalog.value_type_by_oid(oid))
+        .transpose()?
+        .flatten()
+    {
+        ty
+    } else {
+        return Ok(None);
+    };
+    if node.boolean("constbyval")? != pg_type_by_value(&ty)
+        || node.integer("constlen")? != pg_type_len(&ty)
+    {
+        return Err(invalid("invalid catalog constant layout"));
     }
     let Field::Datum { length, bytes } = node.field("constvalue")? else {
         return Err(invalid("constant has no Datum"));
     };
-    varlena_payload(*length, bytes)?;
-    let value = crate::expr::datums::read(&uqa_core::DatumValue::new(oid, 0, bytes.clone()))?;
-    crate::result::format_postgres_text(&value, &ColumnType::Array(Box::new(element.clone())), None)
+    if pg_type_len(&ty) == -1 {
+        varlena_payload(*length, bytes)?;
+    } else if i64::try_from(*length).ok() != Some(pg_type_len(&ty))
+        || (!pg_type_by_value(&ty) && bytes.len() != *length)
+    {
+        return Err(invalid("invalid catalog constant length"));
+    }
+    let value = Value::Datum(uqa_core::DatumValue::new(oid, 0, bytes.clone()));
+    crate::result::format_postgres_text_with_catalog(&value, &ty, catalog).map(Some)
 }
 
 fn varlena(payload: &[u8]) -> Result<Vec<u8>, SQLError> {

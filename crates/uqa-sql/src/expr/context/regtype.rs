@@ -8,6 +8,7 @@
 
 use super::super::conversion::{array_value_to_string_with_control, value_to_string_with_control};
 use super::{casting::rebuild_array, EngineHook};
+use crate::expr::{EngineValueCatalog, SQLValueCatalog};
 use crate::{
     ast::ColumnType,
     error::{Result, SQLError},
@@ -38,6 +39,23 @@ pub fn format_regtype_value_with_control(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>> {
+    let catalog = engine.map(EngineValueCatalog);
+    format_regtype_value_with_catalog_and_control(
+        value,
+        ty,
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn SQLValueCatalog),
+        control,
+    )
+}
+
+pub(crate) fn format_regtype_value_with_catalog_and_control(
+    value: &Value,
+    ty: &ColumnType,
+    catalog: Option<&dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<String>>> {
     control.check()?;
     if matches!(value, Value::Null) {
         return Ok(None);
@@ -49,7 +67,7 @@ pub fn format_regtype_value_with_control(
         let Value::Array(_) = value else {
             return value_to_string_with_control(value, control).map(Some);
         };
-        let Some(formatted) = format_regtype_elements_with_control(value, ty, engine, control)?
+        let Some(formatted) = format_regtype_elements_with_catalog(value, ty, catalog, control)?
         else {
             return Ok(None);
         };
@@ -64,10 +82,9 @@ pub fn format_regtype_value_with_control(
     if *oid == 0 {
         return Ok(Some(control.copy_text("-")?));
     }
-    let resolved = engine
-        .map(|engine| engine.resolve_regtype_output(ty, *oid))
-        .transpose()
-        .map_err(SQLError::Internal)?
+    let resolved = catalog
+        .map(|catalog| catalog.value_regtype_output(ty, *oid))
+        .transpose()?
         .flatten();
     match resolved {
         Some(text) => {
@@ -90,13 +107,30 @@ pub fn format_regtype_elements_with_control(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<uqa_core::ArrayValue>>> {
+    let catalog = engine.map(EngineValueCatalog);
+    format_regtype_elements_with_catalog(
+        value,
+        ty,
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn SQLValueCatalog),
+        control,
+    )
+}
+
+fn format_regtype_elements_with_catalog(
+    value: &Value,
+    ty: &ColumnType,
+    catalog: Option<&dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<uqa_core::ArrayValue>>> {
     let (ColumnType::Array(element), Value::Array(array)) = (ty, value) else {
         return Ok(None);
     };
     if !is_regtype(element) {
         return Ok(None);
     }
-    let elements = format_array_elements(array.elements(), element, engine, control)?;
+    let elements = format_array_elements(array.elements(), element, catalog, control)?;
     rebuild_array(array, elements, control)?
         .ok_or_else(|| {
             SQLError::Internal("regtype array output changed the array dimensions".into())
@@ -120,7 +154,7 @@ fn is_regtype(ty: &ColumnType) -> bool {
 fn format_array_elements(
     values: &[Value],
     element: &ColumnType,
-    engine: Option<&dyn EngineHook>,
+    catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<Value>>> {
     let mut output = ProductionVec::new(*control);
@@ -130,10 +164,12 @@ fn format_array_elements(
             Value::Null => control.finish(Value::Null, control.empty_reservation())?,
             Value::List(nested) => {
                 let (nested, memory) =
-                    format_array_elements(nested, element, engine, control)?.into_parts();
+                    format_array_elements(nested, element, catalog, control)?.into_parts();
                 control.finish(Value::List(nested), memory)?
             }
-            value => match format_regtype_value_with_control(value, element, engine, control)? {
+            value => match format_regtype_value_with_catalog_and_control(
+                value, element, catalog, control,
+            )? {
                 Some(text) => {
                     let (text, memory) = text.into_parts();
                     control.finish(Value::Str(text), memory)?

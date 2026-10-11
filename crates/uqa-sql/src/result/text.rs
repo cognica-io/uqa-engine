@@ -9,9 +9,12 @@
 use std::fmt::Write;
 
 use crate::ast::ColumnType;
-use crate::expr::{format_regtype_value, value_to_string, vector_value_to_string, EngineHook};
+use crate::expr::{
+    format_regtype_value_with_catalog_and_control, value_to_string, vector_value_to_string,
+    EngineHook, EngineValueCatalog, SQLValueCatalog,
+};
 use crate::SQLError;
-use uqa_core::Value;
+use uqa_core::{memory::ProductionControl, Value};
 
 /// Format a non-NULL result value using its declared type and optional catalog resolver. NULL remains separate from text in the calling result protocol.
 pub fn format_postgres_text(
@@ -19,15 +22,35 @@ pub fn format_postgres_text(
     ty: &ColumnType,
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
+    let catalog = engine.map(EngineValueCatalog);
+    format_postgres_text_with_catalog(
+        value,
+        ty,
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn SQLValueCatalog),
+    )
+}
+
+/// Format an admitted value through borrowed type and output metadata, without requiring a stateful scalar execution hook.
+pub fn format_postgres_text_with_catalog(
+    value: &Value,
+    ty: &ColumnType,
+    catalog: Option<&dyn SQLValueCatalog>,
+) -> Result<String, SQLError> {
     if let Value::Datum(datum) = value {
-        return format_postgres_text(
-            &crate::expr::datums::read_with_catalog(datum, engine)?,
+        return format_postgres_text_with_catalog(
+            &*crate::expr::datums::read_with_value_catalog_and_control(
+                datum,
+                catalog,
+                &ProductionControl::uncontrolled(),
+            )?,
             ty,
-            engine,
+            catalog,
         );
     }
     if let ColumnType::Domain { base, .. } = ty {
-        return format_postgres_text(value, base, engine);
+        return format_postgres_text_with_catalog(value, base, catalog);
     }
     if matches!(ty, ColumnType::InternalChar) {
         let byte = crate::expr::internal_char::value_byte(value)
@@ -39,18 +62,25 @@ pub fn format_postgres_text(
         .into_uncontrolled()
         .map_err(|_| SQLError::Internal("ordinary internal char output owner".into()));
     }
-    if let Some(text) = format_regtype_value(value, ty, engine)? {
-        return Ok(text);
+    if let Some(text) = format_regtype_value_with_catalog_and_control(
+        value,
+        ty,
+        catalog,
+        &ProductionControl::uncontrolled(),
+    )? {
+        return text
+            .into_uncontrolled()
+            .map_err(|_| SQLError::Internal("ordinary OID output owner".into()));
     }
     if matches!(ty, ColumnType::Int2Vector | ColumnType::OidVector) {
         return vector_value_to_string(value)?
             .ok_or_else(|| SQLError::Internal("invalid catalog vector result carrier".into()));
     }
     if let ColumnType::Array(element) = ty {
-        return format_array(value, element, engine);
+        return format_array(value, element, catalog);
     }
     if let (ColumnType::Composite(reference), Value::Record(fields)) = (ty, value) {
-        return format_record(fields, fields.type_oid().unwrap_or(reference.oid), engine);
+        return format_record(fields, fields.type_oid().unwrap_or(reference.oid), catalog);
     }
     Ok(match value {
         Value::Bool(value) => if *value { "t" } else { "f" }.into(),
@@ -59,15 +89,10 @@ pub fn format_postgres_text(
             crate::expr::format_real(*value as f32)
         }
         Value::Float(value) => uqa_core::format_float_pg(*value),
-        Value::Enum(label) => {
-            crate::expr::enums::enum_label_text(engine.and_then(EngineHook::enum_labels), label)?
-        }
+        Value::Enum(label) => crate::expr::enums::enum_label_text(catalog, label)?,
         // Container output calls each enum field's output function, which reads the current label.
         _ if crate::expr::enums::contains_enum_carrier(value) => {
-            value_to_string(&crate::expr::enums::render_enum_labels(
-                engine.and_then(EngineHook::enum_labels),
-                value,
-            )?)?
+            value_to_string(&crate::expr::enums::render_enum_labels(catalog, value)?)?
         }
         _ => value_to_string(value)?,
     })
@@ -76,7 +101,7 @@ pub fn format_postgres_text(
 fn format_array(
     value: &Value,
     element: &ColumnType,
-    engine: Option<&dyn EngineHook>,
+    catalog: Option<&dyn SQLValueCatalog>,
 ) -> Result<String, SQLError> {
     // SQL array type identity does not constrain value dimensions. Nested
     // declarations still name the scalar element formatter at every depth.
@@ -90,10 +115,9 @@ fn format_array(
             if let Some(actual) = crate::catalog::type_metadata::builtin_scalar_type(oid) {
                 element = actual;
             } else if crate::catalog::type_metadata::pg_type_oid(element) != i64::from(oid) {
-                catalog_element = engine
-                    .map(|engine| engine.resolve_type_oid(oid))
-                    .transpose()
-                    .map_err(SQLError::Internal)?
+                catalog_element = catalog
+                    .map(|catalog| catalog.value_type_by_oid(oid))
+                    .transpose()?
                     .flatten()
                     .ok_or_else(|| SQLError::Routine {
                         sqlstate: "XX000".into(),
@@ -113,9 +137,9 @@ fn format_array(
     for value in values {
         fields.push(match value {
             Value::Null => "NULL".into(),
-            Value::List(_) | Value::Array(_) => format_array(value, element, engine)?,
+            Value::List(_) | Value::Array(_) => format_array(value, element, catalog)?,
             _ => {
-                let text = format_postgres_text(value, element, engine)?;
+                let text = format_postgres_text_with_catalog(value, element, catalog)?;
                 if text.is_empty()
                     || text.eq_ignore_ascii_case("null")
                     || text.chars().any(|c| {
@@ -136,12 +160,15 @@ fn format_array(
 fn format_record(
     fields: &[(String, Value)],
     type_oid: u32,
-    engine: Option<&dyn EngineHook>,
+    catalog: Option<&dyn SQLValueCatalog>,
 ) -> Result<String, SQLError> {
-    let descriptor = crate::expr::composites::descriptor(
-        engine.and_then(EngineHook::composite_types),
-        type_oid,
-    )?;
+    let descriptor = catalog
+        .ok_or_else(|| SQLError::Internal("composite type catalog is unavailable".into()))?
+        .value_composite_type(type_oid)?
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("type with OID {type_oid} does not exist"),
+        })?;
     let mut text = String::from("(");
     for (index, (name, field)) in fields.iter().enumerate() {
         if index != 0 {
@@ -151,11 +178,13 @@ fn format_record(
             continue;
         }
         let rendered = match descriptor.attribute(name) {
-            Some((_, attribute)) => format_postgres_text(field, &attribute.ty, engine)?,
-            None => format_postgres_text(
+            Some((_, attribute)) => {
+                format_postgres_text_with_catalog(field, &attribute.ty, catalog)?
+            }
+            None => format_postgres_text_with_catalog(
                 field,
                 &crate::type_resolution::value_type(field).unwrap_or(ColumnType::Text),
-                engine,
+                catalog,
             )?,
         };
         let quoted = rendered.is_empty()
