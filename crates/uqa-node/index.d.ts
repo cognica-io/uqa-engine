@@ -153,6 +153,7 @@ export interface HttpSQLStreamFrame {
   requestId?: string
   code?: string
   message?: string
+  diagnostic?: import("./http").HttpSQLDiagnostic
 }
 
 export declare const enum JSFunctionVolatility {

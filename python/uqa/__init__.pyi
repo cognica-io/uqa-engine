@@ -118,6 +118,12 @@ class _AsyncNotificationRegistration:
     async def __aenter__(self) -> AsyncNotificationSubscription: ...
     async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool: ...
 
+class HttpEngineError(RuntimeError):
+    code: str | None
+    status: int | None
+    request_id: str | None
+    diagnostic: dict[str, str | int | None] | None
+
 class HttpEngine:
     def __init__(self, url: str, token: str) -> None: ...
     @staticmethod

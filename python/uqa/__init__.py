@@ -11,6 +11,7 @@ from __future__ import annotations
 from ._uqa import (
     Engine,
     HttpEngine,
+    HttpEngineError,
     HttpSQLStream,
     HttpNotificationOptions,
     NotificationError,
@@ -39,6 +40,7 @@ from ._notifications import AsyncNotificationSubscription
 __all__ = [
     "Engine",
     "HttpEngine",
+    "HttpEngineError",
     "HttpSQLStream",
     "HttpNotificationOptions",
     "NotificationError",

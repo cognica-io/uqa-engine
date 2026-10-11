@@ -31,7 +31,20 @@ pub enum SQLStreamFrame {
         code: String,
         message: String,
         request_id: String,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_diagnostic",
+            skip_serializing_if = "Option::is_none"
+        )]
+        diagnostic: Option<crate::SQLDiagnostic>,
     },
+}
+
+fn deserialize_diagnostic<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::SQLDiagnostic>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| serde_json::from_value(value).ok()))
 }
 
 impl SQLStreamFrame {

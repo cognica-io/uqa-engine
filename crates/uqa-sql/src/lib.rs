@@ -48,6 +48,7 @@ pub mod result;
 pub mod routines;
 pub mod schema;
 pub mod semantics;
+mod sql_batch_error;
 pub mod type_resolution;
 
 pub use ast::{ColumnType, Statement};
@@ -63,6 +64,7 @@ pub use fts_query::{FTSNode, FTSParser, FTSToken, FTSTokenType};
 pub use notice::{NoticeLevel, SQLNotice};
 pub use params::SQLParam;
 pub use result::{ResultRow, SQLResult, SQLResultKind};
+pub use sql_batch_error::SQLBatchError;
 
 pub use ir::{
     scalar_call_argument, scalar_call_arguments, ScalarExpr, ScalarFrameBound, ScalarOrder,

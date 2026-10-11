@@ -14,12 +14,15 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use tokio::runtime::{Builder, Runtime};
-use uqa_client::{HttpEngine, HttpEngineError, SQLStream, SQLStreamFrame, SecretString};
+use uqa_client::{
+    HttpEngine, HttpEngineError as CoreHttpEngineError, SQLStream, SQLStreamFrame, SecretString,
+};
 use uqa_sql::SQLParam;
 
 use super::{batch_from_py, map_to_py, params_from_py, PySQLResult};
 
 static HTTP_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+pyo3::create_exception!(_uqa, HttpEngineError, PyRuntimeError);
 
 #[pyclass(name = "HttpEngine", module = "uqa._uqa")]
 pub(super) struct PyHttpEngine {
@@ -201,7 +204,7 @@ impl PyHttpSQLStream {
         let frame = py.detach(move || {
             let mut stream = stream
                 .lock()
-                .map_err(|_| HttpEngineError::InvalidStreamSequence)?;
+                .map_err(|_| CoreHttpEngineError::InvalidStreamSequence)?;
             runtime.block_on(stream.next_frame())
         });
         let frame = frame.map_err(http_runtime_error)?;
@@ -244,7 +247,7 @@ pub(super) fn http_runtime() -> PyResult<&'static Runtime> {
 
 fn run_http<F, T>(py: Python<'_>, future: F) -> PyResult<T>
 where
-    F: Future<Output = Result<T, HttpEngineError>> + Send,
+    F: Future<Output = Result<T, CoreHttpEngineError>> + Send,
     T: Send,
 {
     let runtime = http_runtime()?;
@@ -252,8 +255,52 @@ where
         .map_err(http_runtime_error)
 }
 
-fn http_runtime_error(error: HttpEngineError) -> PyErr {
-    PyRuntimeError::new_err(error.to_string())
+fn http_runtime_error(error: CoreHttpEngineError) -> PyErr {
+    Python::attach(|py| {
+        let exception = HttpEngineError::new_err(error.to_string());
+        let value = exception.value(py);
+        let attributes = (|| -> PyResult<()> {
+            if let CoreHttpEngineError::Server {
+                status,
+                code,
+                request_id,
+                diagnostic,
+                ..
+            } = error
+            {
+                value.setattr("status", status.as_u16())?;
+                value.setattr("code", code)?;
+                value.setattr("request_id", request_id)?;
+                value.setattr(
+                    "diagnostic",
+                    diagnostic
+                        .map(|value| diagnostic_to_py(py, &value))
+                        .transpose()?,
+                )?;
+            } else {
+                for name in ["status", "code", "request_id", "diagnostic"] {
+                    value.setattr(name, py.None())?;
+                }
+            }
+            Ok(())
+        })();
+        match attributes {
+            Ok(()) => exception,
+            Err(error) => error,
+        }
+    })
+}
+
+fn diagnostic_to_py<'py>(
+    py: Python<'py>,
+    value: &uqa_client::SQLDiagnostic,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("sqlstate", value.sqlstate())?;
+    result.set_item("category", value.category.as_str())?;
+    result.set_item("statement_index", value.statement_index)?;
+    result.set_item("position", value.position)?;
+    Ok(result)
 }
 
 fn stream_frame_to_py(py: Python<'_>, frame: SQLStreamFrame) -> PyResult<Py<PyAny>> {
@@ -287,11 +334,15 @@ fn stream_frame_to_py(py: Python<'_>, frame: SQLStreamFrame) -> PyResult<Py<PyAn
             code,
             message,
             request_id,
+            diagnostic,
         } => {
             output.set_item("type", "error")?;
             output.set_item("code", code)?;
             output.set_item("message", message)?;
             output.set_item("request_id", request_id)?;
+            if let Some(diagnostic) = diagnostic {
+                output.set_item("diagnostic", diagnostic_to_py(py, &diagnostic)?)?;
+            }
         }
     }
     Ok(output.into_any().unbind())

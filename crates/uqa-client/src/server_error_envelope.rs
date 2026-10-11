@@ -16,4 +16,6 @@ pub(crate) struct ServerErrorEnvelope {
 pub(crate) struct ServerErrorDetail {
     pub code: String,
     pub message: String,
+    #[serde(default)]
+    pub diagnostic: Option<serde_json::Value>,
 }

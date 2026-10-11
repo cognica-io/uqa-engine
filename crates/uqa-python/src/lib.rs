@@ -88,6 +88,10 @@ fn uqa_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEngine>()?;
     m.add_class::<PyHttpEngine>()?;
     m.add_class::<PyHttpSQLStream>()?;
+    m.add(
+        "HttpEngineError",
+        m.py().get_type::<http_engine::HttpEngineError>(),
+    )?;
     m.add_class::<notifications::PyNotificationOptions>()?;
     m.add_class::<notifications::PyHttpNotificationOptions>()?;
     m.add_class::<notifications::PyNotificationRetryOptions>()?;

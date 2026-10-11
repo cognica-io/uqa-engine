@@ -10,6 +10,9 @@
 pub enum SQLError {
     #[error("{0}")]
     Parse(String),
+    /// Original parser diagnostics, including its one-based character position.
+    #[error("{0}")]
+    ParseDiagnostic(Box<pg_query::Diagnostic>),
     #[error("{0}")]
     Unsupported(String),
     /// The host configured this SQL session to require an independently owned notification subscription.
@@ -35,6 +38,12 @@ pub enum SQLError {
     MissingParam(usize),
     #[error("vector dimension mismatch: expected {expected}, got {actual}")]
     VectorDimMismatch { expected: usize, actual: usize },
+    #[error("{function_name}: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})")]
+    TextIndexRequired {
+        function_name: String,
+        table: String,
+        field: String,
+    },
     #[error("{0}")]
     Cancelled(#[from] uqa_core::QueryCancelled),
     /// Error raised by (or on behalf of) a user-defined SQL /
@@ -116,12 +125,13 @@ impl SQLError {
         match self {
             SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
             SQLError::Parse(_) => Some("42601"), // syntax_error
+            SQLError::ParseDiagnostic(diagnostic) => Some(&diagnostic.sqlstate),
             SQLError::Unsupported(_) | SQLError::NotificationRequiresSubscription => Some("0A000"), // feature_not_supported
             SQLError::UnknownTable(_) => Some("42P01"), // undefined_table
             SQLError::UnknownColumn(_) => Some("42703"), // undefined_column
             SQLError::AmbiguousColumn(_) => Some("42702"), // ambiguous_column
             SQLError::UnknownFunction(_) => Some("42883"), // undefined_function
-            SQLError::TypeMismatch(_) => Some("42804"), // datatype_mismatch
+            SQLError::TypeMismatch(_) | SQLError::TextIndexRequired { .. } => Some("42804"), // datatype_mismatch
             SQLError::BadArity { .. } => Some("42883"), // undefined_function (PG)
             SQLError::MissingParam(_) => Some("S1002"), // ERRCODE_INVALID_PARAMETER_VALUE
             SQLError::VectorDimMismatch { .. } => Some("22023"), // invalid_parameter_value
@@ -136,6 +146,7 @@ impl SQLError {
     pub fn detail(&self) -> Option<&str> {
         match self {
             SQLError::Diagnostic { detail, .. } => detail.as_deref(),
+            SQLError::ParseDiagnostic(diagnostic) => diagnostic.detail.as_deref(),
             _ => None,
         }
     }
@@ -144,6 +155,17 @@ impl SQLError {
     pub fn hint(&self) -> Option<&str> {
         match self {
             SQLError::Diagnostic { hint, .. } => hint.as_deref(),
+            SQLError::ParseDiagnostic(diagnostic) => diagnostic.hint.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// One-based character position in the submitted SQL, only when supplied by the parser.
+    pub fn position(&self) -> Option<u32> {
+        match self {
+            Self::ParseDiagnostic(diagnostic) => u32::try_from(diagnostic.cursor_position)
+                .ok()
+                .filter(|position| *position != 0),
             _ => None,
         }
     }
@@ -154,12 +176,7 @@ pub type Result<T> = std::result::Result<T, SQLError>;
 impl From<pg_query::Error> for SQLError {
     fn from(value: pg_query::Error) -> Self {
         match value {
-            pg_query::Error::ParseDiagnostic(diagnostic) => Self::Diagnostic {
-                sqlstate: diagnostic.sqlstate,
-                message: diagnostic.message,
-                detail: diagnostic.detail,
-                hint: diagnostic.hint,
-            },
+            pg_query::Error::ParseDiagnostic(diagnostic) => Self::ParseDiagnostic(diagnostic),
             pg_query::Error::Parse(message) => Self::Parse(message),
             other => Self::Parse(other.to_string()),
         }

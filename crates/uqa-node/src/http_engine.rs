@@ -55,6 +55,26 @@ pub struct HttpSQLStreamFrame {
     pub request_id: Option<String>,
     pub code: Option<String>,
     pub message: Option<String>,
+    pub diagnostic: Option<HttpSQLDiagnostic>,
+}
+
+#[napi(object, js_name = "HttpSQLDiagnostic")]
+pub struct HttpSQLDiagnostic {
+    pub sqlstate: Option<String>,
+    pub category: String,
+    pub statement_index: Option<u32>,
+    pub position: Option<u32>,
+}
+
+impl From<uqa_client::SQLDiagnostic> for HttpSQLDiagnostic {
+    fn from(value: uqa_client::SQLDiagnostic) -> Self {
+        Self {
+            sqlstate: value.sqlstate().map(str::to_owned),
+            category: value.category.as_str().to_owned(),
+            statement_index: value.statement_index,
+            position: value.position,
+        }
+    }
 }
 
 #[napi(object, js_name = "HttpEngineLocalOptions")]
@@ -269,6 +289,7 @@ impl TryFrom<CoreSQLStreamFrame> for HttpSQLStreamFrame {
             request_id: None,
             code: None,
             message: None,
+            diagnostic: None,
         };
         match frame {
             CoreSQLStreamFrame::Metadata {
@@ -303,11 +324,13 @@ impl TryFrom<CoreSQLStreamFrame> for HttpSQLStreamFrame {
                 code,
                 message,
                 request_id,
+                diagnostic,
             } => {
                 output.r#type = String::from("error");
                 output.code = Some(code);
                 output.message = Some(message);
                 output.request_id = Some(request_id);
+                output.diagnostic = diagnostic.map(Into::into);
             }
         }
         Ok(output)
