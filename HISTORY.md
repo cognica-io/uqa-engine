@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL infinite date, timestamp and interval values through input/output, casts, arithmetic, comparisons, ranges, window frames, aggregates and persistent storage. Keep finite interval overflow and mixed-infinity diagnostics, validate range bounds before canonicalization, and preserve empty containment.
+
 - Preserve physical array constants in the typed catalog expression codec, including dimensions, lower bounds, NULLs, element modifiers and domain/enum/composite identities across catalog changes. Share typed output through borrowed metadata while retaining live interval formatting.
 
 - Apply PostgreSQL `IntervalStyle` to interval input and SQL output, including prepared casts, arrays, records, JSON, assignment, cursors and stored definitions. Preserve exact input fields, fractional carries, ISO 8601 forms, duplicate-field checks, mixed signs and overflow diagnostics, with unchanged stored carriers and comparisons and ordinary transaction-local settings.
