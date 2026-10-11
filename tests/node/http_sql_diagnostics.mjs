@@ -28,6 +28,19 @@ for (const [sql, state, category, position] of [
     return true;
   });
   if (sql.startsWith("SELECT")) {
+    if (category === "syntax") {
+      await assert.rejects(engine.sqlStream(sql), (error) => {
+        assert.ok(error instanceof HttpEngineError);
+        assert.equal(error.status, 400);
+        assert.equal(error.code, "SQL_EXECUTION_FAILED");
+        assert.equal(error.diagnostic.sqlstate, state);
+        assert.equal(error.diagnostic.category, category);
+        assert.equal(error.diagnostic.position, position);
+        assert.ok(!error.message.includes("js_diagnostic_private"));
+        return true;
+      });
+      continue;
+    }
     const stream = await engine.sqlStream(sql);
     const frame = await stream.nextFrame();
     assert.equal(frame.type, "error");
