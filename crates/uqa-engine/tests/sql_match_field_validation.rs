@@ -52,22 +52,56 @@ fn expect_type_mismatch(result: Result<uqa_sql::SQLResult, SQLError>, needle: &s
     }
 }
 
+fn expect_text_index_required(
+    result: Result<uqa_sql::SQLResult, SQLError>,
+    expected_function: &str,
+    expected_table: &str,
+    expected_field: &str,
+) {
+    let error = result.expect_err("an unindexed text field must be rejected");
+    match &error {
+        SQLError::TextIndexRequired {
+            function_name,
+            table,
+            field,
+        } => {
+            assert_eq!(function_name, expected_function);
+            assert_eq!(table, expected_table);
+            assert_eq!(field, expected_field);
+        }
+        other => panic!("expected TextIndexRequired, got {other:?}"),
+    }
+    assert_eq!(error.sqlstate(), Some("42804"));
+    let message = error.to_string();
+    assert!(message.contains("has no text index"), "{message}");
+    assert!(
+        message.contains(&format!(
+            "CREATE INDEX ... ON {expected_table} USING gin ({expected_field})"
+        )),
+        "{message}"
+    );
+}
+
 #[test]
 fn unindexed_column_is_rejected_with_index_hint() {
     let eng = engine_with_pages(false);
-    expect_type_mismatch(
+    expect_text_index_required(
         eng.sql(
             "SELECT id FROM pages WHERE bayesian_match(body, $1)",
             &fusion_param(),
         ),
-        "no text index",
+        "bayesian_match",
+        "public.pages",
+        "body",
     );
-    expect_type_mismatch(
+    expect_text_index_required(
         eng.sql(
             "SELECT id FROM pages WHERE multi_field_match(title, body, $1, 2.0, 1.0)",
             &fusion_param(),
         ),
-        "no text index",
+        "multi_field_match",
+        "public.pages",
+        "title",
     );
 }
 
@@ -117,13 +151,15 @@ fn join_expression_fields_are_rejected() {
         ),
         "must be column references",
     );
-    expect_type_mismatch(
+    expect_text_index_required(
         eng.sql(
             "SELECT p.id FROM pages p LEFT JOIN revs r ON r.page_id = p.id \
               WHERE bayesian_match(r.markdown, $1)",
             &fusion_param(),
         ),
-        "no text index",
+        "bayesian_match",
+        "revs",
+        "markdown",
     );
 }
 

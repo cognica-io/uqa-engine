@@ -190,9 +190,24 @@ fn driver_rejects_declared_but_unindexed_text_column() {
             top_k: None,
         })
         .expect_err("an unindexed text column must not look like no matches");
+    match &error {
+        SQLError::TextIndexRequired {
+            function_name,
+            table,
+            field,
+        } => {
+            assert_eq!(function_name, "text search");
+            assert_eq!(table, "unindexed_notes");
+            assert_eq!(field, "body");
+        }
+        other => panic!("expected TextIndexRequired, got {other:?}"),
+    }
+    assert_eq!(error.sqlstate(), Some("42804"));
     assert!(
-        matches!(error, SQLError::TypeMismatch(ref message) if message.contains("has no text index")),
-        "unexpected error: {error}"
+        error.to_string().contains(
+            "has no text index; create one with CREATE INDEX ... ON unindexed_notes USING gin (body)"
+        ),
+        "unexpected diagnostic: {error}"
     );
 }
 
