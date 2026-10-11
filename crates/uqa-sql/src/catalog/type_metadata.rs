@@ -13,7 +13,10 @@ use crate::SQLError;
 use super::oids::stable_oid;
 
 mod builtins;
-pub use builtins::{builtin_array_element, builtin_scalar_type};
+pub use builtins::{
+    builtin_array_element, builtin_scalar_type, builtin_scalar_type_by_name, builtin_type_name,
+    pg_type_name,
+};
 
 pub fn catalog_type_name(oid: i64) -> &'static str {
     match oid {

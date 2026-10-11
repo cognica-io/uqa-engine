@@ -100,64 +100,7 @@ pub fn info_numeric_scale(ty: &ColumnType) -> Value {
     }
 }
 
-pub fn info_udt_name(ty: &ColumnType) -> String {
-    match ty {
-        ColumnType::Named(name) => {
-            unreachable!("unresolved declaration type {name} reached catalog projection")
-        }
-        ColumnType::SmallInteger => "int2".into(),
-        ColumnType::Integer => "int4".into(),
-        ColumnType::BigInteger => "int8".into(),
-        ColumnType::Oid => "oid".into(),
-        ColumnType::Xid => "xid".into(),
-        ColumnType::Boolean => "bool".into(),
-        ColumnType::Void => "void".into(),
-        ColumnType::Text => "text".into(),
-        ColumnType::RefCursor => "refcursor".into(),
-        ColumnType::Name => "name".into(),
-        ColumnType::Uuid => "uuid".into(),
-        ColumnType::Varchar(_) => "varchar".into(),
-        ColumnType::Bpchar | ColumnType::Character(_) => "bpchar".into(),
-        ColumnType::Real => "float4".into(),
-        ColumnType::DoublePrecision => "float8".into(),
-        ColumnType::Numeric { .. } => "numeric".into(),
-        ColumnType::Json => "json".into(),
-        ColumnType::JsonB => "jsonb".into(),
-        ColumnType::Bytea => "bytea".into(),
-        ColumnType::InternalChar => "char".into(),
-        ColumnType::Regproc => "regproc".into(),
-        ColumnType::Regprocedure => "regprocedure".into(),
-        ColumnType::Regclass => "regclass".into(),
-        ColumnType::Regcollation => "regcollation".into(),
-        ColumnType::Regnamespace => "regnamespace".into(),
-        ColumnType::Regrole => "regrole".into(),
-        ColumnType::Regtype => "regtype".into(),
-        ColumnType::PgNodeTree => "pg_node_tree".into(),
-        ColumnType::AclItem => "aclitem".into(),
-        ColumnType::Int2Vector => "int2vector".into(),
-        ColumnType::OidVector => "oidvector".into(),
-        ColumnType::AnyArray => "anyarray".into(),
-        ColumnType::Record => "record".into(),
-        ColumnType::Range(subtype) => subtype.range_name().into(),
-        ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
-        // An array type is named after its element type, and a nested array shares its innermost array type.
-        ColumnType::Array(element) => match element.as_ref() {
-            ColumnType::Array(_) => info_udt_name(element),
-            element => format!("_{}", info_udt_name(element)),
-        },
-        ColumnType::Date => "date".into(),
-        ColumnType::Time | ColumnType::TimePrecision(_) => "time".into(),
-        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "timetz".into(),
-        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "timestamp".into(),
-        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => "timestamptz".into(),
-        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "interval".into(),
-        ColumnType::Vector(_) => "vector".into(),
-        ColumnType::Tensor(_) => "tensor".into(),
-        ColumnType::Domain { name, .. } => name.clone(),
-        ColumnType::Enum(reference) => reference.name.clone(),
-        ColumnType::Composite(reference) => reference.name.clone(),
-    }
-}
+pub use uqa_sql::catalog::type_metadata::pg_type_name as info_udt_name;
 
 pub fn info_data_type(ty: &ColumnType) -> &str {
     match ty {

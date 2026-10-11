@@ -50,7 +50,33 @@ impl ColumnType {
             return Self::array_with_control(element_type, control).map_err(Into::into);
         }
         let (base, modifier) = split_type_modifier_with_control(&normalized, control)?;
-        let base = base.strip_prefix("pg_catalog.").unwrap_or(&base);
+        let catalog_name = base
+            .strip_prefix("pg_catalog.")
+            .or_else(|| base.strip_prefix("\"pg_catalog\"."));
+        let catalog_modifiers = catalog_name.is_some() || base.starts_with('"');
+        let catalog_type;
+        let base = if let Some(name) =
+            catalog_name.or_else(|| base.strip_prefix('"').map(|_| &**base))
+        {
+            let name = name
+                .strip_prefix('"')
+                .and_then(|name| name.strip_suffix('"'))
+                .unwrap_or(name);
+            if let Some(element) = builtin_array_element_name(name) {
+                return Self::array_with_control(
+                    Self::from_sql_name_with_control(element, control)?,
+                    control,
+                )
+                .map_err(Into::into);
+            }
+            let ty = crate::catalog::type_metadata::builtin_scalar_type_by_name(name).ok_or_else(
+                || crate::SQLError::Unsupported(format!("SQL type `{}` is not supported", &**base)),
+            )?;
+            catalog_type = ty.regtype_name_with_control(control)?;
+            catalog_type.as_str()
+        } else {
+            &base
+        };
         let temporal_precision = || {
             modifier
                 .map(|value| {
@@ -157,6 +183,7 @@ impl ColumnType {
             "timestamptz" | "timestamp with time zone" => {
                 Self::TimestampTz.with_temporal_precision(temporal_precision()?)
             }
+            "interval" if catalog_modifiers => catalog_interval_type(modifier),
             "interval" => Self::with_interval_modifiers(IntervalFields::All, temporal_precision()?),
             other if other.starts_with("interval ") => {
                 let fields = IntervalFields::from_sql_suffix(&other[9..]).ok_or_else(|| {
@@ -215,9 +242,43 @@ fn normalized_type_name<'a>(
     }
     let mut normalized = ProductionString::new(*control);
     normalized.reserve(name.len())?;
+    let mut quoted = false;
     for character in name.chars() {
-        normalized.push(character.to_ascii_lowercase())?;
+        if character == '"' {
+            quoted = !quoted;
+        }
+        normalized.push(if quoted {
+            character
+        } else {
+            character.to_ascii_lowercase()
+        })?;
     }
     let (normalized, memory) = normalized.finish()?.into_parts();
     control.finish(Cow::Owned(normalized), memory)
+}
+
+fn catalog_interval_type(modifier: Option<&str>) -> Result<ColumnType, crate::SQLError> {
+    let Some(modifier) = modifier else {
+        return Ok(ColumnType::Interval);
+    };
+    let mut parts = modifier.split(',').map(str::trim);
+    let mask = parts
+        .next()
+        .and_then(|mask| mask.parse::<i64>().ok())
+        .and_then(IntervalFields::from_modifier_mask)
+        .ok_or_else(|| crate::SQLError::TypeMismatch("invalid interval fields".into()))?;
+    let precision = parts
+        .next()
+        .map(|precision| {
+            precision.parse::<i64>().map_err(|_| {
+                crate::SQLError::TypeMismatch(format!("invalid temporal precision: {precision}"))
+            })
+        })
+        .transpose()?;
+    if parts.next().is_some() {
+        return Err(crate::SQLError::TypeMismatch(
+            "invalid interval type modifier".into(),
+        ));
+    }
+    ColumnType::with_interval_modifiers(mask, precision)
 }

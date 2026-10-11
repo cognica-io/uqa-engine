@@ -45,6 +45,49 @@ fn reg_alias_scalar_and_array_names_preserve_type_identity() {
 }
 
 #[test]
+fn catalog_type_identifiers_preserve_quoting_and_catalog_modifier_semantics() {
+    use super::IntervalFields;
+
+    for (name, expected) in [
+        ("pg_catalog.int4", ColumnType::Integer),
+        ("\"pg_catalog\".\"int4\"", ColumnType::Integer),
+        ("PG_CATALOG.INT4", ColumnType::Integer),
+        ("pg_catalog.\"char\"", ColumnType::InternalChar),
+        ("character", ColumnType::Character(1)),
+        ("pg_catalog.varchar(2)", ColumnType::Varchar(Some(2))),
+        (
+            "pg_catalog._int4",
+            ColumnType::Array(Box::new(ColumnType::Integer)),
+        ),
+        (
+            "pg_catalog.interval(8)",
+            ColumnType::IntervalWithFields {
+                fields: IntervalFields::Day,
+                precision: None,
+            },
+        ),
+        (
+            "\"pg_catalog\".\"interval\"(32767,3)",
+            ColumnType::IntervalWithFields {
+                fields: IntervalFields::All,
+                precision: Some(3),
+            },
+        ),
+    ] {
+        assert_eq!(ColumnType::from_sql_name(name).unwrap(), expected, "{name}");
+    }
+    // Qualified identifiers name pg_type entries; keyword aliases are parser syntax.
+    for name in [
+        "pg_catalog.integer",
+        "pg_catalog.boolean",
+        "pg_catalog.\"TEXT\"",
+        "\"integer\"",
+    ] {
+        assert!(ColumnType::from_sql_name(name).is_err(), "{name}");
+    }
+}
+
+#[test]
 fn current_routine_acl_entries_require_explicit_bound_endpoints() {
     let owner = uqa_core::catalog_role::RoleIdentity::BOOTSTRAP;
     let entry: RoutineAclEntry = serde_json::from_value(serde_json::json!({
