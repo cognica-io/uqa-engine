@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Independent PostgreSQL 18 observations for non-finite temporal values.
+//! Independent `PostgreSQL` 18 observations for non-finite temporal values.
 
 use super::{eval, projection_expr, EvalContext, Value};
 

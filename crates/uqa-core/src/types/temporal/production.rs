@@ -257,6 +257,9 @@ impl TemporalValue {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
+        if let Some(infinity) = self.infinity() {
+            return control.copy_text(infinity.as_str());
+        }
         match self {
             Self::Date { days } => {
                 match epoch_date().checked_add_signed(Duration::days(i64::from(*days))) {

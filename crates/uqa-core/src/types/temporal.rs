@@ -12,11 +12,13 @@ use crate::{
     ValueRetentionError,
 };
 
+mod infinite;
 mod input;
 mod keys;
 mod production;
 mod timezone;
 
+pub use infinite::TemporalInfinity;
 pub use input::{TemporalDateOrder, TemporalInputError};
 pub use timezone::TemporalTimeZone;
 
@@ -120,8 +122,8 @@ impl TemporalValue {
                 // PostgreSQL compares seconds west of UTC after adjusted time; our carrier stores minutes east. Widen before negation for arbitrary deserialized carriers.
                 -i64::from(*offset_minutes),
             ),
-            Self::Timestamp { micros } => (3, i128::from(*micros), 0),
-            Self::TimestampTz { micros } => (4, i128::from(*micros), 0),
+            Self::Timestamp { micros } => (3, self.timestamp_rank(*micros), 0),
+            Self::TimestampTz { micros } => (4, self.timestamp_rank(*micros), 0),
             // PostgreSQL's interval_cmp flattens to microseconds with
             // 30-day months for ordering purposes.
             Self::Interval {
@@ -175,6 +177,10 @@ fn parse_interval_literal(
     let mut text = ProductionString::new(*control);
     for character in input.trim().chars() {
         text.push(character.to_ascii_lowercase())?;
+    }
+    if let Some(infinity) = input::infinite_token(&text) {
+        control.check()?;
+        return Ok(Ok(infinity.interval()));
     }
     let value = parse_interval_tokens(&text, control)?;
     control.check()?;

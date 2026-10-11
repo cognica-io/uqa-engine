@@ -8,7 +8,7 @@
 
 use crate::catalog::node_tree::invalid;
 use crate::SQLError;
-use uqa_core::TemporalValue;
+use uqa_core::{TemporalInfinity, TemporalValue};
 
 const EPOCH_DAYS: i32 = 10_957;
 const EPOCH_MICROS: i64 = 946_684_800_000_000;
@@ -16,18 +16,25 @@ const EPOCH_MICROS: i64 = 946_684_800_000_000;
 pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLError> {
     let bytes = match (value, oid) {
         (TemporalValue::Date { days }, 1082) => {
-            let days = days
-                .checked_sub(EPOCH_DAYS)
-                .ok_or_else(|| invalid("date Datum overflow"))?;
+            let days = if value.is_finite() {
+                days.checked_sub(EPOCH_DAYS)
+                    .ok_or_else(|| invalid("date Datum overflow"))?
+            } else {
+                *days
+            };
             i64::from(days).to_le_bytes().to_vec()
         }
         (TemporalValue::Time { micros }, 1083) => micros.to_le_bytes().to_vec(),
         (TemporalValue::Timestamp { micros }, 1114)
-        | (TemporalValue::TimestampTz { micros }, 1184) => micros
-            .checked_sub(EPOCH_MICROS)
-            .ok_or_else(|| invalid("timestamp Datum overflow"))?
-            .to_le_bytes()
-            .to_vec(),
+        | (TemporalValue::TimestampTz { micros }, 1184) => (match value.infinity() {
+            Some(TemporalInfinity::Negative) => i64::MIN,
+            Some(TemporalInfinity::Positive) => i64::MAX,
+            None => micros
+                .checked_sub(EPOCH_MICROS)
+                .ok_or_else(|| invalid("timestamp Datum overflow"))?,
+        })
+        .to_le_bytes()
+        .to_vec(),
         (
             TemporalValue::TimeTz {
                 micros,
@@ -78,14 +85,33 @@ pub(crate) fn decode(bytes: &[u8], oid: i64) -> Result<TemporalValue, SQLError> 
             .ok_or_else(|| invalid("truncated temporal Datum"))
     };
     Ok(match oid {
-        1082 => TemporalValue::Date {
-            days: integer(0)?
-                .checked_add(EPOCH_DAYS)
-                .ok_or_else(|| invalid("date Datum overflow"))?,
-        },
+        1082 => {
+            let value = TemporalValue::Date { days: integer(0)? };
+            if !value.is_finite() {
+                return Ok(value);
+            }
+            TemporalValue::Date {
+                days: integer(0)?
+                    .checked_add(EPOCH_DAYS)
+                    .ok_or_else(|| invalid("date Datum overflow"))?,
+            }
+        }
         1083 => TemporalValue::Time { micros: micros()? },
         1114 | 1184 => {
-            let micros = micros()?
+            let micros = micros()?;
+            let infinity = match micros {
+                i64::MIN => Some(TemporalInfinity::Negative),
+                i64::MAX => Some(TemporalInfinity::Positive),
+                _ => None,
+            };
+            if let Some(infinity) = infinity {
+                return Ok(if oid == 1114 {
+                    infinity.timestamp()
+                } else {
+                    infinity.timestamp_tz()
+                });
+            }
+            let micros = micros
                 .checked_add(EPOCH_MICROS)
                 .ok_or_else(|| invalid("timestamp Datum overflow"))?;
             if oid == 1114 {
