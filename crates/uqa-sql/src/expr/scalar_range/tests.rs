@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod empty;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue};
 
 #[test]

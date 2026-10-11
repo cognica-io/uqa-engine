@@ -59,11 +59,14 @@ impl CanonicalRange {
         control: &ProductionControl<'_>,
     ) -> Result<bool> {
         control.check()?;
-        if self.subtype != other.subtype || self.empty {
+        if self.subtype != other.subtype {
             return Ok(false);
         }
         if other.empty {
             return Ok(true);
+        }
+        if self.empty {
+            return Ok(false);
         }
         let lower = match (self.lower(), other.lower()) {
             (None, _) => true,

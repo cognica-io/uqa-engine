@@ -61,6 +61,9 @@ impl RangeSet {
         control.check()?;
         for right in other.ranges() {
             control.check()?;
+            if right.is_empty() {
+                continue;
+            }
             let mut contains = false;
             for left in self.ranges() {
                 if left.contains_range_with_control(right, control)? {
