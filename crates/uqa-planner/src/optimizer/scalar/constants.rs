@@ -30,7 +30,7 @@ pub(crate) fn retain_computed_integer(
     ScalarExpr::TypedLiteral {
         composite_source: None,
         value: Value::Int(value),
-        ty: ty.sql_name(),
+        ty: ty.catalog_name(),
         bound_type: Some(ty),
         parameter_index,
     }

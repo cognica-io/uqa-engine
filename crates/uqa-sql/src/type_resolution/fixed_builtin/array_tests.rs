@@ -81,7 +81,7 @@ fn array_inspection_keeps_concrete_arguments_and_polymorphic_identity() {
             if dimension {
                 assert_eq!(binding.argument_types[1], "integer");
                 assert!(
-                    matches!(&args[1], ScalarExpr::Cast { ty, implicit: true, .. } if ty == "integer")
+                    matches!(&args[1], ScalarExpr::Cast { ty, implicit: true, .. } if ty == &ColumnType::Integer.catalog_name())
                 );
             }
             let mut types = vec![Some(ty.clone())];

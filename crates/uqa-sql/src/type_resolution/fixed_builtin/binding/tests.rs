@@ -68,7 +68,9 @@ fn local_fixed_binding_selects_the_same_default_cast_and_durable_signature() {
     let binding = root.call.binding.as_ref().unwrap();
     assert_eq!(binding.name, "pg_catalog.jsonb_strip_nulls");
     assert_eq!(binding.argument_types, ["jsonb", "boolean"]);
-    assert!(matches!(&root.call.arguments[0], ScalarExpr::Cast {ty, ..} if ty == "jsonb"));
+    assert!(
+        matches!(&root.call.arguments[0], ScalarExpr::Cast {ty, ..} if ty == &ColumnType::JsonB.catalog_name())
+    );
     assert_eq!(
         root.call.arguments[1],
         ScalarExpr::Literal(Value::Bool(false))

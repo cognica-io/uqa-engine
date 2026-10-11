@@ -94,7 +94,9 @@ fn selected_descriptor_keeps_named_default_and_unknown_literal_coercions() {
     );
     assert_eq!(args.len(), 2);
     assert_eq!(args[1], ScalarExpr::Literal(Value::Bool(false)));
-    assert!(matches!(&args[0], ScalarExpr::Cast { ty, .. } if ty == "jsonb"));
+    assert!(
+        matches!(&args[0], ScalarExpr::Cast { ty, .. } if ty == &ColumnType::JsonB.catalog_name())
+    );
     let (_, args) = assert_matches_candidate_path(
         "jsonb_strip_nulls",
         selected,
@@ -109,7 +111,9 @@ fn selected_descriptor_keeps_named_default_and_unknown_literal_coercions() {
         binding("pg_catalog.abs", &["integer"]),
         vec![ScalarExpr::Literal(Value::Null)],
     );
-    assert!(matches!(&args[0], ScalarExpr::Cast { ty, .. } if ty == "integer"));
+    assert!(
+        matches!(&args[0], ScalarExpr::Cast { ty, .. } if ty == &ColumnType::Integer.catalog_name())
+    );
 }
 
 #[test]

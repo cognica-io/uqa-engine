@@ -475,7 +475,7 @@ pub(super) fn bind_call_in_place_with_control(
             }
         };
         if position > 0 && ty.is_none() {
-            cast_names[position] = Some(control.copy_text("boolean")?);
+            cast_names[position] = Some(ColumnType::Boolean.catalog_name_with_control(control)?);
         } else if position == 0
             && local_name(&call.name).eq_ignore_ascii_case("array_sort")
             && ty.as_deref().is_some_and(is_json_array_type)

@@ -276,12 +276,12 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
     assert!(matches!(
         &args[0],
         ScalarExpr::Cast { expr, ty, .. }
-            if ty == "jsonb" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(_)))
+            if ty == &ColumnType::JsonB.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(_)))
     ));
     assert!(matches!(
         &args[1],
         ScalarExpr::Cast { expr, ty, .. }
-            if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
+            if ty == &ColumnType::Boolean.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Param(1))
     ));
 
     let defaulted = ScalarExpr::Func {
@@ -694,7 +694,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     assert_eq!(args[0], ScalarExpr::Column("integers".into()));
     assert!(matches!(
         &args[1],
-        ScalarExpr::Cast { ty, .. } if ty == "boolean"
+        ScalarExpr::Cast { ty, .. } if ty == &ColumnType::Boolean.catalog_name()
     ));
 
     let parameterized = call(
@@ -714,7 +714,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     assert!(matches!(
         &args[1],
         ScalarExpr::Cast { expr, ty, .. }
-            if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
+            if ty == &ColumnType::Boolean.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Param(1))
     ));
 
     let json_sort = call("array_sort", vec![ScalarExpr::Column("documents".into())]);

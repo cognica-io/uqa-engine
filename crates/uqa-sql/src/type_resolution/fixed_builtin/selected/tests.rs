@@ -78,7 +78,7 @@ fn selected_constructors_keep_input_payload_and_admit_cast_defaults_and_metadata
         panic!()
     };
     assert_eq!(text.as_ptr(), pointer);
-    assert_eq!(ty, "jsonb");
+    assert_eq!(ty, &crate::ColumnType::JsonB.catalog_name());
     assert_eq!(output.binding.argument_types, ["jsonb", "boolean"]);
     assert!(output.reserved_bytes() > original_bytes);
     assert_eq!(budget.used(), output.reserved_bytes());

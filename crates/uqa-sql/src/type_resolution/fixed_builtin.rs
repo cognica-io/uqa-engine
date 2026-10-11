@@ -418,7 +418,7 @@ fn coerce_arguments(
                     argument,
                     ScalarExpr::Literal(Value::Null),
                 )),
-                ty: declared.sql_name(),
+                ty: declared.catalog_name(),
             };
         }
     }

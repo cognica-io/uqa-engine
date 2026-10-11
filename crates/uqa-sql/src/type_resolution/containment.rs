@@ -164,7 +164,7 @@ fn prepare_cast(
     if !supported_type(target) {
         return Ok(None);
     }
-    let ty = target.sql_name_with_control(control)?;
+    let ty = target.catalog_name_with_control(control)?;
     let extra = control.reserve(size_of::<ScalarExpr>())?;
     let (ty, memory) = ty.into_parts();
     Ok(Some(

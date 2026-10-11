@@ -61,7 +61,7 @@ impl Construction<'_, '_> {
     }
 
     fn cast(&mut self, argument: ScalarExpr, ty: &ColumnType) -> Result<ScalarExpr, SQLError> {
-        let name = ty.sql_name_with_control(&self.control)?;
+        let name = ty.catalog_name_with_control(&self.control)?;
         let memory = self.control.reserve(size_of::<ScalarExpr>())?;
         *self.memory = self.control.combine(self.memory.take(), memory);
         let ty = self.retain(name);

@@ -54,7 +54,7 @@ pub fn fold_type_transform_assignment(
     transform.plan.scalar = ScalarExpr::TypedLiteral {
         composite_source: None,
         value,
-        ty: base.sql_name(),
+        ty: base.catalog_name(),
         bound_type: Some(base.clone()),
         parameter_index: None,
     };

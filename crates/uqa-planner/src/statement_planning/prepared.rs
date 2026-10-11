@@ -40,7 +40,7 @@ pub fn specialize_parameters(plan: &mut crate::UnifiedPlan, parameters: &[uqa_sq
             SQLParam::TypedScalar { value, ty } => ScalarExpr::TypedLiteral {
                 composite_source: None,
                 value: value.clone(),
-                ty: ty.sql_name(),
+                ty: ty.catalog_name(),
                 bound_type: Some(ty.clone()),
                 parameter_index: Some(*index),
             },

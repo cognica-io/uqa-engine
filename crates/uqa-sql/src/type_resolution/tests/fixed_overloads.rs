@@ -564,7 +564,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
                 matches!(
                     argument,
                     ScalarExpr::Cast { expr, ty, .. }
-                        if ty == expected_type
+                        if ty == &ColumnType::from_sql_name(expected_type).unwrap().catalog_name()
                             && matches!(expr.as_ref(), ScalarExpr::Param(index) if *index == position + 1)
                 ),
                 "{function} argument {position} must retain its selected SQL parameter type"
