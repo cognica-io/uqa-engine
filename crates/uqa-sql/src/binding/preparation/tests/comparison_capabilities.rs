@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Independent PostgreSQL query contracts require declared operators before reading rows.
+//! Independent `PostgreSQL` query contracts require declared operators before reading rows.
 
 use super::*;
 use crate::ast::CompositeTypeReference;

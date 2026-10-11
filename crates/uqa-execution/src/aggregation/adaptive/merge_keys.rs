@@ -7,11 +7,44 @@
 //! Equality-only aggregate keys merge by exact SQL hash encoding without acquiring an ordering operator.
 
 use crate::{
-    Batch, ExecResult, PhysicalOperator, PhysicalRow, RowSchema, SharedExpressionEvaluator,
+    Batch, ExecResult, ExternalSort, PhysicalOperator, PhysicalRow, RowSchema,
+    SharedExpressionEvaluator, SortKey, SpillBuffer, SpillScan,
 };
 use uqa_core::Value;
+use uqa_sql::{ast::InternalRelationId, ScalarExpr};
 
-pub(super) struct KeyedPartials<'a> {
+pub(super) fn sorted_partials<'a>(
+    partials: SpillBuffer,
+    relation: InternalRelationId,
+    group_count: usize,
+    order_group_values: bool,
+    evaluator: SharedExpressionEvaluator<'a>,
+    budget: usize,
+) -> ExternalSort<'a> {
+    let schema = super::super::partial_state::partial_schema(relation, group_count);
+    let mut scan: Box<dyn PhysicalOperator + 'a> = Box::new(SpillScan::new(schema, partials));
+    let positions = if order_group_values {
+        0..group_count
+    } else {
+        scan = Box::new(KeyedPartials::new(
+            scan,
+            relation,
+            group_count,
+            std::sync::Arc::clone(&evaluator),
+        ));
+        group_count + 1..group_count + 2
+    };
+    let keys = positions
+        .map(|index| SortKey {
+            expr: ScalarExpr::InternalColumn(relation.column(index)),
+            descending: false,
+            nulls_first: None,
+        })
+        .collect();
+    ExternalSort::new(scan, keys, evaluator, None, budget)
+}
+
+struct KeyedPartials<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     schema: RowSchema,
     group_count: usize,
@@ -20,7 +53,7 @@ pub(super) struct KeyedPartials<'a> {
 }
 
 impl<'a> KeyedPartials<'a> {
-    pub(super) fn new(
+    fn new(
         child: Box<dyn PhysicalOperator + 'a>,
         relation: uqa_sql::ast::InternalRelationId,
         group_count: usize,
@@ -156,7 +189,7 @@ mod tests {
                 *index
             })
             .collect::<Vec<_>>();
-        states.sort();
+        states.sort_unstable();
         assert_eq!(states, (0..6).collect::<Vec<_>>());
     }
 }

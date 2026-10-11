@@ -215,6 +215,11 @@ fn composite_from_fields(
                     {
                         return Ok(ty.clone());
                     }
+                    if let Some(element) =
+                        crate::catalog::type_metadata::builtin_array_element(field.oid)
+                    {
+                        return Ok(ColumnType::Array(Box::new(element.clone())));
+                    }
                     engine
                         .resolve_type_oid(field.oid)
                         .map_err(SQLError::Internal)?

@@ -6,11 +6,11 @@
 
 //! Finalization for in-memory and spilled adaptive aggregate state.
 
-use crate::{ExternalSort, PhysicalOperator, PhysicalRow, RowSchema, SortKey, SpillScan};
+use crate::{PhysicalOperator, PhysicalRow, RowSchema};
 
 use super::{
     AdaptiveAggregateSet, AggregateAccumulator, QueryBlockPlan, QueryExpressionContext, SQLError,
-    SQLParam, ScalarExpr, SpillBuffer, Value,
+    SQLParam, SpillBuffer, Value,
 };
 
 impl AdaptiveAggregateSet {
@@ -74,30 +74,14 @@ impl AdaptiveAggregateSet {
     ) -> Result<SpillBuffer, SQLError> {
         let group_count = self.statement.group_by.len();
         let enums = uqa_sql::expr::EngineHook::enum_labels(context);
-        let partial_schema =
-            super::super::partial_state::partial_schema(self.partial_relation, group_count);
-        let mut scan: Box<dyn PhysicalOperator + '_> =
-            Box::new(SpillScan::new(partial_schema, partials));
-        let evaluator = context.expression_evaluator(params);
-        let positions = if self.order_group_values {
-            0..group_count
-        } else {
-            scan = Box::new(super::merge_keys::KeyedPartials::new(
-                scan,
-                self.partial_relation,
-                group_count,
-                std::sync::Arc::clone(&evaluator),
-            ));
-            group_count + 1..group_count + 2
-        };
-        let keys = positions
-            .map(|index| SortKey {
-                expr: ScalarExpr::InternalColumn(self.partial_relation.column(index)),
-                descending: false,
-                nulls_first: None,
-            })
-            .collect();
-        let mut sorted = ExternalSort::new(scan, keys, evaluator, None, self.spill_budget);
+        let mut sorted = super::merge_keys::sorted_partials(
+            partials,
+            self.partial_relation,
+            group_count,
+            self.order_group_values,
+            context.expression_evaluator(params),
+            self.spill_budget,
+        );
         sorted
             .open()
             .map_err(super::super::sort_fallback::exec_to_sql_error)?;
