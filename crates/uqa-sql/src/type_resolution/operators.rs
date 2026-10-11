@@ -10,6 +10,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 
 use super::common::{base_type, common_numeric_type, merge_value_types, numeric_rank};
 
+mod btree;
 mod catalog;
 pub(crate) mod comparison;
 pub(super) mod numeric;

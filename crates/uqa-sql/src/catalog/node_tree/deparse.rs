@@ -12,6 +12,7 @@ use crate::SQLError;
 mod bodies;
 mod control;
 mod operators;
+mod rows;
 
 pub use bodies::return_body;
 
@@ -85,6 +86,8 @@ impl Renderer<'_> {
             "PARAM" => self.parameter(node),
             "CONST" => self.constant(node),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
+            "ROWEXPR" => self.row(node),
+            "ROWCOMPAREEXPR" => self.row_comparison(node),
             "NULLIFEXPR" => {
                 let [left, right] = list(node, "args")? else {
                     return Err(invalid("invalid NULLIF operands"));
@@ -109,9 +112,13 @@ impl Renderer<'_> {
             ),
             "BOOLEXPR" => self.boolean(node, outer),
             "NULLTEST" => {
-                let operator = match node.integer("nulltesttype")? {
-                    0 => "IS NULL",
-                    1 => "IS NOT NULL",
+                let scalar_row_test =
+                    !node.boolean("argisrow")? && self.is_record_argument(node.field("arg")?)?;
+                let operator = match (node.integer("nulltesttype")?, scalar_row_test) {
+                    (0, false) => "IS NULL",
+                    (1, false) => "IS NOT NULL",
+                    (0, true) => "IS NOT DISTINCT FROM NULL",
+                    (1, true) => "IS DISTINCT FROM NULL",
                     _ => return Err(invalid("invalid null test")),
                 };
                 Ok(parentheses(
@@ -225,6 +232,7 @@ impl Renderer<'_> {
         }
         let quoted = |value: &str| self.constant_literal(value, node, show_type);
         match oid {
+            705 => self.constant_literal(values::unknown_text(node)?, node, false),
             16 => match bytes.first() {
                 Some(0) => Ok("false".into()),
                 Some(1) => Ok("true".into()),

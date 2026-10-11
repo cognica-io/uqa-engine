@@ -85,6 +85,111 @@
   },
   {
     "base": "integer",
+    "check": "ROW(VALUE, 1, NULL::integer) IS DISTINCT FROM ROW(2, 3, NULL::integer)",
+    "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+    "sql": "(((VALUE IS DISTINCT FROM 2) OR (1 IS DISTINCT FROM 3)) OR (NULL::integer IS DISTINCT FROM NULL::integer))",
+    "pretty": "VALUE IS DISTINCT FROM 2 OR 1 IS DISTINCT FROM 3 OR NULL::integer IS DISTINCT FROM NULL::integer"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE) IS DISTINCT FROM ROW(2)",
+    "conbin": "{DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE IS DISTINCT FROM 2)",
+    "pretty": "VALUE IS DISTINCT FROM 2"
+  },
+  {
+    "base": "integer",
+    "check": "ROW() IS DISTINCT FROM ROW()",
+    "conbin": "{CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]}",
+    "sql": "false",
+    "pretty": "false"
+  },
+  {
+    "base": "integer",
+    "check": "ROW() IS NOT DISTINCT FROM ROW()",
+    "conbin": "{BOOLEXPR :boolop not :args ({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(NOT false)",
+    "pretty": "NOT false"
+  },
+  {
+    "base": "integer",
+    "check": "ROW() IS NULL",
+    "conbin": "{NULLTEST :arg {ROWEXPR :args <> :row_typeid 2249 :row_format 2 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+    "sql": "(ROW() IS NULL)",
+    "pretty": "ROW() IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "ROW() IS NOT NULL",
+    "conbin": "{NULLTEST :arg {ROWEXPR :args <> :row_typeid 2249 :row_format 2 :colnames <> :location -1} :nulltesttype 1 :argisrow true :location -1}",
+    "sql": "(ROW() IS NOT NULL)",
+    "pretty": "ROW() IS NOT NULL"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, NULL, 'x') IS NULL",
+    "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull true :location -1 :constvalue <>} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\" \"f3\") :location -1} :nulltesttype 0 :argisrow true :location -1}",
+    "sql": "(ROW(VALUE, NULL::unknown, 'x') IS NULL)",
+    "pretty": "ROW(VALUE, NULL::unknown, 'x') IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, NULL) < ROW(2, 3)",
+    "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 97 97) :opfamilies (o 1976 1976) :inputcollids (o 0 0) :largs ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :rargs ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]})}",
+    "sql": "(ROW(VALUE, NULL::integer) < ROW(2, 3))",
+    "pretty": "(ROW(VALUE, NULL::integer) < ROW(2, 3))"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(ROW(VALUE, 2), 3) = ROW(ROW(1, 2), 4)",
+    "conbin": "{BOOLEXPR :boolop and :args ({OPEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1}) :location -1} {OPEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((ROW(VALUE, 2) = ROW(1, 2)) AND (3 = 4))",
+    "pretty": "ROW(VALUE, 2) = ROW(1, 2) AND 3 = 4"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(ROW(VALUE, 2), 3) IS DISTINCT FROM ROW(ROW(1, 2), 4)",
+    "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((ROW(VALUE, 2) IS DISTINCT FROM ROW(1, 2)) OR (3 IS DISTINCT FROM 4))",
+    "pretty": "ROW(VALUE, 2) IS DISTINCT FROM ROW(1, 2) OR 3 IS DISTINCT FROM 4"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 1) IS DISTINCT FROM NULL",
+    "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "(ROW(VALUE, 1) IS DISTINCT FROM NULL)",
+    "pretty": "ROW(VALUE, 1) IS DISTINCT FROM NULL"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 1) IS NOT DISTINCT FROM NULL",
+    "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(ROW(VALUE, 1) IS NOT DISTINCT FROM NULL)",
+    "pretty": "ROW(VALUE, 1) IS NOT DISTINCT FROM NULL"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 1)::record IS NULL",
+    "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :nulltesttype 0 :argisrow true :location -1}",
+    "sql": "(ROW(VALUE, 1) IS NULL)",
+    "pretty": "ROW(VALUE, 1) IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 1)::record < ROW(2, 3)::record",
+    "conbin": "{OPEXPR :opno 2990 :opfuncid 2983 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1}) :location -1}",
+    "sql": "(ROW(VALUE, 1) < ROW(2, 3))",
+    "pretty": "ROW(VALUE, 1) < ROW(2, 3)"
+  },
+  {
+    "base": "xid",
+    "check": "ROW(VALUE) = ROW('1'::xid)",
+    "conbin": "{OPEXPR :opno 352 :opfuncid 68 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 28 :typeMod -1 :collation 0 :location -1} {CONST :consttype 28 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE = '1'::xid)",
+    "pretty": "VALUE = '1'::xid"
+  },
+  {
+    "base": "integer",
     "check": "ROW(VALUE, NULL::integer) < ROW(2, 3)",
     "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 97 97) :opfamilies (o 1976 1976) :inputcollids (o 0 0) :largs ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :rargs ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]})}",
     "sql": "(ROW(VALUE, NULL::integer) < ROW(2, 3))",

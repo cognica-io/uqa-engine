@@ -63,7 +63,14 @@ impl ExpressionContext<'_> {
                 let [lhs, rhs] = args else {
                     return Err(SQLError::Internal("invalid distinct operands".into()));
                 };
-                let mut value = self.binary(BinaryOp::Equal, lhs, rhs)?;
+                if binding
+                    .is_some_and(|binding| binding.dispatch == Some(FunctionDispatch::IsDistinct))
+                {
+                    if let (Expr::Row(left), Expr::Row(right)) = (lhs, rhs) {
+                        return self.row_distinct(left, right).map(Some);
+                    }
+                }
+                let mut value = self.scalar_binary(BinaryOp::Equal, lhs, rhs)?;
                 value.node.kind = "DISTINCTEXPR".into();
                 return Ok(Some(value));
             }

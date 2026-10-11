@@ -20,6 +20,51 @@ use crate::expr::composites::{
 use crate::{ColumnType, SQLError};
 use uqa_core::Value;
 
+/// Unresolved ROW fields retain `PostgreSQL`'s unknown/cstring Datum until a consumer selects a type.
+pub(super) fn unknown_constant(value: &Value) -> Result<Node, SQLError> {
+    let bytes = match value {
+        Value::Null => Field::Null,
+        Value::Str(text) => {
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0);
+            Field::Datum {
+                length: bytes.len(),
+                bytes,
+            }
+        }
+        _ => return Err(invalid("unknown constant is not a string or NULL")),
+    };
+    Ok(Node::new(
+        "CONST",
+        [
+            ("consttype", 705.into()),
+            ("consttypmod", (-1).into()),
+            ("constcollid", 0.into()),
+            ("constlen", (-2).into()),
+            ("constbyval", false.into()),
+            ("constisnull", matches!(value, Value::Null).into()),
+            ("location", (-1).into()),
+            ("constvalue", bytes),
+        ],
+    ))
+}
+
+pub(super) fn unknown_text(node: &Node) -> Result<&str, SQLError> {
+    let Field::Datum { length, bytes } = node.field("constvalue")? else {
+        return Err(invalid("unknown constant has no Datum"));
+    };
+    if node.integer("constlen")? != -2
+        || node.boolean("constbyval")?
+        || *length != bytes.len()
+        || bytes.last() != Some(&0)
+        || bytes[..bytes.len() - 1].contains(&0)
+    {
+        return Err(invalid("invalid unknown constant Datum"));
+    }
+    std::str::from_utf8(&bytes[..bytes.len() - 1])
+        .map_err(|_| invalid("invalid UTF-8 in unknown Datum"))
+}
+
 pub(super) fn constant(value: &Value, ty: &ColumnType) -> Result<Node, SQLError> {
     constant_with_source(value, ty, None, None)
 }

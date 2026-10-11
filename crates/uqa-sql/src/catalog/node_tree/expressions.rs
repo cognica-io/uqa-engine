@@ -9,6 +9,7 @@
 mod coercion;
 mod constructs;
 mod operators;
+mod rows;
 
 use super::{values, Field, Node};
 use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax};
@@ -74,6 +75,7 @@ impl ExpressionContext<'_> {
             Expr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs)?,
             Expr::UnaryMinus(argument) => self.unary_minus(argument)?,
             Expr::Array(elements) => self.array(elements, expected)?,
+            Expr::Row(elements) => self.row(elements)?,
             Expr::InList {
                 expr,
                 list,
@@ -89,13 +91,18 @@ impl ExpressionContext<'_> {
             Expr::Not(item) => self.boolean("not", std::slice::from_ref(item.as_ref()))?,
             Expr::IsNull { expr, negated } => {
                 let arg = self.encode(expr, None)?;
+                let mut ty = &arg.ty;
+                while let ColumnType::Domain { base, .. } = ty {
+                    ty = base;
+                }
+                let is_row = matches!(ty, ColumnType::Record | ColumnType::Composite(_));
                 TypedNode {
                     node: Node::new(
                         "NULLTEST",
                         [
                             ("arg", arg.node.into()),
                             ("nulltesttype", i64::from(*negated).into()),
-                            ("argisrow", false.into()),
+                            ("argisrow", is_row.into()),
                             ("location", (-1).into()),
                         ],
                     ),
@@ -281,6 +288,13 @@ impl ExpressionContext<'_> {
     }
 
     fn binary(&self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Result<TypedNode, SQLError> {
+        if let (Expr::Row(left), Expr::Row(right)) = (lhs, rhs) {
+            return self.row_comparison(op, left, right);
+        }
+        self.scalar_binary(op, lhs, rhs)
+    }
+
+    fn scalar_binary(&self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Result<TypedNode, SQLError> {
         let types = [self.expression_type(lhs)?, self.expression_type(rhs)?];
         let [left, right, result] =
             binary_operator_types(op, types[0].as_ref(), types[1].as_ref())?;
