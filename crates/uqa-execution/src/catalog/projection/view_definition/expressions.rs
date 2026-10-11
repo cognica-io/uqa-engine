@@ -273,7 +273,7 @@ impl Deparser<'_> {
         if let Some(rendered) = self.coercion(expr, ty, implicit, scope, subqueries)? {
             return Ok(rendered);
         }
-        let display = self.type_display(ty);
+        let display = self.type_display(ty)?;
         if let ScalarExpr::Literal(value) = expr {
             if matches!(value, Value::Str(_)) {
                 if let Some(constant) = self.literal_cast_constant(value, ty)? {
@@ -752,8 +752,7 @@ fn literal_has_type(value: &Value, ty: &str) -> bool {
 
 /// `format_type_with_typemod` of a stored built-in type name: the SQL spelling with its modifier (`integer`, `character varying(3)`, `time(3) without time zone`), or the name as written when it is not a built-in type.
 pub(super) fn type_name(ty: &str) -> String {
-    ColumnType::from_sql_name(ty)
-        .map_or_else(|_| ty.to_string(), |resolved| resolved.catalog_name())
+    ColumnType::from_sql_name(ty).map_or_else(|_| ty.to_string(), |resolved| resolved.sql_name())
 }
 
 fn precedence(expression: &ScalarExpr) -> u8 {

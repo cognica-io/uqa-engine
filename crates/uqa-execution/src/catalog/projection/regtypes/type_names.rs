@@ -126,50 +126,62 @@ pub fn resolve_catalog_column_type(
     context: &CatalogContext<'_>,
     type_name: &str,
 ) -> Option<ColumnType> {
-    if let Ok(ty) = ColumnType::from_sql_name(type_name) {
-        return Some(ty);
-    }
-    // Stored syntax, routine signatures and bound casts record user-defined types by OID identity rather than by a search-path-dependent name.
     if let Some(identity) = uqa_sql::ast::UserTypeIdentity::parse(type_name) {
         return resolve_user_type_identity(context, identity);
     }
-    let mut base_name = type_name.trim();
-    let mut array_dimensions = 0usize;
-    while let Some(element) = base_name.strip_suffix("[]") {
-        base_name = element.trim_end();
-        array_dimensions += 1;
-    }
-    let (schema, local_name) = base_name
-        .rsplit_once('.')
-        .map_or((None, base_name), |(schema, local_name)| {
-            (Some(schema.trim_matches('"')), local_name)
-        });
-    let local_name = local_name.trim_matches('"');
-    let mut resolved = context.resolve_user_type(base_name).or_else(|| {
-        CATALOG_NAMED_TYPES
-            .iter()
-            .find(|domain| match domain {
-                ColumnType::Domain {
-                    schema: domain_schema,
-                    name: domain_name,
-                    ..
-                } => {
-                    domain_name == local_name
-                        && schema.map_or_else(
-                            || context.search_path_contains(domain_schema),
-                            |schema| domain_schema == schema,
-                        )
-                }
-                _ => false,
-            })
-            .cloned()
-    });
-    if let Some(ty) = resolved.as_mut() {
-        for _ in 0..array_dimensions {
-            *ty = ColumnType::Array(Box::new(ty.clone()));
+    // An explicit builtin namespace is independent of search_path; the SQL owner checks actual catalog identifiers and modifiers.
+    if type_name.starts_with("pg_catalog.") || type_name.starts_with("\"pg_catalog\".") {
+        if let Ok(ty) = ColumnType::from_sql_name(type_name) {
+            return Some(ty);
         }
     }
-    resolved
+    let parsed = uqa_sql::parse_regtype_name(type_name).ok()??;
+    let (qualified, local) = match parsed.names.as_slice() {
+        [local] => (None, local),
+        [schema, local] => (Some(schema.as_str()), local),
+        _ => return None,
+    };
+    let catalog = context.catalog_read_view();
+    let schemas = qualified.map_or_else(
+        || {
+            crate::catalog::namespaces::current_schema_names(
+                &catalog,
+                &context.session.relation_name_resolution(),
+                &context.current_role(),
+                true,
+            )
+        },
+        |schema| vec![schema.to_owned()],
+    );
+    for schema in schemas {
+        if schema == "pg_catalog" {
+            let builtin = uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(local)
+                .is_some()
+                || uqa_sql::ast::ColumnType::from_sql_name(&format!(
+                    "pg_catalog.{}",
+                    uqa_sql::expr::quote_ident(local)
+                ))
+                .is_ok();
+            if builtin {
+                return ColumnType::from_sql_name(type_name).ok();
+            }
+        }
+        let name = format!(
+            "\"{}\".\"{}\"",
+            schema.replace('"', "\"\""),
+            local.replace('"', "\"\"")
+        );
+        let resolved = context.resolve_user_type(&name).or_else(|| {
+            CATALOG_NAMED_TYPES.iter().find(|ty| matches!(ty, ColumnType::Domain { schema: owner, name, .. } if owner == &schema && name == local)).cloned()
+        });
+        if let Some(mut ty) = resolved {
+            for _ in 0..parsed.array_dimensions {
+                ty = ColumnType::Array(Box::new(ty));
+            }
+            return Some(ty);
+        }
+    }
+    None
 }
 
 /// `format_type_be` of a type in one catalog snapshot: a user-defined type is spelled by its current name, qualified when the search path does not include its schema; built-in types use their SQL spelling.
