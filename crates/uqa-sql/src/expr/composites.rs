@@ -15,6 +15,8 @@ use uqa_core::Value;
 use super::{EngineHook, Result, SQLError};
 use crate::ast::ColumnType;
 
+#[cfg(test)]
+mod assignment_tests;
 mod changes;
 pub mod constants;
 pub mod constructor;
@@ -188,6 +190,7 @@ pub fn composite_from_text(engine: &dyn EngineHook, text: &str, type_oid: u32) -
 fn composite_from_fields(
     engine: &dyn EngineHook,
     values: &[Value],
+    field_types: Option<&[uqa_core::RecordFieldType]>,
     descriptor: &CompositeTypeDescriptor,
     target: &str,
 ) -> Result<Value> {
@@ -202,10 +205,29 @@ fn composite_from_fields(
     values
         .iter()
         .zip(&descriptor.attributes)
-        .map(|(value, attribute)| {
+        .enumerate()
+        .map(|(index, (value, attribute))| {
+            let source = field_types
+                .and_then(|types| types.get(index))
+                .filter(|field| field.oid != 705)
+                .map(|field| {
+                    if let Some(ty) = crate::catalog::type_metadata::builtin_scalar_type(field.oid)
+                    {
+                        return Ok(ty.clone());
+                    }
+                    engine
+                        .resolve_type_oid(field.oid)
+                        .map_err(SQLError::Internal)?
+                        .ok_or_else(|| SQLError::Routine {
+                            sqlstate: "42704".into(),
+                            message: format!("type with OID {} does not exist", field.oid),
+                        })
+                })
+                .transpose()?
+                .map(|ty| ty.catalog_name());
             let converted = super::cast_value_with_type_resolution(
                 value,
-                None,
+                source.as_deref(),
                 &attribute.ty.catalog_name(),
                 Some(engine),
             )?;
@@ -253,7 +275,14 @@ pub fn cast_to_composite(
         }
         (Value::Row(values), _) => {
             let descriptor = descriptor(engine.composite_types(), reference.oid)?;
-            composite_from_fields(engine, values, &descriptor, &target_name()).map(Some)
+            composite_from_fields(
+                engine,
+                values,
+                values.field_types(),
+                &descriptor,
+                &target_name(),
+            )
+            .map(Some)
         }
         (Value::Record(fields), _) => {
             let descriptor = descriptor(engine.composite_types(), reference.oid)?;
@@ -261,7 +290,7 @@ pub fn cast_to_composite(
                 .iter()
                 .map(|(_, value)| value.clone())
                 .collect::<Vec<_>>();
-            composite_from_fields(engine, &values, &descriptor, &target_name()).map(Some)
+            composite_from_fields(engine, &values, None, &descriptor, &target_name()).map(Some)
         }
         (_, source) => Err(cannot_cast(
             &source.map_or_else(|| "unknown".into(), ColumnType::display_name),
