@@ -25,7 +25,8 @@ use crate::{
 };
 
 pub(crate) use encoding::canonical_row_lock_keys;
-use encoding::encode_key_with_enum_catalog;
+use encoding::encode_sql_key_with_enum_catalog;
+pub(crate) use encoding::encode_sql_key_with_enum_catalog as canonical_sql_key;
 pub use encoding::{
     canonical_row_key, canonical_row_key_budgeted, hash_canonical_row,
     hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
@@ -156,10 +157,13 @@ impl<'a> Distinct<'a> {
                     )
                 })
                 .collect::<ExecResult<Vec<_>>>()?;
-            return encode_key_with_enum_catalog(values.iter().map(Some), evaluator.enum_labels());
+            return encode_sql_key_with_enum_catalog(
+                values.iter().map(Some),
+                evaluator.enum_labels(),
+            );
         }
         let row = schema.view(row);
-        encode_key_with_enum_catalog(
+        encode_sql_key_with_enum_catalog(
             (0..self.schema.len()).map(|index| row.value_at(index)),
             self.evaluator
                 .as_ref()

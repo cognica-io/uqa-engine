@@ -18,6 +18,10 @@ pub struct BindingTypeResolver<'a> {
 }
 
 impl FunctionTypeResolver for BindingTypeResolver<'_> {
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        self.routines.format_type_name(ty)
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.routines.has_untyped_function(name)
     }

@@ -11,6 +11,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 use super::common::{base_type, common_numeric_type, merge_value_types, numeric_rank};
 
 mod catalog;
+pub(crate) mod comparison;
 pub(super) mod numeric;
 mod resolution;
 pub use numeric::{
@@ -131,32 +132,12 @@ fn named_binary_operator_catalog_entry(
 
 /// Require the equality semantics used by grouping, duplicate elimination, and set operations. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an equality operator for it.
 pub fn require_equality_operator(ty: &ColumnType) -> Result<(), SQLError> {
-    require_operator_capability(ty, "equality", equality_operator_available(ty))
+    comparison::ComparisonSupport::Equality.require(ty, None, &ProductionControl::uncontrolled())
 }
 
-/// Require the ordering semantics used by ORDER BY and window ordering. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an ordering operator for it.
+/// Require the ordering semantics used by ORDER BY and window ordering.
 pub fn require_ordering_operator(ty: &ColumnType) -> Result<(), SQLError> {
-    require_operator_capability(ty, "ordering", ordering_operator_available(ty))
-}
-
-fn require_operator_capability(
-    ty: &ColumnType,
-    capability: &str,
-    available: bool,
-) -> Result<(), SQLError> {
-    if !available {
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42883".into(),
-            message: format!(
-                "could not identify an {capability} operator for type {}",
-                ty.sql_name()
-            ),
-            detail: None,
-            hint: (capability == "ordering")
-                .then(|| "Use an explicit ordering operator or modify the query.".into()),
-        });
-    }
-    Ok(())
+    comparison::ComparisonSupport::Ordering.require(ty, None, &ProductionControl::uncontrolled())
 }
 
 fn equality_operator_available(ty: &ColumnType) -> bool {

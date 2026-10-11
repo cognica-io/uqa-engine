@@ -131,26 +131,42 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
 ) -> Result<QueryOutput, SQLError> {
     if original.distinct {
         let work_mem_bytes = physical_work_mem_bytes(runtime)?;
+        let resolver = context.expression_scope(ctes.clone());
         operator = if original.distinct_on.is_empty() {
             let mut ordered = false;
+            let mut support = uqa_sql::type_resolution::ComparisonKeySupport::default();
+            let mut keys = Vec::new();
             for position in 0..columns.len() {
+                if resjunk.constant_distinct_columns.contains(&position) {
+                    continue;
+                }
+                keys.push(ScalarExpr::Position(position));
                 if let Some(ty) = operator.row_schema().column_type(position) {
                     crate::require_equality_operator(ty)?;
+                    support.include(ty, resolver.as_ref())?;
                     ordered |= uqa_sql::expr::type_comparison_can_fail(ty);
                 }
             }
-            if ordered {
+            support.require_implementation("DISTINCT")?;
+            if ordered && support.ordering {
                 crate::distinct::ordered::operator(
                     operator,
-                    (0..columns.len()).map(ScalarExpr::Position).collect(),
+                    keys,
                     context.evaluator(params, ctes),
                     work_mem_bytes,
                 )
-            } else {
+            } else if keys.len() == columns.len() {
                 Box::new(
                     Distinct::all_with_work_mem(operator, work_mem_bytes)
                         .with_evaluator(context.evaluator(params, ctes)),
                 )
+            } else {
+                Box::new(Distinct::on_with_work_mem(
+                    operator,
+                    keys,
+                    context.evaluator(params, ctes),
+                    work_mem_bytes,
+                ))
             }
         } else {
             let output = identity_order_columns(&columns);
@@ -175,14 +191,23 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
                 };
                 distinct_on.push(key);
             }
+            distinct_on.retain(|key| match key {
+                ScalarExpr::Position(position) => {
+                    !resjunk.constant_distinct_columns.contains(position)
+                }
+                key => !uqa_sql::type_resolution::comparison_key_is_constant(key),
+            });
             let mut ordered = false;
+            let mut support = uqa_sql::type_resolution::ComparisonKeySupport::default();
             for expression in &distinct_on {
                 if let Some(ty) = crate::scalar_type(expression, operator.row_schema(), params)? {
                     crate::require_equality_operator(&ty)?;
+                    support.include(&ty, resolver.as_ref())?;
                     ordered |= uqa_sql::expr::type_comparison_can_fail(&ty);
                 }
             }
-            if ordered {
+            support.require_implementation("DISTINCT")?;
+            if ordered && support.ordering {
                 crate::distinct::ordered::operator(
                     operator,
                     distinct_on,

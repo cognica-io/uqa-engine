@@ -17,6 +17,57 @@ use crate::physical::run_to_rows;
 use crate::scan::TableScan;
 use crate::{ExpressionEvaluator, PhysicalRow, ScalarEvalContext};
 
+#[test]
+fn collision_verification_requires_equality_without_ordering() {
+    let row = |value| {
+        Value::Row(
+            uqa_core::RowValue::typed(
+                vec![Value::Int(value)],
+                vec![uqa_core::RecordFieldType {
+                    oid: 28,
+                    type_modifier: -1,
+                }],
+            )
+            .unwrap(),
+        )
+    };
+    let mut set = CanonicalRowHashSet::new();
+    assert!(set.insert_values(&[row(1)]).unwrap());
+    assert!(!set.insert_values(&[row(1)]).unwrap());
+    assert!(set.contains_values(&[row(1)]).unwrap());
+    assert!(set.insert_values(&[row(2)]).unwrap());
+}
+
+#[test]
+fn sql_hash_distinct_normalizes_physical_and_admitted_fields_before_spill() {
+    let physical = Value::Record(
+        vec![(
+            "n".into(),
+            Value::Datum(uqa_core::DatumValue::new(
+                28,
+                0,
+                42_u32.to_le_bytes().to_vec(),
+            )),
+        )]
+        .into(),
+    );
+    let admitted = Value::Record(vec![("n".into(), Value::Int(42))].into());
+    for budget in [1, 1024 * 1024] {
+        let scan = TableScan::from_rows(
+            vec!["v".into()],
+            vec![value_row(physical.clone()), value_row(admitted.clone())],
+        );
+        let mut distinct = Distinct::all_with_work_mem(Box::new(scan), budget);
+        distinct.open().unwrap();
+        let batch = distinct.next().unwrap().unwrap();
+        assert_eq!(batch.rows.len(), 1);
+        assert_eq!(batch.rows[0].value(0), Some(&physical));
+        assert_eq!(distinct.has_spilled(), budget == 1);
+        assert!(distinct.next().unwrap().is_none());
+        distinct.close().unwrap();
+    }
+}
+
 fn row(a: i64, b: i64) -> ResultRow {
     [("a".into(), Value::Int(a)), ("b".into(), Value::Int(b))]
         .into_iter()

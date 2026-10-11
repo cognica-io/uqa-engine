@@ -176,6 +176,10 @@ impl RoutineResolution for Engine {
 }
 
 impl FunctionTypeResolver for Engine {
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        self.routine_overload_context().format_type_name(ty)
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.routine_overload_context().has_untyped_function(name)
     }

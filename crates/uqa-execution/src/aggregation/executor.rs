@@ -47,7 +47,18 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         let sets = statements
             .into_iter()
             .map(|(statement, relaxed)| {
-                if super::adaptive::supports_adaptive_grouping(context, &statement) {
+                let mut support = uqa_sql::type_resolution::ComparisonKeySupport::default();
+                for key in &statement.group_by {
+                    if let Some(ty) =
+                        crate::scalar_type_with_resolver(key, &input_schema, params, context)?
+                    {
+                        support.include(&ty, context)?;
+                    }
+                }
+                support.require_implementation("GROUP BY")?;
+                if support.hashing
+                    && super::adaptive::supports_adaptive_grouping(context, &statement)
+                {
                     return super::adaptive::AdaptiveAggregateSet::new(
                         context,
                         statement,
@@ -59,22 +70,23 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                     .map(|set| AggregateSet::Adaptive(Box::new(set)));
                 }
                 let phase_budget = (set_budget / 3).max(1);
-                let optimistic =
-                    if super::adaptive::supports_optimistic_grouping(context, &statement) {
-                        Some(Box::new(
-                            super::adaptive::AdaptiveAggregateSet::new_optimistic(
-                                context,
-                                statement.clone(),
-                                relaxed,
-                                (set_budget / 2).max(1),
-                                phase_budget,
-                                &input_schema,
-                                params,
-                            )?,
-                        ))
-                    } else {
-                        None
-                    };
+                let optimistic = if support.hashing
+                    && super::adaptive::supports_optimistic_grouping(context, &statement)
+                {
+                    Some(Box::new(
+                        super::adaptive::AdaptiveAggregateSet::new_optimistic(
+                            context,
+                            statement.clone(),
+                            relaxed,
+                            (set_budget / 2).max(1),
+                            phase_budget,
+                            &input_schema,
+                            params,
+                        )?,
+                    ))
+                } else {
+                    None
+                };
                 let input_budget = if optimistic.is_some() {
                     (set_budget / 2).max(1)
                 } else {

@@ -15,6 +15,7 @@ use crate::routines::RoutineResolution;
 use super::{scope::merge_types, QueryPlan, ScalarExpr, SchemaScope};
 
 pub(super) fn set_operation_output_schema(
+    routines: &dyn RoutineResolution,
     left: &RowSchema,
     right: &RowSchema,
     kind: SetOpKind,
@@ -33,7 +34,7 @@ pub(super) fn set_operation_output_schema(
         .collect::<Result<Vec<_>, _>>()?;
     if !matches!((kind, all), (SetOpKind::Union, true)) {
         for ty in types.iter().flatten() {
-            crate::require_equality_operator(ty)?;
+            crate::type_resolution::ComparisonSupport::Equality.require_in_catalog(ty, routines)?;
         }
     }
     Ok(
@@ -130,6 +131,10 @@ impl QueryFunctionTypeResolver<'_> {
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        self.routines.format_type_name(ty)
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.routines.has_untyped_function(name)
     }

@@ -1,0 +1,315 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE rc_pair AS(n numeric,t text); CREATE TYPE rc_json AS(n integer,j json); CREATE TYPE rc_xid AS(n xid); CREATE TYPE rc_names_a AS(a integer); CREATE TYPE rc_names_b AS(b integer)"
+    },
+    {
+      "id": "numeric_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM (VALUES (ROW(1.0::numeric,'a')::rc_pair),(ROW(1.00::numeric,'a')::rc_pair),(ROW(2.0::numeric,'b')::rc_pair)) t(v)) s"
+    },
+    {
+      "id": "numeric_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1.0::numeric,'a')::rc_pair),(ROW(1.00::numeric,'a')::rc_pair),(ROW(2.0::numeric,'b')::rc_pair)) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "numeric_order",
+      "sql": "SELECT v::text AS v FROM (VALUES (ROW(1.0::numeric,'a')::rc_pair),(ROW(1.00::numeric,'a')::rc_pair),(ROW(2.0::numeric,'b')::rc_pair)) t(v) ORDER BY t.v"
+    },
+    {
+      "id": "numeric_count_distinct",
+      "sql": "SELECT count(DISTINCT v) AS v FROM (VALUES (ROW(1.0::numeric,'a')::rc_pair),(ROW(1.00::numeric,'a')::rc_pair),(ROW(2.0::numeric,'b')::rc_pair)) t(v)"
+    },
+    {
+      "id": "json_prefix_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM (VALUES (ROW(1,'{}'::json)::rc_json),(ROW(2,'{}'::json)::rc_json)) t(v)) s"
+    },
+    {
+      "id": "json_prefix_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json)::rc_json),(ROW(2,'{}'::json)::rc_json)) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "json_prefix_order",
+      "sql": "SELECT v::text AS v FROM (VALUES (ROW(1,'{}'::json)::rc_json),(ROW(2,'{}'::json)::rc_json)) t(v) ORDER BY t.v"
+    },
+    {
+      "id": "json_prefix_count_distinct",
+      "sql": "SELECT count(DISTINCT v) AS v FROM (VALUES (ROW(1,'{}'::json)::rc_json),(ROW(2,'{}'::json)::rc_json)) t(v)"
+    },
+    {
+      "id": "json_single_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM (VALUES (ROW(1,'{}'::json)::rc_json)) t(v)) s"
+    },
+    {
+      "id": "json_single_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json)::rc_json)) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "json_single_order",
+      "sql": "SELECT v::text AS v FROM (VALUES (ROW(1,'{}'::json)::rc_json)) t(v) ORDER BY t.v"
+    },
+    {
+      "id": "json_single_count_distinct",
+      "sql": "SELECT count(DISTINCT v) AS v FROM (VALUES (ROW(1,'{}'::json)::rc_json)) t(v)"
+    },
+    {
+      "id": "xid_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM (VALUES (ROW('1'::xid)::rc_xid),(ROW('1'::xid)::rc_xid),(ROW('2'::xid)::rc_xid)) t(v)) s"
+    },
+    {
+      "id": "xid_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW('1'::xid)::rc_xid),(ROW('1'::xid)::rc_xid),(ROW('2'::xid)::rc_xid)) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "xid_order",
+      "sql": "SELECT v::text AS v FROM (VALUES (ROW('1'::xid)::rc_xid),(ROW('1'::xid)::rc_xid),(ROW('2'::xid)::rc_xid)) t(v) ORDER BY t.v"
+    },
+    {
+      "id": "xid_count_distinct",
+      "sql": "SELECT count(DISTINCT v) AS v FROM (VALUES (ROW('1'::xid)::rc_xid),(ROW('1'::xid)::rc_xid),(ROW('2'::xid)::rc_xid)) t(v)"
+    },
+    {
+      "id": "anonymous_json_prefix_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM (VALUES (ROW(1,'{}'::json)),(ROW(2,'{}'::json))) t(v)) s"
+    },
+    {
+      "id": "anonymous_json_prefix_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json)),(ROW(2,'{}'::json))) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "anonymous_json_prefix_order",
+      "sql": "SELECT v::text AS v FROM (VALUES (ROW(1,'{}'::json)),(ROW(2,'{}'::json))) t(v) ORDER BY t.v"
+    },
+    {
+      "id": "anonymous_json_prefix_count_distinct",
+      "sql": "SELECT count(DISTINCT v) AS v FROM (VALUES (ROW(1,'{}'::json)),(ROW(2,'{}'::json))) t(v)"
+    },
+    {
+      "id": "json_empty_distinct",
+      "sql": "SELECT DISTINCT NULL::rc_json AS v WHERE false"
+    },
+    {
+      "id": "json_empty_group",
+      "sql": "SELECT v FROM (SELECT NULL::rc_json AS v WHERE false) t GROUP BY v"
+    },
+    {
+      "id": "json_empty_order",
+      "sql": "SELECT NULL::rc_json AS v WHERE false ORDER BY v"
+    },
+    {
+      "id": "xid_equals",
+      "sql": "SELECT ROW('1'::xid)::rc_xid = ROW('1'::xid)::rc_xid AS v"
+    },
+    {
+      "id": "xid_scalar_order",
+      "sql": "SELECT ROW('1'::xid)::rc_xid < ROW('2'::xid)::rc_xid AS v"
+    },
+    {
+      "id": "nested_setup",
+      "sql": "CREATE DOMAIN rc_domain AS rc_json; CREATE TYPE rc_wrap AS(v rc_json)"
+    },
+    {
+      "id": "array_distinct",
+      "sql": "SELECT DISTINCT NULL::rc_json[] AS v WHERE false"
+    },
+    {
+      "id": "array_group",
+      "sql": "SELECT v FROM (SELECT NULL::rc_json[] AS v WHERE false) t GROUP BY v"
+    },
+    {
+      "id": "array_order",
+      "sql": "SELECT NULL::rc_json[] AS v WHERE false ORDER BY v"
+    },
+    {
+      "id": "domain_distinct",
+      "sql": "SELECT DISTINCT NULL::rc_domain AS v WHERE false"
+    },
+    {
+      "id": "domain_group",
+      "sql": "SELECT v FROM (SELECT NULL::rc_domain AS v WHERE false) t GROUP BY v"
+    },
+    {
+      "id": "domain_order",
+      "sql": "SELECT NULL::rc_domain AS v WHERE false ORDER BY v"
+    },
+    {
+      "id": "nested_distinct",
+      "sql": "SELECT DISTINCT NULL::rc_wrap AS v WHERE false"
+    },
+    {
+      "id": "nested_group",
+      "sql": "SELECT v FROM (SELECT NULL::rc_wrap AS v WHERE false) t GROUP BY v"
+    },
+    {
+      "id": "nested_order",
+      "sql": "SELECT NULL::rc_wrap AS v WHERE false ORDER BY v"
+    },
+    {
+      "id": "empty_count_distinct",
+      "sql": "SELECT count(DISTINCT v) FROM (SELECT NULL::rc_json AS v WHERE false) t"
+    },
+    {
+      "id": "window_partition",
+      "sql": "SELECT row_number() OVER (PARTITION BY v) FROM (SELECT NULL::rc_json AS v WHERE false) t"
+    },
+    {
+      "id": "window_order",
+      "sql": "SELECT row_number() OVER (ORDER BY v) FROM (SELECT NULL::rc_json AS v WHERE false) t"
+    },
+    {
+      "id": "distinct_on",
+      "sql": "SELECT DISTINCT ON (v) 1 FROM (SELECT NULL::rc_json AS v WHERE false) t"
+    },
+    {
+      "id": "union",
+      "sql": "SELECT NULL::rc_json AS v UNION SELECT NULL::rc_json WHERE false"
+    },
+    {
+      "id": "intersect",
+      "sql": "SELECT NULL::rc_json AS v INTERSECT SELECT NULL::rc_json WHERE false"
+    },
+    {
+      "id": "except",
+      "sql": "SELECT NULL::rc_json AS v EXCEPT SELECT NULL::rc_json WHERE false"
+    },
+    {
+      "id": "prepare",
+      "sql": "PREPARE rc_bad AS SELECT DISTINCT NULL::rc_json AS v WHERE false"
+    },
+    {
+      "id": "prepare_after",
+      "sql": "SELECT count(*) AS v FROM pg_prepared_statements WHERE name='rc_bad'"
+    },
+    {
+      "id": "explain",
+      "sql": "EXPLAIN SELECT DISTINCT NULL::rc_json AS v WHERE false"
+    },
+    {
+      "id": "create_view",
+      "sql": "CREATE VIEW rc_bad_view AS SELECT DISTINCT NULL::rc_json AS v WHERE false"
+    },
+    {
+      "id": "name_setup",
+      "sql": "CREATE SCHEMA rc_visible; CREATE SCHEMA rc_hidden; CREATE TYPE rc_visible.same_name AS(n integer); CREATE TYPE rc_hidden.same_name AS(j json); CREATE TYPE \"odd composite\" AS(j json); SET search_path=rc_visible,public"
+    },
+    {
+      "id": "hidden_name",
+      "sql": "SELECT DISTINCT NULL::rc_hidden.same_name AS v WHERE false"
+    },
+    {
+      "id": "quoted_name",
+      "sql": "SELECT DISTINCT NULL::\"odd composite\" AS v WHERE false"
+    },
+    {
+      "id": "reopen_nested",
+      "sql": "SELECT DISTINCT NULL::rc_wrap AS v WHERE false",
+      "reopen": true
+    },
+    {
+      "id": "reopen_order",
+      "sql": "SELECT NULL::rc_xid AS v WHERE false ORDER BY v",
+      "reopen": true
+    },
+    {
+      "id": "equality_only_setup",
+      "sql": "CREATE DOMAIN public.rc_xid_domain AS rc_xid; CREATE TABLE public.rc_xid_values(v rc_xid); INSERT INTO public.rc_xid_values VALUES (ROW('1'::xid)),(ROW('1'::xid)),(ROW('2'::xid))"
+    },
+    {
+      "id": "xid_array_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ARRAY[v] FROM rc_xid_values) t"
+    },
+    {
+      "id": "xid_domain_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v::rc_xid_domain FROM rc_xid_values) t"
+    },
+    {
+      "id": "xid_distinct_on",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ON (v) v FROM rc_xid_values) t"
+    },
+    {
+      "id": "mixed_capabilities_distinct",
+      "sql": "SELECT DISTINCT ROW(1) AS a, NULL::rc_xid AS b WHERE false"
+    },
+    {
+      "id": "mixed_populated_distinct",
+      "sql": "SELECT DISTINCT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n"
+    },
+    {
+      "id": "mixed_populated_group",
+      "sql": "SELECT count(*) FROM (SELECT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n) t GROUP BY a,b"
+    },
+    {
+      "id": "mixed_nonconstant_empty_distinct",
+      "sql": "SELECT DISTINCT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,0) n"
+    },
+    {
+      "id": "mixed_nonconstant_filtered_group",
+      "sql": "SELECT count(*) FROM (SELECT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n WHERE false) t GROUP BY a,b"
+    },
+    {
+      "id": "constant_anonymous_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW('{}'::json) AS a FROM generate_series(1,2)) s"
+    },
+    {
+      "id": "constant_mixed_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW(1) AS a,'1'::xid AS b FROM generate_series(1,2)) s"
+    },
+    {
+      "id": "constant_after_star_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT t.*,ROW('{}'::json) AS fixed FROM (VALUES (1),(1),(2)) t(n)) s"
+    },
+    {
+      "id": "constant_distinct_on_duplicate_keys",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ON (fixed,n,fixed) ROW('{}'::json) AS fixed,n FROM (VALUES (1),(1),(2)) t(n)) s"
+    },
+    {
+      "id": "mixed_capabilities_group",
+      "sql": "SELECT count(*) FROM (SELECT ROW(1) AS a, NULL::rc_xid AS b WHERE false) t GROUP BY a,b"
+    },
+    {
+      "id": "anonymous_json_singleton_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json))) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "anonymous_json_reached_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json)),(ROW(1,'{\"x\":1}'::json))) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "anonymous_json_distinct_aggregate_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(DISTINCT n) FROM (VALUES (ROW(1,'{}'::json),1),(ROW(2,'{}'::json),2)) t(v,n) GROUP BY v) s"
+    },
+    {
+      "id": "small_work_mem",
+      "sql": "SET work_mem='64kB'"
+    },
+    {
+      "id": "spilled_anonymous_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT ROW(n,repeat('x',2000)::text) AS v,count(*) FROM generate_series(1,150) n GROUP BY v) s"
+    },
+    {
+      "id": "spilled_xid_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW(n::text::xid)::rc_xid AS v FROM generate_series(1,2500) n) s"
+    },
+    {
+      "id": "spilled_xid_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT ROW(n::text::xid)::rc_xid AS v,count(*) FROM generate_series(1,1500) n GROUP BY v) s"
+    },
+    {
+      "id": "spilled_xid_group_duplicates",
+      "sql": "SELECT count(*) AS groups,min(c) AS smallest,max(c) AS largest,sum(c) AS total FROM (SELECT ROW((n%512)::text::xid)::rc_xid AS v,count(*) AS c FROM generate_series(0,4095) n GROUP BY v) s"
+    },
+    {
+      "id": "reset_work_mem",
+      "sql": "RESET work_mem"
+    },
+    {
+      "id": "reopen_xid_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM public.rc_xid_values) t",
+      "reopen": true
+    }
+  ]
+}

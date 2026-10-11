@@ -149,15 +149,12 @@ impl CanonicalRowHashSet {
             }
             let mut equal = true;
             for (stored, value) in stored.iter().zip(values.clone()) {
-                if !uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
                     stored,
                     value,
                     &uqa_core::memory::ProductionControl::uncontrolled(),
                     catalog,
-                    None,
-                )?
-                .is_eq()
-                {
+                )? {
                     equal = false;
                     break;
                 }

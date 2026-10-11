@@ -153,7 +153,8 @@ impl Preparation<'_> {
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
             if let Some(ty) = &value.ty {
-                crate::require_ordering_operator(ty)?;
+                crate::type_resolution::ComparisonSupport::Ordering
+                    .require_in_catalog(ty, self.routines)?;
             }
             if order_type.is_none() {
                 order_type = value.ty;
@@ -164,7 +165,8 @@ impl Preparation<'_> {
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
             if let Some(ty) = &value.ty {
-                crate::require_equality_operator(ty)?;
+                crate::type_resolution::ComparisonSupport::Equality
+                    .require_in_catalog(ty, self.routines)?;
             }
         }
         let (order_count, order_type) = if spec.order_by.is_empty() {

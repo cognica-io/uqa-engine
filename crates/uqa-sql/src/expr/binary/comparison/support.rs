@@ -6,13 +6,22 @@
 
 //! Declared field operators are selected before record NULL handling or array iteration.
 
-use crate::{ast::ColumnType, expr::SQLValueCatalog, SQLError};
+pub(in crate::expr) use crate::type_resolution::ComparisonSupport;
+use crate::{expr::SQLValueCatalog, SQLError};
 use uqa_core::{memory::ProductionControl, ArrayValue};
 
-#[derive(Clone, Copy)]
-pub(in crate::expr) enum ComparisonSupport {
-    Equality,
-    Ordering,
+struct ValueCompositeCatalog<'a>(Option<&'a dyn SQLValueCatalog>);
+
+impl crate::expr::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
+    fn composite_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<std::sync::Arc<crate::expr::composites::CompositeTypeDescriptor>>, SQLError>
+    {
+        self.0
+            .ok_or_else(|| SQLError::Internal("composite operator lookup has no catalog".into()))?
+            .value_composite_type(oid)
+    }
 }
 
 impl ComparisonSupport {
@@ -20,6 +29,7 @@ impl ComparisonSupport {
         let capability = match self {
             Self::Equality => "an equality operator",
             Self::Ordering => "a comparison function",
+            Self::Hashing => "a hash function",
         };
         SQLError::Routine {
             sqlstate: sqlstate.into(),
@@ -37,11 +47,12 @@ impl ComparisonSupport {
         if matches!(oid, 705 | 2278) {
             return Ok(false);
         }
+        let composites = ValueCompositeCatalog(catalog);
         if let Some(ty) = crate::catalog::type_metadata::builtin_scalar_type(oid) {
-            return self.available_for_type(ty, catalog, control);
+            return self.available_for_type(ty, Some(&composites), control);
         }
         if let Some(element) = crate::catalog::type_metadata::builtin_array_element(oid) {
-            return self.available_for_type(element, catalog, control);
+            return self.available_for_type(element, Some(&composites), control);
         }
         let ty = catalog
             .map(|catalog| catalog.value_type_by_oid(oid))
@@ -50,49 +61,11 @@ impl ComparisonSupport {
             .map(|ty| ty.retain_external_with_control(control))
             .transpose()?;
         if let Some(ty) = ty {
-            return self.available_for_type(&ty, catalog, control);
+            return self.available_for_type(&ty, Some(&composites), control);
         }
         Err(SQLError::Internal(format!(
             "comparison type with OID {oid} has no catalog metadata"
         )))
-    }
-
-    fn available_for_type(
-        self,
-        ty: &ColumnType,
-        catalog: Option<&dyn SQLValueCatalog>,
-        control: &ProductionControl<'_>,
-    ) -> Result<bool, SQLError> {
-        control.check()?;
-        match ty {
-            ColumnType::Void | ColumnType::Json => Ok(false),
-            ColumnType::Domain { base, .. } | ColumnType::Array(base) => {
-                self.available_for_type(base, catalog, control)
-            }
-            ColumnType::Composite(reference) => {
-                let descriptor = catalog
-                    .ok_or_else(|| {
-                        SQLError::Internal("composite operator lookup has no catalog".into())
-                    })?
-                    .value_composite_type(reference.oid)?
-                    .ok_or_else(|| SQLError::Routine {
-                        sqlstate: "42704".into(),
-                        message: format!("type with OID {} does not exist", reference.oid),
-                    })?;
-                for attribute in &descriptor.attributes {
-                    if !self.available_for_type(&attribute.ty, catalog, control)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            // Anonymous record support is selected at each reached field, rather than from one declared descriptor.
-            _ => Ok(match self {
-                Self::Equality => crate::type_resolution::require_equality_operator(ty),
-                Self::Ordering => crate::type_resolution::require_ordering_operator(ty),
-            }
-            .is_ok()),
-        }
     }
 }
 

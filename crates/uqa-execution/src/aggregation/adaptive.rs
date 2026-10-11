@@ -8,6 +8,7 @@
 
 use crate::RowSchemaExecution;
 mod finish;
+mod merge_keys;
 mod projected;
 
 use std::collections::HashMap;
@@ -67,6 +68,7 @@ pub(super) struct AdaptiveAggregateSet {
     projected_aggregate_plans: super::projected_input::ProjectedAggregatePlans,
     overflow_strategy: OverflowStrategy,
     abandoned: bool,
+    order_group_values: bool,
 }
 
 impl AdaptiveAggregateSet {
@@ -130,6 +132,17 @@ impl AdaptiveAggregateSet {
             &aggregate_targets,
             input_schema,
         );
+        let order_group_values = statement.group_by.iter().try_fold(true, |available, key| {
+            let ty = crate::scalar_type_with_resolver(key, input_schema, params, context)?;
+            Ok::<_, SQLError>(
+                available
+                    && ty
+                        .as_ref()
+                        .map(|ty| uqa_sql::type_resolution::type_supports_ordering(ty, context))
+                        .transpose()?
+                        .unwrap_or(true),
+            )
+        })?;
         Ok(Self {
             group_expressions: crate::scalar::PreparedExpressions::scalars(
                 statement
@@ -163,6 +176,7 @@ impl AdaptiveAggregateSet {
             projected_aggregate_plans,
             overflow_strategy: OverflowStrategy::SpillMergeablePartials,
             abandoned: false,
+            order_group_values,
         })
     }
 
