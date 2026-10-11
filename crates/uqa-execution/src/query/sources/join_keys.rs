@@ -39,27 +39,21 @@ pub(super) fn join_keys(
     let mut merge_supported = true;
     let schema = RowSchema::join(left, right, []);
     for conjunct in join_conjuncts(predicate) {
-        if uqa_sql::semantics::volatility::expr_contains_volatile_function(volatility, conjunct) {
-            merge_supported = false;
-            residual.push(conjunct.clone());
-            continue;
-        }
-        let sides = match conjunct {
+        // ROW equality selects an operator for each field before either side is assigned to a join input. One field can use the reverse orientation or retain a volatile predicate while another supplies a hash key.
+        let pairs = match conjunct {
             ScalarExpr::Binary {
                 op: BinaryOp::Equal,
                 lhs,
                 rhs,
-            } => decide_join_sides(left, right, lhs, rhs),
+            } => match (lhs.as_ref(), rhs.as_ref()) {
+                (ScalarExpr::Row(left), ScalarExpr::Row(right)) if left.len() == right.len() => {
+                    Some(left.iter().zip(right).collect::<Vec<_>>())
+                }
+                _ => Some(vec![(lhs.as_ref(), rhs.as_ref())]),
+            },
             _ => None,
         };
-        if let Some((left_key, right_key)) = sides {
-            // ROW constructor equality selects one operator per field. A record-valued column instead has one lazily evaluated record operator.
-            let pairs = match (left_key, right_key) {
-                (ScalarExpr::Row(left), ScalarExpr::Row(right)) if left.len() == right.len() => {
-                    left.iter().zip(right).collect::<Vec<_>>()
-                }
-                _ => vec![(left_key, right_key)],
-            };
+        if let Some(pairs) = pairs {
             let mut all_hashed = !pairs.is_empty();
             for (left_key, right_key) in pairs {
                 let bound = uqa_sql::bind_type_introspection_with_resolver(
@@ -72,11 +66,25 @@ pub(super) fn join_keys(
                     params,
                     types,
                 );
+                if uqa_sql::semantics::volatility::expr_contains_volatile_function(
+                    volatility, &bound,
+                ) {
+                    merge_supported = false;
+                    all_hashed = false;
+                    continue;
+                }
                 let ScalarExpr::Binary { lhs, rhs, .. } = bound else {
                     unreachable!("binding preserves a comparison operator")
                 };
+                let Some((left_key, right_key)) = decide_join_sides(left, right, &lhs, &rhs) else {
+                    // Constants remain predicates; they cannot make a non-joinable record clause into a hash join.
+                    merge_supported &= uqa_sql::type_resolution::comparison_key_is_constant(&lhs)
+                        && uqa_sql::type_resolution::comparison_key_is_constant(&rhs);
+                    all_hashed = false;
+                    continue;
+                };
                 let mut support = ComparisonKeySupport::default();
-                for key in [lhs.as_ref(), rhs.as_ref()] {
+                for key in [left_key, right_key] {
                     match crate::scalar_type_with_resolver(key, &schema, params, types)? {
                         Some(ty) => support.include(&ty, types)?,
                         None => {
@@ -88,8 +96,8 @@ pub(super) fn join_keys(
                 merge_supported &= support.ordering;
                 all_hashed &= support.hashing;
                 if support.hashing {
-                    keys.left.push(*lhs);
-                    keys.right.push(*rhs);
+                    keys.left.push(left_key.clone());
+                    keys.right.push(right_key.clone());
                 }
             }
             if all_hashed {

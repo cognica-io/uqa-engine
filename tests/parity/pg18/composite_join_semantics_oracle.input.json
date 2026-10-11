@@ -133,6 +133,10 @@
       "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON NULL::boolean ORDER BY l NULLS LAST,r NULLS LAST"
     },
     {
+      "id": "full_row_crossed_fields",
+      "sql": "SELECT a.i AS l,b.i AS r FROM (VALUES(1),(2),(3)) a(i) FULL JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,b.i)=ROW(b.i,a.i) ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
       "id": "arity_reached",
       "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(1,2))) b(v) ON a.v=b.v"
     },
@@ -159,6 +163,10 @@
     {
       "id": "jsons",
       "sql": "CREATE TABLE cj_json_left(id integer,v cj_json); CREATE TABLE cj_json_right(id integer,v cj_json); INSERT INTO cj_json_left VALUES(1,ROW(1,'{}'::json)); INSERT INTO cj_json_right VALUES(1,ROW(2,'{}'::json))"
+    },
+    {
+      "id": "json_full_row_constant",
+      "sql": "SELECT count(*) FROM cj_json_left a FULL JOIN cj_json_right b ON ROW(a.v,1)=ROW(b.v,1)"
     },
     {
       "id": "json_unreached",
@@ -263,6 +271,14 @@
     {
       "id": "volatile_full",
       "sql": "SELECT count(*) FROM generate_series(1,3) a(i) FULL JOIN generate_series(1,2) b(i) ON a.i+nextval('cj_sequence')*0=b.i"
+    },
+    {
+      "id": "volatile_row_full",
+      "sql": "SELECT a.i AS l,b.i AS r FROM (VALUES(1),(2),(3)) a(i) FULL JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_sequence')*0)=ROW(b.i,b.i) ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "volatile_row_calls",
+      "sql": "SELECT last_value FROM cj_sequence"
     },
     {
       "id": "spill_allowance",

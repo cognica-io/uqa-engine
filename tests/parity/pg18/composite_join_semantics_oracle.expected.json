@@ -982,6 +982,41 @@
       "id": "full_typed_constant_NULL"
     },
     {
+      "sql": "SELECT a.i AS l,b.i AS r FROM (VALUES(1),(2),(3)) a(i) FULL JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,b.i)=ROW(b.i,a.i) ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_row_crossed_fields"
+    },
+    {
       "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(1,2))) b(v) ON a.v=b.v",
       "command_tags": [],
       "error": {
@@ -1153,6 +1188,19 @@
       ],
       "notices": [],
       "id": "jsons"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_json_left a FULL JOIN cj_json_right b ON ROW(a.v,1)=ROW(b.v,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "FULL JOIN is only supported with merge-joinable or hash-joinable join conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_full_row_constant"
     },
     {
       "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
@@ -1734,6 +1782,65 @@
       "id": "volatile_full"
     },
     {
+      "sql": "SELECT a.i AS l,b.i AS r FROM (VALUES(1),(2),(3)) a(i) FULL JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_sequence')*0)=ROW(b.i,b.i) ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "volatile_row_full"
+    },
+    {
+      "sql": "SELECT last_value FROM cj_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "volatile_row_calls"
+    },
+    {
       "sql": "SET work_mem='64kB'",
       "command_tags": [
         "SET"
@@ -1966,7 +2073,7 @@
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "e28413535fc8df61918e63eeb2349e727992720b6cedf7162e3346033dc6cf7f",
+    "input_sha256": "664b70ea395a0a13c5b8a6883e80797aeb5cb8bf9e6d833e02a4bcb4d470df84",
     "options": [
       "--rows",
       "--details",
