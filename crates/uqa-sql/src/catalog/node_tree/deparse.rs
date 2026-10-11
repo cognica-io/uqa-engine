@@ -75,6 +75,16 @@ impl Renderer<'_> {
             "PARAM" => self.parameter(node),
             "CONST" => self.constant(node),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
+            "NULLIFEXPR" => {
+                let [left, right] = list(node, "args")? else {
+                    return Err(invalid("invalid NULLIF operands"));
+                };
+                Ok(format!(
+                    "NULLIF({}, {})",
+                    self.field(left, self.pretty)?,
+                    self.field(right, self.pretty)?
+                ))
+            }
             "FUNCEXPR" => self.function(node),
             "RELABELTYPE" => self.cast(
                 node.field("arg")?,
@@ -157,7 +167,11 @@ impl Renderer<'_> {
 
     fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {
         let text = self.field(argument, false)?;
-        let atomic = matches!(argument, Field::Node(node) if matches!(node.kind.as_str(), "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"));
+        let atomic = matches!(argument, Field::Node(node) if matches!(
+            node.kind.as_str(),
+            "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"
+                | "NULLIFEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ARRAYEXPR" | "CASEEXPR"
+        ));
         Ok(format!(
             "{}::{}",
             parentheses(text, !self.pretty || !atomic),

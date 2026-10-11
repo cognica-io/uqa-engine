@@ -26,16 +26,36 @@ impl Renderer<'_> {
         Ok(parentheses(
             format!(
                 "{} {} {}",
-                self.field(left, false)?,
+                self.arithmetic_operand(left, operator.name, true)?,
                 if node.kind == "DISTINCTEXPR" {
                     "IS DISTINCT FROM"
                 } else {
                     operator.name
                 },
-                self.field(right, false)?
+                self.arithmetic_operand(right, operator.name, false)?
             ),
             !outer,
         ))
+    }
+
+    fn arithmetic_operand(
+        &self,
+        argument: &Field,
+        parent: &str,
+        left: bool,
+    ) -> Result<String, SQLError> {
+        // PostgreSQL's isSimpleNode removes parentheses only for basic binary arithmetic, retaining a right operand of the same priority.
+        let simple = match (arithmetic_priority(parent), argument) {
+            (Some(parent), Field::Node(node))
+                if node.kind == "OPEXPR" && list(node, "args")?.len() == 2 =>
+            {
+                crate::type_resolution::binary_operator_by_oid(node.integer("opno")?)
+                    .and_then(|operator| arithmetic_priority(operator.name))
+                    .is_some_and(|child| child > parent || (left && child == parent))
+            }
+            _ => false,
+        };
+        self.field(argument, self.pretty && simple)
     }
 
     pub(super) fn function(&self, node: &Node) -> Result<String, SQLError> {
@@ -129,5 +149,13 @@ impl Renderer<'_> {
             _ => return Err(invalid("invalid boolean expression operands")),
         };
         Ok(parentheses(value, !outer))
+    }
+}
+
+fn arithmetic_priority(operator: &str) -> Option<u8> {
+    match operator {
+        "+" | "-" => Some(1),
+        "*" | "/" | "%" => Some(2),
+        _ => None,
     }
 }

@@ -213,6 +213,81 @@ impl expressions::ExpressionRoutines for Routines {
     }
 }
 
+#[test]
+fn quoted_nullif_keeps_the_catalog_routine_identity() {
+    struct Routine {
+        name: String,
+        retained: bool,
+    }
+    impl expressions::ExpressionRoutines for Routine {
+        fn resolve(
+            &self,
+            name: &str,
+            binding: Option<&crate::ast::FunctionBinding>,
+            arguments: &[Option<crate::ColumnType>],
+        ) -> Result<expressions::RoutineIdentity, crate::SQLError> {
+            assert_eq!(name, self.name);
+            assert_eq!(
+                binding.and_then(|binding| binding.object_id),
+                self.retained.then_some([1; 16])
+            );
+            assert_eq!(
+                arguments,
+                &[
+                    Some(crate::ColumnType::Integer),
+                    Some(crate::ColumnType::Integer)
+                ]
+            );
+            Ok(expressions::RoutineIdentity {
+                oid: 424_242,
+                argument_types: vec![crate::ColumnType::Integer; 2],
+                result_type: crate::ColumnType::Boolean,
+            })
+        }
+    }
+    for retained in [false, true] {
+        let crate::Statement::CreateDomain(mut domain) =
+            crate::compile("CREATE DOMAIN d AS integer CHECK (\"nullif\"(VALUE, 0))")
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("domain declaration")
+        };
+        let crate::ast::Expr::Func { name, binding, .. } = &mut domain.checks[0].expression else {
+            panic!("quoted routine")
+        };
+        if retained {
+            *binding = Some(crate::ast::FunctionBinding {
+                object_id: Some([1; 16]),
+                name: name.clone(),
+                argument_types: vec!["integer".into(); 2],
+                builtin: false,
+                dispatch: None,
+                invocation: None,
+                composite_field: None,
+                resolution_error: None,
+            });
+        }
+        let routines = Routine {
+            name: name.clone(),
+            retained,
+        };
+        let schema = crate::RowSchema::with_types(
+            vec!["value".into()],
+            vec![Some(crate::ColumnType::Integer)],
+        );
+        let context = expressions::ExpressionContext {
+            schema: &schema,
+            domain_value: Some(&crate::ColumnType::Integer),
+            types: None,
+            routines: &routines,
+        };
+        let node = context.check(&domain.checks[0].expression).unwrap();
+        assert_eq!(node.kind, "FUNCEXPR");
+        assert_eq!(node.integer("funcid").unwrap(), 424_242);
+    }
+}
+
 fn domain_expression(sql: &str, base: crate::ColumnType) -> String {
     let crate::Statement::CreateDomain(domain) = crate::compile(sql).unwrap().remove(0) else {
         panic!("expected a domain declaration")
