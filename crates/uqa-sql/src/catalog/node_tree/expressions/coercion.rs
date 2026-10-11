@@ -41,6 +41,13 @@ impl ExpressionContext<'_> {
         while let ColumnType::Domain { base, .. } = source {
             source = base;
         }
+        if matches!(
+            (source, target),
+            (ColumnType::Array(_), ColumnType::Array(_))
+        ) && pg_type_oid(source) != pg_type_oid(target)
+        {
+            return Self::array_coercion(value, target, format);
+        }
         let base_target = target.without_type_modifiers();
         let method = if pg_type_oid(source) == pg_type_oid(target) {
             CastMethod::Binary
@@ -92,6 +99,49 @@ impl ExpressionContext<'_> {
         Self::modify_type(value, target, format)
     }
 
+    fn array_coercion(
+        value: TypedNode,
+        target: &ColumnType,
+        format: i64,
+    ) -> Result<TypedNode, SQLError> {
+        let mut source = &value.ty;
+        while let ColumnType::Domain { base, .. } = source {
+            source = base;
+        }
+        let (ColumnType::Array(source_element), ColumnType::Array(target_element)) =
+            (source, target)
+        else {
+            return Err(coercion_error(&value.ty, target));
+        };
+        let element = TypedNode {
+            node: Node::new(
+                "CASETESTEXPR",
+                [
+                    ("typeId", pg_type_oid(source_element).into()),
+                    ("typeMod", pg_type_modifier(source_element).into()),
+                    ("collation", 0.into()),
+                ],
+            ),
+            ty: source_element.as_ref().clone(),
+        };
+        let element = Self::coerce(element, target_element, format)?;
+        Ok(TypedNode {
+            node: Node::new(
+                "ARRAYCOERCEEXPR",
+                [
+                    ("arg", value.node.into()),
+                    ("elemexpr", element.node.into()),
+                    ("resulttype", pg_type_oid(target).into()),
+                    ("resulttypmod", pg_type_modifier(&element.ty).into()),
+                    ("resultcollid", pg_type_collation_oid(target).into()),
+                    ("coerceformat", format.into()),
+                    ("location", (-1).into()),
+                ],
+            ),
+            ty: ColumnType::Array(Box::new(element.ty)),
+        })
+    }
+
     fn modify_type(
         value: TypedNode,
         target: &ColumnType,
@@ -100,6 +150,12 @@ impl ExpressionContext<'_> {
         let modifier = pg_type_modifier(target);
         if modifier < 0 || modifier == pg_type_modifier(&value.ty) {
             return Ok(value);
+        }
+        if matches!(
+            (&value.ty, target),
+            (ColumnType::Array(_), ColumnType::Array(_))
+        ) {
+            return Self::array_coercion(value, target, format);
         }
         if let Some(entry) = cast_catalog_entry(target, target) {
             if let CastMethod::Function { oid, arguments } = entry.method {
@@ -120,7 +176,11 @@ fn cast_function(
     if !(1..=3).contains(&arity) {
         return Err(SQLError::Internal("invalid catalog cast arity".into()));
     }
-    let input_collation = pg_type_collation_oid(&value.ty);
+    let input_collation = if value.node.kind == "CASETESTEXPR" {
+        value.node.integer("collation")?
+    } else {
+        pg_type_collation_oid(&value.ty)
+    };
     let mut arguments = vec![value.node.into()];
     if arity > 1 {
         arguments.push(

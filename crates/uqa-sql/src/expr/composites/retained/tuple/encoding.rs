@@ -13,6 +13,7 @@ use super::{
 };
 
 mod arrays;
+pub(crate) use arrays::payload as array_payload;
 
 pub(super) fn encode(
     fields: &[(String, Value)],

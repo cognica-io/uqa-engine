@@ -87,6 +87,20 @@ fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
         (Value::JsonB(value), ColumnType::JsonB) => {
             varlena(&crate::expr::encode_jsonb_datum(value)?)?
         }
+        (Value::Array(array), ColumnType::Array(element)) => {
+            let payload = crate::expr::composites::retained::array_payload(
+                array,
+                element,
+                &crate::expr::composites::retained::Descriptors::new(),
+            )
+            .ok_or_else(|| {
+                SQLError::Unsupported(format!(
+                    "catalog array Datum encoding for {}",
+                    ty.sql_name()
+                ))
+            })?;
+            varlena(&payload)?
+        }
         (Value::Decimal(value), ColumnType::Numeric { .. }) => varlena(&numeric::encode(value)?)?,
         (Value::Temporal(value), _) => temporal::encode(value, pg_type_oid(representation))?,
         _ => {
@@ -152,6 +166,22 @@ pub(super) fn varlena_payload(length: usize, bytes: &[u8]) -> Result<&[u8], SQLE
         return Err(invalid("invalid varlena Datum length"));
     }
     Ok(&bytes[4..])
+}
+
+pub(super) fn array_text(node: &Node) -> Result<String, SQLError> {
+    let oid = u32::try_from(node.integer("consttype")?)
+        .map_err(|_| invalid("invalid array constant type"))?;
+    let element = crate::catalog::type_metadata::builtin_array_element(oid)
+        .ok_or_else(|| invalid("unknown array constant type"))?;
+    if node.boolean("constbyval")? || node.integer("constlen")? != -1 {
+        return Err(invalid("invalid array constant layout"));
+    }
+    let Field::Datum { length, bytes } = node.field("constvalue")? else {
+        return Err(invalid("constant has no Datum"));
+    };
+    varlena_payload(*length, bytes)?;
+    let value = crate::expr::datums::read(&uqa_core::DatumValue::new(oid, 0, bytes.clone()))?;
+    crate::result::format_postgres_text(&value, &ColumnType::Array(Box::new(element.clone())), None)
 }
 
 fn varlena(payload: &[u8]) -> Result<Vec<u8>, SQLError> {
