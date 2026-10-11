@@ -48,7 +48,7 @@ VIRTUAL generated columns permit built-in immutable functions but reject user-de
 | 13 | [#117](https://github.com/cognica-io/uqa-engine/issues/117), JSON extraction | Match declared operand resolution, NULL/error timing, stored syntax and reopen behavior. |
 | 14 | [#118](https://github.com/cognica-io/uqa-engine/issues/118), NULLIF | Select the equality operator, operand casts and resulting left-input type before evaluation. |
 | 15 | [#131](https://github.com/cognica-io/uqa-engine/issues/131), lock timeout | Completed in merged PR #273: setting scope, units, lock wait deadlines, cleanup and PostgreSQL SQLSTATEs; see the configuration and statement inventory below. |
-| 16 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Resolve range/multirange element containment through declared operand types in both directions. |
+| 16 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Implemented in [PR #770](https://github.com/cognica-io/uqa-engine/pull/770): 376 PostgreSQL messages match four providers and thirteen observations match persistent reopen. Both declared operand types select containment, preserving endpoints, NULLs, domains and errors; merge is pending the temporal prerequisite unit. |
 | 17 | [#133](https://github.com/cognica-io/uqa-engine/issues/133), empty ranges | Match empty range/multirange containment without type or NULL exemptions. |
 | 18 | [#134](https://github.com/cognica-io/uqa-engine/issues/134), factorial | Preserve exact numeric results, PostgreSQL bounds/errors and cancellation. |
 | 19 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |

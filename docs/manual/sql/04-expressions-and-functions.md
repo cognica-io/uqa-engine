@@ -353,12 +353,16 @@ User SQL and PL/pgSQL routines may declare `anyrange`, `anymultirange`, `anycomp
 | `range_merge(multirange)` | Return the smallest range covering every member |
 | `multirange(range)`, family multirange constructors | Construct the paired normalized multirange |
 
-The implemented range and multirange operators are `&&` for overlap, `@>` for range-set containment, `<@` for contained-by, and `-|-` for adjacency. These operators require range or multirange operands from the same built-in subtype family; scalar-element containment, complete ordering and arithmetic operators, user-defined range families, and index-backed operator classes remain open compatibility bugs.
+The implemented range and multirange operators are `&&` for overlap, `@>` for containment, `<@` for contained-by, and `-|-` for adjacency. Two range or multirange operands must have the same built-in subtype. `range @> element`, `multirange @> element` and their reversed `<@` forms require the element's declared type to match that subtype; integer widths, numeric and temporal types remain distinct. Numeric precision and temporal precision do not change the selected type. A domain over the container is accepted, but a domain over the element is a distinct polymorphic type and requires an explicit cast to the subtype. Complete ordering and arithmetic operators, user-defined range families, and index-backed operator classes remain open compatibility bugs.
+
+Containment returns a boolean and does not change state. Included endpoints belong to a range, excluded endpoints do not, an empty range contains no element, and a multirange contains an element if any member does. A NULL operand returns NULL after type validation; incompatible types report `42883` even when their values are NULL. An untyped literal opposite a known range or multirange is read as that container type, so a scalar spelling such as `'2'` reports `22P02`; write `2` or `'2'::integer` to select an integer element. An untyped container opposite an element is ambiguous (`42725`).
 
 ```sql execute
 SELECT lower('[1,5)'::int4range) AS lower_bound,
        '[1,5)'::int4range && '[4,8)'::int4range AS overlaps,
        '[1,5)'::int4range -|- '[5,8)'::int4range AS adjacent,
+       '[1,5)'::int4range @> 2 AS contains_element,
+       4 <@ '{[1,3),[4,6)}'::int4multirange AS element_contained,
        range_merge('{[1,3),[8,10)}'::int4multirange) AS covering_range;
 ```
 

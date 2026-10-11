@@ -97,26 +97,8 @@ impl CanonicalRange {
 
     #[must_use]
     pub fn contains_value(&self, value: &Value) -> bool {
-        if self.empty {
-            return false;
-        }
-        let lower = self
-            .lower
-            .as_ref()
-            .is_none_or(|lower| match value.cmp(lower) {
-                Ordering::Greater => true,
-                Ordering::Equal => self.lower_inclusive,
-                Ordering::Less => false,
-            });
-        let upper = self
-            .upper
-            .as_ref()
-            .is_none_or(|upper| match value.cmp(upper) {
-                Ordering::Less => true,
-                Ordering::Equal => self.upper_inclusive,
-                Ordering::Greater => false,
-            });
-        lower && upper
+        self.contains_value_with_control(value, &ProductionControl::uncontrolled())
+            .expect("ordinary range element containment")
     }
 
     /// Smallest range containing both operands. Unlike union, `PostgreSQL`'s

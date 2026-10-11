@@ -12,6 +12,32 @@ use super::{
 };
 
 impl CanonicalRange {
+    pub(in crate::expr) fn contains_value_with_control(
+        &self,
+        value: &Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool> {
+        control.check()?;
+        if self.empty || matches!(value, Value::Null) {
+            return Ok(false);
+        }
+        if let Some(lower) = self.lower() {
+            match compare_values(value, lower, control)? {
+                Ordering::Less => return Ok(false),
+                Ordering::Equal if !self.lower_inclusive => return Ok(false),
+                _ => {}
+            }
+        }
+        Ok(match self.upper() {
+            Some(upper) => match compare_values(value, upper, control)? {
+                Ordering::Less => true,
+                Ordering::Equal => self.upper_inclusive,
+                Ordering::Greater => false,
+            },
+            None => true,
+        })
+    }
+
     pub(in crate::expr) fn overlaps_with_control(
         &self,
         other: &Self,

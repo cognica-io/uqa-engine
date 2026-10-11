@@ -70,9 +70,13 @@ pub(in crate::expr) fn parse_range_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CanonicalRange>> {
     control.check()?;
+    let original = text;
     let text = text.trim();
     if text.eq_ignore_ascii_case("empty") {
         return Ok(control.finish(CanonicalRange::empty(subtype), control.empty_reservation())?);
+    }
+    if !text.starts_with(['[', '(']) {
+        return Err(missing_opening_delimiter(original, false));
     }
     let opening = text
         .chars()
@@ -165,8 +169,12 @@ pub(in crate::expr) fn parse_multirange_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CanonicalMultirange>> {
     control.check()?;
+    let original = text;
     let text = text.trim();
-    if !text.starts_with('{') || !text.ends_with('}') {
+    if !text.starts_with('{') {
+        return Err(missing_opening_delimiter(original, true));
+    }
+    if !text.ends_with('}') {
         return Err(invalid_multirange(text, subtype));
     }
     let items = split_multirange_items(&text[1..text.len() - 1], control)?
@@ -177,6 +185,20 @@ pub(in crate::expr) fn parse_multirange_with_control(
     }
     let (ranges, memory) = ranges.finish()?.into_parts();
     normalize_ranges(ranges, subtype, control, memory)
+}
+
+fn missing_opening_delimiter(text: &str, multirange: bool) -> SQLError {
+    let (kind, detail) = if multirange {
+        ("multirange", "Missing left brace.")
+    } else {
+        ("range", "Missing left parenthesis or bracket.")
+    };
+    SQLError::Diagnostic {
+        sqlstate: "22P02".into(),
+        message: format!("malformed {kind} literal: \"{text}\""),
+        detail: Some(detail.into()),
+        hint: None,
+    }
 }
 
 pub(in crate::expr) fn multirange_from_produced_ranges(

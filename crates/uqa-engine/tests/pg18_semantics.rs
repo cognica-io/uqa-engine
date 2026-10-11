@@ -104,6 +104,8 @@ mod ordered_mode;
 mod pattern_escape;
 #[path = "pg18_semantics/pg18_additions.rs"]
 mod pg18_additions;
+#[path = "pg18_semantics/range_elements.rs"]
+mod range_elements;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]

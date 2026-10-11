@@ -312,7 +312,7 @@ fn generated_lazy_branches_and_typed_numeric_errors_keep_existing_precedence() {
 }
 
 #[test]
-fn generated_range_element_evaluation_preserves_the_shared_owner_outcome() {
+fn generated_range_element_evaluation_preserves_postgresql_results() {
     let budget = MemoryBudget::new(8192);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -320,13 +320,7 @@ fn generated_range_element_evaluation_preserves_the_shared_owner_outcome() {
     let expression = expression("'[1,4)'::int4range @> 2", &crate::RowSchema::default());
     let ordinary = eval_scalar(&expression, &ScalarEvalContext::from_row_lookup(&row, &[]));
     let generated = eval_generated_scalar_with_control(&expression, &row, &control);
-    match (ordinary, generated) {
-        (Ok(expected), Ok(actual)) => assert_eq!(expected, *actual),
-        (Err(expected), Err(actual)) => {
-            assert_eq!(expected.sqlstate(), actual.sqlstate());
-            assert_eq!(expected.to_string(), actual.to_string());
-        }
-        (ordinary, generated) => panic!("different outcomes: {ordinary:?}, {generated:?}"),
-    }
+    assert_eq!(ordinary.unwrap(), Value::Bool(true));
+    assert_eq!(*generated.unwrap(), Value::Bool(true));
     assert_eq!(budget.used(), 0);
 }

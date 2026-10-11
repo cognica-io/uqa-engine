@@ -94,6 +94,8 @@ pub(super) fn eval_dispatched_range_function_with_control(
         RangeFunctionOperation::Overlap => "overlap",
         RangeFunctionOperation::Contains => "contains",
         RangeFunctionOperation::ContainedBy => "contained_by",
+        RangeFunctionOperation::ContainsElement => "contains_element",
+        RangeFunctionOperation::ElementContainedBy => "element_contained_by",
         RangeFunctionOperation::Adjacent => "adjacent",
     };
     for argument in args {
@@ -110,6 +112,9 @@ pub(super) fn eval_dispatched_range_function_with_control(
         "multirange" => multirange_constructor(subtype, args, control),
         "overlap" | "contains" | "contained_by" | "adjacent" => {
             operator(operation, subtype, multirange, args, control)
+        }
+        "contains_element" | "element_contained_by" => {
+            element_containment(operation, subtype, multirange, args, control)
         }
         _ => Err(SQLError::Internal(format!(
             "unknown range dispatch operation `{operation}`"
@@ -313,6 +318,32 @@ fn operator(
         }),
         control,
     )
+}
+
+fn element_containment(
+    operation: &str,
+    subtype: RangeSubtype,
+    multirange: bool,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let [left, right] = args else {
+        return Err(SQLError::TypeMismatch(format!(
+            "range {operation} operator takes 2 arguments"
+        )));
+    };
+    let (range, element) = if operation == "contains_element" {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let range = RangeSet::parse(range_text(range)?, subtype, multirange, control)?;
+    for member in range.ranges() {
+        if member.contains_value_with_control(element, control)? {
+            return inline_value(Value::Bool(true), control);
+        }
+    }
+    inline_value(Value::Bool(false), control)
 }
 
 fn range_text(value: &Value) -> Result<&str> {
