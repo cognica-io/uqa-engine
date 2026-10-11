@@ -22,7 +22,8 @@ pub use comparison::{
     compare_with_control, equal_typed_values_with_enum_catalog, eval_comparison_truth,
     eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
     eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
-    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
+    eval_record_comparison_truth_with_engine, type_comparison_can_fail,
+    validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
 };
 pub(in crate::expr) use comparison::{require_array_element_support, ComparisonSupport};
@@ -47,6 +48,18 @@ pub(super) fn eval_binary(
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
     ) {
+        if matches!((&l, &r), (Value::Row(_), Value::Row(_)))
+            && !matches!((lhs, rhs), (Expr::Row(_), Expr::Row(_)))
+        {
+            return eval_record_comparison_truth_with_engine(
+                op,
+                &l,
+                &r,
+                &ProductionControl::uncontrolled(),
+                ctx.engine,
+            )
+            .map(|value| value.map_or(Value::Null, Value::Bool));
+        }
         return eval_comparison_truth_with_engine(
             op,
             &l,
@@ -318,6 +331,16 @@ pub(super) fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
+    if matches!((l, r), (Value::Row(_), Value::Row(_))) {
+        return eval_record_comparison_truth_with_engine(
+            op,
+            l,
+            r,
+            &ProductionControl::uncontrolled(),
+            ctx.engine,
+        )
+        .map(|value| Some(value.map_or(Value::Null, Value::Bool)));
+    }
     eval_comparison_truth_with_engine(
         op,
         l,

@@ -97,6 +97,18 @@ pub(super) fn binary(
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
     ) {
+        if matches!((&*left, &*right), (Value::Row(_), Value::Row(_)))
+            && !matches!((lhs, rhs), (ScalarExpr::Row(_), ScalarExpr::Row(_)))
+        {
+            let value = uqa_sql::expr::eval_record_comparison_truth_with_engine(
+                op,
+                &left,
+                &right,
+                control,
+                context.function_hook(),
+            )?;
+            return plain(value.map_or(Value::Null, Value::Bool), control);
+        }
         let value = uqa_sql::expr::eval_comparison_truth_with_deferred_state(
             op,
             &left,

@@ -64,6 +64,40 @@ pub fn eval_comparison_truth_with_engine(
     eval_comparison_truth_with_deferred_state(op, left, right, control, engine, || state)
 }
 
+/// Compare record operands selected by SQL syntax. A record-valued column, cast or parameter retains record field operators even when its carrier is an anonymous `Row`; only two uncast ROW constructors select three-valued row comparison.
+pub fn eval_record_comparison_truth_with_engine(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+) -> Result<Option<bool>> {
+    control.check()?;
+    if matches!(left, Value::Null) || matches!(right, Value::Null) {
+        return Ok(None);
+    }
+    let catalog = engine.map(crate::expr::EngineValueCatalog);
+    let catalog = catalog
+        .as_ref()
+        .map(|catalog| catalog as &dyn crate::expr::SQLValueCatalog);
+    if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+        let equal = equal_typed_values_with_enum_catalog(left, right, control, catalog)?;
+        return Ok(Some(if op == BinaryOp::Equal { equal } else { !equal }));
+    }
+    let order = compare_typed_values_with_enum_catalog(left, right, control, catalog, None)?;
+    Ok(Some(match op {
+        BinaryOp::Less => order.is_lt(),
+        BinaryOp::LessEqual => order.is_le(),
+        BinaryOp::Greater => order.is_gt(),
+        BinaryOp::GreaterEqual => order.is_ge(),
+        _ => {
+            return Err(SQLError::Internal(format!(
+                "non-comparison operator {op:?} reached record comparison"
+            )))
+        }
+    }))
+}
+
 /// Primitive scalar comparisons need no catalog or private enum call state. Resolve that state only when the evaluated carriers require the general comparison path; operand evaluation and its SQL ordering remain the caller's responsibility.
 #[inline]
 pub fn eval_comparison_truth_with_deferred_state<'a>(

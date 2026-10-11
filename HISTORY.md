@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL ROW and record comparison operators through joins and constant folding, including NULL fields, reached field errors, equality-only keys and FULL JOIN diagnostics. Hash joins retain the statement value catalog for physical enum identities in direct, duplicate, computed and spilled keys.
+
 - Preserve typed ROW field operators in exact document and transaction-overlay lookups, including equality-only fields and reached NULL-field errors. Retain B-tree ordering requirements and original frame masking.
 
 - Apply PostgreSQL foreign-key actions when a referenced key changes its retained representation despite SQL equality, including numeric scale, signed zero, intervals and nested values. Preserve CASCADE, RESTRICT, SET NULL, SET DEFAULT, deferred parent events, child-side equality, unchanged-key behavior and rollback.

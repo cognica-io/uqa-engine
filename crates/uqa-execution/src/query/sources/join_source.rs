@@ -8,11 +8,10 @@
 /// Build the physical operator for a join source.
 use super::{
     alias_join_operator, bind_source_plan_schema, build_join_operator_with_ctes_at_path,
-    decide_join_sides, join_conjuncts, join_using_predicate, null_row_for_schema,
-    physical_exec_error, physical_work_mem_bytes, resolve_join_using, shape_join_using_output,
-    validate_join_on_schema, ColumnPrune, CteScope, JoinExecutionStrategy, JoinKind,
-    PhysicalOperator, QualifierFilters, QueryLateralSource, RowSchemaExecution, SQLError, SQLParam,
-    ScalarExpr, SourceContext, SourcePlan,
+    join_using_predicate, null_row_for_schema, physical_exec_error, physical_work_mem_bytes,
+    resolve_join_using, shape_join_using_output, validate_join_on_schema, ColumnPrune, CteScope,
+    JoinExecutionStrategy, PhysicalOperator, QualifierFilters, QueryLateralSource,
+    RowSchemaExecution, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::{HashJoin, LateralJoin, NestedLoopJoin};
 
@@ -106,6 +105,17 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .as_ref()
                     .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
                     .or_else(|| on.clone());
+                if *kind == uqa_sql::ast::JoinKind::Full {
+                    super::join_keys::join_keys(
+                        *kind,
+                        effective_on.as_ref(),
+                        &left_schema,
+                        &right_schema,
+                        params,
+                        context.types,
+                        context.volatility,
+                    )?;
+                }
                 let pinned_right = right_recheck_path
                     .as_deref()
                     .and_then(|path| ctes.recheck_source_row(path))
@@ -208,81 +218,48 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let schema = crate::RowSchema::join(&left_schema, &right_schema, []);
                 evaluator.bind_type_introspection(predicate, &schema)
             });
-            let hash_plan = if matches!(kind, JoinKind::Cross) {
-                None
-            } else {
-                effective_on.as_ref().and_then(|predicate| {
-                    let conjuncts = join_conjuncts(predicate);
-                    let mut left_keys = Vec::with_capacity(conjuncts.len());
-                    let mut right_keys = Vec::with_capacity(conjuncts.len());
-                    let mut residual = Vec::new();
-                    for conjunct in conjuncts {
-                        let ScalarExpr::Binary {
-                            op: uqa_sql::ast::BinaryOp::Equal,
-                            lhs,
-                            rhs,
-                        } = conjunct
-                        else {
-                            residual.push(conjunct.clone());
-                            continue;
-                        };
-                        if let Some((left_key, right_key)) =
-                            decide_join_sides(&left_schema, &right_schema, lhs, rhs)
-                        {
-                            left_keys.push(left_key.clone());
-                            right_keys.push(right_key.clone());
-                        } else {
-                            residual.push(conjunct.clone());
-                        }
-                    }
-                    if left_keys.is_empty() {
-                        return None;
-                    }
-                    let residual = match residual.len() {
-                        0 => None,
-                        1 => residual.pop(),
-                        _ => Some(ScalarExpr::And(residual)),
-                    };
-                    Some((left_keys, right_keys, residual))
-                })
-            };
+            let hash_plan = super::join_keys::join_keys(
+                *kind,
+                effective_on.as_ref(),
+                &left_schema,
+                &right_schema,
+                params,
+                context.types,
+                context.volatility,
+            )?;
             let left_nulls = null_row_for_schema(left_operator.schema());
             let right_nulls = null_row_for_schema(right_operator.schema());
             let work_mem = physical_work_mem_bytes(context.relational.runtime)?;
             let joined: Box<dyn PhysicalOperator + 'a> = match (strategy, hash_plan) {
-                (
-                    JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash,
-                    Some((left_keys, right_keys, residual)),
-                ) => Box::new(
-                    HashJoin::try_new_with_work_mem_and_predicate(
+                (JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash, Some(keys)) => {
+                    Box::new(
+                        HashJoin::try_new_with_work_mem_and_predicate(
+                            left_operator,
+                            right_operator,
+                            *kind,
+                            keys.left,
+                            keys.right,
+                            keys.residual,
+                            evaluator,
+                            left_nulls,
+                            right_nulls,
+                            work_mem,
+                            params,
+                        )
+                        .map_err(physical_exec_error)?,
+                    )
+                }
+                (JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash, None) => {
+                    Box::new(NestedLoopJoin::new_with_work_mem(
                         left_operator,
                         right_operator,
                         *kind,
-                        left_keys,
-                        right_keys,
-                        residual,
+                        effective_on,
                         evaluator,
                         left_nulls,
                         right_nulls,
                         work_mem,
-                        params,
-                    )
-                    .map_err(physical_exec_error)?,
-                ),
-                (JoinExecutionStrategy::Auto, None) => Box::new(NestedLoopJoin::new_with_work_mem(
-                    left_operator,
-                    right_operator,
-                    *kind,
-                    effective_on,
-                    evaluator,
-                    left_nulls,
-                    right_nulls,
-                    work_mem,
-                )),
-                (JoinExecutionStrategy::Hash, None) => {
-                    return Err(SQLError::Internal(
-                        "DPccp hash-join strategy has no splittable equality predicate".into(),
-                    ));
+                    ))
                 }
             };
             let joined = if let Some(using) = resolved_using.as_ref() {

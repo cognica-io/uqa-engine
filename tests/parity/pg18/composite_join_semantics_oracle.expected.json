@@ -389,6 +389,599 @@
       "id": "record_null"
     },
     {
+      "sql": "SELECT a.v = b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_column_eq"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer) = ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_constructor_eq"
+    },
+    {
+      "sql": "SELECT a.v <> b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_column_ne"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer) <> ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_constructor_ne"
+    },
+    {
+      "sql": "SELECT a.v < b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_column_lt"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer) < ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_constructor_lt"
+    },
+    {
+      "sql": "SELECT a.v <= b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_column_le"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer) <= ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_constructor_le"
+    },
+    {
+      "sql": "SELECT a.v > b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_column_gt"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer) > ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_constructor_gt"
+    },
+    {
+      "sql": "SELECT a.v >= b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_column_ge"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer) >= ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_constructor_ge"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer)::record=ROW(NULL::integer)::record AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "cast_record_constructor"
+    },
+    {
+      "sql": "SELECT (CASE WHEN true THEN ROW(NULL::integer) END)=ROW(NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "case_record"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,1),(2,NULL)) a(id,n) FULL JOIN (VALUES(1,1),(2,NULL)) b(id,n) ON ROW(a.n)=ROW(b.n) AND a.id>=b.id ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              null
+            ],
+            [
+              null,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_row_residual"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) a(id,v) FULL JOIN (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) b(id,v) ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_record"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) a(id,v) FULL JOIN (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) b(id,v) ON a.v=b.v AND a.id>=b.id ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "FULL JOIN is only supported with merge-joinable or hash-joinable join conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "full_record_residual"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON true ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_constant_true"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON false ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              null,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_constant_false"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON NULL ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              null,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_constant_NULL"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON true::boolean ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_typed_constant_true"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON false::boolean ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              null,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_typed_constant_false"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON NULL::boolean ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              null,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "full_typed_constant_NULL"
+    },
+    {
       "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(1,2))) b(v) ON a.v=b.v",
       "command_tags": [],
       "error": {
@@ -873,6 +1466,148 @@
       "id": "enum_join_renamed"
     },
     {
+      "sql": "CREATE TYPE cj_old_enum AS ENUM ('first','last'); CREATE TYPE cj_new_enum AS ENUM ('new'); CREATE TYPE cj_enum_carrier AS(e cj_old_enum); CREATE VIEW cj_enum_first AS SELECT '(first)'::cj_enum_carrier AS v; CREATE VIEW cj_enum_last AS SELECT '(last)'::cj_enum_carrier AS v; ALTER TYPE cj_enum_carrier ALTER ATTRIBUTE e TYPE cj_new_enum",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "CREATE VIEW",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "retained_enum_setup"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_first b ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "retained_enum_equal"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_last b ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "retained_enum_unequal"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT v FROM cj_enum_first UNION ALL SELECT v FROM cj_enum_first) a JOIN (SELECT v FROM cj_enum_first UNION ALL SELECT v FROM cj_enum_first) b ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "retained_enum_duplicates"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_first b ON ARRAY[a.v]=ARRAY[b.v]",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "retained_enum_nested"
+    },
+    {
       "sql": "PREPARE cj_physical_join(cj_physical) AS SELECT a.id AS l,b.id AS r FROM (VALUES(1,'(hello,8)'::cj_physical),(2,'(other,9)'::cj_physical)) a(id,v) JOIN (SELECT 1 AS id,$1 AS v) b ON a.v=b.v ORDER BY l,r; ALTER TYPE cj_physical ALTER ATTRIBUTE a TYPE bytea",
       "command_tags": [
         "PREPARE",
@@ -920,6 +1655,83 @@
       ],
       "notices": [],
       "id": "physical_join"
+    },
+    {
+      "sql": "CREATE SEQUENCE cj_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "volatile_setup"
+    },
+    {
+      "sql": "SELECT count(*) FROM generate_series(1,3) a(i) JOIN generate_series(1,2) b(i) ON a.i+nextval('cj_sequence')*0=b.i",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "volatile_join"
+    },
+    {
+      "sql": "SELECT last_value FROM cj_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "volatile_calls"
+    },
+    {
+      "sql": "SELECT count(*) FROM generate_series(1,3) a(i) FULL JOIN generate_series(1,2) b(i) ON a.i+nextval('cj_sequence')*0=b.i",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "FULL JOIN is only supported with merge-joinable or hash-joinable join conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "volatile_full"
     },
     {
       "sql": "SET work_mem='64kB'",
@@ -1000,6 +1812,31 @@
       ],
       "notices": [],
       "id": "reset_allowance"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_first b ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_retained_enum",
+      "reopen": true
     },
     {
       "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
@@ -1129,14 +1966,14 @@
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "575f72eacb35b0c76511295d95d3e17af018e4ac95aa0dc16cf924f7c4970629",
+    "input_sha256": "e28413535fc8df61918e63eeb2349e727992720b6cedf7162e3346033dc6cf7f",
     "options": [
       "--rows",
       "--details",
       "--notices"
     ],
     "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
-    "fresh_connection_cases": 3,
-    "fresh_connection_output_sha256": "1b0eba2d128e9d6b0cba03391e401c4e84b3fee40dbf925834620cdaa16cbf9a"
+    "fresh_connection_cases": 4,
+    "fresh_connection_output_sha256": "8ef36dea98f93b6735a8cadc4de9e45700c937a43d93d3920875ce9f8885143c"
   }
 }

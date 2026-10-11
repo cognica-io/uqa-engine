@@ -8,6 +8,61 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{ResultRow, RowSchema};
 
+#[test]
+fn record_columns_and_row_constructors_select_distinct_null_rules() {
+    let row = ResultRow::from([
+        ("l".into(), Value::Row(vec![Value::Null].into())),
+        ("r".into(), Value::Row(vec![Value::Null].into())),
+    ]);
+    let schema = RowSchema::with_types(
+        vec!["l".into(), "r".into()],
+        vec![Some(uqa_sql::ColumnType::Record); 2],
+    );
+    let budget = MemoryBudget::new(16 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (operator, record_result) in [
+        ("=", true),
+        ("<>", false),
+        ("<", false),
+        ("<=", true),
+        (">", false),
+        (">=", true),
+    ] {
+        for (source, expected) in [
+            (format!("SELECT l {operator} r"), Value::Bool(record_result)),
+            (
+                format!("SELECT ROW(NULL::integer) {operator} ROW(NULL::integer)"),
+                Value::Null,
+            ),
+            (
+                format!("SELECT ROW(NULL::integer)::record {operator} ROW(NULL::integer)::record"),
+                Value::Bool(record_result),
+            ),
+        ] {
+            let uqa_sql::Statement::Select(mut query) =
+                uqa_sql::compile(&source).unwrap().remove(0)
+            else {
+                panic!("SELECT comparison")
+            };
+            let scalar =
+                uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+            let bound = uqa_sql::bind_type_introspection(scalar, &schema, &[]);
+            assert_eq!(
+                eval_scalar(&bound, &ScalarEvalContext::from_row_lookup(&row, &[])).unwrap(),
+                expected,
+                "{source}"
+            );
+            assert_eq!(
+                *eval_generated_scalar_with_control(&bound, &row, &control).unwrap(),
+                expected,
+                "{source}"
+            );
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct Oracle {
     postgresql: String,
