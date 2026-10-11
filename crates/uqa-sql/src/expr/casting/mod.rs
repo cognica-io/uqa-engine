@@ -577,6 +577,14 @@ fn canonical_cast_source_with_control(
         Value::Null => "unknown",
         Value::Void => "void",
     });
+    let declared;
+    let source = if source.contains('"') || source.starts_with("pg_catalog.") {
+        declared = crate::ColumnType::from_sql_name_with_control(source, control)?
+            .sql_name_with_control(control)?;
+        declared.as_str()
+    } else {
+        source
+    };
     let (source, _) = crate::ast::split_type_modifier_with_control(source, control)?;
     let mut normalized = ProductionString::new(*control);
     for (index, word) in source.split_whitespace().enumerate() {
