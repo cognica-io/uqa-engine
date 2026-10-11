@@ -184,6 +184,11 @@ fn infinite_temporal_nodes_and_sql_match_postgresql() {
     check_typed_nodes(include_str!("tests/temporal.json"));
 }
 
+#[test]
+fn row_expression_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/rows.json"));
+}
+
 fn check_typed_nodes(fixtures: &str) {
     #[derive(serde::Deserialize)]
     struct Fixture {
@@ -214,8 +219,14 @@ fn check_typed_nodes(fixtures: &str) {
             "CREATE DOMAIN d AS {} CHECK({})",
             fixture.base, fixture.check
         );
-        let crate::Statement::CreateDomain(domain) = crate::compile(&statement).unwrap().remove(0)
-        else {
+        let mut statements = match crate::compile(&statement) {
+            Ok(statements) => statements,
+            Err(error) => {
+                failures.push(format!("{}: compilation: {error}", fixture.check));
+                continue;
+            }
+        };
+        let crate::Statement::CreateDomain(domain) = statements.remove(0) else {
             panic!("domain declaration")
         };
         let schema = crate::RowSchema::with_types(vec!["value".into()], vec![Some(base.clone())]);
