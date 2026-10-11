@@ -53,7 +53,7 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
         }
         let comparison =
             foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
-        let expected = comparison.normalize(old_values)?;
+        let expected = comparison.normalize_referenced(old_values)?;
         context.deferrals.defer_foreign_key_parent_event(
             &ref_table,
             firing.relation,
@@ -136,7 +136,7 @@ pub fn defer_deleted_key_checks<S: Clone + 'static>(
         }
         let comparison =
             foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
-        let expected = comparison.normalize(key_values)?;
+        let expected = comparison.normalize_referenced(key_values)?;
         context.deferrals.defer_foreign_key_parent_event(
             &ref_table,
             parent_table,

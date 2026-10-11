@@ -100,7 +100,7 @@ fn default_analysis_reads_input_constants_without_evaluating_operators() {
     );
     let mut converted = false;
     plan.scalar.visit(&mut |node| {
-        converted |= matches!(node, ScalarExpr::TypedLiteral { value: uqa_core::Value::Int(12), ty, .. } if ty == "integer");
+        converted |= matches!(node, ScalarExpr::TypedLiteral { value: uqa_core::Value::Int(12), ty, .. } if ty == "pg_catalog.\"int4\"");
     });
     assert!(converted, "the input function's value must be retained");
 }
@@ -163,8 +163,8 @@ fn default_sequence_inputs_store_relation_identity_without_sequence_evaluation()
 #[test]
 fn stored_default_function_coercions_preserve_late_text_and_bigint_arguments() {
     for (text, expected_type) in [
-        ("nextval('missing'::text)", "regclass"),
-        ("setval('ids',40)", "bigint"),
+        ("nextval('missing'::text)", ColumnType::Regclass),
+        ("setval('ids',40)", ColumnType::BigInteger),
     ] {
         let aliases = RelationAliases(std::cell::RefCell::new(Vec::new()));
         let original = expression(text);
@@ -190,8 +190,10 @@ fn stored_default_function_coercions_preserve_late_text_and_bigint_arguments() {
             panic!("stored sequence call");
         };
         let argument = args.last().unwrap();
-        assert!(matches!(argument, ScalarExpr::Cast { ty, .. } if ty == expected_type));
-        if expected_type == "regclass" {
+        assert!(
+            matches!(argument, ScalarExpr::Cast { ty, .. } if ty == &expected_type.catalog_name())
+        );
+        if matches!(expected_type, ColumnType::Regclass) {
             assert!(
                 aliases.0.borrow().is_empty(),
                 "typed text resolves at runtime"
@@ -225,6 +227,6 @@ fn stored_function_coercions_keep_named_argument_positions() {
     assert_eq!(arguments[0].name, Some("max"));
     assert_eq!(arguments[1].name, Some("min"));
     assert!(
-        matches!(arguments[1].value, ScalarExpr::Cast { expr, ty, .. } if ty == "bigint" && matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Int(1))))
+        matches!(arguments[1].value, ScalarExpr::Cast { expr, ty, .. } if ty == &ColumnType::BigInteger.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Int(1))))
     );
 }

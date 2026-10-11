@@ -56,9 +56,11 @@ fn membership_preserves_selected_comparisons_and_rebinding() {
     let ScalarExpr::Func { args, .. } = scalar else {
         panic!("quantified comparison")
     };
-    assert!(matches!(&args[0], ScalarExpr::Cast { ty, implicit: true, .. } if ty == "oid"));
     assert!(
-        matches!(&args[1], ScalarExpr::Cast { ty, implicit: true, expr } if ty == "oid[]" && matches!(**expr, ScalarExpr::Array(_)))
+        matches!(&args[0], ScalarExpr::Cast { ty, implicit: true, .. } if ty == "pg_catalog.\"oid\"")
+    );
+    assert!(
+        matches!(&args[1], ScalarExpr::Cast { ty, implicit: true, expr } if ty == "pg_catalog.\"oid\"[]" && matches!(**expr, ScalarExpr::Array(_)))
     );
 }
 

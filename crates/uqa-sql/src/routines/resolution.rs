@@ -548,6 +548,17 @@ fn routine_invocation_binding(
     parameter_indices: &[usize],
     matched: &MatchedRoutineSignature,
 ) -> RoutineInvocationBinding {
+    // Matching keys identify an overload; execution receives the selected catalog types instead of resolving those keys through the caller's search_path.
+    let concrete = matched.invocation_binding(None);
+    let output_type = |type_name: &str| {
+        if crate::type_resolution::routine_polymorphic_type(type_name).is_some() {
+            matched
+                .substitute_type(type_name)
+                .map(|ty| ty.catalog_name())
+        } else {
+            Some(type_name.to_owned())
+        }
+    };
     let parameter_types = def
         .params
         .iter()
@@ -556,9 +567,9 @@ fn routine_invocation_binding(
             parameter_indices
                 .iter()
                 .position(|index| *index == definition_index)
-                .and_then(|call_index| matched.parameter_types.get(call_index).cloned())
-                .or_else(|| matched.substitute_type_name(&parameter.type_name))
-                .unwrap_or_else(|| canonical_routine_type_name(&parameter.type_name))
+                .and_then(|call_index| concrete.parameter_types.get(call_index).cloned())
+                .or_else(|| output_type(&parameter.type_name))
+                .unwrap_or_else(|| parameter.type_name.clone())
         })
         .collect::<Vec<_>>();
     let argument_positions = matched
@@ -593,20 +604,20 @@ fn routine_invocation_binding(
         })
         .collect::<Vec<_>>();
     let return_type = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => matched
-            .substitute_type_name(type_name)
-            .or_else(|| Some(canonical_routine_type_name(type_name))),
-        FunctionReturns::Table => Some("record".into()),
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
+            output_type(type_name)
+        }
+        FunctionReturns::Table => Some(ColumnType::Record.catalog_name()),
         FunctionReturns::None => match output_indices.as_slice() {
             [] => None,
             [index] => parameter_types.get(*index).cloned(),
-            _ => Some("record".into()),
+            _ => Some(ColumnType::Record.catalog_name()),
         },
     };
     RoutineInvocationBinding {
         argument_positions,
-        argument_targets: matched.argument_targets.clone(),
-        argument_sources: matched.argument_sources.clone(),
+        argument_targets: concrete.argument_targets,
+        argument_sources: concrete.argument_sources,
         parameter_types,
         return_type,
         variadic_mode,

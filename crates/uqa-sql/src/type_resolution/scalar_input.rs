@@ -81,6 +81,12 @@ fn array_element_type_from_bound_inputs(
             array_element_type_from_bound_inputs(nested, schema, params, engine, control)?
                 .map(|element| ColumnType::array_with_control(element, control))
                 .transpose()?
+        } else if matches!(item, ScalarExpr::Cast { .. }) {
+            operand_type_name(item, schema, params, engine, control, true)?
+                .as_deref()
+                .map(|name| resolve_operand_type(name, engine, control))
+                .transpose()?
+                .flatten()
         } else if let Some(ty) = inferred_type(item, schema, params, control)? {
             Some(ty)
         } else {
@@ -109,18 +115,21 @@ fn resolve_operand_type(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    if let Some(engine) = engine {
+        let ty = engine.resolve_type_name(name).map_err(SQLError::Internal)?;
+        control.check()?;
+        if let Some(ty) = ty {
+            return ty
+                .retain_external_with_control(control)
+                .map(Some)
+                .map_err(Into::into);
+        }
+    }
     let ty = match ColumnType::from_sql_name_with_control(name, control) {
         Ok(ty) => Some(ty),
         Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
-        Err(_) => engine
-            .map(|engine| engine.resolve_type_name(name).map_err(SQLError::Internal))
-            .transpose()?
-            .flatten()
-            .map(|ty| {
-                ty.retain_external_with_control(control)
-                    .map_err(SQLError::from)
-            })
-            .transpose()?,
+        Err(_) => None,
     };
     control.check()?;
     Ok(ty)
@@ -180,7 +189,8 @@ fn operand_type_name(
         } else {
             base_type(ty, control)?
         };
-        ty.sql_name_with_control(control).map_err(SQLError::from)
+        ty.catalog_name_with_control(control)
+            .map_err(SQLError::from)
     };
     let name = match expression {
         ScalarExpr::Cast { expr, ty, .. } => {
@@ -246,9 +256,11 @@ fn operand_type_name(
                 .map(type_name)
                 .transpose();
         }
-        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
-        ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
-        ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
+            return type_name(&ColumnType::Integer).map(Some);
+        }
+        ScalarExpr::Literal(Value::Int(_)) => return type_name(&ColumnType::BigInteger).map(Some),
+        ScalarExpr::Literal(Value::Bytes(_)) => return type_name(&ColumnType::Bytea).map(Some),
         ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return Ok(None),
         _ => {
             let Some(ty) = inferred_type(expression, schema, params, control)? else {

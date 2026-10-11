@@ -365,6 +365,38 @@ fn unary_minus_preserves_integer_width_and_overflow() {
 }
 
 #[test]
+fn unary_minus_accepts_selected_catalog_identities() {
+    for name in [
+        "pg_catalog.int2",
+        "pg_catalog.\"int4\"",
+        "\"pg_catalog\".\"int8\"",
+    ] {
+        assert_eq!(
+            negate_value(&Value::Int(1), Some(name)).unwrap(),
+            Value::Int(-1)
+        );
+    }
+    for name in ["pg_catalog.\"float4\"", "pg_catalog.\"float8\""] {
+        assert_eq!(
+            negate_value(&Value::Float(0.5), Some(name)).unwrap(),
+            Value::Float(-0.5)
+        );
+    }
+    assert_eq!(
+        negate_value(
+            &Value::Int(i64::from(i16::MIN)),
+            Some("pg_catalog.\"int2\"")
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("22003")
+    );
+    let error = negate_value(&Value::Bool(true), Some("pg_catalog.\"bool\"")).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    assert_eq!(error.to_string(), "operator does not exist: - boolean");
+}
+
+#[test]
 fn unary_minus_preserves_interval_fields() {
     assert_eq!(
         negate_value(

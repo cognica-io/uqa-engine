@@ -61,7 +61,7 @@ impl RegclassBinding<'_> {
         *expression = Expr::TypedLiteral {
             composite_source: None,
             value: Value::Int(oid),
-            ty: "regclass".into(),
+            ty: ColumnType::Regclass.catalog_name(),
         };
         Ok(true)
     }

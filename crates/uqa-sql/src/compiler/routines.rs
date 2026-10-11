@@ -27,25 +27,15 @@ struct CompiledFunctionTypeName {
     reference: Option<crate::ast::RoutineColumnTypeReference>,
 }
 
-/// Canonical spelling of a routine `TypeName`. A leading `pg_catalog`
-/// qualifier is redundant, while relation qualification on `%TYPE` and
-/// schema qualification on named types must survive compilation for catalog
-/// resolution by the engine.
+/// Keep a routine `TypeName`'s parser-selected namespace, named-type qualification and structured %TYPE reference for catalog binding.
 fn compile_function_type_name(
     t: &pg_query::protobuf::TypeName,
 ) -> Result<CompiledFunctionTypeName> {
-    let mut components = t
+    let components = t
         .names
         .iter()
         .map(extract_string)
         .collect::<Result<Vec<_>>>()?;
-    if !t.pct_type
-        && components
-            .first()
-            .is_some_and(|component| component.eq_ignore_ascii_case("pg_catalog"))
-    {
-        components.remove(0);
-    }
     if components.is_empty() {
         return Err(SQLError::Internal(
             "function type has no name components".into(),
@@ -78,11 +68,6 @@ fn compile_function_type_name(
         .map(|component| render_relation_component(component))
         .collect::<Vec<_>>()
         .join(".");
-    if !t.pct_type && t.array_bounds.is_empty() && components.len() == 1 {
-        if let Some(element) = crate::ast::builtin_array_element_name(&components[0]) {
-            name = format!("{element}[]");
-        }
-    }
     if t.pct_type {
         name.push_str("%type");
     }

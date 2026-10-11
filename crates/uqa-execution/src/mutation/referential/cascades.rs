@@ -103,7 +103,7 @@ pub(super) fn run_referential_action<S: Clone + 'static>(
         table,
         foreign_key,
     )?;
-    let expected = comparison.normalize(action.key.clone())?;
+    let expected = comparison.normalize_referenced(action.key.clone())?;
     let referencing = referencing_rows(
         referential,
         table,
@@ -195,15 +195,21 @@ fn prepare_child_rewrite<S: Clone + 'static>(
     let mut updated = document.clone();
     match (&action.new_key, action.action()) {
         (Some(new_key), ForeignKeyAction::Cascade) => {
-            for (column, value) in foreign_key.local_columns.iter().zip(new_key) {
+            for ((column, value), source) in foreign_key
+                .local_columns
+                .iter()
+                .zip(new_key)
+                .zip(&comparison.referenced_types)
+            {
                 updated.insert(
                     column.clone(),
-                    uqa_sql::assignment::columns::coerce_to_column_type(
+                    uqa_sql::assignment::columns::coerce_to_column_type_from(
                         referential.assignment.assignment,
                         referential.assignment.columns,
                         &child.table,
                         column,
                         value.clone(),
+                        Some(source),
                     )?,
                 );
             }

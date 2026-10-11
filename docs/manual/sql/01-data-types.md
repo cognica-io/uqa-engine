@@ -1,6 +1,6 @@
 # SQL Data Types
 
-UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignment checks use these engine types rather than PostgreSQL binary storage formats.
+UQA Engine maps PostgreSQL 18 type identities to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignments retain the selected type and its modifiers; retained PostgreSQL scalar and composite datums are read through their declared physical codecs when SQL observes them.
 
 ## Type matrix
 
@@ -21,6 +21,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
 | `TEXT`, `VARCHAR(n)`, `NAME`, `UUID` | Distinct declared identities over text-compatible carriers; length and UUID input are validated |
 | `CHARACTER(n)`, `CHAR(n)` | Blank-padded fixed-length character value; default length is 1 |
+| `pg_catalog."char"` | PostgreSQL internal unsigned-byte identity with signed integer conversion and octal output for high bytes |
 | `BOOLEAN`, `BOOL` | Boolean carrier |
 | `DATE` | Calendar date |
 | `TIME[(p)]` | Time without timezone, with optional fractional-second precision |
@@ -37,6 +38,14 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `INT4MULTIRANGE`, `INT8MULTIRANGE`, `NUMMULTIRANGE`, `DATEMULTIRANGE`, `TSMULTIRANGE`, `TSTZMULTIRANGE` | PostgreSQL built-in multirange identities whose members are normalized, ordered, and merged |
 | `VECTOR(n)` | One finite fixed-dimensional numeric vector |
 | `TENSOR(n)` | A row-level list of finite vectors with fixed element dimension |
+
+## Type names and catalog selection
+
+SQL keyword types such as `integer`, `double precision` and `character varying` name PostgreSQL builtin types. Identifiers such as `int4`, `text` and `record` use the effective `search_path`, so an earlier user-defined type with the same name is selected and its domain constraints apply. Explicit `pg_catalog` qualification selects an actual catalog identifier: `pg_catalog.int4` is valid, while `pg_catalog.integer` raises `42704`. Quoted identifiers preserve their case. Arrays keep the selected element identity, including domains and generated array names.
+
+A selected type keeps its identity through generated coercions, `pg_typeof`, prepared parameters, stored views and routines, and persistent reopening. Changing the caller's `search_path` changes visible name output without reinterpreting an already-bound builtin or user-defined type. Stored identity casts use the exact selected type and modifier; a cast that changes a character length remains a conversion.
+
+PostgreSQL's internal `"char"` differs from `CHAR(n)`: empty text denotes byte zero, other text supplies its first UTF-8 byte, and a backslash followed by three octal digits denotes that byte. Byte zero prints as empty text, ASCII bytes print directly, and bytes 128–255 print as backslash plus three octal digits. Integer conversion uses signed eight-bit values and raises `22003` outside −128–127; comparison uses unsigned byte order. Arrays, composite fields and stored values preserve these rules.
 
 ## Integer and serial behavior
 

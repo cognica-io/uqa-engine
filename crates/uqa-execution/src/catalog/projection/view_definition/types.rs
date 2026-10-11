@@ -12,9 +12,7 @@ use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::QueryPlan;
 
 use super::{Deparser, SQLError, Scope};
-use crate::catalog::projection::regtypes::{
-    catalog_type_display_name, catalog_user_type_identity, CatalogEnumLabels,
-};
+use crate::catalog::projection::regtypes::{catalog_user_type_identity, CatalogEnumLabels};
 
 impl Deparser<'_> {
     pub(super) fn composite_row(
@@ -47,7 +45,7 @@ impl Deparser<'_> {
             .collect::<Result<Vec<_>, _>>()?;
         let row = format!("ROW({})", values.join(", "));
         Ok(if show_type {
-            format!("{row}::{}", self.type_display(&binding.ty))
+            format!("{row}::{}", self.type_display(&binding.ty)?)
         } else {
             row
         })
@@ -62,13 +60,10 @@ impl Deparser<'_> {
     }
 
     /// `format_type_be` of a stored type name.
-    pub(super) fn type_display(&self, ty: &str) -> String {
-        match UserTypeIdentity::parse(ty) {
-            Some(identity) => catalog_user_type_identity(self.catalog, identity).map_or_else(
-                || ty.to_string(),
-                |resolved| catalog_type_display_name(&self.dynamic, &resolved),
-            ),
-            None => super::expressions::type_name(ty),
+    pub(super) fn type_display(&self, ty: &str) -> Result<String, SQLError> {
+        match self.resolved_type(ty) {
+            Some(resolved) => self.alias_output()?.type_name(&resolved),
+            None => Ok(super::expressions::type_name(ty)),
         }
     }
 
@@ -149,7 +144,7 @@ impl Deparser<'_> {
 
     /// A typed constant, as `get_const_expr` prints a `Const`: a non-negative `integer`, a `numeric` written with a decimal point and a `boolean` print bare, an enum or enum-array constant shows its current label text, and every other constant prints its output text with its type.
     pub(super) fn typed_literal(&self, value: &Value, ty: &str) -> Result<String, SQLError> {
-        let display = self.type_display(ty);
+        let display = self.type_display(ty)?;
         let Some(resolved) = self.resolved_type(ty) else {
             return Ok(format!(
                 "({})::{display}",
@@ -241,7 +236,7 @@ impl Deparser<'_> {
                     };
                     let value = self.typed_literal(value, ty)?;
                     return Ok(Some(if bare_numeric {
-                        format!("{value}::{}", self.type_display(ty))
+                        format!("{value}::{}", self.type_display(ty)?)
                     } else {
                         value
                     }));
@@ -259,7 +254,7 @@ impl Deparser<'_> {
             if implicit || matches!(target, ColumnType::Domain { .. }) {
                 return Ok(None);
             }
-            let display = self.type_display(ty);
+            let display = self.type_display(ty)?;
             if items.is_empty() {
                 return Ok(Some(format!("ARRAY[]::{display}")));
             }
@@ -274,7 +269,7 @@ impl Deparser<'_> {
         if let ColumnType::Domain { base, .. } = &target {
             if matches!(expr, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
                 let operand = self.cast(expr, &base.catalog_name(), scope, subqueries)?;
-                return Ok(Some(format!("({operand})::{}", self.type_display(ty))));
+                return Ok(Some(format!("({operand})::{}", self.type_display(ty)?)));
             }
         }
         Ok(None)

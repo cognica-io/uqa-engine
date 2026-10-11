@@ -87,6 +87,37 @@ fn simple_family_requires_known_consistent_types_and_substitutes_outputs() {
 }
 
 #[test]
+fn invocation_types_keep_catalog_identities_separate_from_overload_keys() {
+    let domain = ColumnType::Domain {
+        schema: "first".into(),
+        name: "text".into(),
+        oid: 50_010,
+        array_oid: Some(50_011),
+        base: Box::new(ColumnType::Text),
+    };
+    for ty in [
+        ColumnType::Text,
+        ColumnType::Integer,
+        ColumnType::InternalChar,
+        ColumnType::Array(Box::new(ColumnType::Integer)),
+        domain,
+    ] {
+        let name = ty.catalog_name();
+        let mut declaration = parameter(&name);
+        declaration.column_type = Some(ty.clone());
+        let matched = match_types(&[declaration], &[Some(ty.clone())])
+            .unwrap()
+            .unwrap();
+        assert_eq!(matched.argument_targets, [canonical_column_type_name(&ty)]);
+        let invocation = matched.invocation_binding(Some(&name));
+        assert_eq!(invocation.argument_targets, std::slice::from_ref(&name));
+        assert_eq!(invocation.argument_sources, [Some(name.clone())]);
+        assert_eq!(invocation.parameter_types, std::slice::from_ref(&name));
+        assert_eq!(invocation.return_type, Some(name));
+    }
+}
+
+#[test]
 fn simple_anyarray_flattens_array_domains() {
     let domain = ColumnType::Domain {
         schema: "public".into(),
@@ -442,9 +473,18 @@ fn generic_variadic_infers_element_and_concrete_parameter_array() {
     );
     let invocation = matched.invocation_binding(Some("anycompatible"));
     assert_eq!(invocation.argument_positions, [0, 0]);
-    assert_eq!(invocation.argument_targets, ["int4", "int4"]);
-    assert_eq!(invocation.parameter_types, ["int4[]"]);
-    assert_eq!(invocation.return_type, Some("int4".into()));
+    assert_eq!(
+        invocation.argument_targets,
+        vec![ColumnType::Integer.catalog_name(); 2]
+    );
+    assert_eq!(
+        invocation.parameter_types,
+        [ColumnType::Array(Box::new(ColumnType::Integer)).catalog_name()]
+    );
+    assert_eq!(
+        invocation.return_type,
+        Some(ColumnType::Integer.catalog_name())
+    );
     assert_eq!(
         invocation.variadic_mode,
         InvocationVariadicMode::Expanded { parameter_index: 0 }

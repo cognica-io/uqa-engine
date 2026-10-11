@@ -42,6 +42,11 @@ pub(super) fn read_bytes(
         let bytes = bytes
             .get(..length)
             .ok_or_else(|| corrupt("invalid datum length"))?;
+        if oid == 18 {
+            return Ok(crate::expr::internal_char::carrier_with_control(
+                bytes[0], control,
+            )?);
+        }
         let mut bits = [0; 8];
         bits[..length].copy_from_slice(bytes);
         let value = crate::expr::composites::datum::decode_bits(u64::from_le_bytes(bits), ty)

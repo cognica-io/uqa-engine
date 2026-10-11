@@ -643,73 +643,34 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
 }
 
 fn compile_cast_type_name(type_name: &pg_query::protobuf::TypeName) -> Result<String> {
-    let raw_names = extract_strings(&type_name.names)?;
-    // libpg_query reports built-in types qualified as `pg_catalog.<name>`;
-    // discard only that implicit qualification. Catalog-owned domains need
-    // their schema retained through overload selection and runtime coercion.
-    let mut names = raw_names;
-    if names.first().is_some_and(|name| name == "pg_catalog") {
-        names.remove(0);
-    }
+    let names = extract_strings(&type_name.names)?;
     if names.is_empty() {
         return Err(SQLError::Internal(
             "TypeCast target has no name components".into(),
         ));
     }
+    // Parser-selected namespaces and identifier case are binding inputs, including keyword aliases already qualified by PostgreSQL's grammar.
     let mut ty = names
         .iter()
-        .map(|name| crate::compiler::render_relation_component(name))
+        .enumerate()
+        .map(|(index, name)| {
+            if index > 0 && names.first().is_some_and(|name| name == "pg_catalog") {
+                format!("\"{}\"", name.replace('"', "\"\""))
+            } else {
+                crate::expr::quote_ident(name)
+            }
+        })
         .collect::<Vec<_>>()
         .join(".");
-    if names.len() == 1 && names[0] == "char" {
-        ty = "\"char\"".to_string();
-    }
-    if crate::ast::ColumnType::from_sql_name(&ty).is_err()
-        || (names.len() == 1
-            && matches!(
-                names[0].as_str(),
-                "integer" | "smallint" | "bigint" | "boolean"
-            ))
-    {
-        let mut declared = crate::compiler::types::compile_pg_type_reference(type_name, "cast")?;
-        while let crate::ast::ColumnType::Array(element) = declared {
-            declared = *element;
+    if !type_name.typmods.is_empty() {
+        if names.first().is_some_and(|schema| schema == "pg_catalog")
+            && names.last().is_some_and(|name| {
+                crate::catalog::type_metadata::builtin_scalar_type_by_name(name).is_some()
+            })
+        {
+            crate::compiler::types::compile_pg_type_reference(type_name, "cast")?;
         }
-        ty = declared.sql_name();
-    }
-    if names.len() == 1 {
-        ty = match ty.as_str() {
-            "int2" => "smallint".to_string(),
-            "int4" => "integer".to_string(),
-            "int8" => "bigint".to_string(),
-            "float4" => "real".to_string(),
-            "float8" => "double precision".to_string(),
-            _ => ty,
-        };
-    }
-    if ty == "interval" && !type_name.typmods.is_empty() {
-        ty = crate::compiler::types::compile_pg_type_name(type_name, "cast")?.sql_name();
-    }
-    if matches!(ty.as_str(), "numeric" | "decimal") && !type_name.typmods.is_empty() {
-        crate::compiler::types::compile_pg_type_name(type_name, "cast")?;
-    }
-    // Carry length / precision modifiers (`varchar(1)`, `numeric(10,2)`)
-    // so the evaluator can truncate / rescale like PostgreSQL.
-    if matches!(
-        ty.as_str(),
-        "varchar"
-            | "bpchar"
-            | "char"
-            | "character"
-            | "character varying"
-            | "numeric"
-            | "decimal"
-            | "time"
-            | "timetz"
-            | "timestamp"
-            | "timestamptz"
-    ) {
-        let mods = type_name
+        let modifiers = type_name
             .typmods
             .iter()
             .map(|node| match node.node.as_ref() {
@@ -726,11 +687,11 @@ fn compile_cast_type_name(type_name: &pg_query::protobuf::TypeName) -> Result<St
                 ))),
             })
             .collect::<Result<Vec<_>>>()?;
-        if !mods.is_empty() {
-            ty = format!("{ty}({})", mods.join(","));
-        }
+        ty.push('(');
+        ty.push_str(&modifiers.join(","));
+        ty.push(')');
     }
-    if !type_name.array_bounds.is_empty() && !ty.ends_with("[]") {
+    if !type_name.array_bounds.is_empty() {
         ty.push_str("[]");
     }
     Ok(ty)

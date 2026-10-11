@@ -333,7 +333,7 @@ pub(in crate::compiler) fn compile_sql_value_function(
         Some(target) => Expr::Cast {
             implicit: false,
             expr: Box::new(call),
-            ty: target.sql_name(),
+            ty: target.catalog_name(),
         },
         None => call,
     })

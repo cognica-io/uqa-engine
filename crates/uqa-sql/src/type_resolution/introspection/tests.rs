@@ -35,23 +35,23 @@ fn input(expression: &Expr, budget: &MemoryBudget) -> Produced<ScalarExpr> {
 fn typeof_distinguishes_unknown_literals_from_resolved_text_inputs() {
     let schema = RowSchema::with_types(vec!["s".into()], vec![Some(ColumnType::Text)]);
     for (argument, expected) in [
-        (Expr::Literal(Value::Null), "unknown"),
-        (Expr::Literal(Value::Str("label".into())), "unknown"),
-        (Expr::Column("s".into()), "text"),
+        (Expr::Literal(Value::Null), 705),
+        (Expr::Literal(Value::Str("label".into())), 705),
+        (Expr::Column("s".into()), 25),
         (
             Expr::Cast {
                 implicit: false,
                 expr: Box::new(Expr::Literal(Value::Null)),
                 ty: "text".into(),
             },
-            "text",
+            25,
         ),
     ] {
         let expression = ExpressionPlan::lower(call("pg_typeof", vec![argument])).scalar;
         let bound = bind_type_introspection(expression, &schema, &[]);
         assert!(matches!(
             bound, ScalarExpr::Cast {ty, expr, ..}
-                if ty == "regtype" && matches!(*expr, ScalarExpr::Literal(Value::Str(ref name)) if name == expected)
+                if ty == "pg_catalog.\"regtype\"" && matches!(*expr, ScalarExpr::Literal(Value::Int(oid)) if oid == expected)
         ));
     }
 }
@@ -145,7 +145,7 @@ fn controlled_binding_admits_new_ir_before_mutating_the_owned_root() {
                     panic!("row remains a row")
                 };
                 assert!(
-                    matches!(&items[0], ScalarExpr::Cast {ty, expr, .. } if ty == "regtype" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(name)) if name == "smallint"))
+                    matches!(&items[0], ScalarExpr::Cast {ty, expr, .. } if ty == "pg_catalog.\"regtype\"" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Int(21))))
                 );
                 assert_eq!(
                     items[1],
@@ -251,8 +251,13 @@ fn array_common_type_preserves_coercion_origin_through_controlled_binding() {
         let ScalarExpr::Func { args, .. } = &*output else {
             panic!("common expression")
         };
+        let expected_type = if explicit {
+            "bigint[]"
+        } else {
+            "pg_catalog.\"int8\"[]"
+        };
         assert!(matches!(&args[0], ScalarExpr::Cast { implicit, ty, expr }
-            if *implicit != explicit && ty == "bigint[]" && matches!(expr.as_ref(), ScalarExpr::Array(_))));
+            if *implicit != explicit && ty == expected_type && matches!(expr.as_ref(), ScalarExpr::Array(_))));
         assert!(matches!(&args[1], ScalarExpr::Array(_)));
         assert_eq!(budget.used(), output.reserved_bytes());
         drop(output);
@@ -283,8 +288,12 @@ fn unknown_common_input_relabels_a_domain_but_identical_domains_survive() {
             panic!("common expression")
         };
         if unknown {
-            assert!(matches!(&args[0], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "oid"));
-            assert!(matches!(&args[1], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "oid"));
+            assert!(
+                matches!(&args[0], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "pg_catalog.\"oid\"")
+            );
+            assert!(
+                matches!(&args[1], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "pg_catalog.\"oid\"")
+            );
         } else {
             assert!(args
                 .iter()

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve parser-selected type namespaces, catalog identifiers and modifiers through casts and routine declarations. Keep bound type identities in introspection, scalar coercions, constant folding, prepared parameters and stored SQL, including shadowed builtin names, generated domain arrays and unary negation of qualified numeric types. Correct PostgreSQL internal `"char"` byte input, signed integer conversion, unsigned comparison, physical retention and text output, retaining already typed bytes through foreign-key actions, point updates and generated columns.
+
 - Preserve PostgreSQL record field types and selected operators in array sorting, search, removal and replacement, including NULL fields, named composites, nested records, unsupported JSON equality and ordering, diagnostic operand order and array search start validation.
 
 ## [0.5.3] - 2026-10-11

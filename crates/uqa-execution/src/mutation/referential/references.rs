@@ -60,7 +60,7 @@ pub fn lock_referencing_child<S: Clone + 'static>(
         .iter()
         .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
         .collect();
-    let actual = comparison.normalize(actual)?;
+    let actual = comparison.normalize_local(actual)?;
     Ok((actual == expected).then_some((identity, child_doc)))
 }
 
@@ -109,7 +109,7 @@ pub fn referencing_rows<S: Clone + 'static>(
                 .iter()
                 .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
                 .collect();
-            if comparison.normalize(values)? == expected {
+            if comparison.normalize_local(values)? == expected {
                 if matches!(
                     action,
                     ForeignKeyAction::Cascade
@@ -134,8 +134,8 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
     action: ForeignKeyAction,
 ) -> Result<(), SQLError> {
     for column in columns {
-        let value = match action {
-            ForeignKeyAction::SetNull => Value::Null,
+        let (value, source) = match action {
+            ForeignKeyAction::SetNull => (Value::Null, None),
             ForeignKeyAction::SetDefault => {
                 if let Some(expr) = context
                     .assignment
@@ -143,7 +143,7 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
                     .try_column_insert_default_expr(table, column)
                     .map_err(|err| dml_storage_error("referential SET DEFAULT", err))?
                 {
-                    crate::query::catalog_expression::eval_lowered_expression(
+                    crate::query::catalog_expression::eval_lowered_expression_with_type(
                         context.assignment.expressions.expressions,
                         context.assignment.scopes.current_routine_scope(),
                         &expr,
@@ -151,7 +151,7 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
                         &[],
                     )?
                 } else {
-                    Value::Null
+                    (Value::Null, None)
                 }
             }
             ForeignKeyAction::NoAction | ForeignKeyAction::Restrict | ForeignKeyAction::Cascade => {
@@ -160,12 +160,13 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
                 )));
             }
         };
-        let value = uqa_sql::assignment::columns::coerce_to_column_type(
+        let value = uqa_sql::assignment::columns::coerce_to_column_type_from(
             context.assignment.assignment,
             context.assignment.columns,
             table,
             column,
             value,
+            source.as_ref(),
         )?;
         new_doc.insert(column.clone(), value);
     }

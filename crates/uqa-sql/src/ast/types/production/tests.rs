@@ -47,6 +47,8 @@ fn controlled_type_parser_preserves_aliases_modifiers_and_errors() {
         "TIMESTAMP(3) WITH TIME ZONE",
         "interval day to second(4)",
         "pg_catalog.varchar(15)",
+        "\"pg_catalog\".\"varchar\"(15)[]",
+        "PG_CATALOG.INTERVAL(32767,3)",
         "int8multirange",
         "vector(8)",
         "\"char\"",
@@ -65,6 +67,8 @@ fn controlled_type_parser_preserves_aliases_modifiers_and_errors() {
         "numeric(2,3,4)",
         "time(-1)",
         "unknown_type",
+        "pg_catalog.\"TEXT\"",
+        "pg_catalog.integer",
     ] {
         let expected = ColumnType::from_sql_name(spelling).unwrap_err();
         let actual = ColumnType::from_sql_name_with_control(spelling, &control).unwrap_err();

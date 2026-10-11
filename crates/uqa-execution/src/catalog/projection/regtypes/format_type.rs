@@ -7,23 +7,22 @@
 //! `PostgreSQL` type display with nullable typmods and catalog-visible names.
 
 use super::{
-    format_regtype, regtype_output_catalog, CatalogContext, OutputVisibility, SQLError, Value,
+    format_catalog_identifier, format_regtype, regtype_output_catalog, CatalogContext,
+    OutputVisibility, RegtypeOutputCatalog, SQLError, Value,
 };
 use uqa_sql::ColumnType;
 
 /// The name `PostgreSQL`'s `format_type_be` gives a type in messages: a built-in type by its SQL name without type modifiers, and a domain by its name, qualified only when the search path does not find it.
 pub fn format_type_name(context: &CatalogContext<'_>, ty: &ColumnType) -> Result<String, SQLError> {
-    match ty {
-        ColumnType::Domain { oid, .. } => {
-            match format_type_value(context, &[Value::Int(i64::from(*oid)), Value::Null])? {
-                Value::Str(name) => Ok(name),
-                other => Err(SQLError::Internal(format!(
-                    "format_type of domain {oid} returned {other:?}"
-                ))),
-            }
-        }
-        ColumnType::Array(element) => Ok(format!("{}[]", format_type_name(context, element)?)),
-        _ => Ok(ty.regtype_name()),
+    let oid = uqa_sql::catalog::type_metadata::pg_type_oid(ty);
+    if oid == 0 {
+        return Ok(ty.regtype_name());
+    }
+    match format_type_value(context, &[Value::Int(oid), Value::Null])? {
+        Value::Str(name) => Ok(name),
+        other => Err(SQLError::Internal(format!(
+            "format_type of type {oid} returned {other:?}"
+        ))),
     }
 }
 
@@ -53,16 +52,25 @@ pub fn format_type_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
         }
     };
     let catalog = regtype_output_catalog(context)?;
+    let visibility = OutputVisibility::from_context(context)?;
+    format_catalog_type(&catalog, &visibility, oid, modifier).map(Value::Str)
+}
+
+pub(super) fn format_catalog_type(
+    catalog: &RegtypeOutputCatalog,
+    visibility: &OutputVisibility,
+    oid: i64,
+    modifier: Option<i64>,
+) -> Result<String, SQLError> {
     let Some(entry) = catalog.types.get(&oid) else {
-        return Ok(Value::Str("???".into()));
+        return Ok("???".into());
     };
     let array = catalog
         .types
         .get(&entry.element_oid)
         .is_some_and(|element| element.array_oid == oid);
     let oid = if array { entry.element_oid } else { oid };
-    let visibility = OutputVisibility::from_context(context)?;
-    let default = || format_regtype(&visibility, &catalog, oid).unwrap_or_else(|| "???".into());
+    let default = || format_regtype(visibility, catalog, oid).unwrap_or_else(|| "???".into());
     let with_modifier = modifier.filter(|modifier| *modifier >= 0);
     let mut name = match oid {
         16 => "boolean".into(),
@@ -71,18 +79,17 @@ pub fn format_type_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
         23 => "integer".into(),
         700 => "real".into(),
         701 => "double precision".into(),
-        114 => "json".into(),
         1042 | 1043 => {
             let name = if oid == 1043 {
-                "character varying"
+                "character varying".into()
             } else if modifier.is_some() && with_modifier.is_none() {
-                "bpchar"
+                format_catalog_identifier(visibility, catalog, oid).unwrap_or_else(|| "???".into())
             } else {
-                "character"
+                "character".into()
             };
             match with_modifier.filter(|modifier| *modifier >= 4) {
                 Some(modifier) => format!("{name}({})", modifier - 4),
-                None => name.into(),
+                None => name,
             }
         }
         1700 => match with_modifier.filter(|modifier| *modifier >= 4) {
@@ -118,7 +125,7 @@ pub fn format_type_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
     if array {
         name.push_str("[]");
     }
-    Ok(Value::Str(name))
+    Ok(name)
 }
 
 fn interval_name(modifier: Option<i64>) -> Result<String, SQLError> {

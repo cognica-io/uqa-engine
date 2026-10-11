@@ -81,7 +81,10 @@ fn unavailable_rule_rows_are_rejected_before_column_lookup() {
     .unwrap()
     .unwrap();
     assert_eq!(typed_row.value, Value::Null);
-    assert_eq!(typed_row.declared_type.as_deref(), Some("integer"));
+    assert_eq!(
+        typed_row.declared_type.as_deref(),
+        Some("pg_catalog.\"int4\"")
+    );
 }
 
 #[test]

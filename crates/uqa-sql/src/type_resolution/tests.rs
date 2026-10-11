@@ -7,6 +7,7 @@
 use super::*;
 use crate::ast::FunctionDispatch;
 
+mod catalog_qualification;
 mod fixed_overloads;
 mod variadic;
 
@@ -275,12 +276,12 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
     assert!(matches!(
         &args[0],
         ScalarExpr::Cast { expr, ty, .. }
-            if ty == "jsonb" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(_)))
+            if ty == &ColumnType::JsonB.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(_)))
     ));
     assert!(matches!(
         &args[1],
         ScalarExpr::Cast { expr, ty, .. }
-            if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
+            if ty == &ColumnType::Boolean.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Param(1))
     ));
 
     let defaulted = ScalarExpr::Func {
@@ -539,8 +540,8 @@ fn type_introspection_binds_before_integer_width_is_erased() {
         bind_type_introspection(expression, &schema, &[]),
         ScalarExpr::Cast {
             implicit: true,
-            expr: Box::new(ScalarExpr::Literal(Value::Str("smallint".into()))),
-            ty: "regtype".into(),
+            expr: Box::new(ScalarExpr::Literal(Value::Int(21))),
+            ty: "pg_catalog.\"regtype\"".into(),
         }
     );
 }
@@ -693,7 +694,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     assert_eq!(args[0], ScalarExpr::Column("integers".into()));
     assert!(matches!(
         &args[1],
-        ScalarExpr::Cast { ty, .. } if ty == "boolean"
+        ScalarExpr::Cast { ty, .. } if ty == &ColumnType::Boolean.catalog_name()
     ));
 
     let parameterized = call(
@@ -713,7 +714,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     assert!(matches!(
         &args[1],
         ScalarExpr::Cast { expr, ty, .. }
-            if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
+            if ty == &ColumnType::Boolean.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Param(1))
     ));
 
     let json_sort = call("array_sort", vec![ScalarExpr::Column("documents".into())]);
@@ -778,8 +779,8 @@ fn qualified_type_introspection_binds_inside_an_expression() {
         ScalarExpr::IsNull {
             expr: Box::new(ScalarExpr::Cast {
                 implicit: true,
-                expr: Box::new(ScalarExpr::Literal(Value::Str("real".into()))),
-                ty: "regtype".into(),
+                expr: Box::new(ScalarExpr::Literal(Value::Int(700))),
+                ty: "pg_catalog.\"regtype\"".into(),
             }),
             negated: false,
         }
@@ -836,7 +837,7 @@ fn array_cast_binding_preserves_the_declared_source_element_type() {
             expr: Box::new(ScalarExpr::Cast {
                 implicit: true,
                 expr: Box::new(source),
-                ty: "smallint[]".into(),
+                ty: "pg_catalog.\"int2\"[]".into(),
             }),
             ty: "bytea[]".into(),
         }
@@ -874,7 +875,7 @@ fn text_cast_binding_preserves_only_legacy_vector_identity() {
             expr: Box::new(ScalarExpr::Cast {
                 implicit: true,
                 expr: Box::new(ScalarExpr::Column("arguments".into())),
-                ty: "oidvector".into(),
+                ty: "pg_catalog.\"oidvector\"".into(),
             }),
             ty: "text".into(),
         }
@@ -915,7 +916,7 @@ fn common_type_binding_coerces_selector_results_before_runtime_evaluation() {
         [
             ScalarExpr::Column(_),
             ScalarExpr::Cast { ty, .. }
-        ] if ty == "double precision"
+        ] if ty == "pg_catalog.\"float8\""
     ));
     assert_eq!(
         scalar_type(&bound, &schema, &[]).unwrap(),

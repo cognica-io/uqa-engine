@@ -99,6 +99,6 @@ fn prefix_minus_preserves_the_cast_operand() {
     assert!(matches!(
         &projection.expr,
         Expr::UnaryMinus(inner)
-            if matches!(inner.as_ref(), Expr::Cast { ty, .. } if ty == "smallint")
+            if matches!(inner.as_ref(), Expr::Cast { ty, .. } if ty == "pg_catalog.\"int2\"")
     ));
 }

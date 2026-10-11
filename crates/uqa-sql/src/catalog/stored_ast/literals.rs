@@ -101,12 +101,12 @@ mod tests {
         let mut expression = Expr::Literal(Value::Str("0".into()));
         read_unknown_stored_literal(None, None, &mut expression, &domain, false).unwrap();
         assert!(
-            matches!(expression, Expr::TypedLiteral { value: Value::Int(0), ty, .. } if ty == "integer")
+            matches!(expression, Expr::TypedLiteral { value: Value::Int(0), ty, .. } if ty == "pg_catalog.\"int4\"")
         );
         let mut null = Expr::Literal(Value::Null);
         read_unknown_stored_literal(None, None, &mut null, &ColumnType::Integer, false).unwrap();
         assert!(
-            matches!(null, Expr::TypedLiteral { value: Value::Null, ty, .. } if ty == "integer")
+            matches!(null, Expr::TypedLiteral { value: Value::Null, ty, .. } if ty == "pg_catalog.\"int4\"")
         );
         let mut invalid = Expr::Literal(Value::Str("bad".into()));
         assert_eq!(

@@ -61,10 +61,9 @@ fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
         ) => value.to_le_bytes().to_vec(),
         (Value::Float(value), ColumnType::Real) => (*value as f32).to_le_bytes().to_vec(),
         (Value::Float(value), ColumnType::DoublePrecision) => value.to_le_bytes().to_vec(),
-        (Value::Str(value) | Value::FixedChar(value), ColumnType::InternalChar)
-            if value.len() == 1 =>
-        {
-            value.as_bytes().to_vec()
+        (Value::Str(_), ColumnType::InternalChar) => {
+            vec![crate::expr::internal_char::value_byte(value)
+                .ok_or_else(|| SQLError::Internal("invalid internal char carrier".into()))?]
         }
         (Value::Str(value) | Value::FixedChar(value), ColumnType::Name) => {
             let mut bytes = value.as_bytes().to_vec();

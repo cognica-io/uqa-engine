@@ -7,13 +7,15 @@
 //! Recompute stored generated values from a relation's declared row schema.
 
 use uqa_core::Value;
-use uqa_sql::assignment::{
-    conversion::convert_value_to_column_type_with_context, AssignmentContext,
-};
+use uqa_sql::assignment::{conversion::coerce_assignment_value, AssignmentContext};
 use uqa_sql::{
     ast::{ColumnDef, Expr, GeneratedColumnKind},
     ResultRow, RowSchema, SQLError,
 };
+
+/// Evaluate a generated expression without discarding its analyzed source type.
+pub type GeneratedColumnEvaluator<'a> = dyn FnMut(&Expr, &ResultRow, &RowSchema) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError>
+    + 'a;
 
 /// Recompute the selected stored generated columns (all when no selection is supplied); each value takes its column type through catalog-aware assignment conversion.
 pub fn refresh_stored_generated_columns(
@@ -21,7 +23,7 @@ pub fn refresh_stored_generated_columns(
     columns: &[ColumnDef],
     selected: Option<&[String]>,
     document: &mut ResultRow,
-    evaluate: &mut dyn FnMut(&Expr, &ResultRow, &RowSchema) -> Result<Value, SQLError>,
+    evaluate: &mut GeneratedColumnEvaluator<'_>,
 ) -> Result<(), SQLError> {
     for column in columns {
         if column.generated.as_ref().is_some_and(|generated| {
@@ -47,10 +49,10 @@ pub fn refresh_stored_generated_columns(
         {
             continue;
         }
-        let value = evaluate(&generated.expression, document, &schema)?;
+        let (value, source) = evaluate(&generated.expression, document, &schema)?;
         document.insert(
             column.name.clone(),
-            convert_value_to_column_type_with_context(assignment, value, &column.ty)?,
+            coerce_assignment_value(assignment, value, &column.ty, source.as_ref())?,
         );
     }
     Ok(())

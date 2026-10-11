@@ -12,6 +12,15 @@ const ENUM_PREFIX: &str = "enum#";
 const DOMAIN_PREFIX: &str = "domain#";
 const COMPOSITE_PREFIX: &str = "composite#";
 
+pub(super) fn write_identity(ty: &ColumnType, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match ty {
+        ColumnType::Enum(reference) => write!(f, "{ENUM_PREFIX}{}", reference.oid),
+        ColumnType::Composite(reference) => write!(f, "{COMPOSITE_PREFIX}{}", reference.oid),
+        ColumnType::Domain { oid, .. } => write!(f, "{DOMAIN_PREFIX}{oid}"),
+        _ => unreachable!("catalog identity formatter requires a user-defined scalar type"),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserTypeKind {
     Enum,

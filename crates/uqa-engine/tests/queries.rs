@@ -8,6 +8,8 @@
 
 #[path = "aggregate_monoid.rs"]
 mod aggregate_monoid;
+#[path = "queries/catalog_cast_qualification.rs"]
+mod catalog_cast_qualification;
 #[path = "correlated_outer_qualifier.rs"]
 mod correlated_outer_qualifier;
 #[path = "join_correctness.rs"]

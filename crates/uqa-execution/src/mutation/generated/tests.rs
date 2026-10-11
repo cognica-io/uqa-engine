@@ -72,7 +72,7 @@ fn selective_rewrite_preserves_other_stored_values_and_full_column_scope() {
                 calls += 1;
                 assert_eq!(row["v"], Value::Int(1));
                 assert_eq!(schema.columns(), &["v", "g", "h", "z"]);
-                Ok(Value::Int(42))
+                Ok((Value::Int(42), Some(ColumnType::Integer)))
             },
         )
         .unwrap();

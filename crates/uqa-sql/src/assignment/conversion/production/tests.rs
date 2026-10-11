@@ -8,12 +8,76 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn typed_byte_assignments_preserve_every_carrier_and_its_original_lease() {
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for byte in 0..=u8::MAX {
+        let value = crate::expr::internal_char::carrier_with_control(byte, &control).unwrap();
+        let original = value.reserved_bytes();
+        let expected = (*value).clone();
+        let output = convert_value_to_column_type_from_with_control(
+            value,
+            &ColumnType::InternalChar,
+            Some(&ColumnType::InternalChar),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(*output, expected);
+        assert_eq!(output.reserved_bytes(), original);
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+    let input = control.copy_value(&Value::Int(-1)).unwrap();
+    let output = convert_value_to_column_type_from_with_control(
+        input,
+        &ColumnType::InternalChar,
+        Some(&ColumnType::Integer),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(*output, Value::Str("ÿ".into()));
+    drop(output);
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    let value = ProductionControl::uncontrolled()
+        .finish(Value::Str("ÿ".into()), None)
+        .unwrap();
+    assert_eq!(
+        convert_value_to_column_type_from_with_control(
+            value,
+            &ColumnType::InternalChar,
+            Some(&ColumnType::InternalChar),
+            &control,
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
 fn controlled_assignment_preserves_character_array_numeric_and_vector_results() {
     let budget = MemoryBudget::new(1 << 20);
     let original = CancellationToken::new();
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(&budget, &original, &invoking);
     let cases = [
+        (
+            Value::Str(String::new()),
+            ColumnType::InternalChar,
+            Value::Str(String::new()),
+        ),
+        (
+            Value::Str("é".into()),
+            ColumnType::InternalChar,
+            Value::Str("Ã".into()),
+        ),
+        (
+            Value::Str("\\377".into()),
+            ColumnType::InternalChar,
+            Value::Str("ÿ".into()),
+        ),
         (
             Value::Str("é  ".into()),
             ColumnType::Varchar(Some(1)),

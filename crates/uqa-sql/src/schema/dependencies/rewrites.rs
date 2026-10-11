@@ -89,8 +89,8 @@ fn regclass_literal_mut(expression: &mut crate::ast::Expr) -> Option<&mut String
     match expression {
         crate::ast::Expr::Literal(Value::Str(reference)) => Some(reference),
         crate::ast::Expr::Cast { expr, ty, .. }
-            if ty.eq_ignore_ascii_case("regclass")
-                || ty.eq_ignore_ascii_case("pg_catalog.regclass") =>
+            if crate::ast::ColumnType::from_sql_name(ty)
+                .is_ok_and(|ty| matches!(ty, crate::ast::ColumnType::Regclass)) =>
         {
             regclass_literal_mut(expr)
         }

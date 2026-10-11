@@ -6,7 +6,7 @@
 
 //! Bind literal relation references in persisted SQL schema expressions to the relations they name when the expressions are published or loaded. Analysis reads them earlier, in `oid_alias`.
 use super::walk_schema_expr_mut;
-use crate::ast::{ColumnDef, Expr, TableCheck};
+use crate::ast::{ColumnDef, ColumnType, Expr, TableCheck};
 use crate::schema::sequences::implicit_ownership::StoredSequenceNames;
 use uqa_core::Value;
 
@@ -21,7 +21,7 @@ pub trait SchemaReferenceCatalog {
 }
 
 fn is_regclass(ty: &str) -> bool {
-    ty.eq_ignore_ascii_case("regclass") || ty.eq_ignore_ascii_case("pg_catalog.regclass")
+    ColumnType::from_sql_name(ty).is_ok_and(|ty| matches!(ty, ColumnType::Regclass))
 }
 
 pub fn bind_schema_regclass_constants(
@@ -55,7 +55,7 @@ pub fn bind_schema_regclass_constants(
         **expr = Expr::TypedLiteral {
             composite_source: None,
             value: Value::Int(oid),
-            ty: "regclass".into(),
+            ty: ColumnType::Regclass.catalog_name(),
         };
         changed = true;
         Ok(())
@@ -133,7 +133,7 @@ pub fn bind_legacy_sequence_regclass_constants(
         *argument = Expr::TypedLiteral {
             composite_source: None,
             value: Value::Int(oid),
-            ty: "regclass".into(),
+            ty: ColumnType::Regclass.catalog_name(),
         };
         if let Some(target) = binding.argument_types.first_mut() {
             "regclass".clone_into(target);

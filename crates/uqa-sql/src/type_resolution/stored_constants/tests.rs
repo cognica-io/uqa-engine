@@ -126,7 +126,7 @@ fn declared_parameter_identity_annotations_do_not_become_stored_argument_casts()
     };
     assert!(
         matches!(&args[0], ScalarExpr::Cast { expr, ty, implicit: true }
-        if matches!(**expr, ScalarExpr::Param(1)) && ty == "bigint")
+        if matches!(**expr, ScalarExpr::Param(1)) && ty == "pg_catalog.\"int8\"")
     );
     let once = stored.clone();
     assert!(!store_operand_coercions(&mut stored, &schema(), &params, &Catalog).unwrap());
@@ -319,6 +319,7 @@ fn composite_record_operand_keeps_its_catalog_type_without_a_runtime_carrier_cas
         schema: &schema,
         params: &[],
         resolver: &Catalog,
+        preserve_syntax_shape: false,
     };
     assert!(!folding.added_casts(&mut stored, &["record"]));
     assert_eq!(stored, expression("p"));

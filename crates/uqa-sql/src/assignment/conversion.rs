@@ -41,7 +41,7 @@ pub fn coerce_assignment_value(
     } else {
         value
     };
-    convert_value_to_column_type_with_context(context, value, target)
+    convert_value_to_column_type_with_context_from(context, value, target, source)
 }
 
 fn same_catalog_value_type(source: &ColumnType, target: &ColumnType) -> bool {
@@ -50,9 +50,8 @@ fn same_catalog_value_type(source: &ColumnType, target: &ColumnType) -> bool {
             source == target
         }
         (ColumnType::Composite(source), ColumnType::Composite(target)) => source.oid == target.oid,
-        (ColumnType::Domain { base, .. }, ColumnType::Composite(_)) => {
-            same_catalog_value_type(base, target)
-        }
+        (ColumnType::InternalChar, ColumnType::InternalChar) => true,
+        (ColumnType::Domain { base, .. }, _) => same_catalog_value_type(base, target),
         (ColumnType::Array(source), ColumnType::Array(target)) => {
             same_catalog_value_type(source, target)
         }
@@ -70,6 +69,9 @@ pub fn convert_declared_value_to_column_type(
     source_ty: &ColumnType,
     target_ty: &ColumnType,
 ) -> Result<Value, SQLError> {
+    if same_catalog_value_type(source_ty, target_ty) {
+        return normalize_existing(value, target_ty);
+    }
     match (source_ty, target_ty) {
         (ColumnType::Domain { base, .. }, target) => {
             convert_declared_value_to_column_type(context, value, base, target)
@@ -152,7 +154,12 @@ pub fn convert_declared_value_to_column_type(
                 column_type_name(target_ty)
             )))
         }
-        _ => convert_value_to_column_type_with_context(context, value, target_ty),
+        _ => convert_value_to_column_type_with_context_from(
+            context,
+            value,
+            target_ty,
+            Some(source_ty),
+        ),
     }
 }
 
@@ -182,6 +189,15 @@ pub fn convert_value_to_column_type_with_context(
     value: Value,
     ty: &ColumnType,
 ) -> Result<Value, SQLError> {
+    convert_value_to_column_type_with_context_from(context, value, ty, None)
+}
+
+fn convert_value_to_column_type_with_context_from(
+    context: &dyn AssignmentContext,
+    value: Value,
+    ty: &ColumnType,
+    source: Option<&ColumnType>,
+) -> Result<Value, SQLError> {
     // Assignment to a string type calls the enum output function, which reads the current label.
     let value = if textual_target(ty) && crate::expr::enums::contains_enum_carrier(&value) {
         crate::expr::enums::render_enum_labels(
@@ -210,7 +226,7 @@ pub fn convert_value_to_column_type_with_context(
             Some(context),
         );
     }
-    convert_value_to_column_type(value, ty)
+    convert_value_to_column_type_from(value, ty, source)
 }
 
 fn textual_target(ty: &ColumnType) -> bool {
@@ -268,13 +284,30 @@ fn convert_catalog_array_elements(
 }
 
 mod production;
-pub use production::{convert_value_to_column_type_with_control, numeric_field_overflow};
+pub use production::{
+    convert_value_to_column_type_from_with_control, convert_value_to_column_type_with_control,
+    numeric_field_overflow,
+};
 
 pub fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
+    convert_value_to_column_type_from(value, ty, None)
+}
+
+/// Convert a catalog-free assignment while retaining the analyzed source identity.
+pub fn convert_value_to_column_type_from(
+    value: Value,
+    ty: &ColumnType,
+    source: Option<&ColumnType>,
+) -> Result<Value, SQLError> {
     let control = uqa_core::memory::ProductionControl::uncontrolled();
-    convert_value_to_column_type_with_control(control.finish(value, None)?, ty, &control)?
-        .into_uncontrolled()
-        .map_err(|_| SQLError::Internal("ordinary assignment production owner".into()))
+    convert_value_to_column_type_from_with_control(
+        control.finish(value, None)?,
+        ty,
+        source,
+        &control,
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary assignment production owner".into()))
 }
 
 fn convert_declared_array_elements(

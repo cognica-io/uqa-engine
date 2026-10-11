@@ -76,7 +76,7 @@ pub(super) fn prune(block: &mut QueryBlockPlan, aggregates: &dyn AggregateClassi
                 ScalarExpr::TypedLiteral {
                     composite_source: None,
                     value: Value::Null,
-                    ty: ty.sql_name(),
+                    ty: ty.catalog_name(),
                     bound_type: Some(ty),
                     parameter_index: None,
                 },

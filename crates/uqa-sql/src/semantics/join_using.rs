@@ -209,7 +209,7 @@ fn coerced_join_column(
         (Some(source), Some(target)) if source != target => ScalarExpr::Cast {
             implicit: true,
             expr: Box::new(expression),
-            ty: target.sql_name(),
+            ty: target.catalog_name(),
         },
         _ => expression,
     }

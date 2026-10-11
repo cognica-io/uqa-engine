@@ -37,9 +37,8 @@ use procedures::{format_regproc, format_regprocedure, lookup_regprocedure_oid};
 pub use procedures::{resolve_regprocedure_input_oid, routine_name_parts};
 
 pub use type_names::{
-    catalog_routine_type_oid, catalog_type_display_name, catalog_user_type_identity,
-    named_type_exists, resolve_catalog_column_type, resolve_catalog_user_type_by_oid,
-    CatalogEnumLabels,
+    catalog_routine_type_oid, catalog_user_type_identity, named_type_exists,
+    resolve_catalog_column_type, resolve_catalog_user_type_by_oid, CatalogEnumLabels,
 };
 
 fn cross_database_reference(name: &str) -> SQLError {
@@ -669,6 +668,20 @@ pub(crate) struct AliasConstantOutput {
 }
 
 impl AliasConstantOutput {
+    /// Type spelling reuses `format_type`'s modifiers and the same visible catalog identity as OID-alias output.
+    pub(crate) fn type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        let oid = uqa_sql::catalog::type_metadata::pg_type_oid(ty);
+        if oid == 0 {
+            return Ok(ty.sql_name());
+        }
+        format_type::format_catalog_type(
+            &self.catalog,
+            &self.visibility,
+            oid,
+            Some(uqa_sql::catalog::type_metadata::pg_type_modifier(ty)),
+        )
+    }
+
     pub(crate) fn build(
         catalog: &CatalogReadView,
         resolution: &RelationNameResolution,
@@ -833,17 +846,34 @@ fn format_regtype(
     catalog: &RegtypeOutputCatalog,
     oid: i64,
 ) -> Option<String> {
+    format_type_spelling(visibility, catalog, oid, false)
+}
+
+fn format_catalog_identifier(
+    visibility: &OutputVisibility,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Option<String> {
+    format_type_spelling(visibility, catalog, oid, true)
+}
+
+fn format_type_spelling(
+    visibility: &OutputVisibility,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+    catalog_identifier: bool,
+) -> Option<String> {
     let entry = catalog.types.get(&oid)?;
     if catalog
         .types
         .get(&entry.element_oid)
         .is_some_and(|element| element.array_oid == oid)
     {
-        return format_regtype(visibility, catalog, entry.element_oid)
+        return format_type_spelling(visibility, catalog, entry.element_oid, catalog_identifier)
             .map(|name| format!("{name}[]"));
     }
     let schema = namespace_name(catalog, entry.namespace_oid)?;
-    let local = if schema == "pg_catalog" {
+    let local = if schema == "pg_catalog" && !catalog_identifier {
         pg_catalog_type_output(&entry.name)
     } else {
         uqa_sql::expr::quote_ident(&entry.name)
@@ -857,13 +887,20 @@ fn format_regtype(
                 })
             })
     });
-    Some(
-        if schema == "pg_catalog" || visible_schema.map(String::as_str) == Some(schema) {
-            local
-        } else {
-            format!("{}.{}", uqa_sql::expr::quote_ident(schema), local)
-        },
-    )
+    let visible = visible_schema.map(String::as_str) == Some(schema);
+    // SQL keyword aliases resolve to the builtin namespace even when a same-name catalog identifier is shadowed.
+    let keyword_alias = !catalog_identifier
+        && !visible
+        && schema == "pg_catalog"
+        && uqa_sql::parse_regtype_name(&local)
+            .ok()
+            .flatten()
+            .is_some_and(|parsed| parsed.names == ["pg_catalog", entry.name.as_str()]);
+    Some(if visible || keyword_alias {
+        local
+    } else {
+        format!("{}.{}", uqa_sql::expr::quote_ident(schema), local)
+    })
 }
 
 fn format_regrole(context: &CatalogContext<'_>, oid: i64) -> Option<String> {

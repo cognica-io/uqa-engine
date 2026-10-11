@@ -305,7 +305,7 @@ fn normalize_expression(
                 ScalarExpr::Cast {
                     implicit: false,
                     expr: Box::new(expression),
-                    ty: target_type.sql_name(),
+                    ty: target_type.catalog_name(),
                 }
             } else if let ScalarExpr::Literal(value @ Value::Str(_)) = &expression {
                 let input_type = if matches!(
@@ -322,7 +322,7 @@ fn normalize_expression(
                     ScalarExpr::TypedLiteral {
                         composite_source: None,
                         value,
-                        ty: input_type.sql_name(),
+                        ty: input_type.catalog_name(),
                         bound_type: Some(input_type.clone()),
                         parameter_index: None,
                     },
@@ -335,14 +335,14 @@ fn normalize_expression(
                     ScalarExpr::Cast {
                         implicit: false,
                         expr: Box::new(input),
-                        ty: target_type.sql_name(),
+                        ty: target_type.catalog_name(),
                     }
                 }
             } else if let ScalarExpr::Literal(Value::Null) = expression {
                 ScalarExpr::TypedLiteral {
                     composite_source: None,
                     value: Value::Null,
-                    ty: target_type.sql_name(),
+                    ty: target_type.catalog_name(),
                     bound_type: Some(target_type),
                     parameter_index: None,
                 }
@@ -350,7 +350,7 @@ fn normalize_expression(
                 ScalarExpr::Cast {
                     implicit: false,
                     expr: Box::new(expression),
-                    ty: target_type.sql_name(),
+                    ty: target_type.catalog_name(),
                 }
             }
         }
@@ -387,7 +387,7 @@ fn normalize_expression(
                 ScalarExpr::TypedLiteral {
                     composite_source,
                     value,
-                    ty: declared.sql_name(),
+                    ty: declared.catalog_name(),
                     bound_type: Some(declared),
                     parameter_index,
                 }
@@ -451,7 +451,7 @@ fn normalize_unknown_literal(
                 ScalarExpr::Cast {
                     implicit: true,
                     expr: Box::new(expression),
-                    ty: target.sql_name(),
+                    ty: target.catalog_name(),
                 },
                 schema,
                 params,

@@ -211,7 +211,7 @@ impl Binder<'_, '_> {
             return Ok(());
         }
         // The cast is resolved again at evaluation, so a user-defined type is named by identity rather than by a search-path-dependent name.
-        let ty = self.control.copy_text(&target.catalog_name())?;
+        let ty = target.catalog_name_with_control(&self.control)?;
         self.install_cast(expression, ty)
     }
 
@@ -289,7 +289,7 @@ impl Binder<'_, '_> {
         };
         let memory = self.control.reserve(size_of::<ScalarExpr>())?;
         *self.memory = self.control.combine(self.memory.take(), memory);
-        let ty = self.control.copy_text(&target.catalog_name())?;
+        let ty = target.catalog_name_with_control(&self.control)?;
         let ty = self.retain(ty);
         let bound_type = target.clone_with_control(&self.control)?;
         let bound_type = self.retain(bound_type);
@@ -308,7 +308,7 @@ impl Binder<'_, '_> {
         expression: &mut ScalarExpr,
         ty: &ColumnType,
     ) -> Result<(), SQLError> {
-        let name = self.control.copy_text(&ty.catalog_name())?;
+        let name = ty.catalog_name_with_control(&self.control)?;
         if matches!(expression, ScalarExpr::Cast {ty, ..} if ty.eq_ignore_ascii_case(&name)) {
             return Ok(());
         }
@@ -348,29 +348,31 @@ impl Binder<'_, '_> {
     }
 
     pub(super) fn cast_requires_source(&self, target: &str) -> Result<bool, SQLError> {
-        let mut target = target.trim();
-        while let Some(element) = target.strip_suffix("[]") {
-            target = element.trim_end();
+        let Some(target) = self
+            .semantic(super::super::inference::resolved_type_name(
+                target,
+                self.resolver,
+                &self.control,
+            ))?
+            .flatten()
+        else {
+            return Ok(false);
+        };
+        let mut target = &*target;
+        while let ColumnType::Array(element) | ColumnType::Domain { base: element, .. } = target {
+            self.control.check()?;
+            target = element;
         }
-        if self.is_character_target(target)? {
-            return Ok(true);
-        }
-        Ok([
-            "bytea",
-            "pg_catalog.bytea",
-            "oid",
-            "pg_catalog.oid",
-            "xid",
-            "pg_catalog.xid",
-            "text",
-            "pg_catalog.text",
-            "int2vector",
-            "pg_catalog.int2vector",
-            "oidvector",
-            "pg_catalog.oidvector",
-        ]
-        .iter()
-        .any(|name| target.eq_ignore_ascii_case(name)))
+        Ok(target.is_character_string()
+            || matches!(
+                target,
+                ColumnType::Bytea
+                    | ColumnType::Oid
+                    | ColumnType::Xid
+                    | ColumnType::Int2Vector
+                    | ColumnType::OidVector
+                    | ColumnType::InternalChar
+            ))
     }
 
     pub(super) fn declared_source(
@@ -380,9 +382,10 @@ impl Binder<'_, '_> {
     ) -> Result<Option<Produced<ColumnType>>, SQLError> {
         if self.is_character_target(target)? {
             return match base_type(&source) {
-                source @ (ColumnType::Int2Vector | ColumnType::OidVector | ColumnType::Real) => {
-                    Ok(Some(source.clone_with_control(&self.control)?))
-                }
+                source @ (ColumnType::Int2Vector
+                | ColumnType::OidVector
+                | ColumnType::Real
+                | ColumnType::InternalChar) => Ok(Some(source.clone_with_control(&self.control)?)),
                 _ => Ok(None),
             };
         }

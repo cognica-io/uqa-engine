@@ -8,7 +8,7 @@
 
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
-use uqa_sql::{scalar_type, RowSchema, ScalarExpr};
+use uqa_sql::{scalar_type, FunctionTypeResolver, RowSchema, ScalarExpr};
 
 use super::Value;
 
@@ -30,7 +30,7 @@ pub(crate) fn retain_computed_integer(
     ScalarExpr::TypedLiteral {
         composite_source: None,
         value: Value::Int(value),
-        ty: ty.sql_name(),
+        ty: ty.catalog_name(),
         bound_type: Some(ty),
         parameter_index,
     }
@@ -73,7 +73,27 @@ pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
     }
 }
 
-fn is_constant(expression: &ScalarExpr) -> bool {
+fn constant_cast_type(
+    name: &str,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+) -> Option<ColumnType> {
+    if let Some(types) = types {
+        return types.resolve_catalog_column_type_name(name).ok();
+    }
+    // Only a parser-selected namespace determines a type without the live catalog. A free identifier can select a domain through search_path.
+    let parsed = uqa_sql::parse_regtype_name(name).ok()??;
+    if !matches!(parsed.names.as_slice(), [schema, _] if schema == "pg_catalog") {
+        return None;
+    }
+    ColumnType::from_sql_name(name).ok()
+}
+
+fn is_constant(
+    expression: &ScalarExpr,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> bool {
+    let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
     match expression {
         ScalarExpr::Literal(value) => {
             !uqa_sql::expr::composites::literal::contains_records(value)
@@ -87,17 +107,17 @@ fn is_constant(expression: &ScalarExpr) -> bool {
         } => {
             !uqa_sql::expr::composites::literal::contains_records(value)
                 && !uqa_sql::expr::datums::contains_datum(value)
-                && (bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok())
+                && (bound_type.is_some() || constant_cast_type(ty, types).is_some())
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().all(is_constant),
+        | ScalarExpr::Or(items) => items.iter().all(constant),
         ScalarExpr::Cast { expr, ty, .. } => {
-            is_constant(expr)
-                && ColumnType::from_sql_name(ty).is_ok_and(|target| {
+            constant(expr)
+                && constant_cast_type(ty, types).is_some_and(|target| {
                     immutable_cast_type(&target)
-                        && scalar_type(expr, &RowSchema::default(), &[]).is_ok_and(|source| {
+                        && constant_scalar_type(expr, resolver).is_ok_and(|source| {
                             source.is_none_or(|source| {
                                 uqa_sql::type_resolution::cast_volatility(&source, &target)
                                     == uqa_sql::ast::FunctionVolatility::Immutable
@@ -107,31 +127,31 @@ fn is_constant(expression: &ScalarExpr) -> bool {
         }
         // A named ROW constructor reads its current catalog descriptor even when every argument is a constant.
         ScalarExpr::CompositeRow { .. } => false,
-        ScalarExpr::Binary { lhs, rhs, .. } => is_constant(lhs) && is_constant(rhs),
+        ScalarExpr::Binary { lhs, rhs, .. } => constant(lhs) && constant(rhs),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. } => is_constant(inner),
+        | ScalarExpr::IsNull { expr: inner, .. } => constant(inner),
         ScalarExpr::Between { expr, low, high } => {
-            is_constant(expr) && is_constant(low) && is_constant(high)
+            constant(expr) && constant(low) && constant(high)
         }
-        ScalarExpr::InList { expr, list, .. } => is_constant(expr) && list.iter().all(is_constant),
+        ScalarExpr::InList { expr, list, .. } => constant(expr) && list.iter().all(constant),
         ScalarExpr::Case {
             base,
             when,
             else_branch,
         } => {
-            base.as_deref().is_none_or(is_constant)
+            base.as_deref().is_none_or(constant)
                 && when
                     .iter()
-                    .all(|(condition, value)| is_constant(condition) && is_constant(value))
-                && else_branch.as_deref().is_none_or(is_constant)
+                    .all(|(condition, value)| constant(condition) && constant(value))
+                && else_branch.as_deref().is_none_or(constant)
         }
         ScalarExpr::Func {
             name,
             binding,
             args,
             ..
-        } if is_coalesce(name, binding.as_ref()) => args.iter().all(is_constant),
+        } if is_coalesce(name, binding.as_ref()) => args.iter().all(constant),
         ScalarExpr::Func {
             order_syntax: _,
             name,
@@ -152,9 +172,20 @@ fn is_constant(expression: &ScalarExpr) -> bool {
                 args.len(),
             ) == uqa_sql::ast::FunctionVolatility::Immutable =>
         {
-            args.iter().all(is_constant)
+            args.iter().all(constant)
         }
         _ => false,
+    }
+}
+
+fn constant_scalar_type(
+    expression: &ScalarExpr,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<Option<ColumnType>, SQLError> {
+    let schema = RowSchema::default();
+    match resolver {
+        Some(resolver) => uqa_sql::scalar_type_with_resolver(expression, &schema, &[], resolver),
+        None => scalar_type(expression, &schema, &[]),
     }
 }
 
@@ -163,7 +194,7 @@ pub(super) fn fold_literal_expression(
     expression: ScalarExpr,
     evaluate: crate::optimizer::ConstantEvaluator,
 ) -> Result<ScalarExpr, SQLError> {
-    fold_authorized_literal(expression, evaluate, None, None)
+    fold_authorized_literal(expression, evaluate, None, None, None)
 }
 
 pub(super) fn fold_authorized_literal(
@@ -171,6 +202,7 @@ pub(super) fn fold_authorized_literal(
     evaluate: crate::optimizer::ConstantEvaluator,
     permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+    resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ScalarExpr, SQLError> {
     if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
         if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
@@ -180,7 +212,7 @@ pub(super) fn fold_authorized_literal(
     }
     if let ScalarExpr::Cast { expr, ty, .. } = &expression {
         if literal_value(expr).is_some_and(|value| matches!(value, Value::Null)) {
-            if let Ok(target) = ColumnType::from_sql_name(ty) {
+            if let Some(target) = constant_cast_type(ty, types) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
                         composite_source: None,
@@ -197,7 +229,9 @@ pub(super) fn fold_authorized_literal(
         return literal;
     }
     let strict_null = strict_null_expression(&expression);
-    if literal_value(&expression).is_some() || (!strict_null && !is_constant(&expression)) {
+    if literal_value(&expression).is_some()
+        || (!strict_null && !is_constant(&expression, types, resolver))
+    {
         return Ok(expression);
     }
     let schema = RowSchema::default();
@@ -217,10 +251,15 @@ pub(super) fn fold_authorized_literal(
     };
     let ty = match selected_type {
         Some(ty) => Some(ty),
-        None => scalar_type(&expression, &schema, &[])?,
+        None => constant_scalar_type(&expression, resolver)?,
     };
     // Keep operator-selected casts before evaluation can replace the expression with a literal, including PostgreSQL unknown string inputs.
-    let expression = uqa_sql::bind_type_introspection(expression, &schema, &[]);
+    let expression = match resolver {
+        Some(resolver) => {
+            uqa_sql::bind_type_introspection_with_resolver(expression, &schema, &[], resolver)
+        }
+        None => uqa_sql::bind_type_introspection(expression, &schema, &[]),
+    };
     let value = if strict_null {
         // PostgreSQL simplifies a strict NULL call without looking up its function execution permission.
         Value::Null
@@ -241,7 +280,7 @@ pub(super) fn fold_authorized_literal(
     // Computed integers are not ORDER BY positions, and computed strings are not fresh unknown literals. Preserve their resolved types when replacing the expression.
     if !matches!(value, Value::Int(_) | Value::Str(_))
         && !matches!(expression, ScalarExpr::Cast { .. })
-        && scalar_type(&literal, &schema, &[])? == ty
+        && constant_scalar_type(&literal, resolver)? == ty
     {
         return Ok(literal);
     }
@@ -249,7 +288,7 @@ pub(super) fn fold_authorized_literal(
         Some(ty) => ScalarExpr::TypedLiteral {
             composite_source: None,
             value,
-            ty: ty.sql_name(),
+            ty: ty.catalog_name(),
             bound_type: Some(ty),
             parameter_index: None,
         },

@@ -185,3 +185,58 @@ fn type_output_qualifies_shadowed_rows_and_arrays_by_first_visible_type() {
         }
     }
 }
+
+#[test]
+fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
+    let mut catalog = RegtypeOutputCatalog {
+        namespaces: BTreeMap::from([(11, "pg_catalog".into()), (20_000, "first".into())]),
+        classes: BTreeMap::new(),
+        procs: BTreeMap::new(),
+        proc_names_by_namespace: BTreeMap::new(),
+        types: BTreeMap::new(),
+        dependencies: crate::catalog::projection::DependencyCatalogCache::default(),
+    };
+    for (oid, namespace, name) in [
+        (25, 11, "text"),
+        (23, 11, "int4"),
+        (1042, 11, "bpchar"),
+        (50_001, 20_000, "text"),
+        (50_002, 20_000, "int4"),
+        (50_003, 20_000, "bpchar"),
+    ] {
+        catalog.types.insert(
+            oid,
+            RegtypeCatalogEntry {
+                name: name.into(),
+                namespace_oid: namespace,
+                overloaded: false,
+                argument_types: vec![],
+                array_oid: 0,
+                element_oid: 0,
+            },
+        );
+    }
+    let visibility = OutputVisibility {
+        schemas: vec!["first".into(), "pg_catalog".into()],
+    };
+    for (oid, name) in [
+        (25, "pg_catalog.text"),
+        (23, "integer"),
+        (1042, "character"),
+    ] {
+        assert_eq!(
+            format_regtype(&visibility, &catalog, oid).as_deref(),
+            Some(name)
+        );
+    }
+    for (modifier, name) in [
+        (Some(-1), "pg_catalog.bpchar"),
+        (None, "character"),
+        (Some(8), "character(4)"),
+    ] {
+        assert_eq!(
+            format_type::format_catalog_type(&catalog, &visibility, 1042, modifier).unwrap(),
+            name
+        );
+    }
+}

@@ -9,7 +9,6 @@
 use super::{
     routines::apply_routine_reference, BTreeSet, Expr, SQLError, Statement, StoredAstVisitor,
 };
-use crate::ast::UserTypeIdentity;
 use crate::binding::syntax_sites::{SyntaxSites, ValueSite};
 use uqa_core::Value;
 
@@ -138,8 +137,8 @@ fn apply_value_site<'a>(
             let Some(ValueSite::Cast(bound)) = sites.next() else {
                 return Err(mismatch("cast"));
             };
-            // Built-in type names keep their written spelling; a user-defined type is named by identity.
-            if UserTypeIdentity::parse(bound).is_some() && ty != bound {
+            // The bound name keeps the selected catalog identity independently of the caller's later search_path.
+            if ty != bound {
                 ty.clone_from(bound);
                 return Ok(true);
             }

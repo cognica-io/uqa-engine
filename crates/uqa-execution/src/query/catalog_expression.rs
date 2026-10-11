@@ -74,6 +74,19 @@ pub fn eval_lowered_expression_with_schema<S: Clone + 'static>(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
+    eval_lowered_expression_with_schema_and_type(factory, scope, expression, row, schema, params)
+        .map(|(value, _)| value)
+}
+
+/// Keep the analyzed source type with a schema expression's value for assignment into a generated column.
+pub fn eval_lowered_expression_with_schema_and_type<S: Clone + 'static>(
+    factory: &dyn QueryExpressionFactory<S>,
+    scope: CteScope<S>,
+    expression: &uqa_sql::ast::Expr,
+    row: &ResultRow,
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
     eval_catalog_expression_with_schema(
         factory,
         scope,
@@ -96,6 +109,7 @@ pub fn eval_expression_plan_with_schema<S: Clone + 'static>(
 ) -> Result<Value, SQLError> {
     // Planner-proven constant routines enter here: planning again would recurse into the same constant evaluator.
     eval_catalog_expression_with_schema(factory, scope, expression, row, schema, params, false)
+        .map(|(value, _)| value)
 }
 
 fn eval_catalog_expression_with_schema<S: Clone + 'static>(
@@ -106,10 +120,11 @@ fn eval_catalog_expression_with_schema<S: Clone + 'static>(
     schema: &RowSchema,
     params: &[SQLParam],
     optimize: bool,
-) -> Result<Value, SQLError> {
+) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
     scope.scalar_subqueries.clone_from(&expression.subqueries);
     let hook = factory.bind_scope(scope);
-    crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
+    let source =
+        crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
     expression.scalar = crate::bind_type_introspection_with_resolver(
         expression.scalar,
         schema,
@@ -124,7 +139,7 @@ fn eval_catalog_expression_with_schema<S: Clone + 'static>(
         .with_row_schema(schema)
         .with_function_hook(hook.as_ref())
         .with_subquery_runner(hook.as_ref());
-    eval_physical(&expression, &context)
+    eval_physical(&expression, &context).map(|value| (value, source))
 }
 
 /// Borrow named document fields through the analyzed schema's identities, without copying a row or inventing qualified map keys.

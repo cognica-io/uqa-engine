@@ -105,7 +105,7 @@ impl CatalogContext<'_> {
             .get(&relation)
             .copied())
     }
-    /// Resolve a user-defined type name: a domain, an enum, or an enum's generated array type. An unqualified name uses the first search-path schema that defines any type with that name.
+    /// Resolve a user-defined type or its generated array name. An unqualified name uses the first search-path schema that defines any type with that name.
     pub fn resolve_user_type(&self, name: &str) -> Option<ColumnType> {
         let names = uqa_sql::compiler::parse_regobject_name(name)?;
         let catalog = self.catalog_read_view();
@@ -114,8 +114,16 @@ impl CatalogContext<'_> {
             definitions
                 .domains
                 .values()
-                .find(|domain| domain.identity.schema == schema && domain.identity.name == local)
-                .map(uqa_sql::catalog::domain::StoredDomain::column_type)
+                .filter(|domain| domain.identity.schema == schema)
+                .find_map(|domain| {
+                    if domain.identity.name == local {
+                        Some(domain.column_type())
+                    } else if domain.array_type_name() == local {
+                        Some(ColumnType::Array(Box::new(domain.column_type())))
+                    } else {
+                        None
+                    }
+                })
                 .or_else(|| {
                     definitions
                         .enums

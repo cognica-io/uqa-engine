@@ -697,7 +697,7 @@ fn routine_builtin_array_names_use_sql_array_spelling() {
     ) else {
         panic!("not CREATE FUNCTION");
     };
-    assert_eq!(function.params[0].type_name, "int4[]");
+    assert_eq!(function.params[0].type_name, "pg_catalog.int4[]");
     assert!(matches!(
         function.returns,
         crate::ast::FunctionReturns::Scalar { type_name } if type_name == "text[]"

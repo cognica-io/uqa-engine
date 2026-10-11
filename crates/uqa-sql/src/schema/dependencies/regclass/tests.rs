@@ -84,7 +84,7 @@ fn selected_legacy_sequence_inputs_are_bound_once_without_session_resolution() {
             Expr::TypedLiteral {
                 composite_source: None,
                 value: Value::Int(41),
-                ty: "regclass".into()
+                ty: ColumnType::Regclass.catalog_name()
             }
         );
         assert_eq!(binding.as_ref().unwrap().argument_types, ["regclass"]);
@@ -160,4 +160,30 @@ fn ambiguous_legacy_sequence_inputs_fail_without_rewriting_the_argument() {
     );
     assert_eq!(expression, before);
     assert_eq!(*references.calls.borrow(), ["sequence:ids"]);
+}
+
+#[test]
+fn qualified_regclass_input_binding_keeps_its_selected_identity_on_reload() {
+    let references = References::default();
+    let mut expression = Expr::Cast {
+        implicit: false,
+        expr: Box::new(Expr::Literal(Value::Str("41".into()))),
+        ty: ColumnType::Regclass.catalog_name(),
+    };
+    assert!(bind_schema_regclass_constants(&references, &mut expression, true).unwrap());
+    let Expr::Cast { expr, .. } = &expression else {
+        panic!("selected cast")
+    };
+    assert_eq!(
+        **expr,
+        Expr::TypedLiteral {
+            composite_source: None,
+            value: Value::Int(41),
+            ty: ColumnType::Regclass.catalog_name(),
+        }
+    );
+    let retained = expression.clone();
+    assert!(!bind_schema_regclass_constants(&references, &mut expression, true).unwrap());
+    assert_eq!(expression, retained);
+    assert!(references.calls.borrow().is_empty());
 }
