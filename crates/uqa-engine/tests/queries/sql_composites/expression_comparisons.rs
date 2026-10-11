@@ -25,18 +25,62 @@ fn composite_expression_comparisons_match_postgresql(#[case] provider: usize) {
         .unwrap()
         .retain(|case| case["reopen"] != true);
     crate::pg18_oracle::verify(&engine, &initial.to_string());
+    reconstruct_precedence_views(&engine);
+    verify_reconstructed_predicates(&engine, &reference);
     let engine = if provider == 0 {
         engine
     } else {
         drop(engine);
         super::addition::open(provider, &path)
     };
-    let mut durable = reference;
+    let mut durable = reference.clone();
     durable["cases"]
         .as_array_mut()
         .unwrap()
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
+    verify_reconstructed_predicates(&engine, &reference);
+}
+
+fn reconstruct_precedence_views(engine: &uqa_engine::Engine) {
+    for pretty in [false, true] {
+        let result = engine
+            .sql(
+                &format!("SELECT pg_get_viewdef('ce_precedence'::regclass,{pretty}) AS definition"),
+                &[],
+            )
+            .unwrap();
+        let uqa_core::Value::Str(definition) = &result.rows[0]["definition"] else {
+            panic!("view definition");
+        };
+        engine
+            .sql(
+                &format!("CREATE VIEW ce_reconstructed_{pretty} AS {definition}"),
+                &[],
+            )
+            .unwrap();
+    }
+}
+
+fn verify_reconstructed_predicates(engine: &uqa_engine::Engine, reference: &serde_json::Value) {
+    let expected = reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "precedence_values")
+        .unwrap();
+    for pretty in [false, true] {
+        let mut expected = expected.clone();
+        expected["sql"] = format!("SELECT * FROM ce_reconstructed_{pretty} ORDER BY id").into();
+        crate::pg18_oracle::verify(
+            engine,
+            &serde_json::json!({
+                "postgresql_version": reference["postgresql_version"],
+                "cases": [expected],
+            })
+            .to_string(),
+        );
+    }
 }
 
 #[rstest::rstest]

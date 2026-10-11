@@ -411,6 +411,19 @@
       "id": "reopen_values",
       "sql": "SELECT * FROM ce_observation ORDER BY id",
       "reopen": true
+    },
+    {
+      "id": "precedence_definition",
+      "sql": "CREATE VIEW ce_precedence AS SELECT id,(ROW(id) IS DISTINCT FROM ROW(id+1)) = true AS row_left,true = (ROW(id) IS DISTINCT FROM ROW(id+1)) AS row_right,(v IS DISTINCT FROM NULL) = false AS present_left,false = (v IS DISTINCT FROM NULL) AS present_right,(v IS NOT DISTINCT FROM NULL) = true AS absent_left,true = (v IS NOT DISTINCT FROM NULL) AS absent_right,(id IS DISTINCT FROM NULL) = true AS scalar_left,true = (id IS DISTINCT FROM NULL) AS scalar_right FROM ce_values; SELECT pg_get_viewdef('ce_precedence'::regclass,false); SELECT pg_get_viewdef('ce_precedence'::regclass,true)"
+    },
+    {
+      "id": "precedence_values",
+      "sql": "SELECT * FROM ce_precedence ORDER BY id"
+    },
+    {
+      "id": "reopen_precedence",
+      "sql": "SELECT * FROM ce_precedence ORDER BY id",
+      "reopen": true
     }
   ]
 }

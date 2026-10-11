@@ -54,7 +54,7 @@ impl Deparser<'_> {
             ScalarExpr::UnaryMinus(inner) => self.unary_minus(inner, scope, subqueries),
             ScalarExpr::IsNull { expr, negated } => Ok(self.parenthesize(format!(
                 "{} IS {}NULL",
-                self.operand(expr, 40, false, scope, subqueries)?,
+                self.operand(expr, 80, false, scope, subqueries)?,
                 if *negated { "NOT " } else { "" }
             ))),
             ScalarExpr::Between { expr, low, high } => {
@@ -363,7 +363,7 @@ impl Deparser<'_> {
         };
         Ok(self.parenthesize(format!(
             "{} {operator}",
-            self.operand(argument, 40, false, scope, subqueries)?
+            self.operand(argument, 80, false, scope, subqueries)?
         )))
     }
 
@@ -419,8 +419,8 @@ impl Deparser<'_> {
                 };
                 return Ok(self.parenthesize(format!(
                     "{} IS DISTINCT FROM {}",
-                    self.operand(left, 40, false, scope, subqueries)?,
-                    self.operand(right, 40, true, scope, subqueries)?
+                    self.operand(left, 80, false, scope, subqueries)?,
+                    self.operand(right, 80, false, scope, subqueries)?
                 )));
             }
             // A `ScalarArrayOpExpr`: the operator, then `ANY` or `ALL` over the parenthesized array.
@@ -792,6 +792,7 @@ pub(super) fn type_name(ty: &str) -> String {
 }
 
 fn precedence(expression: &ScalarExpr) -> u8 {
+    // IS predicates bind below comparison operators and above NOT.
     match expression {
         ScalarExpr::Func {
             binding: Some(binding),
@@ -810,7 +811,17 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         ScalarExpr::Func {
             binding: Some(binding),
             ..
-        } if binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::IsDistinct) => 40,
+        } if matches!(
+            binding.dispatch,
+            Some(
+                uqa_sql::ast::FunctionDispatch::IsDistinct
+                    | uqa_sql::ast::FunctionDispatch::ValueIsDistinct
+                    | uqa_sql::ast::FunctionDispatch::ValueNullTest { .. }
+            )
+        ) =>
+        {
+            35
+        }
         // `isSimpleNode` never counts a `ScalarArrayOpExpr` as simple, so it keeps its parentheses as any operand.
         ScalarExpr::Func {
             binding: Some(binding),
@@ -830,7 +841,8 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         ScalarExpr::And(_) | ScalarExpr::Between { .. } => 20,
         ScalarExpr::Not(_) => 30,
         ScalarExpr::Binary { op, .. } => operator_precedence(*op),
-        ScalarExpr::IsNull { .. } | ScalarExpr::InList { .. } => 40,
+        ScalarExpr::IsNull { .. } => 35,
+        ScalarExpr::InList { .. } => 40,
         ScalarExpr::UnaryMinus(_) => 70,
         ScalarExpr::Cast { .. } => 80,
         _ => 100,

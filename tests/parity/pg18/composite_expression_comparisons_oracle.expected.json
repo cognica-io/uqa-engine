@@ -1490,7 +1490,7 @@
             "type"
           ],
           "type_oids": [
-            24435,
+            24546,
             25
           ],
           "rows": [
@@ -1517,7 +1517,7 @@
             "type"
           ],
           "type_oids": [
-            24435,
+            24546,
             25
           ],
           "rows": [
@@ -1571,7 +1571,7 @@
             "type"
           ],
           "type_oids": [
-            24435,
+            24546,
             25
           ],
           "rows": [
@@ -2799,6 +2799,131 @@
       "id": "stored_initial"
     },
     {
+      "sql": "CREATE VIEW ce_precedence AS SELECT id,(ROW(id) IS DISTINCT FROM ROW(id+1)) = true AS row_left,true = (ROW(id) IS DISTINCT FROM ROW(id+1)) AS row_right,(v IS DISTINCT FROM NULL) = false AS present_left,false = (v IS DISTINCT FROM NULL) AS present_right,(v IS NOT DISTINCT FROM NULL) = true AS absent_left,true = (v IS NOT DISTINCT FROM NULL) AS absent_right,(id IS DISTINCT FROM NULL) = true AS scalar_left,true = (id IS DISTINCT FROM NULL) AS scalar_right FROM ce_values; SELECT pg_get_viewdef('ce_precedence'::regclass,false); SELECT pg_get_viewdef('ce_precedence'::regclass,true)",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    ((id IS DISTINCT FROM (id + 1)) = true) AS row_left,\n    (true = (id IS DISTINCT FROM (id + 1))) AS row_right,\n    ((v IS DISTINCT FROM NULL) = false) AS present_left,\n    (false = (v IS DISTINCT FROM NULL)) AS present_right,\n    ((v IS NOT DISTINCT FROM NULL) = true) AS absent_left,\n    (true = (v IS NOT DISTINCT FROM NULL)) AS absent_right,\n    ((id IS NOT NULL) = true) AS scalar_left,\n    (true = (id IS NOT NULL)) AS scalar_right\n   FROM ce_values;"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (id IS DISTINCT FROM (id + 1)) = true AS row_left,\n    true = (id IS DISTINCT FROM (id + 1)) AS row_right,\n    (v IS DISTINCT FROM NULL) = false AS present_left,\n    false = (v IS DISTINCT FROM NULL) AS present_right,\n    (v IS NOT DISTINCT FROM NULL) = true AS absent_left,\n    true = (v IS NOT DISTINCT FROM NULL) AS absent_right,\n    (id IS NOT NULL) = true AS scalar_left,\n    true = (id IS NOT NULL) AS scalar_right\n   FROM ce_values;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "precedence_definition"
+    },
+    {
+      "sql": "SELECT * FROM ce_precedence ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "row_left",
+            "row_right",
+            "present_left",
+            "present_right",
+            "absent_left",
+            "absent_right",
+            "scalar_left",
+            "scalar_right"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "3",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "4",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "precedence_values"
+    },
+    {
       "sql": "SELECT n,t,matched,pg_typeof(n)::text AS nt,pg_typeof(t)::text AS tt FROM ce_types",
       "command_tags": [
         "SELECT 1"
@@ -2930,19 +3055,101 @@
       "notices": [],
       "id": "reopen_values",
       "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ce_precedence ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "row_left",
+            "row_right",
+            "present_left",
+            "present_right",
+            "absent_left",
+            "absent_right",
+            "scalar_left",
+            "scalar_right"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "3",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "4",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_precedence",
+      "reopen": true
     }
   ],
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "90d30f43eec5e2c0aa11cb292d3e14b505fbc16fc639da720279485a194ff329",
+    "input_sha256": "3687879c13bd90979065a921846a069061c66bd5cd1baf163043e71a6fa8f68f",
     "options": [
       "--rows",
       "--details",
       "--notices"
     ],
     "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
-    "fresh_connection_cases": 4,
-    "fresh_connection_output_sha256": "def563745c93d8c12219b2cb05a478470ec6024699e5d8e3eac8e174e231cb73"
+    "fresh_connection_cases": 5,
+    "fresh_connection_output_sha256": "dbb96da6ce583e0cee89f4daea0b3630bcd5e748fe64afd19a242e4e04169a3e"
   }
 }
