@@ -24,7 +24,7 @@ jobs:
       digests: ${{ steps.inventory.outputs.digests }}
       publish: ${{ steps.npm.outputs.publish }}
     permissions:
-      contents: read
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.tag }}
@@ -33,6 +33,17 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+
+      - name: Check out reviewed publication tools
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: release-tools
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
 
       - name: Validate the release version
         shell: bash
@@ -58,8 +69,7 @@ jobs:
           mkdir -p dist
           gh release download "$RELEASE_TAG" --dir dist --pattern '*.tgz'
 
-      - name: Verify the npm release inventory
-        id: inventory
+      - name: Verify the original npm release transport and licenses
         shell: bash
         run: |
           set -euo pipefail
@@ -106,16 +116,57 @@ jobs:
               exit 1
             fi
           done
+          python3 scripts/check-release-licenses.py --require-nori "${actual[@]}"
+
+      - name: Restore omitted files only from the original release source
+        id: repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          result="$RUNNER_TEMP/npm-root-repair.json"
+          python3 release-tools/scripts/npm-release.py repair-root \
+            --source-dir crates/uqa-node --version "$version" \
+            --archive "dist/cognica-io-uqa-${version}.tgz" --result-file "$result"
+          python3 - "$result" <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json, sys
+          print("repaired=" + str(json.load(open(sys.argv[1]))["repaired"]).lower())
+          PYTHON
+
+      - name: Verify and install the exact npm release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          python3 release-tools/scripts/npm-release.py check --version "$version" dist/*.tgz
+          UQA_NPM_RELEASE_ARCHIVE="$GITHUB_WORKSPACE/dist/cognica-io-uqa-${version}.tgz" \
+            node --test --test-name-pattern="installed npm package loads both entry points" \
+            release-tools/tests/node/test_http_engine.mjs
+
+      - name: Retain the verified unpublished root archive
+        if: ${{ steps.repair.outputs.repaired == 'true' }}
+        shell: bash
+        run: gh release upload "$RELEASE_TAG" "dist/cognica-io-uqa-${RELEASE_TAG#v}.tgz" --clobber
+
+      - name: Record the verified npm release digests
+        id: inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --json assets \
+            --jq '.assets[] | [.name, .digest] | @tsv' > "$RUNNER_TEMP/npm-final-digests.tsv"
+          for archive in dist/*.tgz; do
+            filename="${archive##*/}"
+            expected="$(awk -F '\t' -v filename="$filename" \
+              '$1 == filename { print $2 }' "$RUNNER_TEMP/npm-final-digests.tsv")"
+            actual="sha256:$(sha256sum "$archive" | awk '{print $1}')"
+            test "$expected" = "$actual"
+          done
           {
             echo 'digests<<UQA_RELEASE_DIGESTS'
-            (
-              cd dist
-              sha256sum "${expected[@]}"
-            )
+            (cd dist && sha256sum *.tgz)
             echo UQA_RELEASE_DIGESTS
           } >> "$GITHUB_OUTPUT"
-          python3 scripts/check-release-licenses.py --require-nori "${actual[@]}"
-          python3 scripts/npm-release.py check --version "$version" "${actual[@]}"
 
       - name: Check whether npm already has this exact release
         id: npm
@@ -124,7 +175,7 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           pending="$RUNNER_TEMP/npm-pending.txt"
-          python3 scripts/npm-release.py check \
+          python3 release-tools/scripts/npm-release.py check \
             --version "$version" \
             --check-registry \
             --pending-file "$pending" \
@@ -160,6 +211,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Check out reviewed publication tools
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: release-tools
           persist-credentials: false
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -225,7 +282,7 @@ jobs:
           version="${{ inputs.tag }}"
           version="${version#v}"
           pending="$RUNNER_TEMP/npm-pending.txt"
-          python3 scripts/npm-release.py check \
+          python3 release-tools/scripts/npm-release.py check \
             --version "$version" \
             --check-registry \
             --pending-file "$pending" \
@@ -259,7 +316,7 @@ jobs:
           # processing queue for more than ten minutes after accepting them.
           deadline=$((SECONDS + 1800))
           while :; do
-            if python3 scripts/npm-release.py check \
+            if python3 release-tools/scripts/npm-release.py check \
               --version "$version" \
               --require-published \
               dist/*.tgz; then
@@ -271,6 +328,14 @@ jobs:
             fi
             sleep 5
           done
+
+      - name: Install the published npm package and verify both entry points
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          UQA_NPM_PUBLISHED_VERSION="${RELEASE_TAG#v}" node --test \
+            --test-name-pattern="installed npm package loads both entry points" \
+            release-tools/tests/node/test_http_engine.mjs
 
   record:
     name: record npm publication

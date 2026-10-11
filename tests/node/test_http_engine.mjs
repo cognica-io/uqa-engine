@@ -330,26 +330,40 @@ test("CLI failures and oversized output do not expose captured secrets", async (
   await runCLIFixture(packagePath, "failures");
 });
 
-test("packed npm package installs offline and runs HTTP without native artifacts", async () => {
+test("installed npm package loads both entry points and runs HTTP without native artifacts", async () => {
   const npm = [
     resolve(dirname(process.execPath), "../lib/node_modules/npm/bin/npm-cli.js"),
     resolve(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js"),
   ].find(existsSync);
   assert.notEqual(npm, undefined, "the Node.js distribution must include npm");
   const options = { env: { ...process.env, npm_config_cache: join(directory, "npm-cache") }, maxBuffer: 2 * 1024 * 1024 };
-  await exec(process.execPath, [npm, "pack", "--json", "--ignore-scripts", "--pack-destination", directory], { ...options, cwd: packagePath });
-  const archives = readdirSync(directory).filter((name) => name.endsWith(".tgz"));
-  assert.equal(archives.length, 1);
-  const archive = join(directory, archives[0]);
+  let archive = process.env.UQA_NPM_RELEASE_ARCHIVE;
+  const publishedVersion = process.env.UQA_NPM_PUBLISHED_VERSION;
+  assert.ok(archive === undefined || publishedVersion === undefined, "select one package source");
+  if (archive === undefined && publishedVersion === undefined) {
+    await exec(process.execPath, [npm, "pack", "--json", "--ignore-scripts", "--pack-destination", directory], { ...options, cwd: packagePath });
+    const archives = readdirSync(directory).filter((name) => name.endsWith(".tgz"));
+    assert.equal(archives.length, 1);
+    archive = join(directory, archives[0]);
+  }
+  if (publishedVersion === undefined) {
+    archive = resolve(archive);
+    assert.ok(existsSync(archive), "the release archive must exist");
+  } else archive = `@cognica-io/uqa@${publishedVersion}`;
   const install = join(directory, "installed");
   mkdirSync(install);
   writeFileSync(join(install, "package.json"), '{"private":true}');
-  await exec(process.execPath, [npm, "install", "--offline", "--ignore-scripts", "--omit=optional", "--no-audit", "--no-fund", archive], { ...options, cwd: install });
+  await exec(process.execPath, [npm, "install", ...(publishedVersion === undefined ? ["--offline"] : []), "--ignore-scripts", "--omit=optional", "--no-audit", "--no-fund", archive], { ...options, cwd: install });
   const script = join(install, "smoke.mjs");
   writeFileSync(script, [
     'import { HttpEngine, SQLParam, HttpNotificationSubscription, NotificationError } from "@cognica-io/uqa";',
     'import { HttpEngine as Direct } from "@cognica-io/uqa/http";',
     'import assert from "node:assert/strict";',
+    'import { createRequire } from "node:module";',
+    'const require = createRequire(import.meta.url);',
+    'assert.equal(require("@cognica-io/uqa/http").HttpEngine, Direct);',
+    'assert.equal(require("@cognica-io/uqa").HttpEngine, HttpEngine);',
+    'assert.equal(typeof require("@cognica-io/uqa").Engine, "function");',
     'assert.equal(Direct, HttpEngine);',
     'const result = await new HttpEngine(process.argv[2], "token").sql("SELECT $1", [SQLParam.scalar(7)]);',
     'assert.equal(result.rows[0].n, 1);',

@@ -142,6 +142,11 @@ jobs:
           fi
           python3 scripts/check-release-licenses.py --require-nori --require-kuromoji "${archives[@]}"
 
+      - name: Verify the complete npm archive contents before announcing the release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 scripts/npm-release.py check --version "${RELEASE_TAG#v}" dist/*.tgz
+
       - name: Build release notes from HISTORY.md
         shell: bash
         env:

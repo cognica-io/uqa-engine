@@ -112,6 +112,14 @@ jobs:
           --output-dir dist
       - name: Check npm package license contents
         run: python3 scripts/check-release-licenses.py --require-nori --require-kuromoji dist/*.tgz
+      - name: Install and test the assembled root npm archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archives=(dist/cognica-io-uqa-[0-9]*.tgz)
+          test "${#archives[@]}" -eq 1
+          UQA_NPM_RELEASE_ARCHIVE="${archives[0]}" node --test \
+            --test-name-pattern="installed npm package loads both entry points" tests/node/test_http_engine.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: node-packages

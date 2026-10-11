@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Restore declared notification modules, type declarations and HTTP diagnostic helpers in the Node.js npm package so both public entry points load from a clean installation.
+
 - Bound full-text occurrence commit spill reads with independent ordered-cursor and point-read caches, and reuse validated immutable commit metadata within the selected snapshots. Preserve encrypted spill, conflict checks and the original memory allowance.
 
 - Restore legacy catalogs whose derived relation, row-type or RULE OIDs fall below the modern user range only when the complete identity tuple matches its original derivation. Preserve collision checks, recorded identities and migration rollback across persistent providers.
