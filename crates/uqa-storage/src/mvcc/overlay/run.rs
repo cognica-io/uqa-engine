@@ -68,6 +68,20 @@ pub(in crate::mvcc) struct SpilledRun {
 }
 
 impl SpilledRun {
+    #[cfg(test)]
+    pub(in crate::mvcc) fn read_io_counts(&self) -> (usize, usize) {
+        (
+            self.entries.block_io_counts().0,
+            self.values.block_io_counts().0,
+        )
+    }
+
+    #[cfg(test)]
+    pub(in crate::mvcc) fn file_blocks(&self) -> usize {
+        (self.entry_bytes.div_ceil(VALUE_CHUNK)
+            + (self.bytes - self.entry_bytes).div_ceil(VALUE_CHUNK)) as usize
+    }
+
     pub(in crate::mvcc) fn shares_allowance(&self, memory: &MemoryBudget) -> bool {
         self.cache.memory().shares_allowance(memory)
     }
@@ -217,10 +231,19 @@ impl SpilledRun {
         location: ValueLocation,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<BudgetedVec<u8>>> {
+        self.load_value_cached(location, None, control)
+    }
+
+    fn load_value_cached(
+        &self,
+        location: ValueLocation,
+        cache: Option<&mut cache::ValueCache>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Arc<BudgetedVec<u8>>> {
         #[cfg(test)]
         read_counts::value();
         let mut value = BudgetedVec::new(control.memory());
-        if let Some((chunk, begin)) = self.value_chunk(location, control)? {
+        if let Some((chunk, begin)) = self.value_chunk_cached(location, cache, control)? {
             value.extend_from_slice(&chunk[begin..begin + location.len as usize])?;
             return Ok(Arc::new(value));
         }
@@ -240,12 +263,26 @@ impl SpilledRun {
         location: ValueLocation,
         control: &StorageReadControl,
     ) -> VersionResult<Option<(Arc<BudgetedVec<u8>>, usize)>> {
+        self.value_chunk_cached(location, None, control)
+    }
+
+    fn value_chunk_cached(
+        &self,
+        location: ValueLocation,
+        mut cache: Option<&mut cache::ValueCache>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<(Arc<BudgetedVec<u8>>, usize)>> {
+        control.check()?;
         let start = location.offset - location.offset % VALUE_CHUNK;
+        let cached = match &mut cache {
+            Some(cache) => cache.get(start),
+            None => self.cache.chunk(start),
+        };
         if location.offset + location.len > start + VALUE_CHUNK {
             return Ok(None);
         }
         let begin = (location.offset - start) as usize;
-        if let Some(chunk) = self.cache.chunk(start) {
+        if let Some(chunk) = cached {
             return Ok(Some((chunk, begin)));
         }
         let end = (start + VALUE_CHUNK).min(self.bytes - self.entry_bytes);
@@ -267,7 +304,10 @@ impl SpilledRun {
         ) {
             Ok(bytes) => {
                 let bytes = Arc::new(bytes);
-                self.cache.keep_chunk(start, &bytes);
+                match cache {
+                    Some(cache) => cache.keep(start, &bytes),
+                    None => self.cache.keep_chunk(start, &bytes),
+                }
                 Ok(Some((bytes, begin)))
             }
             Err(VersionError::Memory(_)) => Ok(None),

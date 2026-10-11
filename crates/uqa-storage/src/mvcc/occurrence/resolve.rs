@@ -10,6 +10,7 @@ use super::{
     OccurrenceRecordKind as Kind, OccurrenceRecordLayout, OccurrenceRecordValue as Value,
     OccurrenceRelatedKey as Related,
 };
+use crate::mvcc::key::RecordKey;
 use crate::mvcc::{
     commit::{PreparedLookup, RecordWriteKind},
     resolution::ResolutionMode,
@@ -17,6 +18,7 @@ use crate::mvcc::{
     VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
+use std::cell::RefCell;
 use uqa_core::memory::BudgetedVec;
 
 mod writes;
@@ -40,6 +42,8 @@ pub(in crate::mvcc) fn resolve(
         mode,
         changes: &changes,
         control,
+        validated_marker: RefCell::new(None),
+        validated_fence: RefCell::new(None),
     };
     stream::apply(original, &writes, &resolver)?;
     Ok(changes
@@ -55,6 +59,8 @@ pub(super) struct Resolver<'a> {
     mode: ResolutionMode,
     changes: &'a ResolvedChanges,
     pub(super) control: &'a StorageReadControl,
+    validated_marker: RefCell<Option<RecordKey>>,
+    validated_fence: RefCell<Option<BudgetedVec<u8>>>,
 }
 
 struct Source {
@@ -131,30 +137,8 @@ impl Resolver<'_> {
             marker_kind,
             ..
         } = source;
-        if marker_kind != RecordWriteKind::Occurrence {
-            return Err(VersionError::InvalidEncoding(
-                "invalid occurrence source marker",
-            ));
-        }
-        let source = writes
-            .get(&marker, control)?
-            .expect("the immutable prepared source contains this marker");
-        if !self.is_format(&marker, source.value())? {
-            return Err(VersionError::InvalidEncoding(
-                "invalid occurrence source marker",
-            ));
-        }
-        if base.sequence() != current.sequence() {
-            let expected = revision(base, &fence, control)?;
-            let actual = revision(current, &fence, control)?;
-            if expected != actual {
-                return Err(VersionError::WriteConflict {
-                    mutation,
-                    expected,
-                    actual,
-                });
-            }
-        }
+        self.validate_marker(&marker, marker_kind, writes)?;
+        self.validate_fence(mutation, fence)?;
         match (write.kind(), kind) {
             (RecordWriteKind::OccurrenceCache, Kind::Cache) => {}
             (RecordWriteKind::Occurrence, Kind::Format) => {
@@ -205,6 +189,59 @@ impl Resolver<'_> {
                     "occurrence merge targets a canonical record",
                 ))
             }
+        }
+        Ok(())
+    }
+
+    fn validate_marker(
+        &self,
+        marker: &[u8],
+        kind: RecordWriteKind,
+        writes: &PreparedLookup<'_>,
+    ) -> VersionResult<()> {
+        if kind != RecordWriteKind::Occurrence {
+            return Err(VersionError::InvalidEncoding(
+                "invalid occurrence source marker",
+            ));
+        }
+        if self
+            .validated_marker
+            .borrow()
+            .as_ref()
+            .is_none_or(|key| key.bytes() != marker)
+        {
+            let source = writes
+                .get(marker, self.control)?
+                .expect("the immutable prepared source contains this marker");
+            if !self.is_format(marker, source.value())? {
+                return Err(VersionError::InvalidEncoding(
+                    "invalid occurrence source marker",
+                ));
+            }
+            *self.validated_marker.borrow_mut() = Some(source.shared_key());
+        }
+        Ok(())
+    }
+
+    fn validate_fence(&self, mutation: usize, fence: BudgetedVec<u8>) -> VersionResult<()> {
+        if self.base.sequence() != self.current.sequence()
+            && self
+                .validated_fence
+                .borrow()
+                .as_ref()
+                .is_none_or(|key| **key != *fence)
+        {
+            let expected = revision(self.base, &fence, self.control)?;
+            let actual = revision(self.current, &fence, self.control)?;
+            if expected != actual {
+                return Err(VersionError::WriteConflict {
+                    mutation,
+                    expected,
+                    actual,
+                });
+            }
+            // Both committed views are fixed for this resolution; only a new fence can have another result.
+            *self.validated_fence.borrow_mut() = Some(fence);
         }
         Ok(())
     }

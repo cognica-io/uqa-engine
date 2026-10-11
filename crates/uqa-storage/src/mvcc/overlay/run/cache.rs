@@ -11,11 +11,38 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
+/// One value stream's decrypted chunk. Independent ordered streams must not evict a point lookup's chunk on every record.
+#[derive(Default)]
+pub(super) struct ValueCache {
+    chunk: Option<(u64, Arc<BudgetedVec<u8>>)>,
+}
+
+impl ValueCache {
+    pub(super) fn get(&mut self, start: u64) -> Option<Arc<BudgetedVec<u8>>> {
+        if self
+            .chunk
+            .as_ref()
+            .is_some_and(|(previous, _)| *previous != start)
+        {
+            self.clear();
+        }
+        self.chunk.as_ref().map(|(_, bytes)| Arc::clone(bytes))
+    }
+
+    pub(super) fn keep(&mut self, start: u64, bytes: &Arc<BudgetedVec<u8>>) {
+        self.chunk = Some((start, Arc::clone(bytes)));
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.chunk = None;
+    }
+}
+
 #[derive(Default)]
 struct Cached {
     readers: usize,
     block: Option<(usize, Arc<BudgetedVec<u8>>)>,
-    chunk: Option<(u64, Arc<BudgetedVec<u8>>)>,
+    chunk: ValueCache,
 }
 
 /// Shares the last decrypted block and value chunk among active readers. The last reader releases both; retaining an immutable run or savepoint alone does not retain decoded bytes. Cached bytes remain charged to the transaction that owns the run.
@@ -71,25 +98,13 @@ impl RunCache {
     }
 
     pub(super) fn chunk(&self, start: u64) -> Option<Arc<BudgetedVec<u8>>> {
-        let mut cached = self.cached.lock();
-        if cached
-            .chunk
-            .as_ref()
-            .is_some_and(|(previous, _)| *previous != start)
-        {
-            cached.chunk = None;
-        }
-        cached
-            .chunk
-            .as_ref()
-            .filter(|(cached, _)| *cached == start)
-            .map(|(_, bytes)| Arc::clone(bytes))
+        self.cached.lock().chunk.get(start)
     }
 
     pub(super) fn keep_chunk(&self, start: u64, bytes: &Arc<BudgetedVec<u8>>) {
         let mut cached = self.cached.lock();
         if cached.readers != 0 {
-            cached.chunk = Some((start, Arc::clone(bytes)));
+            cached.chunk.keep(start, bytes);
         }
     }
 }
@@ -103,7 +118,7 @@ impl Drop for RunCacheReader {
         cached.readers -= 1;
         if cached.readers == 0 {
             cached.block = None;
-            cached.chunk = None;
+            cached.chunk.clear();
         }
     }
 }

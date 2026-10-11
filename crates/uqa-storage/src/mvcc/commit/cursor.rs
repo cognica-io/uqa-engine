@@ -89,7 +89,7 @@ impl<'a> PreparedWriteCursor<'a> {
                         entry.value.map(|location| location.len),
                     );
                     if select(&metadata)? {
-                        return spilled_write(cursor.run(), entry, control).map(Some);
+                        return spilled_write(cursor, entry, control).map(Some);
                     }
                 }
                 Ok(None)
@@ -125,7 +125,7 @@ impl<'a> PreparedWriteCursor<'a> {
             Source::Spilled(cursor) => {
                 while let Some(entry) = cursor.next(control)? {
                     if kind.is_none_or(|kind| entry.kind == kind) {
-                        return spilled_write(cursor.run(), entry, control).map(Some);
+                        return spilled_write(cursor, entry, control).map(Some);
                     }
                 }
                 Ok(None)
@@ -159,13 +159,13 @@ impl<'a> PreparedWriteCursor<'a> {
 }
 
 fn spilled_write(
-    run: &SpilledRun,
+    cursor: &mut RunCursor,
     entry: RunEntry,
     control: &StorageReadControl,
 ) -> VersionResult<PreparedRecordWrite> {
     let value = entry
         .value
-        .map(|location| run.load_value(location, control))
+        .map(|location| cursor.load_value(location, control))
         .transpose()?;
     Ok(PreparedRecordWrite::from_shared(entry.key, entry.expected, value).with_kind(entry.kind))
 }

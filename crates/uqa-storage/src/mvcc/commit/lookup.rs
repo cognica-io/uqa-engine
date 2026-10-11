@@ -6,12 +6,13 @@
 
 //! Point lookups into the writes of a prepared commit.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::memory::{MemoryError, MemoryReservation};
 
-use crate::mvcc::overlay::run::{RunCacheReader, SpilledRun};
+use crate::mvcc::overlay::run::{RunCacheReader, RunEntry, SpilledRun};
 use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
 
@@ -26,6 +27,7 @@ enum Source<'a> {
     Spilled {
         run: &'a Arc<SpilledRun>,
         _reader: RunCacheReader,
+        metadata: RefCell<Option<RunEntry>>,
     },
 }
 
@@ -60,6 +62,7 @@ impl<'a> PreparedLookup<'a> {
             PreparedWrites::Spilled(run) => Source::Spilled {
                 run,
                 _reader: run.cache_reader(),
+                metadata: RefCell::new(None),
             },
         };
         Ok(Self { source })
@@ -81,10 +84,23 @@ impl<'a> PreparedLookup<'a> {
                     write.value().map(|value| value.len() as u64),
                 )
             })),
-            Source::Spilled { run, .. } => Ok(run.get(key, control)?.map(|entry| {
-                let value_len = entry.value.map(|location| location.len);
-                PreparedWriteMetadata::new(entry.key, entry.expected, entry.kind, value_len)
-            })),
+            Source::Spilled { run, metadata, .. } => {
+                let mut cached = metadata.borrow_mut();
+                if cached.as_ref().is_none_or(|entry| entry.key.bytes() != key) {
+                    // Drop the previous charged key before reading another. The prepared run is immutable for this lookup's lifetime.
+                    *cached = None;
+                    *cached = run.get(key, control)?;
+                }
+                Ok(cached.as_ref().map(|entry| {
+                    let value_len = entry.value.map(|location| location.len);
+                    PreparedWriteMetadata::new(
+                        entry.key.clone(),
+                        entry.expected,
+                        entry.kind,
+                        value_len,
+                    )
+                }))
+            }
         }
     }
 
@@ -166,7 +182,7 @@ impl<'a> PreparedLookup<'a> {
                     }
                     let value = entry
                         .value
-                        .map(|location| run.load_value(location, control))
+                        .map(|location| cursor.load_value(location, control))
                         .transpose()?;
                     let write = PreparedRecordWrite::from_shared(entry.key, entry.expected, value)
                         .with_kind(entry.kind);
