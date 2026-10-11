@@ -7,7 +7,7 @@
 //! Admission and execution policy for session-owned SQL notification listeners.
 
 use uqa_core::CancellationToken;
-use uqa_sql::SQLError;
+use uqa_sql::{SQLBatchError, SQLError};
 
 /// Check the host's live session policy at the actual listener command boundary.
 pub fn require_sql_listener_session(requires_subscription: bool) -> Result<(), SQLError> {
@@ -25,21 +25,39 @@ pub fn admit_sql_batch<'sql>(
     messages: impl IntoIterator<Item = &'sql str>,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    admit_sql_batch_diagnosed(requires_subscription, settings, messages, cancellation)
+        .map_err(SQLBatchError::into_error)
+}
+
+/// The same admission boundary with the exact zero-based message that failed.
+pub fn admit_sql_batch_diagnosed<'sql>(
+    requires_subscription: bool,
+    settings: uqa_sql::parser::ParserSettings,
+    messages: impl IntoIterator<Item = &'sql str>,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLBatchError> {
     if !requires_subscription {
         return Ok(());
     }
-    for sql in messages {
-        cancellation.check()?;
+    for (index, sql) in messages.into_iter().enumerate() {
+        let at_statement = |error| SQLBatchError::statement(error, index);
+        cancellation
+            .check()
+            .map_err(SQLError::from)
+            .map_err(at_statement)?;
         // Admission precedes the batch's effects, including SET. Execution parses
         // each admitted message again with the settings live at that boundary.
         // Keep successful admission silent so execution delivers each notice once.
         let (statements, _) =
             uqa_sql::parser::with_settings(settings, || uqa_sql::parse_statements(sql));
-        let statements = statements?;
+        let statements = statements.map_err(at_statement)?;
         for statement in statements {
-            cancellation.check()?;
+            cancellation
+                .check()
+                .map_err(SQLError::from)
+                .map_err(at_statement)?;
             if statement.is_notification_listener_command() {
-                return Err(SQLError::NotificationRequiresSubscription);
+                return Err(at_statement(SQLError::NotificationRequiresSubscription));
             }
         }
     }
@@ -52,6 +70,33 @@ mod tests {
     use uqa_core::CancellationToken;
     use uqa_sql::parser::ParserSettings;
     use uqa_sql::SQLError;
+
+    #[test]
+    fn diagnosed_admission_retains_the_original_failing_member() {
+        let token = CancellationToken::new();
+        let error = super::admit_sql_batch_diagnosed(
+            true,
+            ParserSettings::default(),
+            ["SELECT 1", "SELECT )"],
+            &token,
+        )
+        .unwrap_err();
+        assert_eq!(error.statement_index, Some(1));
+        assert_eq!(error.error.sqlstate(), Some("42601"));
+        assert_eq!(error.error.position(), Some(8));
+        let error = super::admit_sql_batch_diagnosed(
+            true,
+            ParserSettings::default(),
+            ["SELECT 1", "LISTEN events"],
+            &token,
+        )
+        .unwrap_err();
+        assert_eq!(error.statement_index, Some(1));
+        assert_eq!(
+            error.error.code(),
+            Some("NOTIFICATION_REQUIRES_SUBSCRIPTION")
+        );
+    }
 
     #[test]
     fn api_batch_classifies_commands_without_searching_embedded_sql() {

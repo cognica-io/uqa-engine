@@ -10,6 +10,11 @@ use super::{
     panic_description, BackendTransactionMode, Engine, SQLError, SQLParam, SQLResult,
     StorageBackendError, StorageBackendResult, TransactionIntent, TransactionScope,
 };
+use uqa_sql::SQLBatchError;
+
+#[cfg(test)]
+#[path = "batch_diagnostic_tests.rs"]
+mod batch_diagnostic_tests;
 
 impl Engine {
     /// Run `f` inside one engine transaction. An error or panic from `f` rolls back the transaction. A successful callback commits; an indeterminate commit retains its sealed attempt in the session for resolution through `commit` or `rollback`, without replaying `f`.
@@ -473,6 +478,16 @@ impl Engine {
         &self,
         statements: &[(&str, &[SQLParam])],
     ) -> Result<Vec<SQLResult>, SQLError> {
+        self.sql_batch_diagnosed(statements)
+            .map_err(SQLBatchError::into_error)
+    }
+
+    /// Execute the same atomic batch while retaining the zero-based failing member.
+    /// Transaction-boundary failures carry no member; no statement is retried.
+    pub fn sql_batch_diagnosed(
+        &self,
+        statements: &[(&str, &[SQLParam])],
+    ) -> Result<Vec<SQLResult>, SQLBatchError> {
         self.sql_batch_observed(statements, |_, _| Ok(()))
     }
 
@@ -482,27 +497,32 @@ impl Engine {
         statements: &[(&str, &[SQLParam])],
     ) -> Result<Vec<SQLResult>, SQLError> {
         self.sql_batch_observed(statements, Engine::render_enum_labels)
+            .map_err(SQLBatchError::into_error)
     }
 
     fn sql_batch_observed(
         &self,
         statements: &[(&str, &[SQLParam])],
         observe: impl Fn(&Engine, &mut SQLResult) -> Result<(), SQLError>,
-    ) -> Result<Vec<SQLResult>, SQLError> {
-        self.transaction(|engine| {
-            uqa_execution::statement::notifications::admit_sql_batch(
-                engine.notification_subscriptions_required(),
-                engine.parser_settings(),
-                statements.iter().map(|(sql, _)| *sql),
-                &engine.runtime.cancellation,
-            )?;
-            let mut results = Vec::with_capacity(statements.len());
-            for (sql, params) in statements {
-                let mut result = engine.sql(sql, params)?;
-                observe(engine, &mut result)?;
-                results.push(result);
-            }
-            Ok(results)
-        })
+    ) -> Result<Vec<SQLResult>, SQLBatchError> {
+        self.transaction_with_error(
+            |engine| {
+                uqa_execution::statement::notifications::admit_sql_batch_diagnosed(
+                    engine.notification_subscriptions_required(),
+                    engine.parser_settings(),
+                    statements.iter().map(|(sql, _)| *sql),
+                    &engine.runtime.cancellation,
+                )?;
+                let mut results = Vec::with_capacity(statements.len());
+                for (index, (sql, params)) in statements.iter().enumerate() {
+                    let at_statement = |error| SQLBatchError::statement(error, index);
+                    let mut result = engine.sql(sql, params).map_err(at_statement)?;
+                    observe(engine, &mut result).map_err(at_statement)?;
+                    results.push(result);
+                }
+                Ok(results)
+            },
+            SQLBatchError::transaction,
+        )
     }
 }

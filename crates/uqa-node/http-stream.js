@@ -7,6 +7,7 @@
 "use strict";
 
 const { HttpEngineError, invalidResponse } = require("./http-error.js");
+const { sqlDiagnostic } = require("./http-diagnostic.js");
 const { decodeRow, count, columns } = require("./http-values.js");
 const { decodeJSON, MAX_FRAME_BYTES } = require("./http-transport.js");
 
@@ -90,7 +91,9 @@ class HttpSQLStream {
       } else if (frame.type === "error") {
         if (frame.request_id !== this.#requestId || typeof frame.code !== "string" || typeof frame.message !== "string") throw invalidResponse();
         phase = "terminal";
-        yield { type: "error", code: frame.code, message: frame.message, requestId: this.#requestId };
+        const diagnostic = sqlDiagnostic(frame.code, frame.diagnostic);
+        yield { type: "error", code: frame.code, message: frame.message, requestId: this.#requestId,
+          ...(diagnostic === undefined ? {} : { diagnostic }) };
       } else if (phase === "rows" && frame.type === "complete") {
         if (frame.request_id !== this.#requestId) throw invalidResponse();
         phase = "terminal";

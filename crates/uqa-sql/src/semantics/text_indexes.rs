@@ -291,10 +291,11 @@ pub fn validate_text_match_field(
                 "{function_name}: column `{field}` does not exist on table `{table}`"
             )));
         }
-        return Err(SQLError::TypeMismatch(format!(
-            "{function_name}: column `{table}.{field}` has no text index; \
-             create one with CREATE INDEX ... ON {table} USING gin ({field})"
-        )));
+        return Err(SQLError::TextIndexRequired {
+            function_name: function_name.to_owned(),
+            table: table.to_owned(),
+            field: field.to_owned(),
+        });
     }
     Ok(())
 }
@@ -335,7 +336,9 @@ pub fn require_physical_text_index(
     if !columns.is_empty() && !columns.iter().any(|column| column.name == field) {
         return Err(SQLError::UnknownColumn(field.to_string()));
     }
-    Err(SQLError::TypeMismatch(format!(
-        "text search: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})"
-    )))
+    Err(SQLError::TextIndexRequired {
+        function_name: "text search".to_owned(),
+        table: table.to_owned(),
+        field: field.to_owned(),
+    })
 }

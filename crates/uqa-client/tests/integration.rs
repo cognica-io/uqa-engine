@@ -5,6 +5,8 @@
 //
 
 mod notifications;
+#[path = "sql_diagnostics/mod.rs"]
+mod sql_diagnostics;
 
 use std::net::Ipv4Addr;
 
@@ -249,11 +251,13 @@ async fn server_error_keeps_diagnostics_but_redacts_customer_message() {
             code,
             message: response_message,
             request_id,
+            diagnostic,
         } => {
             assert_eq!(*status, StatusCode::BAD_REQUEST);
             assert_eq!(code, "SQL_EXECUTION_FAILED");
             assert_eq!(response_message, message);
             assert_eq!(request_id.as_deref(), Some(REQUEST_ID));
+            assert!(diagnostic.is_none());
         }
         other => panic!("unexpected error: {other:?}"),
     }

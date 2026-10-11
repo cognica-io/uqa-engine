@@ -90,8 +90,19 @@ impl SQLStream {
 
     fn decode_frame(&mut self, line: &[u8]) -> Result<SQLStreamFrame, HttpEngineError> {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let frame = serde_json::from_slice::<SQLStreamFrame>(line)
+        let mut frame = serde_json::from_slice::<SQLStreamFrame>(line)
             .map_err(HttpEngineError::InvalidResponse)?;
+        if let SQLStreamFrame::Error {
+            code, diagnostic, ..
+        } = &mut frame
+        {
+            if diagnostic
+                .as_ref()
+                .is_some_and(|value| !value.matches_code(code))
+            {
+                *diagnostic = None;
+            }
+        }
         if frame
             .request_id()
             .is_some_and(|request_id| request_id != self.request_id)

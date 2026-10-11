@@ -171,7 +171,7 @@ pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
 pub use uqa_sql::{
     ast::{SequenceBound, SequenceDataType, SequenceRestart},
-    AsyncSQLEngine, NoticeLevel, SQLNotice, SQLParam, SQLResult,
+    AsyncSQLEngine, NoticeLevel, SQLBatchError, SQLNotice, SQLParam, SQLResult,
 };
 pub use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 

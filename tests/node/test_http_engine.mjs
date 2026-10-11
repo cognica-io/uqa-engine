@@ -75,6 +75,59 @@ const result = (row = { n: 1 }) => ({
 const metadata = { type: "metadata", columns: ["n"], row_count: 1, spilled_to_disk: false, request_id: "request-test" };
 const complete = { type: "complete", row_count: 1, request_id: "request-test" };
 
+test("SQL diagnostics survive materialized, batch and streamed errors without raw messages", async () => {
+  const diagnostic = { sqlstate: "42703", category: "undefined_column", statement_index: 1, position: 8 };
+  await server(async (request, response) => {
+    await body(request);
+    if (request.url === "/v1/sql/stream") {
+      response.writeHead(200, { "content-type": "application/x-ndjson", "x-request-id": "request-test" });
+      response.end(JSON.stringify({ type: "error", code: "SQL_EXECUTION_FAILED", message: "redacted",
+        request_id: "request-test", diagnostic }) + "\n");
+    } else {
+      json(response, { error: { code: "SQL_EXECUTION_FAILED", message: "private SQL value", diagnostic },
+        request_id: "request-test" }, { status: 400 });
+    }
+  }, async (url) => {
+    const engine = new uqa.HttpEngine(url, "token-test");
+    for (const request of [() => engine.sql("SELECT 1"), () => engine.sqlBatch([["SELECT 1", []]])]) {
+      await assert.rejects(request, (error) => {
+        assert.ok(error instanceof uqa.HttpEngineError);
+        assert.deepEqual(error.diagnostic, { sqlstate: "42703", category: "undefined_column", statementIndex: 1, position: 8 });
+        assert.match(error.message, /batch statement 2/);
+        assert.ok(!inspect(error).includes("private SQL value"));
+        return true;
+      });
+    }
+    const stream = await engine.sqlStream("SELECT 1");
+    const frame = await stream.nextFrame();
+    assert.deepEqual(frame.diagnostic, { sqlstate: "42703", category: "undefined_column", statementIndex: 1, position: 8 });
+    assert.equal(await stream.nextFrame(), null);
+  });
+});
+
+test("SQL diagnostic decoder rejects unknown categories, text and invalid positions", async () => {
+  for (const diagnostic of [
+    { category: "private SQL value", sqlstate: "42601" },
+    { category: "syntax", sqlstate: "private SQL value" },
+    { category: "syntax", position: 0 },
+    { category: "syntax", statement_index: -1 },
+    { category: "syntax", hint: "private SQL value" },
+  ]) {
+    await server(async (request, response) => {
+      await body(request);
+      json(response, { error: { code: "SQL_EXECUTION_FAILED", message: "private SQL value", diagnostic },
+        request_id: "request-test" }, { status: 400 });
+    }, async (url) => {
+      await assert.rejects(new uqa.HttpEngine(url, "token-test").sql("SELECT 1"), (error) => {
+        assert.equal(error.diagnostic, undefined);
+        assert.equal(error.code, "SQL_EXECUTION_FAILED");
+        assert.ok(!inspect(error).includes("private SQL value"));
+        return true;
+      });
+    });
+  }
+});
+
 test("package imports expose HTTP and parameters without loading a native addon", async () => {
   assert.equal(readdirSync(packagePath).some((name) => name.endsWith(".node")), false);
   const http = require("@cognica-io/uqa/http");
