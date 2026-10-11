@@ -584,7 +584,7 @@ Reference image: `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9
 - [x] Capture 32 independent PostgreSQL 18.4 typed nodes and both SQL forms; reproduce missing scalar Datum encoding and output in the existing SQL owner harness.
 - [x] Reuse the existing bytea, UUID and JSON codecs for complete constant encoding and SQL reconstruction, with validated Datum bounds.
 - [x] Verify original JSON text, JSONB normalization and numeric precision, binary bytes, UUID normalization, NULLs and composition; run focused owner/static checks and review.
-- [ ] Merge and remove the completed branch, then continue #119's remaining codecs and runtime catalog projection.
+- [x] Merge as `008109c17` and remove the completed branch; continue #119's remaining codecs and runtime catalog projection.
 
 The reference extends `crates/uqa-sql/src/catalog/node_tree/tests/checks.json`. A disposable database in PostgreSQL 18.4 Docker supplied each `conbin` and both `pg_get_expr` outputs through the existing command-completion collector; `SELECT version()` precedes the capture. Fixture SHA-256: `f4de7c6225b12d15b0d500dbeee344380f4495de680e3215de0fef8cc24617c5`. Raw output remains outside version control. The reference image and collector are the same immutable inputs recorded for the NULLIF unit above.
 
@@ -593,3 +593,15 @@ For bytea and JSON, encoding adds the varlena length to the existing payload and
 Review found that the shared node deparser emitted `E` literals instead of PostgreSQL's session-dependent catalog spelling. The reference now contains 34 cases observed with `standard_conforming_strings` both on and off and both pretty modes (fixture SHA-256 `4a5af1d511537db3eab4f47730b77213c66db95401342b88e5904c4170a2f5e9`). The deparser and saved routine configuration now share SQL's existing literal algorithm; Execution supplies the session setting. Apostrophes always double; backslashes double exactly when ordinary string parsing treats them as escapes, preserving each literal's bytes under the invoking setting. The distinction from the SQL `quote_literal` function is retained. This matches PostgreSQL's [`simple_quote_literal`](https://github.com/postgres/postgres/blob/REL_18_4/src/backend/utils/adt/ruleutils.c#L11083) contract.
 
 All 34 complete typed nodes and four SQL observations per case match the Docker reference. All 1,641 SQL owner tests pass, including existing scalar output, JSONB physical bytes and routine configuration tests, plus invalid/truncated/overlong layouts and unread NULL payload regressions. Strict SQL/Execution Clippy, workspace rustfmt, Engine capability boundaries (2,590 files, 111 adapters), Rust headers/size and the single integration-harness policy pass. This is codec and adapter source evidence; runtime constraint projection remains unfinished in #119.
+
+## Infinite temporal values
+
+The array catalog codec in [PR #769](https://github.com/cognica-io/uqa-engine/pull/769) exposes an existing #289 defect: date, timestamp and timestamptz input rejects PostgreSQL's infinite values. This prerequisite fixes the shared temporal representation and its SQL consumers before the array unit is merged. Core owns parsing, formatting, ordering and durable value fields; SQL owns casts, operators, functions and physical Datums. Their manifests, enabled features, dependency policy and manual ownership boundaries have been checked; no dependency or feature change is needed. Other datetime input forms and #119 runtime constraint projection remain open.
+
+- [x] Capture an independent PostgreSQL 18 reference for non-finite inputs, casts, comparisons, arithmetic, functions, time zones and finite controls.
+- [ ] Preserve infinite values in Core input/output, equality/order and serialization, and SQL physical Datums.
+- [ ] Match PostgreSQL casts, operators, functions and validation order, including indeterminate-operation errors.
+- [ ] Pass owner and affected runtime/persistence checks; review and update the public contract.
+- [ ] Merge and remove the prerequisite branch; finish PR #769 against the corrected shared representation.
+
+The compact expected fixture is `crates/uqa-sql/tests/expr_evaluator/temporal_infinity.json` (490 cases, SHA-256 `a904055a8696d49f8e077bef585e340bbdc851d3ea86cb41a10011aa33715467`). Each case contains executable SQL and PostgreSQL's text result or SQLSTATE, primary message, detail and hint. Capture used a disposable database in PostgreSQL 18.4 Docker with UTC, ISO/MDY and postgres interval output, through the existing `tests/parity/pg18/capture_command_completion_oracle.py --rows --details` after `SELECT version()`. The image and collector are the same immutable inputs recorded above; raw diagnostic output stays outside version control. The enabled owner tests retain currently failing cases until their implementation is corrected.
