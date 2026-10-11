@@ -25,7 +25,7 @@ pub use compressed_vfs::{
     read_authenticated_anchor, SQLiteCompressedContainerAnchor, SQLiteCompressionCodec,
     SQLiteCompressionOptions,
 };
-pub use connection::{ManagedConnection, Result, SQLiteError};
+pub use connection::{register_schema_functions, ManagedConnection, Result, SQLiteError};
 pub use connection_lease::SQLiteConnectionLease;
 pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;
