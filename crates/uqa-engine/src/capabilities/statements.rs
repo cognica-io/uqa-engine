@@ -122,6 +122,10 @@ impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
         ))
     }
 
+    fn temporal_interval_style(&self) -> Option<uqa_core::TemporalIntervalStyle> {
+        Some(self.session.interval_style())
+    }
+
     fn diagnostic_search_path(&self) -> Option<Vec<String>> {
         Some(self.session.state.read().search_path.clone())
     }

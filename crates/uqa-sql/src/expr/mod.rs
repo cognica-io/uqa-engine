@@ -57,6 +57,7 @@ mod current_time;
 pub mod enums;
 pub(crate) mod hashing;
 pub(crate) mod internal_char;
+pub(crate) mod interval_style;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;
@@ -121,7 +122,8 @@ pub(crate) use scalar_helpers::append_sql_literal;
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 pub use temporal_input::{
-    temporal_date_order, DateOrderScope, TemporalInputContext, TemporalInputScope,
+    temporal_date_order, temporal_interval_style, DateOrderScope, IntervalStyleScope,
+    TemporalInputContext, TemporalInputScope,
 };
 
 mod builtin;

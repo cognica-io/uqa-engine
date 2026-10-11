@@ -142,6 +142,16 @@ When an input is read, temporal coercion, comparison and date or timestamp range
 
 `INTERVAL` supports the fields `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, and `SECOND`, plus `YEAR TO MONTH`, `DAY TO HOUR`, `DAY TO MINUTE`, `DAY TO SECOND`, `HOUR TO MINUTE`, `HOUR TO SECOND`, and `MINUTE TO SECOND`. The least significant field determines truncation: for example, `INTERVAL HOUR TO MINUTE` preserves years, months, days, hours, and minutes while discarding seconds. `INTERVAL(p)` and ranges ending in `SECOND(p)` round fractional seconds. `information_schema.columns.interval_type` exposes an explicit field restriction, including its precision when present.
 
+`SET IntervalStyle = 'iso_8601'` selects interval input/output conventions; the other values are `postgres` (the default), `postgres_verbose` and `sql_standard`. The style applies to SQL result text, text casts and assignments, arrays, records, JSON functions and JSON aggregates. SQL-standard input applies an initial minus sign to all fields when later fields have no explicit sign: `'-1 1:00:00'` then means negative one day and negative one hour. Unknown literals retain the style active when analysis reads them; text parameters and columns use the style active when their cast executes. Stored interval fields, comparisons and arithmetic do not change. `SET LOCAL`, function settings, savepoints and rollback follow the ordinary parameter lifecycle, and invalid settings report `22023` with the available values in HINT.
+
+```sql execute
+SET IntervalStyle = 'iso_8601';
+SELECT interval '-1 days 1 hour'::text AS interval_text;
+RESET IntervalStyle;
+```
+
+The result is `P-1DT1H`. Explicit field signs preserve this mixed-sign carrier across styles.
+
 ```sql execute
 SELECT '23:59:59.9995'::time(3) AS midnight,
        '1 year 2 mons 3 days 04:05:06.789'::interval hour to minute AS whole_minutes;

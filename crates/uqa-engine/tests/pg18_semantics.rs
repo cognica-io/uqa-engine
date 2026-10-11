@@ -88,6 +88,8 @@ mod comparisons_and_arrays;
 mod floating_point_width;
 #[path = "pg18_semantics/gamma_functions.rs"]
 mod gamma_functions;
+#[path = "pg18_semantics/interval_style.rs"]
+mod interval_style;
 #[path = "pg18_semantics/json_strip_nulls.rs"]
 mod json_strip_nulls;
 #[path = "pg18_semantics/md5_overloads.rs"]

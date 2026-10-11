@@ -10,6 +10,44 @@ use super::super::{aggregate_value, AggregateAccumulator};
 use uqa_core::{TemporalValue, Value};
 use uqa_sql::SQLError;
 
+#[test]
+fn interval_json_keys_and_values_share_sql_output_in_memory_and_spill() {
+    let _style = uqa_sql::expr::IntervalStyleScope::enter(uqa_core::TemporalIntervalStyle::Iso8601);
+    let values = [
+        Value::Temporal(TemporalValue::Interval {
+            months: 0,
+            days: -1,
+            micros: 3_600_000_000,
+        }),
+        Value::Temporal(TemporalValue::Interval {
+            months: 14,
+            days: 3,
+            micros: 14_400_000_000,
+        }),
+    ];
+    // Captured with PostgreSQL 18.4 json[b]_object_agg under iso_8601.
+    for (name, expected) in [
+        (
+            "json_object_agg",
+            Value::Json(r#"{ "P-1DT1H" : "P-1DT1H", "P1Y2M3DT4H" : "P1Y2M3DT4H" }"#.into()),
+        ),
+        (
+            "jsonb_object_agg",
+            Value::JsonB(r#"{"P-1DT1H": "P-1DT1H", "P1Y2M3DT4H": "P1Y2M3DT4H"}"#.into()),
+        ),
+    ] {
+        for budget in [1, 4096] {
+            let mut accumulator = AggregateAccumulator::builtin_with_budget(name, budget);
+            for value in &values {
+                accumulator
+                    .observe(&Value::List(vec![value.clone(), value.clone()]))
+                    .unwrap();
+            }
+            assert_eq!(aggregate_value(name, &accumulator, None).unwrap(), expected);
+        }
+    }
+}
+
 fn inputs(case: &serde_json::Value) -> Vec<Value> {
     case["inputs"]
         .as_array()

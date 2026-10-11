@@ -69,7 +69,11 @@ impl TemporalCastTarget {
             Self::TimestampTz => TemporalValue::timestamp_tz_input_in_order_with_control(
                 text, now_micros, order, control,
             )?,
-            Self::Interval => TemporalValue::interval_input_with_control(text, control)?,
+            Self::Interval => TemporalValue::interval_input_in_style_with_control(
+                text,
+                crate::expr::temporal_interval_style(),
+                control,
+            )?,
         })
     }
 }

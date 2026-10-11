@@ -48,6 +48,21 @@ pub(crate) fn parameter_key(name: &str) -> String {
 }
 
 impl SessionContext {
+    /// Borrow the validated interval setting without allocating a SHOW result for each converted value.
+    pub(crate) fn interval_style(&self) -> uqa_core::TemporalIntervalStyle {
+        let decode = |setting: &str| {
+            uqa_sql::semantics::parameters::intervalstyle::style(setting)
+                .expect("validated session IntervalStyle")
+        };
+        if let Some(setting) = self.state.read().session_vars.get("intervalstyle") {
+            return decode(setting);
+        }
+        self.parameters
+            .lock()
+            .client_setting("IntervalStyle")
+            .map_or_else(uqa_core::TemporalIntervalStyle::default, decode)
+    }
+
     /// The setting of the ordinary parameter `name` in base units: the session's own, the client's startup setting, the engine's default or the boot value.
     pub(crate) fn setting(&self, name: &str) -> String {
         let definition = find_parameter(name).expect("the engine defines the parameter");

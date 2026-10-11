@@ -69,6 +69,8 @@ When projected labels repeat, `SQLResult` retains the distinct final values in a
 
 Enum results arrive as `Value::Enum`, which carries the type OID and an immutable label key rather than the label text, because a label can be renamed without rewriting stored values. `sql::format_postgres_text(value, column_type, Some(&engine))` renders the current label, including inside arrays and records. `Engine::render_enum_labels(&mut result)` replaces every enum value of a result by its label while keeping the declared column types, as a PostgreSQL client receives enum values; it reports an error if a value's type has since been dropped. `Engine::sql_batch_with_labels` runs a batch like `Engine::sql_batch` and renders each result before the next statement runs, so a later statement that drops the type cannot invalidate an earlier result. The Python, Node.js and browser bindings, the Arrow and Parquet `QueryBuilder` outputs, and arguments passed to registered host functions use these labels.
 
+`sql::format_postgres_text(value, column_type, Some(&engine))` also reads the session's current `IntervalStyle`, including when a retained result is rendered after its statement returns. `TemporalValue::to_sql_string()` remains the canonical PostgreSQL-style carrier formatter; use the SQL formatter for session-dependent presentation.
+
 ```rust
 let engine = uqa_engine::Engine::new();
 engine.sql("CREATE TYPE mood AS ENUM ('sad', 'happy')", &[])?;

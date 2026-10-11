@@ -141,6 +141,7 @@ impl RoutineStatements for Engine {
     ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError> {
         let _temporal_input = uqa_sql::expr::TemporalInputContext {
             transaction_clock_micros: Some(self.transaction_timestamp_micros()),
+            interval_style: self.session.interval_style(),
             date_order: uqa_sql::semantics::parameters::datestyle::date_order(
                 &self.session.setting("DateStyle"),
             ),

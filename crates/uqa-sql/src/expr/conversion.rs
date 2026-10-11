@@ -37,7 +37,10 @@ pub fn value_to_string_with_control(
         Value::Str(value) | Value::Json(value) | Value::JsonB(value) => control.copy_text(value)?,
         Value::FixedChar(value) => control.copy_text(value.trim_end_matches(' '))?,
         Value::Bool(value) => control.copy_text(if *value { "true" } else { "false" })?,
-        Value::Temporal(value) => value.to_sql_string_with_control(control)?,
+        Value::Temporal(value) => value.to_sql_string_in_interval_style_with_control(
+            super::temporal_interval_style(),
+            control,
+        )?,
         Value::Array(value) => array_value_to_string_with_control(value, control)?,
         Value::LegacyVector(_) => {
             vector_value_to_string_with_control(value, control)?.expect("validated legacy vector")

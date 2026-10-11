@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve exact interval input fields, fractional carries, ISO 8601 forms, duplicate-field checks and PostgreSQL overflow diagnostics. Match interval sign prefixes after mixed fields without changing stored values or their comparisons.
+- Apply PostgreSQL `IntervalStyle` to interval input and SQL output, including prepared casts, arrays, records, JSON, assignment, cursors and stored definitions. Preserve exact input fields, fractional carries, ISO 8601 forms, duplicate-field checks, mixed signs and overflow diagnostics, with unchanged stored carriers and comparisons and ordinary transaction-local settings.
 
 - Select range and multirange element containment from both declared operand types, preserving PostgreSQL endpoints, NULLs, incompatible-type diagnostics and domain distinctions through stored expressions and persistent reopening.
 
