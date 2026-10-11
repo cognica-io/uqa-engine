@@ -1,0 +1,434 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "setup",
+      "sql": "CREATE TYPE ac_plain AS(n integer,t text); CREATE TYPE ac_json AS(n integer,j json); CREATE DOMAIN ac_json_domain AS json; CREATE TYPE ac_domain_json AS(n integer,j ac_json_domain); CREATE TYPE ac_enum AS ENUM('z','a'); CREATE TYPE ac_enum_record AS(n integer,e ac_enum); CREATE TYPE ac_numeric AS(n numeric,b jsonb); CREATE DOMAIN ac_composite_domain AS ac_json; CREATE SCHEMA ac_scope; CREATE TYPE ac_scope.record AS(n integer,t text)"
+    },
+    {
+      "id": "setup_refcursor_record",
+      "sql": "CREATE TYPE ac_refcursor AS(c refcursor)"
+    },
+    {
+      "id": "setup_xid_record",
+      "sql": "CREATE TYPE ac_xid AS(x xid)"
+    },
+    {
+      "id": "setup_aclitem_record",
+      "sql": "CREATE TYPE ac_aclitem AS(a aclitem)"
+    },
+    {
+      "id": "sort_reached_null_types",
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int,NULL::int),ROW(1::int,NULL::text)])::text AS v"
+    },
+    {
+      "id": "sort_reached_width",
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int),ROW(1::int,2::int)])::text AS v"
+    },
+    {
+      "id": "sort_deciding_prefix",
+      "sql": "SELECT array_sort(ARRAY[ROW(2::int),ROW(1::int,2::int)])::text AS v"
+    },
+    {
+      "id": "position_type_mismatch",
+      "sql": "SELECT array_position(ARRAY[ROW(1::int)],ROW(1::bigint))::text AS v"
+    },
+    {
+      "id": "remove_type_mismatch",
+      "sql": "SELECT array_remove(ARRAY[ROW(1::int)],ROW(1::bigint))::text AS v"
+    },
+    {
+      "id": "position_json",
+      "sql": "SELECT array_position(ARRAY[ROW('{}'::json)],ROW('{}'::json))::text AS v"
+    },
+    {
+      "id": "remove_json",
+      "sql": "SELECT array_remove(ARRAY[ROW('{}'::json)],ROW('{}'::json))::text AS v"
+    },
+    {
+      "id": "sort_numeric_record",
+      "sql": "SELECT array_sort(ARRAY[ROW(10::numeric),ROW(2::numeric)])::text AS v"
+    },
+    {
+      "id": "sort_nested_null_types",
+      "sql": "SELECT array_sort(ARRAY[ROW(ROW(NULL::int)),ROW(ROW(NULL::text))])::text AS v"
+    },
+    {
+      "id": "sort_width_reached_desc",
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int),ROW(1::int,2::int)],true)::text AS v"
+    },
+    {
+      "id": "sort_prefix_types_decided",
+      "sql": "SELECT array_sort(ARRAY[ROW(2::int,NULL::int),ROW(1::int,NULL::text)])::text AS v"
+    },
+    {
+      "id": "sort_equal_names",
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int,NULL::text),ROW(1::int,NULL::text)])::text AS v"
+    },
+    {
+      "id": "position_types_decided",
+      "sql": "SELECT array_position(ARRAY[ROW(1::int,NULL::int)],ROW(2::int,NULL::text))::text AS v"
+    },
+    {
+      "id": "remove_types_decided",
+      "sql": "SELECT array_remove(ARRAY[ROW(1::int,NULL::int)],ROW(2::int,NULL::text))::text AS v"
+    },
+    {
+      "id": "positions_type_mismatch",
+      "sql": "SELECT array_positions(ARRAY[ROW(1::int)],ROW(1::bigint))::text AS v"
+    },
+    {
+      "id": "replace_type_mismatch",
+      "sql": "SELECT array_replace(ARRAY[ROW(1::int)],ROW(1::bigint),ROW(2::bigint))::text AS v"
+    },
+    {
+      "id": "positions_json",
+      "sql": "SELECT array_positions(ARRAY[ROW('{}'::json)],ROW('{}'::json))::text AS v"
+    },
+    {
+      "id": "replace_json",
+      "sql": "SELECT array_replace(ARRAY[ROW('{}'::json)],ROW('{}'::json),ROW('[]'::json))::text AS v"
+    },
+    {
+      "id": "sort_named",
+      "sql": "SELECT array_sort(ARRAY[ROW(2,'later')::ac_plain,ROW(1,'early')::ac_plain,NULL::ac_plain])::text AS v"
+    },
+    {
+      "id": "sort_named_desc",
+      "sql": "SELECT array_sort(ARRAY[ROW(2,'later')::ac_plain,ROW(1,'early')::ac_plain,NULL::ac_plain],true,false)::text AS v"
+    },
+    {
+      "id": "position_named",
+      "sql": "SELECT array_position(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain],ROW(2,NULL)::ac_plain)::text AS v"
+    },
+    {
+      "id": "remove_named",
+      "sql": "SELECT array_remove(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain],ROW(2,NULL)::ac_plain)::text AS v"
+    },
+    {
+      "id": "positions_named",
+      "sql": "SELECT array_positions(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain,ROW(2,NULL)::ac_plain],ROW(2,NULL)::ac_plain)::text AS v"
+    },
+    {
+      "id": "replace_named",
+      "sql": "SELECT array_replace(ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'early')::ac_plain],ROW(2,NULL)::ac_plain,ROW(3,'new')::ac_plain)::text AS v"
+    },
+    {
+      "id": "sort_named_json_decided",
+      "sql": "SELECT array_sort(ARRAY[ROW(2,'{}'::json)::ac_json,ROW(1,'[]'::json)::ac_json])::text AS v"
+    },
+    {
+      "id": "sort_named_json_reached",
+      "sql": "SELECT array_sort(ARRAY[ROW(1,'{}'::json)::ac_json,ROW(1,'[]'::json)::ac_json])::text AS v"
+    },
+    {
+      "id": "sort_named_json_nulls",
+      "sql": "SELECT array_sort(ARRAY[ROW(1,NULL)::ac_json,ROW(1,NULL)::ac_json])::text AS v"
+    },
+    {
+      "id": "position_named_json_nulls",
+      "sql": "SELECT array_position(ARRAY[ROW(1,NULL)::ac_json],ROW(1,NULL)::ac_json)::text AS v"
+    },
+    {
+      "id": "position_named_json_decided",
+      "sql": "SELECT array_position(ARRAY[ROW(1,'{}'::json)::ac_json],ROW(2,'[]'::json)::ac_json)::text AS v"
+    },
+    {
+      "id": "remove_named_domain_json",
+      "sql": "SELECT array_remove(ARRAY[ROW(1,'{}'::ac_json_domain)::ac_domain_json],ROW(1,'{}'::ac_json_domain)::ac_domain_json)::text AS v"
+    },
+    {
+      "id": "sort_named_domain_json",
+      "sql": "SELECT array_sort(ARRAY[ROW(1,'{}'::ac_json_domain)::ac_domain_json,ROW(1,'[]'::ac_json_domain)::ac_domain_json])::text AS v"
+    },
+    {
+      "id": "sort_named_enum",
+      "sql": "SELECT array_sort(ARRAY[ROW(1,'a'::ac_enum)::ac_enum_record,ROW(1,'z'::ac_enum)::ac_enum_record])::text AS v"
+    },
+    {
+      "id": "position_named_enum",
+      "sql": "SELECT array_position(ARRAY[ROW(1,'z'::ac_enum)::ac_enum_record],ROW(1,'z'::ac_enum)::ac_enum_record)::text AS v"
+    },
+    {
+      "id": "sort_named_numeric",
+      "sql": "SELECT array_sort(ARRAY[ROW(10,'{}'::jsonb)::ac_numeric,ROW(2,'[]'::jsonb)::ac_numeric])::text AS v"
+    },
+    {
+      "id": "remove_numeric_scale",
+      "sql": "SELECT array_remove(ARRAY[ROW(1.00,'{}'::jsonb)::ac_numeric],ROW(1.0,'{}'::jsonb)::ac_numeric)::text AS v"
+    },
+    {
+      "id": "remove_numeric_nan",
+      "sql": "SELECT array_remove(ARRAY[ROW('NaN'::numeric,'{}'::jsonb)::ac_numeric],ROW('NaN'::numeric,'{}'::jsonb)::ac_numeric)::text AS v"
+    },
+    {
+      "id": "sort_nested_numeric",
+      "sql": "SELECT array_sort(ARRAY[ROW(ROW(10::numeric)),ROW(ROW(2::numeric))])::text AS v"
+    },
+    {
+      "id": "sort_nested_array_metadata",
+      "sql": "SELECT array_sort(ARRAY[ROW(ARRAY[1::int]),ROW(ARRAY[1::bigint])])::text AS v"
+    },
+    {
+      "id": "position_nested_array_metadata",
+      "sql": "SELECT array_position(ARRAY[ROW(ARRAY[1::int])],ROW(ARRAY[1::bigint]))::text AS v"
+    },
+    {
+      "id": "remove_anonymous_null_record",
+      "sql": "SELECT array_remove(ARRAY[ROW(NULL::int),NULL::record],ROW(NULL::int))::text AS v"
+    },
+    {
+      "id": "position_anonymous_null_record",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::int),NULL::record],ROW(NULL::int))::text AS v"
+    },
+    {
+      "id": "remove_outer_null",
+      "sql": "SELECT array_remove(ARRAY[ROW(NULL::int),NULL::record],NULL::record)::text AS v"
+    },
+    {
+      "id": "position_outer_null",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::int),NULL::record],NULL::record)::text AS v"
+    },
+    {
+      "id": "sort_json_records_singleton",
+      "sql": "SELECT array_sort(ARRAY[ROW('{}'::json)])::text AS v"
+    },
+    {
+      "id": "sort_json_records_empty",
+      "sql": "SELECT array_sort(ARRAY[]::ac_json[])::text AS v"
+    },
+    {
+      "id": "remove_json_records_empty",
+      "sql": "SELECT array_remove(ARRAY[]::ac_json[],ROW(1,'{}'::json)::ac_json)::text AS v"
+    },
+    {
+      "id": "position_json_records_empty",
+      "sql": "SELECT array_position(ARRAY[]::ac_json[],ROW(1,'{}'::json)::ac_json)::text AS v"
+    },
+    {
+      "id": "sort_null_argument",
+      "sql": "SELECT array_sort(ARRAY[ROW(1::int),ROW(1::bigint)],NULL)::text AS v"
+    },
+    {
+      "id": "position_null_start",
+      "sql": "SELECT array_position(ARRAY[ROW(1::int)],ROW(1::int),NULL)::text AS v"
+    },
+    {
+      "id": "position_start_past_end",
+      "sql": "SELECT array_position(ARRAY[ROW(1::int)],ROW(1::bigint),4)::text AS v"
+    },
+    {
+      "id": "remove_direct_json_empty",
+      "sql": "SELECT array_remove(ARRAY[]::json[],'{}'::json)::text AS v"
+    },
+    {
+      "id": "position_direct_json_empty",
+      "sql": "SELECT array_position(ARRAY[]::json[],'{}'::json)::text AS v"
+    },
+    {
+      "id": "remove_direct_json_null",
+      "sql": "SELECT array_remove(ARRAY[NULL::json],NULL::json)::text AS v"
+    },
+    {
+      "id": "position_direct_json_null",
+      "sql": "SELECT array_position(ARRAY[NULL::json],NULL::json)::text AS v"
+    },
+    {
+      "id": "position_null_array",
+      "sql": "SELECT array_position(NULL::ac_plain[],ROW(1,'x')::ac_plain,NULL)::text AS v"
+    },
+    {
+      "id": "positions_null_array",
+      "sql": "SELECT array_positions(NULL::ac_plain[],ROW(1,'x')::ac_plain)::text AS v"
+    },
+    {
+      "id": "sort_lower_bounds",
+      "sql": "SELECT array_sort('[4:6]={\"(2,x)\",\"(1,y)\",NULL}'::ac_plain[])::text AS v"
+    },
+    {
+      "id": "remove_lower_bounds",
+      "sql": "SELECT array_remove('[4:6]={\"(2,x)\",\"(1,y)\",\"(2,x)\"}'::ac_plain[],ROW(2,'x')::ac_plain)::text AS v"
+    },
+    {
+      "id": "positions_lower_bounds",
+      "sql": "SELECT array_positions('[4:6]={\"(2,x)\",\"(1,y)\",\"(2,x)\"}'::ac_plain[],ROW(2,'x')::ac_plain)::text AS v"
+    },
+    {
+      "id": "named_json_equality",
+      "sql": "SELECT ROW(1,NULL)::ac_json=ROW(1,NULL)::ac_json AS v"
+    },
+    {
+      "id": "named_json_order",
+      "sql": "SELECT ROW(1,NULL)::ac_json<ROW(1,NULL)::ac_json AS v"
+    },
+    {
+      "id": "nested_row_equality",
+      "sql": "SELECT ROW(ROW(NULL::int))=ROW(ROW(NULL::int)) AS v"
+    },
+    {
+      "id": "anonymous_null_equality",
+      "sql": "SELECT ROW(NULL::int)=ROW(NULL::int) AS v"
+    },
+    {
+      "id": "stored_setup",
+      "sql": "CREATE TABLE ac_values(id integer PRIMARY KEY,a ac_plain[]); INSERT INTO ac_values VALUES(1,ARRAY[ROW(2,NULL)::ac_plain,ROW(1,'first')::ac_plain,ROW(2,NULL)::ac_plain]); CREATE VIEW ac_ordered AS SELECT array_sort(a) AS a FROM ac_values"
+    },
+    {
+      "id": "stored_sort",
+      "sql": "SELECT array_sort(a)::text AS v FROM ac_values",
+      "reopen": true
+    },
+    {
+      "id": "stored_position",
+      "sql": "SELECT array_position(a,ROW(2,NULL)::ac_plain)::text AS v FROM ac_values",
+      "reopen": true
+    },
+    {
+      "id": "stored_positions",
+      "sql": "SELECT array_positions(a,ROW(2,NULL)::ac_plain)::text AS v FROM ac_values",
+      "reopen": true
+    },
+    {
+      "id": "stored_remove",
+      "sql": "SELECT array_remove(a,ROW(2,NULL)::ac_plain)::text AS v FROM ac_values",
+      "reopen": true
+    },
+    {
+      "id": "stored_replace",
+      "sql": "SELECT array_replace(a,ROW(2,NULL)::ac_plain,ROW(5,'new')::ac_plain)::text AS v FROM ac_values",
+      "reopen": true
+    },
+    {
+      "id": "stored_view",
+      "sql": "SELECT a::text AS v FROM ac_ordered",
+      "reopen": true
+    },
+    {
+      "id": "sort_unknown_fields",
+      "sql": "SELECT array_sort(ARRAY[ROW('a'),ROW('b')])::text AS v"
+    },
+    {
+      "id": "position_unknown_fields",
+      "sql": "SELECT array_position(ARRAY[ROW('a')],ROW('a'))::text AS v"
+    },
+    {
+      "id": "sort_unknown_nulls",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL),ROW(NULL)])::text AS v"
+    },
+    {
+      "id": "position_unknown_nulls",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL)],ROW(NULL))::text AS v"
+    },
+    {
+      "id": "sort_named_as_record_decided",
+      "sql": "SELECT array_sort(ARRAY[(ROW(2,'{}'::json)::ac_json)::record,(ROW(1,'[]'::json)::ac_json)::record])::text AS v"
+    },
+    {
+      "id": "position_named_as_record_decided",
+      "sql": "SELECT array_position(ARRAY[(ROW(1,'{}'::json)::ac_json)::record],(ROW(2,'[]'::json)::ac_json)::record)::text AS v"
+    },
+    {
+      "id": "position_named_as_record_nulls",
+      "sql": "SELECT array_position(ARRAY[(ROW(1,NULL)::ac_json)::record],(ROW(1,NULL)::ac_json)::record)::text AS v"
+    },
+    {
+      "id": "record_cast_type_identity",
+      "sql": "SELECT pg_typeof((ROW(1,NULL)::ac_json)::record)::text AS named,pg_typeof((ROW(1,NULL)::ac_composite_domain)::record)::text AS domain,pg_typeof(ROW(1)::record)::text AS anonymous"
+    },
+    {
+      "id": "record_cast_quoted_type_identity",
+      "sql": "SELECT pg_typeof((ROW(1,NULL)::ac_json)::\"pg_catalog\".\"record\")::text AS named,pg_typeof((ROW(1,NULL)::ac_composite_domain)::\"pg_catalog\".\"record\")::text AS domain"
+    },
+    {
+      "id": "sort_named_as_quoted_record",
+      "sql": "SELECT array_sort(ARRAY[(ROW(2,NULL)::ac_json)::\"pg_catalog\".\"record\",(ROW(1,NULL)::ac_json)::\"pg_catalog\".\"record\"])::text AS v"
+    },
+    {
+      "id": "remove_domain_as_record",
+      "sql": "SELECT array_remove(ARRAY[(ROW(1,NULL)::ac_composite_domain)::record],(ROW(1,NULL)::ac_composite_domain)::record)::text AS v"
+    },
+    {
+      "id": "sort_domain_as_record",
+      "sql": "SELECT array_sort(ARRAY[(ROW(2,NULL)::ac_composite_domain)::record,(ROW(1,NULL)::ac_composite_domain)::record])::text AS v"
+    },
+    {
+      "id": "position_domain_as_record_nulls",
+      "sql": "SELECT array_position(ARRAY[(ROW(1,NULL)::ac_composite_domain)::record],(ROW(1,NULL)::ac_composite_domain)::record)::text AS v"
+    },
+    {
+      "id": "record_null_array",
+      "sql": "SELECT pg_typeof(ARRAY[NULL::\"pg_catalog\".\"record\"])::text AS type,array_position(ARRAY[NULL::\"pg_catalog\".\"record\"],NULL::\"pg_catalog\".\"record\")::text AS v"
+    },
+    {
+      "id": "sort_user_type_named_record",
+      "sql": "SELECT pg_typeof(ARRAY[ROW(2,'b')::ac_scope.\"record\",ROW(1,'a')::ac_scope.\"record\"])::text AS type,array_sort(ARRAY[ROW(2,'b')::ac_scope.\"record\",ROW(1,'a')::ac_scope.\"record\"])::text AS v"
+    },
+    {
+      "id": "refcursor_null_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::refcursor)],ROW(NULL::refcursor))::text AS v"
+    },
+    {
+      "id": "refcursor_null_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::refcursor),ROW(NULL::refcursor)])::text AS v"
+    },
+    {
+      "id": "pg_node_tree_null_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::pg_node_tree)],ROW(NULL::pg_node_tree))::text AS v"
+    },
+    {
+      "id": "pg_node_tree_null_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::pg_node_tree),ROW(NULL::pg_node_tree)])::text AS v"
+    },
+    {
+      "id": "xid_null_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::xid)],ROW(NULL::xid))::text AS v"
+    },
+    {
+      "id": "xid_null_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::xid),ROW(NULL::xid)])::text AS v"
+    },
+    {
+      "id": "aclitem_null_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::aclitem)],ROW(NULL::aclitem))::text AS v"
+    },
+    {
+      "id": "aclitem_null_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::aclitem),ROW(NULL::aclitem)])::text AS v"
+    },
+    {
+      "id": "int2vector_null_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::int2vector)],ROW(NULL::int2vector))::text AS v"
+    },
+    {
+      "id": "int2vector_null_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::int2vector),ROW(NULL::int2vector)])::text AS v"
+    },
+    {
+      "id": "void_null_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL::void)],ROW(NULL::void))::text AS v"
+    },
+    {
+      "id": "void_null_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL::void),ROW(NULL::void)])::text AS v"
+    },
+    {
+      "id": "named_refcursor_equality",
+      "sql": "SELECT array_position(ARRAY[ROW(NULL)::ac_refcursor],ROW(NULL)::ac_refcursor)::text AS v"
+    },
+    {
+      "id": "named_refcursor_singleton",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL)::ac_refcursor])::text AS v"
+    },
+    {
+      "id": "named_xid_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL)::ac_xid,ROW(NULL)::ac_xid])::text AS v"
+    },
+    {
+      "id": "named_aclitem_ordering",
+      "sql": "SELECT array_sort(ARRAY[ROW(NULL)::ac_aclitem,ROW(NULL)::ac_aclitem])::text AS v"
+    }
+  ]
+}

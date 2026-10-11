@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve PostgreSQL record field types and selected operators in array sorting, search, removal and replacement, including NULL fields, named composites, nested records, unsupported JSON equality and ordering, diagnostic operand order and array search start validation.
+
 ## [0.5.3] - 2026-10-11
 
 ### Added
