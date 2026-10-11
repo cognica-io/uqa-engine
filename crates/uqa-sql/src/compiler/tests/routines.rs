@@ -50,7 +50,7 @@ fn variadic_declarations_compile_and_survive_serde() {
     };
     assert_eq!(function.params.len(), 1);
     assert_eq!(function.params[0].mode, FunctionParamMode::Variadic);
-    assert_eq!(function.params[0].type_name, "int4[]");
+    assert_eq!(function.params[0].type_name, "pg_catalog.int4[]");
     assert_eq!(function.identity_arity(), 1);
     assert_eq!(function.call_arity(), 1);
 
@@ -124,7 +124,10 @@ fn alter_function_compiles_exact_identity_and_supported_attributes() {
     };
     assert_eq!(alter.kind, AlterRoutineKind::Function);
     assert_eq!(alter.name, "app.f");
-    assert_eq!(alter.arg_types.as_deref().unwrap(), ["int4", "int8"]);
+    assert_eq!(
+        alter.arg_types.as_deref().unwrap(),
+        ["pg_catalog.int4", "pg_catalog.int8"]
+    );
     assert_eq!(alter.arg_type_references.len(), 0);
     assert_eq!(alter.volatility, Some(FunctionVolatility::Immutable));
     assert_eq!(alter.strict, Some(true));
@@ -138,7 +141,7 @@ fn alter_procedure_and_routine_preserve_target_kind_and_null_input_action() {
         panic!("expected ALTER PROCEDURE");
     };
     assert_eq!(procedure.kind, AlterRoutineKind::Procedure);
-    assert_eq!(procedure.arg_types.as_deref().unwrap(), ["int4"]);
+    assert_eq!(procedure.arg_types.as_deref().unwrap(), ["pg_catalog.int4"]);
     assert_eq!(procedure.volatility, Some(FunctionVolatility::Stable));
     assert_eq!(procedure.strict, Some(false));
 
@@ -317,7 +320,7 @@ fn routine_rename_preserves_kind_identity_and_new_identifier() {
     };
     assert_eq!(function.kind, AlterRoutineKind::Function);
     assert_eq!(function.name, "app.f");
-    assert_eq!(function.arg_types.as_deref().unwrap(), ["int4"]);
+    assert_eq!(function.arg_types.as_deref().unwrap(), ["pg_catalog.int4"]);
     assert_eq!(function.new_name, "renamed");
 
     let Statement::RenameRoutine(procedure) =

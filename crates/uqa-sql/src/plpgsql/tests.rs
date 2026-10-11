@@ -58,7 +58,7 @@ fn plpgsql_synthesized_definition_preserves_variadic_parameters() {
     };
     let synthesized =
         synthesize_create_text(&definition, body, &|type_name| Ok(type_name.to_string())).unwrap();
-    assert!(synthesized.contains("VARIADIC \"items\" int4[]"));
+    assert!(synthesized.contains("VARIADIC \"items\" pg_catalog.int4[]"));
     parse_function(&definition).unwrap();
 }
 
