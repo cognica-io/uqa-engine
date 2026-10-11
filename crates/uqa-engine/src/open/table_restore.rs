@@ -186,7 +186,10 @@ impl Engine {
         };
         let constraints = names.decode(&schema)?;
         if let Some(oids) = constraints.catalog_oids {
-            if !oids.is_valid_for(uqa_sql::catalog::relation_oids::RelationOidKind::Table) {
+            if !oids.is_valid_for(
+                uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+                &schema.object_id,
+            ) {
                 return Err(StorageBackendError::Other(format!(
                     "table `{table_name}` records invalid catalog OIDs"
                 )));

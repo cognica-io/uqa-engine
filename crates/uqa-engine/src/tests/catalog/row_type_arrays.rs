@@ -106,6 +106,33 @@ fn make_legacy(catalog: &dyn CatalogFacade, remove_oids: bool) {
 
 fn fixture(engine: &Engine) {
     sql(engine, "CREATE SCHEMA legacy_rows; CREATE TABLE legacy_rows.item(id integer); INSERT INTO legacy_rows.item VALUES(7),(9); CREATE TABLE legacy_rows._item(id integer); CREATE TABLE legacy_rows.partitioned(id integer) PARTITION BY RANGE(id); CREATE TABLE legacy_rows.partition_child PARTITION OF legacy_rows.partitioned FOR VALUES FROM(0) TO(10); INSERT INTO legacy_rows.partitioned VALUES(3); CREATE TYPE legacy_rows._view AS ENUM('occupied'); CREATE VIEW legacy_rows.view AS SELECT id FROM legacy_rows.item; CREATE MATERIALIZED VIEW legacy_rows.materialized AS SELECT id FROM legacy_rows.item; CREATE DOMAIN legacy_rows._foreign_table AS integer; CREATE SERVER legacy_server FOREIGN DATA WRAPPER memory_fdw OPTIONS(kind 'memory'); CREATE FOREIGN TABLE legacy_rows.foreign_table(id integer) SERVER legacy_server OPTIONS(source 'memory')");
+    sql(engine, "CREATE TABLE legacy_rows.low_relation(id integer); CREATE VIEW legacy_rows.low_rule AS SELECT 1 AS id; CREATE FOREIGN TABLE legacy_rows.low_row_type(id integer) SERVER legacy_server OPTIONS(source 'memory')");
+}
+
+fn set_low_legacy_identities(catalog: &dyn CatalogFacade) {
+    // Fixed identities exercise the old 10,000-based mapping below FirstNormalObjectId.
+    for mut row in catalog.load_tables().unwrap() {
+        if row.relation == RelationIdentity::new(SCHEMA, "low_relation") {
+            row.object_id = 248_721_u128.to_le_bytes();
+            catalog.save_table(&row).unwrap();
+        }
+    }
+    for mut row in catalog.load_views().unwrap() {
+        if row.relation == RelationIdentity::new(SCHEMA, "low_rule") {
+            let mut definition: Json = serde_json::from_str(&row.definition_json).unwrap();
+            definition["object_id"] = serde_json::to_value(2_270_u128.to_le_bytes()).unwrap();
+            row.definition_json = serde_json::to_string(&definition).unwrap();
+            catalog.save_view(&row).unwrap();
+        }
+    }
+    for mut row in catalog.load_foreign_tables().unwrap() {
+        if row.relation == RelationIdentity::new(SCHEMA, "low_row_type") {
+            let mut definition: Json = serde_json::from_str(&row.columns_json).unwrap();
+            definition["object_id"] = serde_json::to_value(44_683_u128.to_le_bytes()).unwrap();
+            row.columns_json = serde_json::to_string(&definition).unwrap();
+            catalog.save_foreign_table(&row).unwrap();
+        }
+    }
 }
 
 fn verify_projection(engine: &Engine, relation: &RelationIdentity, stored: &StoredRelation) {
@@ -163,7 +190,7 @@ fn verify_completed(
         assert_eq!(oids.relation, expected.relation);
         assert_eq!(oids.row_type, expected.row_type);
         assert_eq!(oids.rule, expected.rule);
-        assert!(oids.is_valid_for(original.kind));
+        assert!(oids.is_valid_for(original.kind, &current.object_id));
         if !remove_oids {
             assert_eq!(oids.array_type, expected.array_type);
         }
@@ -200,11 +227,12 @@ fn legacy_row_arrays_are_completed_once_and_preserve_relation_identities(
     let before_rows = sql(&first, "SELECT id FROM legacy_rows.item ORDER BY id").rows;
     let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
     let raw = factory.open_session().unwrap();
-    let before = definitions(raw.catalog.as_ref());
-    assert_eq!(before.len(), 7);
     drop(second);
     drop(first);
     raw.backend.begin_transaction().unwrap();
+    set_low_legacy_identities(raw.catalog.as_ref());
+    let before = definitions(raw.catalog.as_ref());
+    assert_eq!(before.len(), 10);
     make_legacy(raw.catalog.as_ref(), remove_oids);
     raw.backend.commit_transaction().unwrap();
     let restored = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();

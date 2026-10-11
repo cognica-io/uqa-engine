@@ -101,6 +101,7 @@ impl StoredForeignTable {
                 if schema.catalog_oids.is_some_and(|oids| {
                     !oids.is_valid_for(
                         uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+                        &schema.object_id,
                     )
                 }) {
                     return Err(StorageBackendError::Other(format!(

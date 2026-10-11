@@ -30,8 +30,10 @@ pub fn validate_restored_view_object_ids(
             ));
         }
         if let Some(recorded) = view.catalog_oids {
-            if !recorded.is_valid_for(crate::catalog::relation_oids::RelationOidKind::View)
-                || !recorded.claimed().all(|oid| oids.insert(oid))
+            if !recorded.is_valid_for(
+                crate::catalog::relation_oids::RelationOidKind::View,
+                &view.object_id,
+            ) || !recorded.claimed().all(|oid| oids.insert(oid))
             {
                 return Err(format!(
                     "view `{}` records invalid catalog OIDs",
