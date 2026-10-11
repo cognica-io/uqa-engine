@@ -13,8 +13,9 @@ use std::hash::BuildHasher;
 use smallvec::SmallVec;
 use uqa_core::Value;
 
-use crate::distinct::hash_canonical_row;
+use crate::distinct::hash_canonical_row_with_enum_catalog;
 use crate::{ExecResult, PhysicalRow, RowSchema};
+use uqa_sql::expr::enums::EnumLabelCatalog;
 
 use super::row_store::HybridRowStore;
 
@@ -83,6 +84,7 @@ impl DirectHashIndex {
         rows: &HybridRowStore,
         schema: &RowSchema,
         positions: &[usize],
+        catalog: Option<&dyn EnumLabelCatalog>,
     ) -> ExecResult<bool> {
         if !self.is_available() {
             return Ok(false);
@@ -95,7 +97,9 @@ impl DirectHashIndex {
                     else {
                         return Ok(false);
                     };
-                    if positional_keys_equal(schema, left, positions, schema, right, positions)? {
+                    if positional_keys_equal(
+                        schema, left, positions, schema, right, positions, catalog,
+                    )? {
                         return Ok(false);
                     }
                 }
@@ -110,6 +114,7 @@ pub(super) fn positional_key_hash<S: BuildHasher>(
     schema: &RowSchema,
     row: &PhysicalRow,
     positions: &[usize],
+    catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<Option<u64>> {
     let view = schema.view(row);
     if positions.iter().any(|position| {
@@ -118,9 +123,10 @@ pub(super) fn positional_key_hash<S: BuildHasher>(
     }) {
         return Ok(None);
     }
-    hash_canonical_row(
+    hash_canonical_row_with_enum_catalog(
         build_hasher,
         positions.iter().map(|position| view.value_at(*position)),
+        catalog,
     )
     .map(Some)
 }
@@ -132,6 +138,7 @@ fn positional_keys_equal(
     right_schema: &RowSchema,
     right_row: &PhysicalRow,
     right_positions: &[usize],
+    catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<bool> {
     if left_positions.len() != right_positions.len() {
         return Ok(false);
@@ -145,12 +152,12 @@ fn positional_keys_equal(
         ) else {
             return Ok(false);
         };
-        if uqa_sql::expr::values_equal_nullable_with_control(
+        if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
             left,
             right,
             &uqa_core::memory::ProductionControl::uncontrolled(),
-        )? != Some(true)
-        {
+            catalog,
+        )? {
             return Ok(false);
         }
     }
@@ -164,8 +171,15 @@ pub(super) fn direct_unique_match(
     probe_schema: &RowSchema,
     probe_row: &PhysicalRow,
     probe_positions: &[usize],
+    catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<Option<u64>> {
-    let Some(hash) = positional_key_hash(index.hasher(), probe_schema, probe_row, probe_positions)?
+    let Some(hash) = positional_key_hash(
+        index.hasher(),
+        probe_schema,
+        probe_row,
+        probe_positions,
+        catalog,
+    )?
     else {
         return Ok(None);
     };
@@ -178,6 +192,7 @@ pub(super) fn direct_unique_match(
                 probe_schema,
                 probe_row,
                 probe_positions,
+                catalog,
             )? {
                 return Ok(Some(*row_index));
             }
@@ -203,7 +218,7 @@ mod tests {
         let fresh = PhysicalRow::from_values(vec![Value::Record(
             vec![("a".into(), Value::Bytes(b"x".to_vec()))].into(),
         )]);
-        assert!(positional_keys_equal(&schema, &old, &[0], &schema, &fresh, &[0]).unwrap());
+        assert!(positional_keys_equal(&schema, &old, &[0], &schema, &fresh, &[0], None).unwrap());
         let bad = PhysicalRow::from_values(vec![Value::Record(
             vec![(
                 "a".into(),
@@ -216,7 +231,7 @@ mod tests {
             .into(),
         )]);
         assert!(
-            positional_keys_equal(&schema, &bad, &[0], &schema, &bad, &[0])
+            positional_keys_equal(&schema, &bad, &[0], &schema, &bad, &[0], None)
                 .unwrap_err()
                 .to_string()
                 .contains("compressed pglz data is corrupt")

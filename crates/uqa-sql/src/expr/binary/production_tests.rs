@@ -8,6 +8,48 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken, DecimalValue, TemporalValue};
 
 #[test]
+fn record_operands_preserve_postgresql_null_comparison_operators() {
+    let row = crate::ResultRow::from([
+        ("l".into(), Value::Row(vec![Value::Null].into())),
+        ("r".into(), Value::Row(vec![Value::Null].into())),
+    ]);
+    for (operator, record_result) in [
+        ("=", true),
+        ("<>", false),
+        ("<", false),
+        ("<=", true),
+        (">", false),
+        (">=", true),
+    ] {
+        for (source, expected) in [
+            (format!("SELECT l {operator} r"), Value::Bool(record_result)),
+            (
+                format!("SELECT ROW(NULL::integer) {operator} ROW(NULL::integer)"),
+                Value::Null,
+            ),
+            (
+                format!("SELECT ROW(NULL::integer)::record {operator} ROW(NULL::integer)::record"),
+                Value::Bool(record_result),
+            ),
+        ] {
+            let crate::Statement::Select(mut query) = crate::compile(&source).unwrap().remove(0)
+            else {
+                panic!("SELECT comparison")
+            };
+            assert_eq!(
+                super::super::eval(
+                    &query.projections.remove(0).expr,
+                    &EvalContext::new(Some(&row), &[])
+                )
+                .unwrap(),
+                expected,
+                "{source}",
+            );
+        }
+    }
+}
+
+#[test]
 fn binary_inline_results_preserve_width_null_and_error_behavior_at_zero_budget() {
     let budget = MemoryBudget::new(0);
     let cancellation = CancellationToken::new();

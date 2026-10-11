@@ -9,6 +9,43 @@ use super::*;
 mod catalog_types;
 
 #[test]
+fn constant_folding_retains_row_and_record_comparison_selection() {
+    for coerced_conditionals in [false, true] {
+        let mut config =
+            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        config.coerced_conditionals = coerced_conditionals;
+        for (source, expected) in [
+            ("SELECT ROW(NULL::integer)=ROW(NULL::integer)", Value::Null),
+            (
+                "SELECT ROW(NULL::integer)::record=ROW(NULL::integer)::record",
+                Value::Bool(true),
+            ),
+            (
+                "SELECT (CASE WHEN true THEN ROW(NULL::integer) END)=ROW(NULL::integer)",
+                Value::Bool(true),
+            ),
+            (
+                "SELECT COALESCE(ROW(NULL::integer),ROW(1))=ROW(NULL::integer)",
+                Value::Bool(true),
+            ),
+        ] {
+            let uqa_sql::Statement::Select(mut query) = uqa_sql::compile(source).unwrap().remove(0)
+            else {
+                panic!("SELECT comparison")
+            };
+            let mut expression =
+                uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+            crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap();
+            assert_eq!(
+                uqa_execution::scalar::eval_constant_scalar(&expression).unwrap(),
+                expected,
+                "{source}; coerced={coerced_conditionals}"
+            );
+        }
+    }
+}
+
+#[test]
 fn typed_row_constructors_require_the_live_catalog_even_with_constant_arguments() {
     let row = ScalarExpr::CompositeRow {
         bound_type: None,

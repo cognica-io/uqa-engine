@@ -41,6 +41,7 @@ use uqa_sql::{
 };
 
 mod function_source;
+mod join_keys;
 mod join_source;
 mod join_validation;
 mod lateral_source;

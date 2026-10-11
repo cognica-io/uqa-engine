@@ -86,14 +86,25 @@ fn optimize_scalar(
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
     let integer_syntax = matches!(&expression, ScalarExpr::Literal(Value::Int(_)));
+    let row_syntax = matches!(&expression, ScalarExpr::Row(_));
     let optimized = match expression {
         ScalarExpr::Array(items) => ScalarExpr::Array(optimize_list(items, config)?),
         ScalarExpr::Row(items) => ScalarExpr::Row(optimize_list(items, config)?),
-        ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
-            op,
-            lhs: Box::new(optimize_scalar(*lhs, config)?),
-            rhs: Box::new(optimize_scalar(*rhs, config)?),
-        },
+        ScalarExpr::Binary { op, lhs, rhs } => {
+            let row_comparison = matches!((&*lhs, &*rhs), (ScalarExpr::Row(_), ScalarExpr::Row(_)));
+            let operand = |expression| match (row_comparison, expression) {
+                // Preserve the syntax selecting row comparison while folding its fields. The enclosing constant comparison can still fold as a whole; record constants in projections and grouping remain foldable.
+                (true, ScalarExpr::Row(items)) => {
+                    Ok(ScalarExpr::Row(optimize_list(items, config)?))
+                }
+                (_, expression) => optimize_scalar(expression, config),
+            };
+            ScalarExpr::Binary {
+                op,
+                lhs: Box::new(operand(*lhs)?),
+                rhs: Box::new(operand(*rhs)?),
+            }
+        }
         ScalarExpr::UnaryMinus(inner) => {
             ScalarExpr::UnaryMinus(Box::new(optimize_scalar(*inner, config)?))
         }
@@ -224,12 +235,13 @@ fn optimize_scalar(
                 let mut nested = config.clone();
                 nested.active_inline_routines.push(inlined.identity);
                 return optimize_scalar(inlined.expression, &nested)
+                    .map(|expression| constants::retain_record_result(expression, false))
                     .map(|expression| constants::retain_computed_integer(expression, None));
             }
         }
     }
     let optimized = constants::fold_composite_constructor(
-        optimized,
+        constants::retain_record_result(optimized, row_syntax),
         config
             .routine_inlining
             .as_ref()

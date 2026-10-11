@@ -384,9 +384,13 @@ impl<'a> HashJoin<'a> {
                 if let (Some(direct), Some((positions, _))) =
                     (direct_index.as_mut(), direct_positions)
                 {
-                    if let Some(hash) =
-                        positional_key_hash(direct.hasher(), &batch.schema, &row, positions)?
-                    {
+                    if let Some(hash) = positional_key_hash(
+                        direct.hasher(),
+                        &batch.schema,
+                        &row,
+                        positions,
+                        self.evaluator.enum_labels(),
+                    )? {
                         direct.insert(hash, index)?;
                     }
                 } else if let Some(key) = self.key(
@@ -414,7 +418,13 @@ impl<'a> HashJoin<'a> {
         let direct_is_unique = if let (Some(direct), Some((positions, _))) =
             (direct_index.as_ref(), direct_positions)
         {
-            !left.has_spilled() && direct.keys_are_unique(&left, &left.schema, positions)?
+            !left.has_spilled()
+                && direct.keys_are_unique(
+                    &left,
+                    &left.schema,
+                    positions,
+                    self.evaluator.enum_labels(),
+                )?
         } else {
             false
         };
@@ -505,7 +515,10 @@ impl<'a> HashJoin<'a> {
     ) -> ExecResult<Option<EncodedKey>> {
         if let Some(positions) = positions {
             let view = schema.view(row);
-            return encode_non_null_key(positions.iter().map(|position| view.value_at(*position)));
+            return encode_non_null_key(
+                positions.iter().map(|position| view.value_at(*position)),
+                self.evaluator.enum_labels(),
+            );
         }
         let mut values = SmallVec::<[Value; 4]>::with_capacity(expressions.len());
         for expression in expressions.iter() {
@@ -520,7 +533,7 @@ impl<'a> HashJoin<'a> {
             }
             values.push(value);
         }
-        encode_non_null_key(values.iter().map(Some))
+        encode_non_null_key(values.iter().map(Some), self.evaluator.enum_labels())
     }
 
     fn matches(&self, row: &PhysicalRow) -> ExecResult<bool> {
@@ -581,6 +594,7 @@ impl<'a> HashJoin<'a> {
                             &batch.schema,
                             &probe_row,
                             probe_positions,
+                            self.evaluator.enum_labels(),
                         )?
                     }
                     UniqueHashIndex::Encoded(index) => {
@@ -668,9 +682,13 @@ impl PhysicalOperator for HashJoin<'_> {
                 if let (Some(direct), Some((positions, _))) =
                     (direct_index.as_mut(), direct_positions)
                 {
-                    if let Some(hash) =
-                        positional_key_hash(direct.hasher(), &batch.schema, &row, positions)?
-                    {
+                    if let Some(hash) = positional_key_hash(
+                        direct.hasher(),
+                        &batch.schema,
+                        &row,
+                        positions,
+                        self.evaluator.enum_labels(),
+                    )? {
                         direct.insert(hash, index)?;
                     }
                 } else if let Some(key) = self.key(
@@ -698,7 +716,13 @@ impl PhysicalOperator for HashJoin<'_> {
         let direct_is_unique = if let (Some(direct), Some((positions, _))) =
             (direct_index.as_ref(), direct_positions)
         {
-            !right.has_spilled() && direct.keys_are_unique(&right, &right.schema, positions)?
+            !right.has_spilled()
+                && direct.keys_are_unique(
+                    &right,
+                    &right.schema,
+                    positions,
+                    self.evaluator.enum_labels(),
+                )?
         } else {
             false
         };

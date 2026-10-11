@@ -1,0 +1,320 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "types",
+      "sql": "CREATE TYPE cj_pair AS(n numeric,label text); CREATE TYPE cj_other AS(x numeric,y text); CREATE TYPE cj_xid AS(n xid); CREATE TYPE cj_json AS(n integer,j json); CREATE TYPE cj_enum AS ENUM ('a','b'); CREATE TYPE cj_enums AS(e cj_enum); CREATE TYPE cj_physical AS(a text,b integer)"
+    },
+    {
+      "id": "values",
+      "sql": "CREATE TABLE cj_left(id integer,v cj_pair); CREATE TABLE cj_right(id integer,v cj_other); INSERT INTO cj_left VALUES (1,ROW(1.0,'a')),(2,ROW(1.00,'a')),(3,ROW(2,'b')),(4,ROW(NULL,NULL)),(5,NULL); INSERT INTO cj_right VALUES (1,ROW(1.000,'a')),(2,ROW(2,'b')),(3,ROW(NULL,NULL)),(4,NULL)"
+    },
+    {
+      "id": "named_join",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "named_left_join",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a LEFT JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "named_right_join",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a RIGHT JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "named_full_join",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "named_residual",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v AND a.id>b.id ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "anonymous_null",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,1),(2,NULL)) a(id,n) JOIN (VALUES(1,1),(2,NULL)) b(id,n) ON ROW(a.n)=ROW(b.n) ORDER BY l,r"
+    },
+    {
+      "id": "record_null",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) a(id,v) JOIN (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) b(id,v) ON a.v=b.v ORDER BY l,r"
+    },
+    {
+      "id": "record_column_eq",
+      "sql": "SELECT a.v = b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)"
+    },
+    {
+      "id": "row_constructor_eq",
+      "sql": "SELECT ROW(NULL::integer) = ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "record_column_ne",
+      "sql": "SELECT a.v <> b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)"
+    },
+    {
+      "id": "row_constructor_ne",
+      "sql": "SELECT ROW(NULL::integer) <> ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "record_column_lt",
+      "sql": "SELECT a.v < b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)"
+    },
+    {
+      "id": "row_constructor_lt",
+      "sql": "SELECT ROW(NULL::integer) < ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "record_column_le",
+      "sql": "SELECT a.v <= b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)"
+    },
+    {
+      "id": "row_constructor_le",
+      "sql": "SELECT ROW(NULL::integer) <= ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "record_column_gt",
+      "sql": "SELECT a.v > b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)"
+    },
+    {
+      "id": "row_constructor_gt",
+      "sql": "SELECT ROW(NULL::integer) > ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "record_column_ge",
+      "sql": "SELECT a.v >= b.v AS result FROM (VALUES(ROW(NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(NULL::integer))) b(v)"
+    },
+    {
+      "id": "row_constructor_ge",
+      "sql": "SELECT ROW(NULL::integer) >= ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "cast_record_constructor",
+      "sql": "SELECT ROW(NULL::integer)::record=ROW(NULL::integer)::record AS result"
+    },
+    {
+      "id": "case_record",
+      "sql": "SELECT (CASE WHEN true THEN ROW(NULL::integer) END)=ROW(NULL::integer) AS result"
+    },
+    {
+      "id": "full_row_residual",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,1),(2,NULL)) a(id,n) FULL JOIN (VALUES(1,1),(2,NULL)) b(id,n) ON ROW(a.n)=ROW(b.n) AND a.id>=b.id ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_record",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) a(id,v) FULL JOIN (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) b(id,v) ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_record_residual",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) a(id,v) FULL JOIN (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) b(id,v) ON a.v=b.v AND a.id>=b.id ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_constant_true",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON true ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_constant_false",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON false ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_constant_NULL",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON NULL ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_typed_constant_true",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON true::boolean ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_typed_constant_false",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON false::boolean ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_typed_constant_NULL",
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1)) a(id) FULL JOIN (VALUES(2)) b(id) ON NULL::boolean ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "full_row_crossed_fields",
+      "sql": "SELECT a.i AS l,b.i AS r FROM (VALUES(1),(2),(3)) a(i) FULL JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,b.i)=ROW(b.i,a.i) ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "arity_reached",
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(1,2))) b(v) ON a.v=b.v"
+    },
+    {
+      "id": "arity_unreached",
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(2,2))) b(v) ON a.v=b.v"
+    },
+    {
+      "id": "field_type_reached",
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1,2))) a(v) JOIN (VALUES(ROW(1,2::bigint))) b(v) ON a.v=b.v"
+    },
+    {
+      "id": "field_type_unreached",
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1,2))) a(v) JOIN (VALUES(ROW(2,2::bigint))) b(v) ON a.v=b.v"
+    },
+    {
+      "id": "xids",
+      "sql": "CREATE TABLE cj_xids(id integer,v cj_xid); INSERT INTO cj_xids VALUES(1,ROW('1'::xid)),(2,ROW('1'::xid)),(3,ROW('2'::xid)),(4,NULL)"
+    },
+    {
+      "id": "xid_join",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_xids a JOIN cj_xids b ON a.v=b.v ORDER BY l,r"
+    },
+    {
+      "id": "jsons",
+      "sql": "CREATE TABLE cj_json_left(id integer,v cj_json); CREATE TABLE cj_json_right(id integer,v cj_json); INSERT INTO cj_json_left VALUES(1,ROW(1,'{}'::json)); INSERT INTO cj_json_right VALUES(1,ROW(2,'{}'::json))"
+    },
+    {
+      "id": "json_full_row_constant",
+      "sql": "SELECT count(*) FROM cj_json_left a FULL JOIN cj_json_right b ON ROW(a.v,1)=ROW(b.v,1)"
+    },
+    {
+      "id": "json_unreached",
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v"
+    },
+    {
+      "id": "json_unmatched_outer",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_json_left a FULL JOIN cj_json_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "json_reached_update",
+      "sql": "UPDATE cj_json_right SET v=ROW(1,'[]'::json)"
+    },
+    {
+      "id": "json_reached_different",
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v"
+    },
+    {
+      "id": "json_same_update",
+      "sql": "UPDATE cj_json_right SET v=ROW(1,'{}'::json)"
+    },
+    {
+      "id": "json_reached_same",
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v"
+    },
+    {
+      "id": "json_duplicate",
+      "sql": "INSERT INTO cj_json_right VALUES(2,ROW(1,'{}'::json))"
+    },
+    {
+      "id": "json_reached_duplicate",
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v"
+    },
+    {
+      "id": "json_null_update",
+      "sql": "UPDATE cj_json_left SET v=ROW(1,NULL); UPDATE cj_json_right SET v=ROW(1,NULL)"
+    },
+    {
+      "id": "json_declared_null",
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v"
+    },
+    {
+      "id": "json_empty",
+      "sql": "DELETE FROM cj_json_right; SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v"
+    },
+    {
+      "id": "enums",
+      "sql": "CREATE TABLE cj_enum_values(id integer,v cj_enums); INSERT INTO cj_enum_values VALUES(1,ROW('a'::cj_enum)),(2,ROW('a'::cj_enum)),(3,ROW('b'::cj_enum)); PREPARE cj_enum_join(cj_enums) AS SELECT a.id AS l,b.id AS r FROM cj_enum_values a JOIN (SELECT 1 AS id,$1 AS v UNION ALL SELECT 2,ROW('a'::cj_enum)::cj_enums) b ON a.v=b.v ORDER BY l,r"
+    },
+    {
+      "id": "enum_join",
+      "sql": "EXECUTE cj_enum_join(ROW('a'::cj_enum)::cj_enums)"
+    },
+    {
+      "id": "enum_rename",
+      "sql": "ALTER TYPE cj_enum RENAME VALUE 'a' TO 'renamed'"
+    },
+    {
+      "id": "enum_join_renamed",
+      "sql": "EXECUTE cj_enum_join(ROW('renamed'::cj_enum)::cj_enums)"
+    },
+    {
+      "id": "retained_enum_setup",
+      "sql": "CREATE TYPE cj_old_enum AS ENUM ('first','last'); CREATE TYPE cj_new_enum AS ENUM ('new'); CREATE TYPE cj_enum_carrier AS(e cj_old_enum); CREATE VIEW cj_enum_first AS SELECT '(first)'::cj_enum_carrier AS v; CREATE VIEW cj_enum_last AS SELECT '(last)'::cj_enum_carrier AS v; ALTER TYPE cj_enum_carrier ALTER ATTRIBUTE e TYPE cj_new_enum"
+    },
+    {
+      "id": "retained_enum_equal",
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_first b ON a.v=b.v"
+    },
+    {
+      "id": "retained_enum_unequal",
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_last b ON a.v=b.v"
+    },
+    {
+      "id": "retained_enum_duplicates",
+      "sql": "SELECT count(*) FROM (SELECT v FROM cj_enum_first UNION ALL SELECT v FROM cj_enum_first) a JOIN (SELECT v FROM cj_enum_first UNION ALL SELECT v FROM cj_enum_first) b ON a.v=b.v"
+    },
+    {
+      "id": "retained_enum_nested",
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_first b ON ARRAY[a.v]=ARRAY[b.v]"
+    },
+    {
+      "id": "physical_prepare",
+      "sql": "PREPARE cj_physical_join(cj_physical) AS SELECT a.id AS l,b.id AS r FROM (VALUES(1,'(hello,8)'::cj_physical),(2,'(other,9)'::cj_physical)) a(id,v) JOIN (SELECT 1 AS id,$1 AS v) b ON a.v=b.v ORDER BY l,r; ALTER TYPE cj_physical ALTER ATTRIBUTE a TYPE bytea"
+    },
+    {
+      "id": "physical_join",
+      "sql": "EXECUTE cj_physical_join(ROW(decode('68656c6c6f','hex'),8)::cj_physical)"
+    },
+    {
+      "id": "volatile_setup",
+      "sql": "CREATE SEQUENCE cj_sequence"
+    },
+    {
+      "id": "volatile_join",
+      "sql": "SELECT count(*) FROM generate_series(1,3) a(i) JOIN generate_series(1,2) b(i) ON a.i+nextval('cj_sequence')*0=b.i"
+    },
+    {
+      "id": "volatile_calls",
+      "sql": "SELECT last_value FROM cj_sequence"
+    },
+    {
+      "id": "volatile_full",
+      "sql": "SELECT count(*) FROM generate_series(1,3) a(i) FULL JOIN generate_series(1,2) b(i) ON a.i+nextval('cj_sequence')*0=b.i"
+    },
+    {
+      "id": "volatile_row_full",
+      "sql": "SELECT a.i AS l,b.i AS r FROM (VALUES(1),(2),(3)) a(i) FULL JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_sequence')*0)=ROW(b.i,b.i) ORDER BY l NULLS LAST,r NULLS LAST"
+    },
+    {
+      "id": "volatile_row_calls",
+      "sql": "SELECT last_value FROM cj_sequence"
+    },
+    {
+      "id": "spill_allowance",
+      "sql": "SET work_mem='64kB'"
+    },
+    {
+      "id": "spill_named",
+      "sql": "SELECT count(*) FROM generate_series(1,200) a(i) JOIN generate_series(1,200) b(i) ON ROW(a.i::numeric,repeat('x',1024))::cj_pair=ROW(b.i::numeric,repeat('x',1024))::cj_other"
+    },
+    {
+      "id": "spill_xid",
+      "sql": "SELECT count(*) FROM generate_series(1,200) a(i) JOIN generate_series(1,200) b(i) ON ROW((a.i::text)::xid)::cj_xid=ROW((b.i::text)::xid)::cj_xid"
+    },
+    {
+      "id": "reset_allowance",
+      "sql": "RESET work_mem"
+    },
+    {
+      "id": "reopen_retained_enum",
+      "sql": "SELECT count(*) FROM cj_enum_first a JOIN cj_enum_first b ON a.v=b.v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_named",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "reopen": true
+    },
+    {
+      "id": "reopen_xid",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_xids a JOIN cj_xids b ON a.v=b.v ORDER BY l,r",
+      "reopen": true
+    },
+    {
+      "id": "reopen_enum",
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_enum_values a JOIN (VALUES(1,ROW('renamed'::cj_enum)::cj_enums)) b(id,v) ON a.v=b.v ORDER BY l,r",
+      "reopen": true
+    }
+  ]
+}

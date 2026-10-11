@@ -15,6 +15,19 @@ use super::Value;
 mod composites;
 pub(super) use composites::fold_composite_constructor;
 
+/// Eliminating a CASE, COALESCE or function call must not turn its record result into ROW comparison syntax.
+pub(super) fn retain_record_result(expression: ScalarExpr, row_syntax: bool) -> ScalarExpr {
+    if !row_syntax && matches!(expression, ScalarExpr::Row(_)) {
+        ScalarExpr::Cast {
+            implicit: true,
+            expr: Box::new(expression),
+            ty: ColumnType::Record.catalog_name(),
+        }
+    } else {
+        expression
+    }
+}
+
 pub(crate) fn retain_computed_integer(
     expression: ScalarExpr,
     parameter_index: Option<usize>,

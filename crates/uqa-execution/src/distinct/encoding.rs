@@ -155,13 +155,13 @@ fn encode_catalog_key<'a>(
     Ok(output.values)
 }
 
-struct CatalogKeyOutput<'a> {
-    values: Vec<u8>,
+struct CatalogKeyOutput<'a, O> {
+    values: O,
     enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     sql_hash: bool,
 }
 
-impl KeyOutput for CatalogKeyOutput<'_> {
+impl<O: KeyOutput> KeyOutput for CatalogKeyOutput<'_, O> {
     fn invokes_sql_hash_operator(&self) -> bool {
         self.sql_hash
     }
@@ -182,9 +182,14 @@ impl KeyOutput for CatalogKeyOutput<'_> {
 /// the SQL equality key without allocating or cloning a `Value`.
 pub(crate) fn encode_non_null_key<'a>(
     values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<Option<EncodedKey>> {
     let count = values.len();
-    let mut output = EncodedKey::with_capacity(encoded_key_capacity(count)?);
+    let mut output = CatalogKeyOutput {
+        values: EncodedKey::with_capacity(encoded_key_capacity(count)?),
+        enums,
+        sql_hash: true,
+    };
     encode_len(count, &mut output)?;
     for value in values {
         let Some(value) = value else {
@@ -195,7 +200,7 @@ pub(crate) fn encode_non_null_key<'a>(
         }
         encode_value(value, &mut output)?;
     }
-    Ok(Some(output))
+    Ok(Some(output.values))
 }
 
 fn encoded_key_capacity(values: usize) -> ExecResult<usize> {
