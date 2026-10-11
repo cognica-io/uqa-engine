@@ -107,7 +107,7 @@ fn folds_value_builtins_after_binding_without_evaluating_stateful_or_set_calls()
     {
         binding.builtin = false;
     }
-    assert!(!is_constant(&user_call, None));
+    assert!(!is_constant(&user_call, None, None));
 }
 
 #[test]
@@ -220,6 +220,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         |_| panic!("denied function ran"),
         Some(&DeniedBuiltin),
         None,
+        None,
     )
     .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
@@ -237,6 +238,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
         null,
         |_| panic!("strict NULL function ran"),
         Some(&DeniedBuiltin),
+        None,
         None,
     )
     .unwrap();
@@ -289,6 +291,7 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         expression,
         |_| panic!("strict NULL evaluated a sibling"),
         Some(&DeniedBuiltin),
+        None,
         None,
     )
     .unwrap();
@@ -428,9 +431,14 @@ fn null_casts_to_temporal_types_fold_without_calling_input_functions() {
             expr: Box::new(ScalarExpr::Literal(Value::Null)),
             ty: ColumnType::from_sql_name(ty).unwrap().catalog_name(),
         };
-        let result =
-            fold_authorized_literal(expression, |_| panic!("a NULL cast evaluated"), None, None)
-                .unwrap();
+        let result = fold_authorized_literal(
+            expression,
+            |_| panic!("a NULL cast evaluated"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(literal_value(&result), Some(&Value::Null));
         assert_eq!(
             uqa_sql::scalar_type(&result, &RowSchema::default(), &[]).unwrap(),

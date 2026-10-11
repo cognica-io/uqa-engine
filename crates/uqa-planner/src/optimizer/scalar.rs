@@ -243,6 +243,10 @@ fn optimize_scalar(
             .routine_inlining
             .as_ref()
             .map(|context| context.types),
+        config
+            .routine_inlining
+            .as_ref()
+            .map(|context| context.routines as &dyn uqa_sql::FunctionTypeResolver),
     )?;
     Ok(if integer_syntax {
         optimized

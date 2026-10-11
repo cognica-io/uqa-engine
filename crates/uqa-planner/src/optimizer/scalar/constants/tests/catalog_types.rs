@@ -17,7 +17,14 @@ impl RoutineTypeCatalog for Catalog {
     }
 
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType> {
-        if name == "text" {
+        if name == "enum#50020" {
+            Some(ColumnType::Enum(uqa_sql::ast::EnumTypeReference {
+                schema: "first".into(),
+                name: "labels".into(),
+                oid: 50_020,
+                array_oid: 50_021,
+            }))
+        } else if name == "text" {
             Some(ColumnType::Domain {
                 schema: "first".into(),
                 name: "text".into(),
@@ -48,6 +55,23 @@ impl RoutineTypeCatalog for Catalog {
     }
 }
 
+impl FunctionTypeResolver for Catalog {
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        self.resolve_catalog_column_type_name(name).map(Some)
+    }
+
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&uqa_sql::ast::FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+
 #[test]
 fn a_free_type_identifier_cannot_fold_before_catalog_selection() {
     for value in [Value::Null, Value::Str("x".into())] {
@@ -62,12 +86,13 @@ fn a_free_type_identifier_cannot_fold_before_catalog_selection() {
                     cast.clone(),
                     |_| panic!("domain input cannot be folded"),
                     None,
-                    types
+                    types,
+                    None,
                 )
                 .unwrap(),
                 cast,
             );
-            assert!(!is_constant(&cast, types));
+            assert!(!is_constant(&cast, types, None));
         }
     }
 }
@@ -80,16 +105,53 @@ fn selected_builtin_identity_keeps_ordinary_constant_folding() {
             expr: Box::new(ScalarExpr::Literal(Value::Str("x".into()))),
             ty: ColumnType::Text.catalog_name(),
         };
-        assert!(is_constant(&cast, types));
+        assert!(is_constant(&cast, types, None));
         let folded = fold_authorized_literal(
             cast,
             uqa_execution::scalar::eval_constant_scalar,
             None,
             types,
+            None,
         )
         .unwrap();
         assert!(
             matches!(folded, ScalarExpr::TypedLiteral { value: Value::Str(text), bound_type: Some(ColumnType::Text), .. } if text == "x")
         );
+    }
+}
+
+#[test]
+fn retained_enum_constants_use_the_same_catalog_during_inference_and_coercion() {
+    let literal = |key| ScalarExpr::TypedLiteral {
+        value: Value::Enum(uqa_core::EnumValue::new(
+            50_020,
+            uqa_core::EnumLabelKey::from_bytes(vec![key]).unwrap(),
+        )),
+        ty: "enum#50020".into(),
+        bound_type: None,
+        parameter_index: None,
+        composite_source: None,
+    };
+    for key in [1, 2] {
+        for op in [
+            uqa_sql::ast::BinaryOp::Equal,
+            uqa_sql::ast::BinaryOp::NotEqual,
+        ] {
+            let expression = ScalarExpr::Binary {
+                op,
+                lhs: Box::new(literal(1)),
+                rhs: Box::new(literal(key)),
+            };
+            let expected = (key == 1) == (op == uqa_sql::ast::BinaryOp::Equal);
+            let folded = fold_authorized_literal(
+                expression,
+                uqa_execution::scalar::eval_constant_scalar,
+                None,
+                Some(&Catalog),
+                Some(&Catalog),
+            )
+            .unwrap();
+            assert_eq!(folded, ScalarExpr::Literal(Value::Bool(expected)));
+        }
     }
 }
