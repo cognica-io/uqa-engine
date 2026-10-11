@@ -17,6 +17,9 @@ mod array_comparisons;
 #[path = "sql_composites/comparison_capabilities.rs"]
 mod comparison_capabilities;
 
+#[path = "sql_composites/key_semantics.rs"]
+mod key_semantics;
+
 #[path = "sql_composites/range_restoration.rs"]
 mod range_restoration;
 #[path = "sql_composites/removal.rs"]

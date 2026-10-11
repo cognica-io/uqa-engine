@@ -80,6 +80,62 @@ fn command_nodes_are_reserved_before_publishing_the_first_tombstone() {
 }
 
 #[test]
+fn typed_row_exact_lookup_keeps_command_frame_masking_and_equality() {
+    let control = StorageReadControl::with_limit(1024 * 1024);
+    let row = Value::Row(
+        uqa_core::RowValue::typed(
+            vec![Value::Int(1)],
+            vec![uqa_core::RecordFieldType {
+                oid: 28,
+                type_modifier: -1,
+            }],
+        )
+        .unwrap(),
+    );
+    let mut overlays = [
+        CommandMutationOverlay::default(),
+        CommandMutationOverlay::default(),
+    ];
+    stage(
+        &mut overlays[0],
+        1,
+        Document::from([("a".into(), row.clone())]),
+        &control,
+    );
+    assert_eq!(
+        find(
+            &mut overlays,
+            &["a"],
+            std::slice::from_ref(&row),
+            FieldPresence::Required,
+            &control
+        )
+        .unwrap(),
+        Some(1)
+    );
+    overlays[1].stage("items", 1, None, &control).unwrap();
+    stage(
+        &mut overlays[1],
+        2,
+        Document::from([("a".into(), row.clone())]),
+        &control,
+    );
+    assert_eq!(
+        find(
+            &mut overlays,
+            &["a"],
+            std::slice::from_ref(&row),
+            FieldPresence::Required,
+            &control
+        )
+        .unwrap(),
+        Some(2)
+    );
+    drop(overlays);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn exact_cache_normalizes_borrowed_columns_and_keeps_missing_null_and_duplicate_rules() {
     let control = StorageReadControl::with_limit(1024 * 1024);
     let mut overlays = [CommandMutationOverlay::default()];

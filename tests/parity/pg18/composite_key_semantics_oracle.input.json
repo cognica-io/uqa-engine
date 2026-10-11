@@ -1,0 +1,529 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "types",
+      "sql": "CREATE TYPE ck_pair AS(n numeric,label text); CREATE TYPE ck_other AS(x numeric,y text); CREATE TYPE ck_xid AS(n xid); CREATE TYPE ck_json AS(n integer,j json); CREATE TYPE ck_wrap AS(p ck_pair,a integer[])"
+    },
+    {
+      "id": "values",
+      "sql": "CREATE TABLE ck_values(id integer PRIMARY KEY,v ck_pair); INSERT INTO ck_values VALUES (1,ROW(1.0,'a')),(2,ROW(1.00,'a')),(3,ROW(2,'b')),(4,ROW('NaN'::numeric,'n')),(5,ROW('NaN'::numeric,'n')),(6,ROW(NULL,NULL)),(7,ROW(NULL,NULL)),(8,NULL),(9,NULL)"
+    },
+    {
+      "id": "pairs_eq",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v = b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v = b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_ne",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v <> b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v <> b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_lt",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v < b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v < b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_le",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v <= b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v <= b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_gt",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v > b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v > b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_ge",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v >= b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v >= b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "reflexivity",
+      "sql": "SELECT count(*) AS violations FROM ck_values WHERE v<>v"
+    },
+    {
+      "id": "symmetry",
+      "sql": "SELECT count(*) AS violations FROM ck_values a CROSS JOIN ck_values b WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)"
+    },
+    {
+      "id": "transitivity",
+      "sql": "SELECT count(*) AS violations FROM ck_values a CROSS JOIN ck_values b CROSS JOIN ck_values c WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v"
+    },
+    {
+      "id": "cross_named",
+      "sql": "SELECT ROW(1.0,'a')::ck_pair=ROW(1.00,'a')::ck_other AS eq, ROW(1,'a')::ck_pair<ROW(2,'a')::ck_other AS lt"
+    },
+    {
+      "id": "cross_field_type",
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(1,'a') AS v"
+    },
+    {
+      "id": "cross_arity_prefix",
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(2::numeric) AS eq,ROW(1,'a')::ck_pair<ROW(2::numeric) AS lt"
+    },
+    {
+      "id": "cross_arity_reached",
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(1::numeric) AS v"
+    },
+    {
+      "id": "outer_inner_null",
+      "sql": "SELECT NULL::ck_pair=ROW(NULL,NULL)::ck_pair AS eq, NULL::ck_pair IS NOT DISTINCT FROM ROW(NULL,NULL)::ck_pair AS same,ROW(NULL,NULL)::ck_pair IS NULL AS all_null"
+    },
+    {
+      "id": "anonymous_null",
+      "sql": "SELECT ROW(NULL::numeric,NULL::text)=ROW(NULL::numeric,NULL::text) AS eq, ROW(NULL::numeric,NULL::text)<ROW(1::numeric,'a'::text) AS lt"
+    },
+    {
+      "id": "distinct",
+      "sql": "SELECT count(*) AS groups FROM (SELECT DISTINCT v FROM ck_values) s"
+    },
+    {
+      "id": "group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "join",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id)::text AS pairs FROM ck_values a JOIN ck_values b ON a.v=b.v"
+    },
+    {
+      "id": "null_safe_join",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id)::text AS pairs FROM ck_values a JOIN ck_values b ON a.v IS NOT DISTINCT FROM b.v"
+    },
+    {
+      "id": "window",
+      "sql": "SELECT id,rank() OVER (ORDER BY v) AS r,dense_rank() OVER (ORDER BY v) AS d,count(*) OVER (PARTITION BY v) AS n FROM ck_values ORDER BY id"
+    },
+    {
+      "id": "set_union",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 UNION SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_union_all",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 UNION ALL SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_intersect",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 INTERSECT SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_intersect_all",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 INTERSECT ALL SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_except",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 EXCEPT SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_except_all",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 EXCEPT ALL SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "before_index_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair"
+    },
+    {
+      "id": "before_index_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v<>ROW(1,'a')::ck_pair"
+    },
+    {
+      "id": "before_index_range",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v>=ROW(2,'b')::ck_pair"
+    },
+    {
+      "id": "before_index_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IN (ROW(1.000,'a')::ck_pair,ROW(NULL,NULL)::ck_pair)"
+    },
+    {
+      "id": "before_index_any",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ANY(ARRAY[ROW(1,'a')::ck_pair,ROW('NaN'::numeric,'n')::ck_pair])"
+    },
+    {
+      "id": "before_index_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NULL"
+    },
+    {
+      "id": "before_index_outer_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NOT DISTINCT FROM NULL::ck_pair"
+    },
+    {
+      "id": "index",
+      "sql": "CREATE INDEX ck_values_v_idx ON ck_values(v)"
+    },
+    {
+      "id": "after_index_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair"
+    },
+    {
+      "id": "after_index_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v<>ROW(1,'a')::ck_pair"
+    },
+    {
+      "id": "after_index_range",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v>=ROW(2,'b')::ck_pair"
+    },
+    {
+      "id": "after_index_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IN (ROW(1.000,'a')::ck_pair,ROW(NULL,NULL)::ck_pair)"
+    },
+    {
+      "id": "after_index_any",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ANY(ARRAY[ROW(1,'a')::ck_pair,ROW('NaN'::numeric,'n')::ck_pair])"
+    },
+    {
+      "id": "after_index_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NULL"
+    },
+    {
+      "id": "after_index_outer_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NOT DISTINCT FROM NULL::ck_pair"
+    },
+    {
+      "id": "equality_only_table",
+      "sql": "CREATE TABLE ck_xids(id integer,v ck_xid); INSERT INTO ck_xids VALUES(1,ROW('1'::xid)),(2,ROW('1'::xid)),(3,ROW('2'::xid)),(4,NULL)"
+    },
+    {
+      "id": "xid_lookup_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v=ROW('1'::xid)::ck_xid"
+    },
+    {
+      "id": "xid_lookup_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v<>ROW('1'::xid)::ck_xid"
+    },
+    {
+      "id": "xid_lookup_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v IN (ROW('1'::xid)::ck_xid)"
+    },
+    {
+      "id": "xid_lookup_any",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v=ANY(ARRAY[ROW('1'::xid)::ck_xid])"
+    },
+    {
+      "id": "prefix_table",
+      "sql": "CREATE TABLE ck_prefix(id integer,v ck_json); INSERT INTO ck_prefix VALUES(1,ROW(1,'{}'::json)),(2,ROW(2,'{}'::json))"
+    },
+    {
+      "id": "prefix_lookup_unreached",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v=ROW(0,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_lookup_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v=ROW(1,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_lookup_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v<>ROW(1,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_lookup_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v IN (ROW(1,'{}'::json)::ck_json)"
+    },
+    {
+      "id": "prefix_lookup_range",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v BETWEEN ROW(0,'{}'::json)::ck_json AND ROW(3,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_index",
+      "sql": "CREATE INDEX ck_prefix_v_idx ON ck_prefix(v)"
+    },
+    {
+      "id": "prefix_index_reached",
+      "sql": "INSERT INTO ck_prefix VALUES(3,ROW(1,'{}'::json))"
+    },
+    {
+      "id": "prefix_index_after",
+      "sql": "SELECT id FROM ck_prefix ORDER BY id"
+    },
+    {
+      "id": "unique_setup",
+      "sql": "CREATE TABLE ck_unique(v ck_pair UNIQUE)"
+    },
+    {
+      "id": "unique_first",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.0,'a'))"
+    },
+    {
+      "id": "unique_duplicate",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.00,'a'))"
+    },
+    {
+      "id": "unique_inner_null",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(NULL,NULL))"
+    },
+    {
+      "id": "unique_inner_null_duplicate",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(NULL,NULL))"
+    },
+    {
+      "id": "unique_outer_null",
+      "sql": "INSERT INTO ck_unique VALUES(NULL)"
+    },
+    {
+      "id": "unique_outer_null_again",
+      "sql": "INSERT INTO ck_unique VALUES(NULL)"
+    },
+    {
+      "id": "unique_conflict",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.000,'a')) ON CONFLICT(v) DO NOTHING RETURNING v::text"
+    },
+    {
+      "id": "unique_after",
+      "sql": "SELECT v::text FROM ck_unique ORDER BY v"
+    },
+    {
+      "id": "fk_setup",
+      "sql": "CREATE TABLE ck_parent(v ck_pair PRIMARY KEY); CREATE TABLE ck_child(id integer PRIMARY KEY,p ck_pair REFERENCES ck_parent(v) ON DELETE CASCADE ON UPDATE CASCADE); INSERT INTO ck_parent VALUES(ROW(1.0,'a')),(ROW(2,'b')),(ROW(NULL,NULL)); INSERT INTO ck_child VALUES(1,ROW(1.00,'a')),(2,ROW(2,'b')),(3,ROW(NULL,NULL)),(4,NULL)"
+    },
+    {
+      "id": "fk_missing",
+      "sql": "INSERT INTO ck_child VALUES(5,ROW(5,'e'))"
+    },
+    {
+      "id": "fk_equal_update",
+      "sql": "UPDATE ck_parent SET v=ROW(1.000,'a') WHERE v=ROW(1,'a')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "fk_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "fk_update",
+      "sql": "UPDATE ck_parent SET v=ROW(9,'a') WHERE v=ROW(1,'a')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "fk_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "fk_after_rollback",
+      "sql": "SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "fk_delete",
+      "sql": "DELETE FROM ck_parent WHERE v=ROW(2,'b')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "nested",
+      "sql": "CREATE TABLE ck_nested(id integer,v ck_wrap); INSERT INTO ck_nested VALUES(1,ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])),(2,ROW(ROW(1.00,'a')::ck_pair,ARRAY[1,2])),(3,ROW(ROW(1,'a')::ck_pair,'[0:1]={1,2}'::integer[])),(4,ROW(NULL,ARRAY[NULL]::integer[]))"
+    },
+    {
+      "id": "nested_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_nested GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "nested_index",
+      "sql": "CREATE INDEX ck_nested_v_idx ON ck_nested(v)"
+    },
+    {
+      "id": "nested_lookup",
+      "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id"
+    },
+    {
+      "id": "numeric_fk_setup",
+      "sql": "CREATE TABLE ck_numeric_parent(v numeric PRIMARY KEY,note integer); CREATE TABLE ck_numeric_child(id integer PRIMARY KEY,v numeric REFERENCES ck_numeric_parent(v) ON UPDATE CASCADE); CREATE TABLE ck_audit(old_v text,new_v text); CREATE FUNCTION ck_audit_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO ck_audit VALUES(OLD.v::text,NEW.v::text); RETURN NEW; END $$; CREATE TRIGGER ck_audit_update AFTER UPDATE ON ck_numeric_child FOR EACH ROW EXECUTE FUNCTION ck_audit_update(); INSERT INTO ck_numeric_parent VALUES(1.0,0); INSERT INTO ck_numeric_child VALUES(1,1.00)"
+    },
+    {
+      "id": "numeric_fk_same",
+      "sql": "UPDATE ck_numeric_parent SET v=v; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_representation",
+      "sql": "UPDATE ck_numeric_parent SET v=1.000; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_same_representation",
+      "sql": "UPDATE ck_numeric_parent SET v=1.000; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_non_key",
+      "sql": "UPDATE ck_numeric_parent SET note=1; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_rollback_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "numeric_fk_rollback_change",
+      "sql": "UPDATE ck_numeric_parent SET v=1.0000; SELECT v::text FROM ck_numeric_child; SELECT count(*) AS n FROM ck_audit"
+    },
+    {
+      "id": "numeric_fk_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "numeric_fk_rollback_result",
+      "sql": "SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "zero_fk_setup",
+      "sql": "CREATE TABLE ck_zero_parent(v double precision PRIMARY KEY); CREATE TABLE ck_zero_child(v double precision REFERENCES ck_zero_parent(v) ON UPDATE CASCADE); INSERT INTO ck_zero_parent VALUES('-0'::double precision); INSERT INTO ck_zero_child VALUES('-0'::double precision)"
+    },
+    {
+      "id": "zero_fk_change",
+      "sql": "UPDATE ck_zero_parent SET v='0'::double precision; SELECT v::text FROM ck_zero_child"
+    },
+    {
+      "id": "interval_fk_setup",
+      "sql": "CREATE TABLE ck_interval_parent(v interval PRIMARY KEY); CREATE TABLE ck_interval_child(v interval REFERENCES ck_interval_parent(v) ON UPDATE CASCADE); INSERT INTO ck_interval_parent VALUES('1 month'::interval); INSERT INTO ck_interval_child VALUES('1 month'::interval)"
+    },
+    {
+      "id": "interval_fk_change",
+      "sql": "UPDATE ck_interval_parent SET v='30 days'::interval; SELECT v::text FROM ck_interval_child"
+    },
+    {
+      "id": "array_fk_setup",
+      "sql": "CREATE TABLE ck_array_parent(v numeric[] PRIMARY KEY); CREATE TABLE ck_array_child(v numeric[] REFERENCES ck_array_parent(v) ON UPDATE CASCADE); INSERT INTO ck_array_parent VALUES(ARRAY[1.0,2.00]); INSERT INTO ck_array_child VALUES(ARRAY[1.0,2.00])"
+    },
+    {
+      "id": "array_fk_change",
+      "sql": "UPDATE ck_array_parent SET v=ARRAY[1.000,2.0]; SELECT v::text FROM ck_array_child"
+    },
+    {
+      "id": "nested_fk_setup",
+      "sql": "CREATE TABLE ck_nested_parent(v ck_wrap PRIMARY KEY); CREATE TABLE ck_nested_child(v ck_wrap REFERENCES ck_nested_parent(v) ON UPDATE CASCADE); INSERT INTO ck_nested_parent VALUES(ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])::ck_wrap); INSERT INTO ck_nested_child VALUES(ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])::ck_wrap)"
+    },
+    {
+      "id": "nested_fk_change",
+      "sql": "UPDATE ck_nested_parent SET v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap; SELECT v::text FROM ck_nested_child"
+    },
+    {
+      "id": "restrict_fk_setup",
+      "sql": "CREATE TABLE ck_restrict_parent(v numeric PRIMARY KEY); CREATE TABLE ck_restrict_child(v numeric DEFAULT 2.50 REFERENCES ck_restrict_parent(v) ON UPDATE RESTRICT); INSERT INTO ck_restrict_parent VALUES(1.0),(2.5); INSERT INTO ck_restrict_child VALUES(1.00)"
+    },
+    {
+      "id": "restrict_fk_change",
+      "sql": "UPDATE ck_restrict_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "restrict_fk_after",
+      "sql": "SELECT v::text FROM ck_restrict_parent ORDER BY v; SELECT v::text FROM ck_restrict_child"
+    },
+    {
+      "id": "no_action_fk_setup",
+      "sql": "CREATE TABLE ck_no_action_parent(v numeric PRIMARY KEY); CREATE TABLE ck_no_action_child(v numeric DEFAULT 2.50 REFERENCES ck_no_action_parent(v) ON UPDATE NO ACTION); INSERT INTO ck_no_action_parent VALUES(1.0),(2.5); INSERT INTO ck_no_action_child VALUES(1.00)"
+    },
+    {
+      "id": "no_action_fk_change",
+      "sql": "UPDATE ck_no_action_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "no_action_fk_after",
+      "sql": "SELECT v::text FROM ck_no_action_parent ORDER BY v; SELECT v::text FROM ck_no_action_child"
+    },
+    {
+      "id": "set_null_fk_setup",
+      "sql": "CREATE TABLE ck_set_null_parent(v numeric PRIMARY KEY); CREATE TABLE ck_set_null_child(v numeric DEFAULT 2.50 REFERENCES ck_set_null_parent(v) ON UPDATE SET NULL); INSERT INTO ck_set_null_parent VALUES(1.0),(2.5); INSERT INTO ck_set_null_child VALUES(1.00)"
+    },
+    {
+      "id": "set_null_fk_change",
+      "sql": "UPDATE ck_set_null_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "set_null_fk_after",
+      "sql": "SELECT v::text FROM ck_set_null_parent ORDER BY v; SELECT v::text FROM ck_set_null_child"
+    },
+    {
+      "id": "set_default_fk_setup",
+      "sql": "CREATE TABLE ck_set_default_parent(v numeric PRIMARY KEY); CREATE TABLE ck_set_default_child(v numeric DEFAULT 2.50 REFERENCES ck_set_default_parent(v) ON UPDATE SET DEFAULT); INSERT INTO ck_set_default_parent VALUES(1.0),(2.5); INSERT INTO ck_set_default_child VALUES(1.00)"
+    },
+    {
+      "id": "set_default_fk_change",
+      "sql": "UPDATE ck_set_default_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "set_default_fk_after",
+      "sql": "SELECT v::text FROM ck_set_default_parent ORDER BY v; SELECT v::text FROM ck_set_default_child"
+    },
+    {
+      "id": "deferred_fk_setup",
+      "sql": "CREATE TABLE ck_deferred_parent(v numeric PRIMARY KEY); CREATE TABLE ck_deferred_child(v numeric REFERENCES ck_deferred_parent(v) DEFERRABLE INITIALLY DEFERRED); INSERT INTO ck_deferred_parent VALUES(1.0); INSERT INTO ck_deferred_child VALUES(1.00)"
+    },
+    {
+      "id": "deferred_fk_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "deferred_fk_equal",
+      "sql": "UPDATE ck_deferred_parent SET v=1.000; SAVEPOINT ck_before_ddl"
+    },
+    {
+      "id": "deferred_fk_pending",
+      "sql": "ALTER TABLE ck_deferred_parent ADD COLUMN note integer"
+    },
+    {
+      "id": "deferred_fk_recover",
+      "sql": "ROLLBACK TO ck_before_ddl"
+    },
+    {
+      "id": "deferred_fk_immediate",
+      "sql": "SET CONSTRAINTS ALL IMMEDIATE; ALTER TABLE ck_deferred_parent ADD COLUMN note integer"
+    },
+    {
+      "id": "deferred_fk_commit",
+      "sql": "COMMIT"
+    },
+    {
+      "id": "deferred_fk_after",
+      "sql": "SELECT v::text FROM ck_deferred_parent; SELECT v::text FROM ck_deferred_child"
+    },
+    {
+      "id": "child_equal_setup",
+      "sql": "CREATE TABLE ck_child_equal_parent(v numeric PRIMARY KEY); CREATE TABLE ck_child_equal(v numeric REFERENCES ck_child_equal_parent(v)); SET session_replication_role=replica; INSERT INTO ck_child_equal VALUES(1.00); SET session_replication_role=origin"
+    },
+    {
+      "id": "child_equal_update",
+      "sql": "UPDATE ck_child_equal SET v=1.000; SELECT v::text FROM ck_child_equal"
+    },
+    {
+      "id": "child_unequal_update",
+      "sql": "UPDATE ck_child_equal SET v=2"
+    },
+    {
+      "id": "child_equal_after",
+      "sql": "SELECT v::text FROM ck_child_equal"
+    },
+    {
+      "id": "child_composite_equal_setup",
+      "sql": "CREATE TABLE ck_child_record_parent(v ck_pair PRIMARY KEY); CREATE TABLE ck_child_record(v ck_pair REFERENCES ck_child_record_parent(v)); SET session_replication_role=replica; INSERT INTO ck_child_record VALUES(ROW(1.00,'a')); SET session_replication_role=origin"
+    },
+    {
+      "id": "child_composite_equal_update",
+      "sql": "UPDATE ck_child_record SET v=ROW(1.000,'a'); SELECT v::text FROM ck_child_record"
+    },
+    {
+      "id": "child_composite_unequal_update",
+      "sql": "UPDATE ck_child_record SET v=ROW(2,'a')"
+    },
+    {
+      "id": "child_composite_equal_after",
+      "sql": "SELECT v::text FROM ck_child_record"
+    },
+    {
+      "id": "partial_null",
+      "sql": "SELECT ROW(1,NULL)::ck_pair IS NULL AS all_null, ROW(1,NULL)::ck_pair IS NOT NULL AS all_present, ROW(1,NULL)::ck_pair=ROW(1,NULL)::ck_pair AS same, ROW(1,NULL)::ck_pair>ROW(1,'a')::ck_pair AS greater"
+    },
+    {
+      "id": "reopen_lookup",
+      "sql": "SELECT id FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_xid",
+      "sql": "SELECT id FROM ck_xids WHERE v=ROW('1'::xid)::ck_xid ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_unique",
+      "sql": "SELECT v::text FROM ck_unique ORDER BY v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_fk",
+      "sql": "SELECT id,p::text FROM ck_child ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_nested",
+      "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id",
+      "reopen": true
+    }
+  ]
+}

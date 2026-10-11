@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve typed ROW field operators in exact document and transaction-overlay lookups, including equality-only fields and reached NULL-field errors. Retain B-tree ordering requirements and original frame masking.
+
+- Apply PostgreSQL foreign-key actions when a referenced key changes its retained representation despite SQL equality, including numeric scale, signed zero, intervals and nested values. Preserve CASCADE, RESTRICT, SET NULL, SET DEFAULT, deferred parent events, child-side equality, unchanged-key behavior and rollback.
+
 - Validate declared composite comparison capabilities before query execution, including empty inputs, nested types, exact PostgreSQL diagnostics and aggregate DISTINCT ordering requirements. Preserve lazy anonymous-record comparisons, equality-only DISTINCT and spilled grouping, and admitted field identities during ROW assignment to a composite.
 
 - Preserve already typed values through view INSERT inputs, rewrite-rule OLD/NEW rows and RETURNING, and INSTEAD OF trigger results. Share SQL record validation for PostgreSQL trigger-result type and column-count details, retaining rollback and persistent behavior.

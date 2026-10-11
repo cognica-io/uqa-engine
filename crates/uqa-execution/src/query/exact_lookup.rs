@@ -69,15 +69,12 @@ pub(crate) fn matches_fields_with_control(
         if matches!(presence, FieldPresence::Required) && actual.is_none() {
             return Ok(false);
         }
-        if !uqa_sql::expr::compare_typed_values_with_enum_catalog(
+        if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
             actual.unwrap_or(&Value::Null),
             expected,
             control,
             catalog,
-            None,
-        )?
-        .is_eq()
-        {
+        )? {
             return Ok(false);
         }
     }
@@ -93,14 +90,12 @@ fn matches_value(
     if matches!(presence, FieldPresence::Required) && actual.is_none() {
         return Ok(false);
     }
-    uqa_sql::expr::compare_typed_values_with_enum_catalog(
+    uqa_sql::expr::equal_typed_values_with_enum_catalog(
         actual.unwrap_or(&Value::Null),
         expected,
         &uqa_core::memory::ProductionControl::uncontrolled(),
         catalog,
-        None,
     )
-    .map(std::cmp::Ordering::is_eq)
 }
 
 impl ExactLookupOverlay for BTreeMap<DocId, Option<StoredDocument>> {
