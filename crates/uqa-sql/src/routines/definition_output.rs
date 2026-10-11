@@ -6,6 +6,7 @@
 
 //! Source bodies, estimates and saved configuration in routine definitions.
 
+use crate::expr::append_sql_literal;
 use crate::semantics::parameters::{catalog::find_parameter, definition::ParameterFlags};
 use crate::SQLError;
 
@@ -86,25 +87,14 @@ pub fn configuration_clauses(
                 if index > 0 {
                     output.push_str(", ");
                 }
-                append_literal(&mut output, value, standard_strings);
+                append_sql_literal(&mut output, value, standard_strings);
             }
         } else {
-            append_literal(&mut output, value, standard_strings);
+            append_sql_literal(&mut output, value, standard_strings);
         }
         output.push('\n');
     }
     Ok(output)
-}
-
-fn append_literal(output: &mut String, value: &str, standard_strings: bool) {
-    output.push('\'');
-    for character in value.chars() {
-        if character == '\'' || (character == '\\' && !standard_strings) {
-            output.push(character);
-        }
-        output.push(character);
-    }
-    output.push('\'');
 }
 
 // SplitGUCList does not normalize identifiers: saved list elements can also be

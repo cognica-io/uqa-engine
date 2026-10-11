@@ -82,6 +82,11 @@ fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
             | ColumnType::RefCursor,
         ) => varlena(value.as_bytes())?,
         (Value::Bytes(value), ColumnType::Bytea) => varlena(value)?,
+        (Value::Str(value), ColumnType::Uuid) => crate::expr::parse_uuid_bytes(value)?.to_vec(),
+        (Value::Json(value), ColumnType::Json) => varlena(value.as_bytes())?,
+        (Value::JsonB(value), ColumnType::JsonB) => {
+            varlena(&crate::expr::encode_jsonb_datum(value)?)?
+        }
         (Value::Decimal(value), ColumnType::Numeric { .. }) => varlena(&numeric::encode(value)?)?,
         (Value::Temporal(value), _) => temporal::encode(value, pg_type_oid(representation))?,
         _ => {
@@ -99,6 +104,41 @@ fn datum(value: &Value, ty: &ColumnType) -> Result<Field, SQLError> {
         bytes.len()
     };
     Ok(Field::Datum { length, bytes })
+}
+
+pub(super) fn scalar_text(node: &Node) -> Result<String, SQLError> {
+    let oid = u32::try_from(node.integer("consttype")?)
+        .map_err(|_| invalid("invalid scalar constant type"))?;
+    let ty = crate::catalog::type_metadata::builtin_scalar_type(oid)
+        .ok_or_else(|| invalid("unknown scalar constant type"))?;
+    if node.boolean("constbyval")? || node.integer("constlen")? != pg_type_len(ty) {
+        return Err(invalid("invalid scalar constant layout"));
+    }
+    let Field::Datum { length, bytes } = node.field("constvalue")? else {
+        return Err(invalid("constant has no Datum"));
+    };
+    if *ty == ColumnType::Uuid {
+        if *length != 16 {
+            return Err(invalid("invalid UUID Datum length"));
+        }
+        let bytes = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| invalid("invalid UUID Datum length"))?;
+        return Ok(crate::expr::format_uuid(bytes));
+    }
+    let payload = varlena_payload(*length, bytes)?;
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    match ty {
+        ColumnType::Bytea => crate::expr::bytea_to_string_with_control(payload, &control)
+            .map(|text| text.into_uncontrolled().expect("ordinary bytea text")),
+        ColumnType::Json => std::str::from_utf8(payload)
+            .map(str::to_owned)
+            .map_err(|_| invalid("invalid JSON Datum encoding")),
+        ColumnType::JsonB => crate::expr::decode_jsonb_datum_with_control(payload, &control)
+            .map(|text| text.into_uncontrolled().expect("ordinary JSONB text")),
+        _ => Err(invalid("unsupported scalar constant type")),
+    }
 }
 
 pub(super) fn varlena_payload(length: usize, bytes: &[u8]) -> Result<&[u8], SQLError> {

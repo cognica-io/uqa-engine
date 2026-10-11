@@ -35,6 +35,7 @@ pub use array_transform::{
     argument_positions as array_transform_argument_positions,
     argument_positions_with_control as array_transform_argument_positions_with_control,
 };
+pub(crate) use json::{decode_jsonb_datum_with_control, encode_jsonb_datum};
 pub use json::{validate_json_object_key_type, value_to_json_text};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
@@ -45,6 +46,7 @@ use time::{
     age_between, coerce_temporal, format_pg_number, format_temporal, hex_encode, make_timestamp,
     parse_timestamp, pg_to_chrono_fmt,
 };
+pub(crate) use uuid::format_uuid;
 pub use uuid::parse_uuid_bytes;
 use uuid::{generate_random_uuid, generate_uuid_v7};
 mod binary;
@@ -101,7 +103,9 @@ pub use conversion::{
     array_value_to_string, catalog_output_required, invalid_numeric_input, value_to_string,
     value_to_string_with_control, vector_value_to_string,
 };
-pub(crate) use conversion::{tensor_items, vector_element, vector_items};
+pub(crate) use conversion::{
+    bytea_to_string_with_control, tensor_items, vector_element, vector_items,
+};
 pub use conversion::{
     value_to_tensor, value_to_tensor_with_control, value_to_vector, value_to_vector_with_control,
 };
@@ -113,6 +117,7 @@ pub use floating::{
 pub use in_range::in_range;
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
+pub(crate) use scalar_helpers::append_sql_literal;
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 pub use temporal_input::{

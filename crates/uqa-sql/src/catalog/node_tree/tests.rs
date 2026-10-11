@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod scalar;
+
 const DOMAIN_CHECK: &str = "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}";
 
 #[test]
@@ -93,6 +95,26 @@ fn rejects_truncated_ambiguous_and_excessively_nested_node_trees() {
 
 struct Routines;
 
+struct StringSettings(bool);
+
+impl deparse::ExpressionNames for StringSettings {
+    fn column(&self, attribute: i64) -> Result<String, SQLError> {
+        deparse::ExpressionNames::column(&Routines, attribute)
+    }
+
+    fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError> {
+        deparse::ExpressionNames::routine(&Routines, oid)
+    }
+
+    fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError> {
+        deparse::ExpressionNames::type_name(&Routines, oid, modifier)
+    }
+
+    fn standard_conforming_strings(&self) -> Result<bool, SQLError> {
+        Ok(self.0)
+    }
+}
+
 impl deparse::ExpressionNames for Routines {
     fn column(&self, attribute: i64) -> Result<String, SQLError> {
         match attribute {
@@ -139,6 +161,8 @@ fn typed_check_nodes_and_sql_match_postgresql() {
         conbin: String,
         sql: String,
         pretty: String,
+        sql_nonstandard: Option<String>,
+        pretty_nonstandard: Option<String>,
     }
     // PostgreSQL 18.4 reference; fixtures retain expected expressions, not machine reports.
     let fixtures: Vec<Fixture> = serde_json::from_str(include_str!("tests/checks.json")).unwrap();
@@ -180,11 +204,18 @@ fn typed_check_nodes_and_sql_match_postgresql() {
                         fixture.check
                     ));
                 }
-                for (pretty, expected) in [(false, fixture.sql), (true, fixture.pretty)] {
-                    let output = deparse::expression(&actual, &Routines, pretty);
+                for (pretty, standard_strings, expected) in [
+                    (false, true, Some(fixture.sql)),
+                    (true, true, Some(fixture.pretty)),
+                    (false, false, fixture.sql_nonstandard),
+                    (true, false, fixture.pretty_nonstandard),
+                ] {
+                    let Some(expected) = expected else { continue };
+                    let output =
+                        deparse::expression(&actual, &StringSettings(standard_strings), pretty);
                     if output.as_ref().ok() != Some(&expected) {
                         failures.push(format!(
-                            "{} (pretty={pretty}): {output:?}, expected {expected}",
+                            "{} (pretty={pretty}, standard_strings={standard_strings}): {output:?}, expected {expected}",
                             fixture.check
                         ));
                     }

@@ -56,17 +56,22 @@ pub fn value_to_string_with_control(
                 control,
             )
         }
-        Value::Bytes(values) => {
-            const HEX: &[u8; 16] = b"0123456789abcdef";
-            let mut text = ProductionString::new(*control);
-            text.push_str("\\x")?;
-            for byte in values {
-                text.push(char::from(HEX[usize::from(byte >> 4)]))?;
-                text.push(char::from(HEX[usize::from(byte & 0xf)]))?;
-            }
-            text.finish()?
-        }
+        Value::Bytes(values) => bytea_to_string_with_control(values, control)?,
     })
+}
+
+pub(crate) fn bytea_to_string_with_control(
+    values: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut text = ProductionString::new(*control);
+    text.push_str("\\x")?;
+    for byte in values {
+        text.push(char::from(HEX[usize::from(byte >> 4)]))?;
+        text.push(char::from(HEX[usize::from(byte & 0xf)]))?;
+    }
+    Ok(text.finish()?)
 }
 
 /// `PostgreSQL`'s legacy vector text format separates values with spaces.

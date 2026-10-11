@@ -57,6 +57,13 @@ struct Names<'a, 'b> {
 }
 
 impl deparse::ExpressionNames for Names<'_, '_> {
+    fn standard_conforming_strings(&self) -> Result<bool, SQLError> {
+        self.context
+            .session
+            .show_parameter("standard_conforming_strings")
+            .map(|(_, setting)| setting == "on")
+    }
+
     fn column(&self, _: i64) -> Result<String, SQLError> {
         Err(SQLError::Internal(
             "built-in RETURN body contains a relation column".into(),

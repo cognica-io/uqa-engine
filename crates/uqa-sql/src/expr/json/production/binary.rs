@@ -29,11 +29,11 @@ const CONTAINER: u32 = 0x5000_0000;
 const TYPE_MASK: u32 = 0x7000_0000;
 const HAS_OFFSET: u32 = 0x8000_0000;
 
-pub(in crate::expr) fn encode_jsonb_datum(text: &str) -> Result<Vec<u8>> {
+pub(crate) fn encode_jsonb_datum(text: &str) -> Result<Vec<u8>> {
     encode::encode(text)
 }
 
-pub(in crate::expr) fn decode_jsonb_datum_with_control(
+pub(crate) fn decode_jsonb_datum_with_control(
     bytes: &[u8],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {

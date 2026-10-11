@@ -11,6 +11,18 @@ use uqa_core::{
     ValueRetentionError,
 };
 
+/// Catalog definitions follow the current string setting and never emit an `E` prefix (`simple_quote_literal`).
+pub(crate) fn append_sql_literal(output: &mut String, value: &str, standard_strings: bool) {
+    output.push('\'');
+    for character in value.chars() {
+        if character == '\'' || (character == '\\' && !standard_strings) {
+            output.push(character);
+        }
+        output.push(character);
+    }
+    output.push('\'');
+}
+
 /// Double-quote unless the identifier starts with a lowercase letter or an underscore, holds only lowercase letters, digits and underscores, and is not a keyword other than an unreserved one (`quote_identifier`).
 pub fn quote_ident(ident: &str) -> String {
     quote_ident_with_control(ident, &ProductionControl::uncontrolled())

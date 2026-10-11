@@ -234,7 +234,7 @@ fn generate_uuid_v7_at(unix_millis: u64, sub_millisecond_nanos: u32) -> Result<S
     Ok(format_uuid(bytes))
 }
 
-fn format_uuid(bytes: [u8; 16]) -> String {
+pub(crate) fn format_uuid(bytes: [u8; 16]) -> String {
     format_uuid_with_control(bytes, &ProductionControl::uncontrolled())
         .expect("ordinary UUID formatting")
         .into_uncontrolled()
