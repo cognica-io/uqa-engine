@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::ArrayValue;
 
 mod enums;
+mod interval;
 mod legacy_vectors;
 mod mode;
 
