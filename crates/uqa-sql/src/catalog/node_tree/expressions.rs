@@ -66,13 +66,11 @@ impl ExpressionContext<'_> {
             Expr::Column(column) => self.column(column, None)?,
             Expr::QualifiedColumn { qualifier, column } => self.column(column, Some(qualifier))?,
             Expr::Literal(value) => self.literal(expression, value, expected)?,
-            Expr::TypedLiteral { value, ty, .. } => {
-                let ty = self.resolve_type(ty)?;
-                TypedNode {
-                    node: values::constant(value, &ty)?,
-                    ty,
-                }
-            }
+            Expr::TypedLiteral {
+                value,
+                ty,
+                composite_source,
+            } => self.constant(value, self.resolve_type(ty)?, composite_source.as_deref())?,
             Expr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs)?,
             Expr::UnaryMinus(argument) => self.unary_minus(argument)?,
             Expr::Array(elements) => self.array(elements, expected)?,
@@ -170,13 +168,54 @@ impl ExpressionContext<'_> {
             .or(expected)
             .cloned()
             .unwrap_or(ColumnType::Text);
-        let value = crate::type_resolution::coerce_common_context_value(
-            value.clone(),
-            source.as_ref(),
-            Some(&ty),
-        )?;
+        let value = if source.is_none() {
+            if let Some(value) = crate::expr::enums::fold_unknown_literal(
+                self.types.and_then(FunctionTypeResolver::enum_labels),
+                value,
+                &ty,
+            )? {
+                value
+            } else if let uqa_core::Value::Str(text) = value {
+                if crate::expr::requires_catalog_constant_input(&ty) {
+                    self.types
+                        .and_then(FunctionTypeResolver::catalog_input_functions)
+                        .ok_or_else(|| {
+                            SQLError::Internal("catalog input functions are unavailable".into())
+                        })?
+                        .read_unknown_input(text, &ty)?
+                } else {
+                    crate::type_resolution::coerce_common_context_value(
+                        value.clone(),
+                        None,
+                        Some(&ty),
+                    )?
+                }
+            } else {
+                crate::type_resolution::coerce_common_context_value(value.clone(), None, Some(&ty))?
+            }
+        } else {
+            crate::type_resolution::coerce_common_context_value(
+                value.clone(),
+                source.as_ref(),
+                Some(&ty),
+            )?
+        };
+        self.constant(&value, ty, None)
+    }
+
+    fn constant(
+        &self,
+        value: &uqa_core::Value,
+        ty: ColumnType,
+        source: Option<&crate::expr::composites::CompositeConstantSource>,
+    ) -> Result<TypedNode, SQLError> {
         Ok(TypedNode {
-            node: values::constant(&value, &ty)?,
+            node: values::constant_with_source(
+                value,
+                &ty,
+                source,
+                self.types.and_then(FunctionTypeResolver::composite_types),
+            )?,
             ty,
         })
     }

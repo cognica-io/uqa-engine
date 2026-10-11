@@ -23,6 +23,11 @@ pub trait ExpressionNames {
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
 
+    /// Type identities and current output metadata for admitted physical constants.
+    fn value_catalog(&self) -> Option<&dyn crate::expr::SQLValueCatalog> {
+        None
+    }
+
     /// The invoking session's string-literal rule for reconstructed SQL.
     fn standard_conforming_strings(&self) -> Result<bool, SQLError> {
         Ok(true)
@@ -97,7 +102,7 @@ impl Renderer<'_> {
                 node.integer("resulttypmod")?,
             ),
             "COERCEVIAIO" => self.cast(node.field("arg")?, node.integer("resulttype")?, -1),
-            "COERCETODOMAIN" => self.cast(
+            "COERCETODOMAIN" | "ARRAYCOERCEEXPR" => self.cast(
                 node.field("arg")?,
                 node.integer("resulttype")?,
                 node.integer("resulttypmod")?,
@@ -171,6 +176,19 @@ impl Renderer<'_> {
     }
 
     fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {
+        let argument = implicit_cast_input(argument)?;
+        if let Field::Node(node) = argument {
+            if node.kind == "CONST"
+                && node.integer("consttype")? == oid
+                && node.integer("consttypmod")? == -1
+            {
+                return Ok(format!(
+                    "{}::{}",
+                    self.constant_labeled(node, false)?,
+                    self.names.type_name(oid, modifier)?
+                ));
+            }
+        }
         let text = self.field(argument, false)?;
         let atomic = matches!(argument, Field::Node(node) if matches!(
             node.kind.as_str(),
@@ -185,11 +203,19 @@ impl Renderer<'_> {
     }
 
     fn constant(&self, node: &Node) -> Result<String, SQLError> {
+        self.constant_labeled(node, true)
+    }
+
+    fn constant_labeled(&self, node: &Node, show_type: bool) -> Result<String, SQLError> {
         let oid = node.integer("consttype")?;
         let modifier = node.integer("consttypmod")?;
         let type_name = || self.names.type_name(oid, modifier);
         if node.boolean("constisnull")? {
-            return Ok(format!("NULL::{}", type_name()?));
+            return if show_type {
+                Ok(format!("NULL::{}", type_name()?))
+            } else {
+                Ok("NULL".into())
+            };
         }
         let Field::Datum { length, bytes } = node.field("constvalue")? else {
             return Err(invalid("constant has no Datum"));
@@ -197,15 +223,7 @@ impl Renderer<'_> {
         if node.boolean("constbyval")? && (bytes.len() != 8 || !matches!(*length, 1 | 2 | 4 | 8)) {
             return Err(invalid("invalid by-value Datum length"));
         }
-        let quoted = |value: &str| -> Result<String, SQLError> {
-            let mut output = String::new();
-            crate::expr::append_sql_literal(
-                &mut output,
-                value,
-                self.names.standard_conforming_strings()?,
-            );
-            Ok(format!("{output}::{}", type_name()?))
-        };
+        let quoted = |value: &str| self.constant_literal(value, node, show_type);
         match oid {
             16 => match bytes.first() {
                 Some(0) => Ok("false".into()),
@@ -260,7 +278,7 @@ impl Renderer<'_> {
             1700 => {
                 let text = values::numeric::decode(values::varlena_payload(*length, bytes)?)?;
                 if text.as_bytes().first().is_some_and(u8::is_ascii_digit) && text.contains('.') {
-                    if modifier < 0 {
+                    if modifier < 0 || !show_type {
                         Ok(text)
                     } else {
                         Ok(format!("{text}::{}", type_name()?))
@@ -272,10 +290,35 @@ impl Renderer<'_> {
             1082 | 1083 | 1114 | 1184 | 1186 | 1266 => {
                 quoted(&values::temporal::decode(bytes, oid)?.to_sql_string())
             }
-            _ => Err(SQLError::Unsupported(format!(
-                "catalog expression Datum deparser for type {oid}"
-            ))),
+            _ => match values::catalog_text(node, self.names.value_catalog())? {
+                Some(text) => quoted(&text),
+                None => Err(SQLError::Unsupported(format!(
+                    "catalog expression Datum deparser for type {oid}"
+                ))),
+            },
         }
+    }
+    fn constant_literal(
+        &self,
+        value: &str,
+        node: &Node,
+        show_type: bool,
+    ) -> Result<String, SQLError> {
+        let mut output = String::new();
+        crate::expr::append_sql_literal(
+            &mut output,
+            value,
+            self.names.standard_conforming_strings()?,
+        );
+        if show_type {
+            output.push_str("::");
+            output.push_str(
+                &self
+                    .names
+                    .type_name(node.integer("consttype")?, node.integer("consttypmod")?)?,
+            );
+        }
+        Ok(output)
     }
 }
 
@@ -292,6 +335,29 @@ fn atom<'a>(node: &'a Node, name: &str) -> Result<&'a str, SQLError> {
         Field::Atom(value) | Field::String(value) => Ok(value),
         _ => Err(invalid(format!("expected token in {name}"))),
     }
+}
+
+fn implicit_cast_input(mut argument: &Field) -> Result<&Field, SQLError> {
+    while let Field::Node(node) = argument {
+        let format = match node.kind.as_str() {
+            "FUNCEXPR" => "funcformat",
+            "RELABELTYPE" => "relabelformat",
+            "COERCEVIAIO" | "ARRAYCOERCEEXPR" => "coerceformat",
+            "COERCETODOMAIN" => "coercionformat",
+            _ => break,
+        };
+        if node.integer(format)? != 2 {
+            break;
+        }
+        argument = if node.kind == "FUNCEXPR" {
+            list(node, "args")?
+                .first()
+                .ok_or_else(|| invalid("cast function has no argument"))?
+        } else {
+            node.field("arg")?
+        };
+    }
+    Ok(argument)
 }
 
 fn prefix<const N: usize>(bytes: &[u8]) -> Result<[u8; N], SQLError> {

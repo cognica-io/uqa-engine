@@ -12,6 +12,7 @@ use crate::ColumnType;
 use uqa_core::{DatumValue, Value};
 
 mod encoding;
+pub(crate) use encoding::array_payload;
 
 pub(super) fn project(
     fields: &[(String, Value)],

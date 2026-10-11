@@ -18,6 +18,11 @@ pub trait SQLValueCatalog {
         Ok(None)
     }
 
+    /// Current SQL spelling of an admitted catalog OID alias; `None` retains numeric output.
+    fn value_regtype_output(&self, _ty: &crate::ColumnType, _oid: i64) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     /// The current descriptor of an admitted composite value.
     fn value_composite_type(
         &self,
@@ -58,6 +63,12 @@ pub trait SQLValueCatalog {
 pub struct EngineValueCatalog<'a>(pub &'a dyn super::EngineHook);
 
 impl SQLValueCatalog for EngineValueCatalog<'_> {
+    fn value_regtype_output(&self, ty: &crate::ColumnType, oid: i64) -> Result<Option<String>> {
+        self.0
+            .resolve_regtype_output(ty, oid)
+            .map_err(crate::SQLError::Internal)
+    }
+
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<crate::ColumnType>> {
         self.0
             .resolve_type_oid(oid)

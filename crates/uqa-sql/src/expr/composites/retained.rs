@@ -12,6 +12,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, Value};
 
 mod tuple;
+pub(crate) use tuple::array_payload;
 
 #[cfg(test)]
 mod tests;

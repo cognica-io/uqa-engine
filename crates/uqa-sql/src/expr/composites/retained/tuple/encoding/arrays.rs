@@ -12,7 +12,7 @@ use super::{
 use crate::catalog::type_metadata::{builtin_scalar_type, pg_type_oid};
 use uqa_core::{memory::ProductionControl, ArrayValue};
 
-pub(super) fn payload(
+pub(crate) fn payload(
     array: &ArrayValue,
     mut element: &ColumnType,
     descriptors: &Descriptors,

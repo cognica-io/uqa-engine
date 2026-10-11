@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod arrays;
 mod scalar;
 
 const DOMAIN_CHECK: &str = "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}";
@@ -130,6 +131,17 @@ impl deparse::ExpressionNames for Routines {
     }
 
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError> {
+        if let Some(element) = u32::try_from(oid)
+            .ok()
+            .and_then(crate::catalog::type_metadata::builtin_array_element)
+        {
+            return self
+                .type_name(
+                    crate::catalog::type_metadata::pg_type_oid(element),
+                    modifier,
+                )
+                .map(|name| format!("{name}[]"));
+        }
         if oid == 1043 {
             return Ok(if modifier < 0 {
                 "character varying".into()
@@ -142,6 +154,16 @@ impl deparse::ExpressionNames for Routines {
             return Ok(format!("numeric({},{})", modifier >> 16, modifier & 0x7ff));
         }
         match oid {
+            18 => return Ok("\"char\"".into()),
+            19 => return Ok("name".into()),
+            700 => return Ok("real".into()),
+            1042 => {
+                return Ok(if modifier < 0 {
+                    "bpchar".into()
+                } else {
+                    format!("character({})", modifier - 4)
+                })
+            }
             1082 => return Ok("date".into()),
             1083 => return Ok("time without time zone".into()),
             1114 => return Ok("timestamp without time zone".into()),

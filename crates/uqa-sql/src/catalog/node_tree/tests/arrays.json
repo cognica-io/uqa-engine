@@ -1,0 +1,624 @@
+{
+  "catalog": [
+    {
+      "oid": 25308,
+      "name": "array_mood",
+      "array_oid": 25307,
+      "relation_oid": 0,
+      "kind": "e",
+      "base": null,
+      "labels": [
+        {
+          "oid": 25310,
+          "label": "low"
+        },
+        {
+          "oid": 25312,
+          "label": "high"
+        }
+      ],
+      "attributes": null
+    },
+    {
+      "oid": 25314,
+      "name": "array_int",
+      "array_oid": 25313,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "integer",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25316,
+      "name": "array_text",
+      "array_oid": 25315,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "character varying(5)",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25319,
+      "name": "array_record",
+      "array_oid": 25318,
+      "relation_oid": 25317,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "number": 1,
+          "name": "n",
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        },
+        {
+          "number": 2,
+          "name": "t",
+          "type": "text",
+          "dropped": false,
+          "length": -1,
+          "alignment": "i"
+        }
+      ]
+    },
+    {
+      "oid": 25322,
+      "name": "array_outer",
+      "array_oid": 25321,
+      "relation_oid": 25320,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "number": 1,
+          "name": "items",
+          "type": "array_record[]",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d"
+        },
+        {
+          "number": 2,
+          "name": "mood",
+          "type": "array_mood",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        }
+      ]
+    },
+    {
+      "oid": 25324,
+      "name": "array_record_domain",
+      "array_oid": 25323,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "array_record",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25326,
+      "name": "array_container",
+      "array_oid": 25325,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "array_record[]",
+      "labels": null,
+      "attributes": null
+    }
+  ],
+  "changed_catalog": [
+    {
+      "oid": 25308,
+      "name": "array_mood",
+      "array_oid": 25307,
+      "relation_oid": 0,
+      "kind": "e",
+      "base": null,
+      "labels": [
+        {
+          "oid": 25310,
+          "label": "renamed low"
+        },
+        {
+          "oid": 25312,
+          "label": "high"
+        }
+      ],
+      "attributes": null
+    },
+    {
+      "oid": 25314,
+      "name": "array_int",
+      "array_oid": 25313,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "integer",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25316,
+      "name": "array_text",
+      "array_oid": 25315,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "character varying(5)",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25319,
+      "name": "array_record",
+      "array_oid": 25318,
+      "relation_oid": 25317,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "number": 1,
+          "name": "n",
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        },
+        {
+          "number": 2,
+          "name": "label",
+          "type": "text",
+          "dropped": false,
+          "length": -1,
+          "alignment": "i"
+        },
+        {
+          "number": 3,
+          "name": "more",
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        }
+      ]
+    },
+    {
+      "oid": 25322,
+      "name": "array_outer",
+      "array_oid": 25321,
+      "relation_oid": 25320,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "number": 1,
+          "name": "items",
+          "type": "array_record[]",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d"
+        },
+        {
+          "number": 2,
+          "name": "mood",
+          "type": "array_mood",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        }
+      ]
+    },
+    {
+      "oid": 25324,
+      "name": "array_record_domain",
+      "array_oid": 25323,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "array_record",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25326,
+      "name": "array_container",
+      "array_oid": 25325,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "array_record[]",
+      "labels": null,
+      "attributes": null
+    }
+  ],
+  "cases": [
+    {
+      "type": "array_mood[]",
+      "input": "{low,NULL,high}",
+      "check": "VALUE IS NOT NULL AND '{low,NULL,high}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "type": "array_mood[][]",
+      "input": "[0:1][-1:0]={{low,NULL},{high,low}}",
+      "check": "VALUE IS NOT NULL AND '[0:1][-1:0]={{low,NULL},{high,low}}'::array_mood[][] IS NOT NULL"
+    },
+    {
+      "type": "array_mood[]",
+      "input": "{}",
+      "check": "VALUE IS NOT NULL AND '{}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "type": "array_int[]",
+      "input": "{1,NULL,-3}",
+      "check": "VALUE IS NOT NULL AND '{1,NULL,-3}'::array_int[] IS NOT NULL"
+    },
+    {
+      "type": "array_text[]",
+      "input": "{\"a\",NULL,\"ab c\"}",
+      "check": "VALUE IS NOT NULL AND '{\"a\",NULL,\"ab c\"}'::array_text[] IS NOT NULL"
+    },
+    {
+      "type": "array_record[]",
+      "input": "{\"(1,one)\",NULL,\"(2,two)\"}",
+      "check": "VALUE IS NOT NULL AND '{\"(1,one)\",NULL,\"(2,two)\"}'::array_record[] IS NOT NULL"
+    },
+    {
+      "type": "array_record[][]",
+      "input": "[0:1][-1:0]={{\"(1,one)\",NULL},{\"(2,two)\",\"(3,)\"}}",
+      "check": "VALUE IS NOT NULL AND '[0:1][-1:0]={{\"(1,one)\",NULL},{\"(2,two)\",\"(3,)\"}}'::array_record[][] IS NOT NULL"
+    },
+    {
+      "type": "array_record[]",
+      "input": "{}",
+      "check": "VALUE IS NOT NULL AND '{}'::array_record[] IS NOT NULL"
+    },
+    {
+      "type": "array_record_domain[]",
+      "input": "{\"(1,one)\",NULL,\"(2,two)\"}",
+      "check": "VALUE IS NOT NULL AND '{\"(1,one)\",NULL,\"(2,two)\"}'::array_record_domain[] IS NOT NULL"
+    },
+    {
+      "type": "array_container",
+      "input": "{\"(1,one)\",NULL}",
+      "check": "VALUE IS NOT NULL AND '{\"(1,one)\",NULL}'::array_container IS NOT NULL"
+    },
+    {
+      "type": "array_outer[]",
+      "input": "{\"(\\\"{\\\"\\\"(1,one)\\\"\\\",NULL}\\\",\\\"low\\\")\",NULL,\"(,\\\"high\\\")\"}",
+      "check": "VALUE IS NOT NULL AND '{\"(\\\"{\\\"\\\"(1,one)\\\"\\\",NULL}\\\",\\\"low\\\")\",NULL,\"(,\\\"high\\\")\"}'::array_outer[] IS NOT NULL"
+    }
+  ],
+  "initial": [
+    {
+      "name": "probe_0",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 40 [ 160 0 0 0 1 0 0 0 32 0 0 0 220 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 222 98 0 0 224 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{low,NULL,high}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{low,NULL,high}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_1",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 52 [ 208 0 0 0 2 0 0 0 40 0 0 0 220 98 0 0 2 0 0 0 2 0 0 0 0 0 0 0 255 255 255 255 13 0 0 0 0 0 0 0 222 98 0 0 224 98 0 0 222 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('[0:1][-1:0]={{low,NULL},{high,low}}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '[0:1][-1:0]={{low,NULL},{high,low}}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_10",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25321 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 160 [ 128 2 0 0 1 0 0 0 32 0 0 0 234 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 112 1 0 0 255 255 255 255 234 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 123 1 0 0 0 32 0 0 0 231 98 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 0 0 0 222 98 0 0 0 0 0 0 112 0 0 0 255 255 255 255 234 98 0 0 255 255 255 255 0 0 2 0 1 0 24 2 224 98 0 0 0 0 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(\\\"{\\\"\\\"(1,one)\\\"\\\",NULL}\\\",low)\",NULL,\"(,high)\"}'::array_outer[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(\\\"{\\\"\\\"(1,one)\\\"\\\",NULL}\\\",low)\",NULL,\"(,high)\"}'::array_outer[] IS NOT NULL"
+    },
+    {
+      "name": "probe_2",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 0 0 0 0 0 0 0 0 220 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_3",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25313 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 40 [ 160 0 0 0 1 0 0 0 32 0 0 0 226 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 1 0 0 0 253 255 255 255 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{1,NULL,-3}'::array_int[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{1,NULL,-3}'::array_int[] IS NOT NULL"
+    },
+    {
+      "name": "probe_4",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25315 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 48 [ 192 0 0 0 1 0 0 0 32 0 0 0 228 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 20 0 0 0 97 0 0 0 32 0 0 0 97 98 32 99 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{a,NULL,\"ab c\"}'::array_text[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{a,NULL,\"ab c\"}'::array_text[] IS NOT NULL"
+    },
+    {
+      "name": "probe_5",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 96 [ 128 1 0 0 1 0 0 0 32 0 0 0 231 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(1,one)\",NULL,\"(2,two)\"}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1,one)\",NULL,\"(2,two)\"}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_6",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 136 [ 32 2 0 0 2 0 0 0 40 0 0 0 231 98 0 0 2 0 0 0 2 0 0 0 0 0 0 0 255 255 255 255 13 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 112 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 1 0 24 1 3 0 0 0 0 0 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('[0:1][-1:0]={{\"(1,one)\",NULL},{\"(2,two)\",\"(3,)\"}}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '[0:1][-1:0]={{\"(1,one)\",NULL},{\"(2,two)\",\"(3,)\"}}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_7",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 0 0 0 0 0 0 0 0 231 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_8",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25323 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 96 [ 128 1 0 0 1 0 0 0 32 0 0 0 236 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(1,one)\",NULL,\"(2,two)\"}'::array_record_domain[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1,one)\",NULL,\"(2,two)\"}'::array_record_domain[] IS NOT NULL"
+    },
+    {
+      "name": "probe_9",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {COERCETODOMAIN :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 64 [ 0 1 0 0 1 0 0 0 32 0 0 0 231 98 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 ]} :resulttype 25326 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND (('{\"(1,one)\",NULL}'::array_record[])::array_container IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1,one)\",NULL}'::array_record[]::array_container IS NOT NULL"
+    }
+  ],
+  "changed": [
+    {
+      "name": "probe_0",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 40 [ 160 0 0 0 1 0 0 0 32 0 0 0 220 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 222 98 0 0 224 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"renamed low\",NULL,high}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"renamed low\",NULL,high}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_1",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 52 [ 208 0 0 0 2 0 0 0 40 0 0 0 220 98 0 0 2 0 0 0 2 0 0 0 0 0 0 0 255 255 255 255 13 0 0 0 0 0 0 0 222 98 0 0 224 98 0 0 222 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('[0:1][-1:0]={{\"renamed low\",NULL},{high,\"renamed low\"}}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '[0:1][-1:0]={{\"renamed low\",NULL},{high,\"renamed low\"}}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_10",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25321 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 160 [ 128 2 0 0 1 0 0 0 32 0 0 0 234 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 112 1 0 0 255 255 255 255 234 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 123 1 0 0 0 32 0 0 0 231 98 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 0 0 0 222 98 0 0 0 0 0 0 112 0 0 0 255 255 255 255 234 98 0 0 255 255 255 255 0 0 2 0 1 0 24 2 224 98 0 0 0 0 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(\\\"{\\\"\\\"(1,one,)\\\"\\\",NULL}\\\",\\\"renamed low\\\")\",NULL,\"(,high)\"}'::array_outer[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(\\\"{\\\"\\\"(1,one,)\\\"\\\",NULL}\\\",\\\"renamed low\\\")\",NULL,\"(,high)\"}'::array_outer[] IS NOT NULL"
+    },
+    {
+      "name": "probe_2",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 0 0 0 0 0 0 0 0 220 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_3",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25313 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 40 [ 160 0 0 0 1 0 0 0 32 0 0 0 226 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 1 0 0 0 253 255 255 255 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{1,NULL,-3}'::array_int[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{1,NULL,-3}'::array_int[] IS NOT NULL"
+    },
+    {
+      "name": "probe_4",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25315 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 48 [ 192 0 0 0 1 0 0 0 32 0 0 0 228 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 20 0 0 0 97 0 0 0 32 0 0 0 97 98 32 99 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{a,NULL,\"ab c\"}'::array_text[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{a,NULL,\"ab c\"}'::array_text[] IS NOT NULL"
+    },
+    {
+      "name": "probe_5",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 96 [ 128 1 0 0 1 0 0 0 32 0 0 0 231 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(1,one,)\",NULL,\"(2,two,)\"}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1,one,)\",NULL,\"(2,two,)\"}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_6",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 136 [ 32 2 0 0 2 0 0 0 40 0 0 0 231 98 0 0 2 0 0 0 2 0 0 0 0 0 0 0 255 255 255 255 13 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 112 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 1 0 24 1 3 0 0 0 0 0 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('[0:1][-1:0]={{\"(1,one,)\",NULL},{\"(2,two,)\",\"(3,,)\"}}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '[0:1][-1:0]={{\"(1,one,)\",NULL},{\"(2,two,)\",\"(3,,)\"}}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_7",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 0 0 0 0 0 0 0 0 231 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_8",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25323 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 96 [ 128 1 0 0 1 0 0 0 32 0 0 0 236 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(1,one,)\",NULL,\"(2,two,)\"}'::array_record_domain[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1,one,)\",NULL,\"(2,two,)\"}'::array_record_domain[] IS NOT NULL"
+    },
+    {
+      "name": "probe_9",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {COERCETODOMAIN :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 64 [ 0 1 0 0 1 0 0 0 32 0 0 0 231 98 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 ]} :resulttype 25326 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND (('{\"(1,one,)\",NULL}'::array_record[])::array_container IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1,one,)\",NULL}'::array_record[]::array_container IS NOT NULL"
+    }
+  ],
+  "layout_catalog": [
+    {
+      "oid": 25308,
+      "name": "array_mood",
+      "array_oid": 25307,
+      "relation_oid": 0,
+      "kind": "e",
+      "base": null,
+      "labels": [
+        {
+          "oid": 25310,
+          "label": "renamed low"
+        },
+        {
+          "oid": 25312,
+          "label": "high"
+        }
+      ],
+      "attributes": null
+    },
+    {
+      "oid": 25314,
+      "name": "array_int",
+      "array_oid": 25313,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "integer",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25316,
+      "name": "array_text",
+      "array_oid": 25315,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "character varying(5)",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25319,
+      "name": "array_record",
+      "array_oid": 25318,
+      "relation_oid": 25317,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "number": 1,
+          "name": "n",
+          "type": "real",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        },
+        {
+          "number": 2,
+          "name": "........pg.dropped.2........",
+          "type": "-",
+          "dropped": true,
+          "length": -1,
+          "alignment": "i"
+        },
+        {
+          "number": 3,
+          "name": "more",
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        }
+      ]
+    },
+    {
+      "oid": 25322,
+      "name": "array_outer",
+      "array_oid": 25321,
+      "relation_oid": 25320,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "number": 1,
+          "name": "items",
+          "type": "array_record[]",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d"
+        },
+        {
+          "number": 2,
+          "name": "mood",
+          "type": "array_mood",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        }
+      ]
+    },
+    {
+      "oid": 25324,
+      "name": "array_record_domain",
+      "array_oid": 25323,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "array_record",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 25326,
+      "name": "array_container",
+      "array_oid": 25325,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "array_record[]",
+      "labels": null,
+      "attributes": null
+    }
+  ],
+  "layout": [
+    {
+      "name": "probe_0",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 40 [ 160 0 0 0 1 0 0 0 32 0 0 0 220 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 222 98 0 0 224 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"renamed low\",NULL,high}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"renamed low\",NULL,high}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_1",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 52 [ 208 0 0 0 2 0 0 0 40 0 0 0 220 98 0 0 2 0 0 0 2 0 0 0 0 0 0 0 255 255 255 255 13 0 0 0 0 0 0 0 222 98 0 0 224 98 0 0 222 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('[0:1][-1:0]={{\"renamed low\",NULL},{high,\"renamed low\"}}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '[0:1][-1:0]={{\"renamed low\",NULL},{high,\"renamed low\"}}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_10",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25321 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 160 [ 128 2 0 0 1 0 0 0 32 0 0 0 234 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 112 1 0 0 255 255 255 255 234 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 123 1 0 0 0 32 0 0 0 231 98 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 0 0 0 222 98 0 0 0 0 0 0 112 0 0 0 255 255 255 255 234 98 0 0 255 255 255 255 0 0 2 0 1 0 24 2 224 98 0 0 0 0 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(\\\"{\\\"\\\"(1e-45,)\\\"\\\",NULL}\\\",\\\"renamed low\\\")\",NULL,\"(,high)\"}'::array_outer[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(\\\"{\\\"\\\"(1e-45,)\\\"\\\",NULL}\\\",\\\"renamed low\\\")\",NULL,\"(,high)\"}'::array_outer[] IS NOT NULL"
+    },
+    {
+      "name": "probe_2",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25307 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 0 0 0 0 0 0 0 0 220 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{}'::array_mood[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{}'::array_mood[] IS NOT NULL"
+    },
+    {
+      "name": "probe_3",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25313 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 40 [ 160 0 0 0 1 0 0 0 32 0 0 0 226 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 1 0 0 0 253 255 255 255 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{1,NULL,-3}'::array_int[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{1,NULL,-3}'::array_int[] IS NOT NULL"
+    },
+    {
+      "name": "probe_4",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25315 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 48 [ 192 0 0 0 1 0 0 0 32 0 0 0 228 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 20 0 0 0 97 0 0 0 32 0 0 0 97 98 32 99 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{a,NULL,\"ab c\"}'::array_text[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{a,NULL,\"ab c\"}'::array_text[] IS NOT NULL"
+    },
+    {
+      "name": "probe_5",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 96 [ 128 1 0 0 1 0 0 0 32 0 0 0 231 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(1e-45,)\",NULL,\"(3e-45,)\"}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1e-45,)\",NULL,\"(3e-45,)\"}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_6",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 136 [ 32 2 0 0 2 0 0 0 40 0 0 0 231 98 0 0 2 0 0 0 2 0 0 0 0 0 0 0 255 255 255 255 13 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 112 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 1 0 24 1 3 0 0 0 0 0 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('[0:1][-1:0]={{\"(1e-45,)\",NULL},{\"(3e-45,)\",\"(4e-45,)\"}}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '[0:1][-1:0]={{\"(1e-45,)\",NULL},{\"(3e-45,)\",\"(4e-45,)\"}}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_7",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 0 0 0 0 0 0 0 0 231 98 0 0 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{}'::array_record[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{}'::array_record[] IS NOT NULL"
+    },
+    {
+      "name": "probe_8",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 25323 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 96 [ 128 1 0 0 1 0 0 0 32 0 0 0 236 98 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 2 0 0 0 9 116 119 111 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND ('{\"(1e-45,)\",NULL,\"(3e-45,)\"}'::array_record_domain[] IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1e-45,)\",NULL,\"(3e-45,)\"}'::array_record_domain[] IS NOT NULL"
+    },
+    {
+      "name": "probe_9",
+      "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {COERCETODOMAIN :arg {CONST :consttype 25318 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 64 [ 0 1 0 0 1 0 0 0 32 0 0 0 231 98 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 128 0 0 0 255 255 255 255 231 98 0 0 255 255 255 255 0 0 2 0 2 0 24 0 1 0 0 0 9 111 110 101 ]} :resulttype 25326 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+      "sql": "((VALUE IS NOT NULL) AND (('{\"(1e-45,)\",NULL}'::array_record[])::array_container IS NOT NULL))",
+      "pretty": "VALUE IS NOT NULL AND '{\"(1e-45,)\",NULL}'::array_record[]::array_container IS NOT NULL"
+    }
+  ]
+}

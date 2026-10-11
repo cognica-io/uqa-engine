@@ -23,6 +23,7 @@ pub use casting::{
     coercion_type_name, read_catalog_array_input, read_catalog_input, CatalogInputFunctions,
 };
 pub(crate) use casting::{requires_catalog_constant_input, requires_domain_array_input};
+pub(crate) use regtype::format_regtype_value_with_catalog_and_control;
 pub use regtype::{
     format_regtype_elements_with_control, format_regtype_value, format_regtype_value_with_control,
 };
