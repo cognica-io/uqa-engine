@@ -83,15 +83,16 @@ pub(super) fn cast_temporal(
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     let converted = match v {
-        Value::Temporal(value) => cast_temporal_kind(value, target),
-        Value::Str(text) | Value::FixedChar(text) => Some(
+        Value::Temporal(value) if !value.is_finite() => cast_infinite(value, target)?,
+        Value::Temporal(value) => cast_temporal_kind(value, target).map(Value::Temporal),
+        Value::Str(text) | Value::FixedChar(text) => Some(Value::Temporal(
             target
                 .read(text, crate::expr::transaction_timestamp_or_clock(), control)?
                 .map_err(|error| input_error(error, target.input_name(), text))?,
-        ),
+        )),
         _ => None,
     };
-    let Some(mut value) = converted.map(Value::Temporal) else {
+    let Some(mut value) = converted else {
         return Err(undefined_cast(
             &canonical_cast_source_with_control(source_ty, v, control)?,
             target.cast_name(),
@@ -112,6 +113,9 @@ fn round_temporal(value: &mut Value, precision: &str) -> Result<()> {
     let Value::Temporal(value) = value else {
         return Ok(());
     };
+    if !value.is_finite() {
+        return Ok(());
+    }
     let (micros, epoch, overflow) = match value {
         TemporalValue::Time { micros } | TemporalValue::TimeTz { micros, .. } => {
             (micros, 0, ("22008", "time"))
@@ -152,6 +156,9 @@ pub(super) fn cast_interval(
         control,
     )?;
     let column_type = ColumnType::from_sql_name_with_control(ty, control)?;
+    if matches!(&value, Value::Temporal(temporal) if !temporal.is_finite()) {
+        return Ok(value);
+    }
     let ColumnType::IntervalWithFields { fields, precision } = &*column_type else {
         return Ok(value);
     };
@@ -190,6 +197,33 @@ pub(super) fn cast_interval(
         round_temporal(&mut value, &control.format(format_args!("{precision}"))?)?;
     }
     Ok(value)
+}
+
+fn cast_infinite(value: &TemporalValue, target: TemporalCastTarget) -> Result<Option<Value>> {
+    use TemporalCastTarget as C;
+    use TemporalValue as T;
+    let infinity = value.infinity().expect("non-finite temporal cast");
+    Ok(Some(match (value, target) {
+        (T::Date { .. } | T::Timestamp { .. } | T::TimestampTz { .. }, C::Date) => {
+            Value::Temporal(infinity.date())
+        }
+        (T::Date { .. } | T::Timestamp { .. } | T::TimestampTz { .. }, C::Timestamp) => {
+            Value::Temporal(infinity.timestamp())
+        }
+        (T::Date { .. } | T::Timestamp { .. } | T::TimestampTz { .. }, C::TimestampTz) => {
+            Value::Temporal(infinity.timestamp_tz())
+        }
+        (T::Timestamp { .. } | T::TimestampTz { .. }, C::Time)
+        | (T::TimestampTz { .. }, C::TimeTz) => Value::Null,
+        (T::Interval { .. }, C::Interval) => Value::Temporal(infinity.interval()),
+        (T::Interval { .. }, C::Time) => {
+            return Err(SQLError::Routine {
+                sqlstate: "22008".into(),
+                message: "cannot convert infinite interval to time".into(),
+            })
+        }
+        _ => return Ok(None),
+    }))
 }
 
 fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Option<TemporalValue> {

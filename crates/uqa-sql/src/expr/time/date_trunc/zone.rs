@@ -62,12 +62,15 @@ fn truncate(
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     control.check()?;
-    let Value::Temporal(TemporalValue::TimestampTz { micros }) = value else {
+    let Value::Temporal(temporal @ TemporalValue::TimestampTz { micros }) = value else {
         return Err(SQLError::TypeMismatch(
             "date_trunc with a time zone requires timestamp with time zone".into(),
         ));
     };
     let unit = decode_unit(units, "timestamp with time zone")?;
+    if !temporal.is_finite() {
+        return Ok(Value::Temporal(temporal.clone()));
+    }
     let out_of_range = || datetime_out_of_range("timestamp");
     let offset = zone
         .offset_at(micros.div_euclid(1_000_000))

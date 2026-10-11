@@ -33,6 +33,14 @@ pub(super) fn cast_local_timestamp(
         return Ok(None);
     }
     let out_of_range = || crate::expr::datetime_out_of_range("timestamp");
+    if let Value::Temporal(value @ (TemporalValue::Date { .. } | TemporalValue::Timestamp { .. })) =
+        value
+    {
+        if let Some(infinity) = value.infinity() {
+            control.check()?;
+            return Ok(Some(Value::Temporal(infinity.timestamp_tz())));
+        }
+    }
     let local = match value {
         Value::Temporal(TemporalValue::Timestamp { micros }) => *micros,
         Value::Temporal(TemporalValue::Date { days }) => i64::from(*days)

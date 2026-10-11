@@ -60,6 +60,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     value @ (Value::Int(_) | Value::Float(_) | Value::Decimal(_)) => {
                         format_pg_number(value, &fmt).map(Value::Str)
                     }
+                    Value::Temporal(t) if !t.is_finite() => Ok(Value::Null),
                     Value::Temporal(t) => Ok(Value::Str(format_temporal(t, &fmt)?)),
                     Value::Str(s) => {
                         let temporal = coerce_temporal(&Value::Str(s.clone()))?;

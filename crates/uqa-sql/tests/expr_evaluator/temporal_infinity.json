@@ -488,5 +488,12 @@
   {"group": "finite", "sql": "SELECT CAST(('12:00'::time) AS text)", "expected": "12:00:00", "error": null},
   {"group": "finite", "sql": "SELECT CAST(('12:00+09'::timetz) AS text)", "expected": "12:00:00+09", "error": null},
   {"group": "finite", "sql": "SELECT CAST((isfinite('2000-01-01'::timestamp)) AS text)", "expected": "true", "error": null},
-  {"group": "finite", "sql": "SELECT CAST((isfinite('1 day'::interval)) AS text)", "expected": "true", "error": null}
+  {"group": "finite", "sql": "SELECT CAST((isfinite('1 day'::interval)) AS text)", "expected": "true", "error": null},
+  {"group": "arithmetic", "sql": "SELECT CAST((interval '1 month' * 'Infinity'::float8) AS text)", "expected": "infinity", "error": null},
+  {"group": "arithmetic", "sql": "SELECT CAST((interval '1 month -30 days' * 'Infinity'::float8) AS text)", "expected": null, "error": {"sqlstate": "22008", "message": "interval out of range", "detail": null, "hint": null}},
+  {"group": "arithmetic", "sql": "SELECT CAST((interval '1 month -31 days' * 'Infinity'::float8) AS text)", "expected": "-infinity", "error": null},
+  {"group": "cast", "sql": "SELECT CAST((interval 'infinity'::time) AS text)", "expected": null, "error": {"sqlstate": "22008", "message": "cannot convert infinite interval to time", "detail": null, "hint": null}},
+  {"group": "cast", "sql": "SELECT CAST((interval '-infinity'::time) AS text)", "expected": null, "error": {"sqlstate": "22008", "message": "cannot convert infinite interval to time", "detail": null, "hint": null}},
+  {"group": "input", "sql": "SELECT CAST((interval '2147483647 months 2147483647 days 2562047788:00:54.775807') AS text)", "expected": "infinity", "error": null},
+  {"group": "arithmetic", "sql": "SELECT CAST((-interval '-2147483647 months -2147483647 days -2562047788:00:54.775807') AS text)", "expected": null, "error": {"sqlstate": "22008", "message": "interval out of range", "detail": null, "hint": null}}
 ]

@@ -434,7 +434,7 @@ fn integer_builtins_report_overflow_instead_of_panicking_or_saturating() {
 }
 
 #[test]
-fn temporal_builtins_reject_narrowing_and_arithmetic_overflow() {
+fn temporal_builtins_distinguish_overflow_from_infinite_operands() {
     assert!(eval_scalar_function("to_timestamp", &[Value::Float(f64::MAX)]).is_err());
     assert!(eval_scalar_function(
         "make_timestamp",
@@ -472,16 +472,19 @@ fn temporal_builtins_reject_narrowing_and_arithmetic_overflow() {
         })],
     )
     .is_err());
-    assert!(eval_binary_values(
-        BinaryOp::Multiply,
-        &Value::Temporal(TemporalValue::Interval {
-            months: 1,
-            days: 0,
-            micros: 0,
-        }),
-        &Value::Float(f64::INFINITY),
-    )
-    .is_err());
+    assert_eq!(
+        eval_binary_values(
+            BinaryOp::Multiply,
+            &Value::Temporal(TemporalValue::Interval {
+                months: 1,
+                days: 0,
+                micros: 0,
+            }),
+            &Value::Float(f64::INFINITY),
+        )
+        .unwrap(),
+        Value::Temporal(uqa_core::TemporalInfinity::Positive.interval())
+    );
 }
 
 #[test]

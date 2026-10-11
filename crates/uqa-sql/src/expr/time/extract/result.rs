@@ -8,7 +8,7 @@
 
 use uqa_core::{
     memory::{Produced, ProductionControl},
-    DecimalValue, Value,
+    DecimalValue, TemporalInfinity, Value,
 };
 
 use crate::error::{Result, SQLError};
@@ -16,6 +16,8 @@ use crate::error::{Result, SQLError};
 use super::{MICROS_PER_DAY, MICROS_PER_SECOND};
 
 pub(super) enum Part {
+    Null,
+    Infinity(TemporalInfinity),
     Integer(i64),
     Scaled {
         coefficient: i128,
@@ -34,8 +36,14 @@ impl Part {
         as_numeric: bool,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Value>> {
+        if matches!(self, Self::Null) {
+            return Ok(control.finish(Value::Null, control.empty_reservation())?);
+        }
         if !as_numeric {
             let float = match self {
+                Self::Null => unreachable!("NULL part returned above"),
+                Self::Infinity(TemporalInfinity::Negative) => f64::NEG_INFINITY,
+                Self::Infinity(TemporalInfinity::Positive) => f64::INFINITY,
                 Self::Integer(integer) => integer as f64,
                 Self::Scaled { float, .. } => float,
                 Self::Julian { day, micros } => {
@@ -48,6 +56,11 @@ impl Part {
             return Ok(control.finish(Value::Float(float), control.empty_reservation())?);
         }
         let decimal = match self {
+            Self::Null => unreachable!("NULL part returned above"),
+            Self::Infinity(infinity) => {
+                DecimalValue::parse_with_control(infinity.as_str(), control)?
+                    .expect("numeric infinity input")
+            }
             Self::Integer(integer) => DecimalValue::from_i64_with_control(integer, control)?,
             Self::Scaled {
                 coefficient, scale, ..

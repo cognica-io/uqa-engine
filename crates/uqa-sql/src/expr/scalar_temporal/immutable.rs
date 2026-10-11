@@ -60,6 +60,20 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                     return Err(SQLError::TypeMismatch("to_timestamp takes 1 arg".into()));
                 }
                 let secs = float(&args[0])?;
+                if secs.is_nan() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22008".into(),
+                        message: "timestamp cannot be NaN".into(),
+                    });
+                }
+                if secs.is_infinite() {
+                    let infinity = if secs.is_sign_negative() {
+                        uqa_core::TemporalInfinity::Negative
+                    } else {
+                        uqa_core::TemporalInfinity::Positive
+                    };
+                    return inline(Value::Temporal(infinity.timestamp_tz()));
+                }
                 inline(Value::Temporal(TemporalValue::TimestampTz {
                     micros: float_to_i64_rounded(secs * 1e6, "timestamp")?,
                 }))
@@ -171,7 +185,8 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                     })
                     .and_then(|value| value.checked_mul(1_000_000))
                     .ok_or_else(|| datetime_out_of_range("interval"))?;
-                let fractional_micros = float_to_i64_rounded(secs * 1e6, "interval")?;
+                let fractional_micros = float_to_i64_rounded(secs * 1e6, "interval")
+                    .map_err(|_| datetime_out_of_range("interval"))?;
                 let micros = whole_micros
                     .checked_add(fractional_micros)
                     .ok_or_else(|| datetime_out_of_range("interval"))?;
@@ -201,11 +216,8 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                 }
                 match &args[0] {
                     Value::Float(f) => inline(Value::Bool(f.is_finite())),
-                    // The temporal model has no infinity values, so every
-                    // date / timestamp / interval is finite.
-                    Value::Int(_) | Value::Decimal(_) | Value::Str(_) | Value::Temporal(_) => {
-                        inline(Value::Bool(true))
-                    }
+                    Value::Temporal(temporal) => inline(Value::Bool(temporal.is_finite())),
+                    Value::Int(_) | Value::Decimal(_) | Value::Str(_) => inline(Value::Bool(true)),
                     Value::Null => inline(Value::Null),
                     other => Err(SQLError::TypeMismatch(format!(
                         "isfinite: unsupported {other:?}"
