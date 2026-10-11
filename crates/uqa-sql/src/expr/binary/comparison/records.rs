@@ -202,6 +202,7 @@ mod tests {
     fn record_field_operator_lookup_precedes_null_equality_and_ordering() {
         let control = ProductionControl::uncontrolled();
         let value = row(vec![Value::Int(1), Value::Null], &[23, 114]);
+        assert!(crate::expr::value_comparison_can_fail(&value));
         let error =
             equal_typed_values_with_enum_catalog(&value, &value, &control, None).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42883"));
@@ -247,6 +248,7 @@ mod tests {
             (2278, false, false),
         ] {
             let value = row(vec![Value::Null], &[oid]);
+            assert!(crate::expr::value_comparison_can_fail(&value));
             let equal = equal_typed_values_with_enum_catalog(&value, &value, &control, None);
             assert_eq!(equal.is_ok(), equality, "equality for OID {oid}");
             if let Err(error) = equal {

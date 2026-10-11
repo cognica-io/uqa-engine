@@ -261,3 +261,46 @@ fn raw_field_eligibility_survives_index_mutation_and_carried_conversion() {
         }
     }
 }
+
+#[test]
+fn typed_field_probes_preserve_btree_operator_errors() {
+    for (ty, value, name) in [
+        (uqa_sql::ColumnType::Xid, Value::Int(1), "xid"),
+        (uqa_sql::ColumnType::Json, Value::Null, "json"),
+    ] {
+        let row = Value::Row(
+            uqa_core::RowValue::typed(
+                vec![value],
+                vec![uqa_core::RecordFieldType {
+                    oid: uqa_sql::catalog::type_metadata::pg_type_oid(&ty)
+                        .try_into()
+                        .unwrap(),
+                    type_modifier: -1,
+                }],
+            )
+            .unwrap(),
+        );
+        let index = ColumnValueIndex::build("v", [(1, row.clone())].into_iter());
+        assert!(index.field_candidates(&row).is_none());
+        for predicate in [
+            Predicate::Equals(row.clone()),
+            Predicate::NotEquals(row.clone()),
+            Predicate::InSet([row.clone()].into_iter().collect()),
+            Predicate::LessThan(row),
+        ] {
+            let mut observed = false;
+            let error = index
+                .scan_observing(&predicate, || {
+                    observed = true;
+                    Ok(())
+                })
+                .unwrap_err();
+            assert!(observed);
+            assert_eq!(error.sqlstate(), Some("42883"));
+            assert_eq!(
+                error.to_string(),
+                format!("could not identify a comparison function for type {name}")
+            );
+        }
+    }
+}

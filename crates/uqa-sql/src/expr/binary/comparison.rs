@@ -594,7 +594,9 @@ pub fn value_comparison_can_fail(value: &Value) -> bool {
             array.element_type_oid().is_some()
                 || array.elements().iter().any(value_comparison_can_fail)
         }
-        Value::Row(values) => values.iter().any(value_comparison_can_fail),
+        Value::Row(values) => {
+            values.field_types().is_some() || values.iter().any(value_comparison_can_fail)
+        }
         Value::List(values) => values.iter().any(value_comparison_can_fail),
         Value::Record(fields) => {
             fields.type_oid().is_some()

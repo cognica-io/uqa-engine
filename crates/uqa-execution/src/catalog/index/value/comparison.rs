@@ -72,6 +72,7 @@ pub(super) fn matches(
     predicate: &Predicate,
     catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> Result<bool, SQLError> {
+    // B-tree probes use the ordering support function even for equality predicates. Raw field matching uses SQL equality after declining an unsuitable accelerator.
     let compare = |other: &Value| {
         uqa_sql::expr::compare_typed_values_with_enum_catalog(
             value,

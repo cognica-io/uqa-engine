@@ -572,3 +572,58 @@ fn indexed_raw_field_probes_preserve_typed_enum_errors_and_record_row_equality()
         }
     }
 }
+
+#[test]
+fn typed_row_exact_lookup_uses_equality_for_stored_and_private_rows() {
+    let row = Value::Row(
+        uqa_core::RowValue::typed(
+            vec![Value::Int(1)],
+            vec![uqa_core::RecordFieldType {
+                oid: 28,
+                type_modifier: -1,
+            }],
+        )
+        .unwrap(),
+    );
+    let table = Table::new([(1, vec![("a", row.clone())])]);
+    let index = ColumnValueIndex::build("a", [(1, row.clone())].into_iter());
+    let replacement = StoredDocument::new(Document::from([("a".into(), row.clone())]));
+    for (overlay, expected) in [
+        (BTreeMap::new(), Some(1)),
+        (BTreeMap::from([(1, None), (2, Some(replacement))]), Some(2)),
+    ] {
+        assert_eq!(
+            ExactLookup {
+                catalog: None,
+                table: &table,
+                overlay: &overlay,
+                read: None,
+            }
+            .find_field_with_index("a", &row, |_, value| Ok(index.field_candidates(value)))
+            .unwrap(),
+            expected
+        );
+    }
+    let unsupported = Value::Row(
+        uqa_core::RowValue::typed(
+            vec![Value::Null],
+            vec![uqa_core::RecordFieldType {
+                oid: 114,
+                type_modifier: -1,
+            }],
+        )
+        .unwrap(),
+    );
+    let error = matches_fields(
+        &Document::from([("a".into(), unsupported.clone())]),
+        &["a".into()],
+        &[unsupported],
+        FieldPresence::Required,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    assert_eq!(
+        error.to_string(),
+        "could not identify an equality operator for type json"
+    );
+}
