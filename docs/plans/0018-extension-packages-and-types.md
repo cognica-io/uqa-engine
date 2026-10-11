@@ -600,9 +600,11 @@ The array catalog codec in [PR #769](https://github.com/cognica-io/uqa-engine/pu
 
 - [x] Capture an independent PostgreSQL 18 reference for non-finite inputs, casts, comparisons, arithmetic, functions, time zones and finite controls.
 - [x] Preserve infinite values in Core input/output, equality/order and serialization, and SQL physical Datums.
-- [ ] Match PostgreSQL casts, operators, functions and validation order, including indeterminate-operation errors.
-- [ ] Pass owner and affected runtime/persistence checks; review and update the public contract.
+- [x] Match PostgreSQL casts, operators, functions and validation order, including indeterminate-operation errors.
+- [x] Pass owner and affected runtime/persistence checks; review and update the public contract.
 - [ ] Merge and remove the prerequisite branch; finish PR #769 against the corrected shared representation.
+
+The complete prerequisite is implemented and pushed as `a894b2182`. All required scalar, range, aggregate, interval-style, calendar, sleep and UUID references pass their owners and affected runtime providers, including persistent reopening. PR #770 is ready for review; final PR review, merge and branch cleanup remain. The paragraphs below retain the evidence at each implementation checkpoint; their earlier failures are resolved by the later corrections. Full finite temporal ranges and the broader #289/#317 contracts remain separate active units.
 
 The compact expected fixture is `crates/uqa-sql/tests/expr_evaluator/temporal_infinity.json` (490 cases, SHA-256 `a904055a8696d49f8e077bef585e340bbdc851d3ea86cb41a10011aa33715467`). Each case contains executable SQL and PostgreSQL's text result or SQLSTATE, primary message, detail and hint. Capture used a disposable database in PostgreSQL 18.4 Docker with UTC, ISO/MDY and postgres interval output, through the existing `tests/parity/pg18/capture_command_completion_oracle.py --rows --details` after `SELECT version()`. The image and collector are the same immutable inputs recorded above; raw diagnostic output stays outside version control. The enabled owner tests retain currently failing cases until their implementation is corrected.
 
