@@ -15,6 +15,21 @@ fn controlled_assignment_preserves_character_array_numeric_and_vector_results() 
     let control = ProductionControl::new(&budget, &original, &invoking);
     let cases = [
         (
+            Value::Str(String::new()),
+            ColumnType::InternalChar,
+            Value::Str(String::new()),
+        ),
+        (
+            Value::Str("é".into()),
+            ColumnType::InternalChar,
+            Value::Str("Ã".into()),
+        ),
+        (
+            Value::Str("\\377".into()),
+            ColumnType::InternalChar,
+            Value::Str("ÿ".into()),
+        ),
+        (
             Value::Str("é  ".into()),
             ColumnType::Varchar(Some(1)),
             Value::Str("é".into()),

@@ -116,13 +116,10 @@ pub fn convert_value_to_column_type_with_control(
         },
         ColumnType::InternalChar => {
             let text = value_to_text_with_control(&value, control)?;
-            if text.len() != 1 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "value `{}` must be exactly one byte for type \"char\"",
-                    text.as_str()
-                )));
-            }
-            text_value(text, false, control)
+            Ok(crate::expr::internal_char::carrier_with_control(
+                crate::expr::internal_char::input_byte(&text),
+                control,
+            )?)
         }
         ColumnType::Regproc
         | ColumnType::Regprocedure

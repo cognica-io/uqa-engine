@@ -50,6 +50,7 @@ fn same_catalog_value_type(source: &ColumnType, target: &ColumnType) -> bool {
             source == target
         }
         (ColumnType::Composite(source), ColumnType::Composite(target)) => source.oid == target.oid,
+        (ColumnType::InternalChar, ColumnType::InternalChar) => true,
         (ColumnType::Domain { base, .. }, ColumnType::Composite(_)) => {
             same_catalog_value_type(base, target)
         }
