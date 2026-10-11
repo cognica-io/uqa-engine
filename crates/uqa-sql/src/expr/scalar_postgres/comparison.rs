@@ -36,7 +36,17 @@ pub(in crate::expr) fn evaluate_with_context(
     let result = match dispatch {
         FunctionDispatch::AnyOperator => any_all(args, true, control, context),
         FunctionDispatch::AllOperator => any_all(args, false, control, context),
-        FunctionDispatch::IsDistinct => is_distinct(args, control, context),
+        FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct => {
+            is_distinct(args, control, context)
+        }
+        FunctionDispatch::ValueNullTest { negated } => {
+            let [value] = args else {
+                return Some(Err(SQLError::Internal(
+                    "outer NULL test takes one input".into(),
+                )));
+            };
+            Ok(Value::Bool(matches!(value, Value::Null) != negated))
+        }
         FunctionDispatch::BetweenSymmetric => between_symmetric(args, control, context),
         _ => return None,
     };

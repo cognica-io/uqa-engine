@@ -638,7 +638,8 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 }
                 return inline(ColumnType::Boolean, control);
             }
-            FunctionDispatch::IsDistinct => {
+            FunctionDispatch::ValueNullTest { .. } => return inline(ColumnType::Boolean, control),
+            FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct => {
                 super::super::operators::binary_result_type_with_control(
                     BinaryOp::Equal,
                     effective(0),

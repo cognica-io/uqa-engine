@@ -90,6 +90,12 @@ fn apply_value_site<'a>(
             "stored catalog binding does not match the {what} of its syntax"
         ))
     };
+    if let Some(ValueSite::RowDistinct) = sites.peek() {
+        sites.next();
+        crate::type_resolution::row_distinct::rewrite_ast(node)?;
+        apply_value_site(node, sites)?;
+        return Ok(true);
+    }
     if let Some(ValueSite::CompositeRow(binding)) = sites.peek() {
         let binding = (*binding).clone();
         sites.next();

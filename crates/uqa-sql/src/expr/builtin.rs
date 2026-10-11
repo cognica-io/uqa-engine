@@ -251,6 +251,8 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::Slice
             | FunctionDispatch::AnyOperator
             | FunctionDispatch::AllOperator
+            | FunctionDispatch::ValueNullTest { .. }
+            | FunctionDispatch::ValueIsDistinct
             | FunctionDispatch::IsDistinct => Some(false),
             FunctionDispatch::Enum { operation, .. } => Some(operation.is_strict()),
             FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => None,

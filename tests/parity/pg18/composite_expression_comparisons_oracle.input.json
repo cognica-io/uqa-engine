@@ -334,6 +334,72 @@
       "reopen": true
     },
     {
+      "id": "raw_null_distinct",
+      "sql": "SELECT ROW(NULL::integer,NULL::integer) IS DISTINCT FROM NULL AS result,ROW(NULL::integer,NULL::integer) IS NOT DISTINCT FROM NULL AS opposite"
+    },
+    {
+      "id": "json_null_distinct",
+      "sql": "SELECT '{}'::json IS DISTINCT FROM NULL AS result,NULL IS NOT DISTINCT FROM '{}'::json AS opposite"
+    },
+    {
+      "id": "typed_json_null_distinct",
+      "sql": "SELECT '{}'::json IS DISTINCT FROM NULL::json AS result"
+    },
+    {
+      "id": "record_cast_distinct",
+      "sql": "SELECT ROW(1::smallint)::record IS DISTINCT FROM ROW(1::bigint)::record AS result"
+    },
+    {
+      "id": "empty_row_distinct",
+      "sql": "SELECT ROW() IS DISTINCT FROM ROW() AS result"
+    },
+    {
+      "id": "nullif_dynamic_effects",
+      "sql": "SELECT NULLIF(v,nextval('ce_sequence')) AS result FROM (VALUES(NULL::bigint)) a(v); SELECT last_value FROM ce_sequence"
+    },
+    {
+      "id": "nullif_parameter_effects",
+      "sql": "PREPARE ce_effect(bigint) AS SELECT NULLIF($1,nextval('ce_sequence')) AS result; SET plan_cache_mode='force_generic_plan'; EXECUTE ce_effect(NULL); SELECT last_value FROM ce_sequence; RESET plan_cache_mode"
+    },
+    {
+      "id": "distinct_stored_definition",
+      "sql": "CREATE TYPE ce_stored_pair AS(a integer,b text); CREATE VIEW ce_distinct_stored AS SELECT ROW(1,'a')::ce_stored_pair IS DISTINCT FROM ROW(2,'b')::ce_stored_pair AS result; SELECT pg_get_viewdef('ce_distinct_stored'::regclass,true)"
+    },
+    {
+      "id": "distinct_stored_change",
+      "sql": "ALTER TYPE ce_stored_pair ALTER ATTRIBUTE b TYPE integer; SELECT * FROM ce_distinct_stored"
+    },
+    {
+      "id": "distinct_stored_drop",
+      "sql": "DROP TYPE ce_stored_pair; SELECT * FROM ce_distinct_stored"
+    },
+    {
+      "id": "reopen_distinct",
+      "sql": "SELECT * FROM ce_distinct_stored",
+      "reopen": true
+    },
+    {
+      "id": "outer_null_stored",
+      "sql": "CREATE VIEW ce_outer_null AS SELECT id,v IS DISTINCT FROM NULL AS present,v IS NOT DISTINCT FROM NULL AS absent FROM ce_values; SELECT * FROM ce_outer_null ORDER BY id; SELECT pg_get_viewdef('ce_outer_null'::regclass,true)"
+    },
+    {
+      "id": "json_null_stored",
+      "sql": "CREATE DOMAIN ce_present_json AS json CHECK(VALUE IS DISTINCT FROM NULL); SELECT pg_get_constraintdef(oid,true) FROM pg_constraint WHERE contypid='ce_present_json'::regtype; SELECT '{}'::ce_present_json"
+    },
+    {
+      "id": "nested_distinct_stored",
+      "sql": "CREATE VIEW ce_nested_distinct AS SELECT ROW(ROW(1,NULL)::ce_pair) IS DISTINCT FROM ROW(ROW(1,NULL)::ce_pair) AS same; SELECT * FROM ce_nested_distinct; SELECT pg_get_viewdef('ce_nested_distinct'::regclass,true)"
+    },
+    {
+      "id": "reopen_nested_distinct",
+      "sql": "SELECT * FROM ce_nested_distinct",
+      "reopen": true
+    },
+    {
+      "id": "rollback_definition",
+      "sql": "BEGIN; CREATE VIEW ce_rollback AS SELECT NULLIF(1,2.0) AS v,ROW(1,NULL::integer) IS DISTINCT FROM ROW(1,NULL::integer) AS d; SELECT * FROM ce_rollback; ROLLBACK; SELECT to_regclass('ce_rollback') IS NULL AS removed"
+    },
+    {
       "id": "stored",
       "sql": "CREATE VIEW ce_observation AS SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS same, NULLIF(v,ROW(1,NULL)::ce_pair)::text AS n FROM ce_values"
     },

@@ -110,7 +110,9 @@ impl Binder<'_, '_> {
             return Ok(());
         };
         match binding.dispatch {
-            Some(FunctionDispatch::IsDistinct) => self.coerce_argument_pair(&mut call.arguments),
+            Some(FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct) => {
+                self.coerce_argument_pair(&mut call.arguments)
+            }
             Some(FunctionDispatch::BetweenSymmetric) => {
                 let [value, low, high] = call.arguments.as_mut_slice() else {
                     return Ok(());

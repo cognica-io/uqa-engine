@@ -671,6 +671,14 @@ impl SchemaScope {
             }
         });
         failure.map_or(Ok(()), Err)?;
+        let mut comparison_inputs = false;
+        expression.visit(&mut |node| {
+            comparison_inputs |= matches!(node, ScalarExpr::Func { binding: Some(binding), .. }
+                if matches!(binding.dispatch, Some(crate::ast::FunctionDispatch::IsDistinct | crate::ast::FunctionDispatch::ValueNullTest { .. })));
+        });
+        if comparison_inputs {
+            self.retain_composite_inputs_in_scope(engine, expression, schema, subqueries, params)?;
+        }
         self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)?;
         self.record_composite_dependencies(engine, expression, schema, subqueries, params)
     }

@@ -86,6 +86,12 @@ pub enum FunctionDispatch {
     AnyOperator,
     AllOperator,
     IsDistinct,
+    /// One selected DISTINCT comparison of complete field values; nested ROW constructors remain one record-valued operand.
+    ValueIsDistinct,
+    /// The outer NULL test selected by DISTINCT against a bare NULL, without testing individual record fields or requiring equality.
+    ValueNullTest {
+        negated: bool,
+    },
     BetweenSymmetric,
     ToBinInt4,
     ToBinInt8,
@@ -148,7 +154,9 @@ impl FunctionDispatch {
             Self::FieldSelect => "field selection",
             Self::AnyOperator => "ANY operator",
             Self::AllOperator => "ALL operator",
-            Self::IsDistinct => "IS DISTINCT FROM",
+            Self::IsDistinct | Self::ValueIsDistinct => "IS DISTINCT FROM",
+            Self::ValueNullTest { negated: false } => "IS NULL",
+            Self::ValueNullTest { negated: true } => "IS NOT NULL",
             Self::BetweenSymmetric => "BETWEEN SYMMETRIC",
             Self::ToBinInt4 | Self::ToBinInt8 => "pg_catalog.to_bin",
             Self::ToHexInt4 | Self::ToHexInt8 => "pg_catalog.to_hex",

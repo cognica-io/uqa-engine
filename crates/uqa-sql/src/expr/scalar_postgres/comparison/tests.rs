@@ -12,6 +12,30 @@ fn array(elements: Vec<Value>) -> Value {
 }
 
 #[test]
+fn outer_null_test_keeps_null_fields_distinct_from_a_null_value() {
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (value, is_null) in [
+        (Value::Null, true),
+        (Value::Row(vec![].into()), false),
+        (Value::Row(vec![Value::Null, Value::Null].into()), false),
+    ] {
+        for negated in [false, true] {
+            let result = evaluate(
+                FunctionDispatch::ValueNullTest { negated },
+                std::slice::from_ref(&value),
+                &control,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(*result, Value::Bool(is_null != negated));
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn controlled_quantified_comparison_preserves_nested_null_and_empty_semantics() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();

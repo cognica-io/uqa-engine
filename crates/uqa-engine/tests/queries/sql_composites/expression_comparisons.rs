@@ -38,3 +38,56 @@ fn composite_expression_comparisons_match_postgresql(#[case] provider: usize) {
         .retain(|case| case["reopen"] == true);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
+
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn retained_constructor_comparison_survives_type_changes_after_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("retained-comparison.db");
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/composite_expression_comparisons_oracle.expected.json"
+    ))
+    .unwrap();
+    let engine = super::addition::open(provider, &path);
+    let setup = reference["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "distinct_stored_definition")
+        .unwrap();
+    engine.sql(setup["sql"].as_str().unwrap(), &[]).unwrap();
+    drop(engine);
+    // Restore the predecessor's complete constructor comparison in this disposable catalog. Public type and view identities remain unchanged.
+    super::addition::restoration::catalog(provider, &path, |catalog| {
+        let mut views = catalog.load_views().unwrap();
+        assert_eq!(views.len(), 1);
+        let view = &mut views[0];
+        let mut definition: uqa_sql::catalog::stored_view::StoredViewDefinition =
+            serde_json::from_str(&view.definition_json).unwrap();
+        let uqa_sql::Statement::Select(query) = uqa_sql::compile(
+            "SELECT ROW(1,'a')::ce_stored_pair IS DISTINCT FROM ROW(2,'b')::ce_stored_pair AS result"
+        ).unwrap().remove(0) else { panic!("SELECT"); };
+        definition.query = uqa_sql::plan::QueryPlan::lower(*query);
+        view.definition_json = serde_json::to_string(&definition).unwrap();
+        catalog.save_view(view).unwrap();
+    });
+    let engine = super::addition::open(provider, &path);
+    let mut changed = reference.clone();
+    changed["cases"].as_array_mut().unwrap().retain(|case| {
+        matches!(
+            case["id"].as_str(),
+            Some("distinct_stored_change" | "distinct_stored_drop")
+        )
+    });
+    crate::pg18_oracle::verify(&engine, &changed.to_string());
+    drop(engine);
+    let engine = super::addition::open(provider, &path);
+    let mut reopened = reference;
+    reopened["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["id"] == "reopen_distinct");
+    crate::pg18_oracle::verify(&engine, &reopened.to_string());
+}

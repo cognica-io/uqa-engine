@@ -1490,7 +1490,7 @@
             "type"
           ],
           "type_oids": [
-            24272,
+            24435,
             25
           ],
           "rows": [
@@ -1517,7 +1517,7 @@
             "type"
           ],
           "type_oids": [
-            24272,
+            24435,
             25
           ],
           "rows": [
@@ -1571,7 +1571,7 @@
             "type"
           ],
           "type_oids": [
-            24272,
+            24435,
             25
           ],
           "rows": [
@@ -2221,6 +2221,523 @@
       "id": "stored_types"
     },
     {
+      "sql": "SELECT ROW(NULL::integer,NULL::integer) IS DISTINCT FROM NULL AS result,ROW(NULL::integer,NULL::integer) IS NOT DISTINCT FROM NULL AS opposite",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "opposite"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "raw_null_distinct"
+    },
+    {
+      "sql": "SELECT '{}'::json IS DISTINCT FROM NULL AS result,NULL IS NOT DISTINCT FROM '{}'::json AS opposite",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "opposite"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_null_distinct"
+    },
+    {
+      "sql": "SELECT '{}'::json IS DISTINCT FROM NULL::json AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: json = json",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "typed_json_null_distinct"
+    },
+    {
+      "sql": "SELECT ROW(1::smallint)::record IS DISTINCT FROM ROW(1::bigint)::record AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_cast_distinct"
+    },
+    {
+      "sql": "SELECT ROW() IS DISTINCT FROM ROW() AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_row_distinct"
+    },
+    {
+      "sql": "SELECT NULLIF(v,nextval('ce_sequence')) AS result FROM (VALUES(NULL::bigint)) a(v); SELECT last_value FROM ce_sequence",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_dynamic_effects"
+    },
+    {
+      "sql": "PREPARE ce_effect(bigint) AS SELECT NULLIF($1,nextval('ce_sequence')) AS result; SET plan_cache_mode='force_generic_plan'; EXECUTE ce_effect(NULL); SELECT last_value FROM ce_sequence; RESET plan_cache_mode",
+      "command_tags": [
+        "PREPARE",
+        "SET",
+        "SELECT 1",
+        "SELECT 1",
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "nullif_parameter_effects"
+    },
+    {
+      "sql": "CREATE TYPE ce_stored_pair AS(a integer,b text); CREATE VIEW ce_distinct_stored AS SELECT ROW(1,'a')::ce_stored_pair IS DISTINCT FROM ROW(2,'b')::ce_stored_pair AS result; SELECT pg_get_viewdef('ce_distinct_stored'::regclass,true)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT 1 IS DISTINCT FROM 2 OR 'a'::text IS DISTINCT FROM 'b'::text AS result;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_stored_definition"
+    },
+    {
+      "sql": "ALTER TYPE ce_stored_pair ALTER ATTRIBUTE b TYPE integer; SELECT * FROM ce_distinct_stored",
+      "command_tags": [
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_stored_change"
+    },
+    {
+      "sql": "DROP TYPE ce_stored_pair; SELECT * FROM ce_distinct_stored",
+      "command_tags": [
+        "DROP TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_stored_drop"
+    },
+    {
+      "sql": "CREATE VIEW ce_outer_null AS SELECT id,v IS DISTINCT FROM NULL AS present,v IS NOT DISTINCT FROM NULL AS absent FROM ce_values; SELECT * FROM ce_outer_null ORDER BY id; SELECT pg_get_viewdef('ce_outer_null'::regclass,true)",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 4",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "id",
+            "present",
+            "absent"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "f"
+            ],
+            [
+              "2",
+              "t",
+              "f"
+            ],
+            [
+              "3",
+              "t",
+              "f"
+            ],
+            [
+              "4",
+              "f",
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    v IS DISTINCT FROM NULL AS present,\n    v IS NOT DISTINCT FROM NULL AS absent\n   FROM ce_values;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "outer_null_stored"
+    },
+    {
+      "sql": "CREATE DOMAIN ce_present_json AS json CHECK(VALUE IS DISTINCT FROM NULL); SELECT pg_get_constraintdef(oid,true) FROM pg_constraint WHERE contypid='ce_present_json'::regtype; SELECT '{}'::ce_present_json",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK (VALUE IS NOT NULL)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "ce_present_json"
+          ],
+          "type_oids": [
+            114
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_null_stored"
+    },
+    {
+      "sql": "CREATE VIEW ce_nested_distinct AS SELECT ROW(ROW(1,NULL)::ce_pair) IS DISTINCT FROM ROW(ROW(1,NULL)::ce_pair) AS same; SELECT * FROM ce_nested_distinct; SELECT pg_get_viewdef('ce_nested_distinct'::regclass,true)",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT ROW(1, NULL::integer)::ce_pair IS DISTINCT FROM ROW(1, NULL::integer)::ce_pair AS same;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_distinct_stored"
+    },
+    {
+      "sql": "BEGIN; CREATE VIEW ce_rollback AS SELECT NULLIF(1,2.0) AS v,ROW(1,NULL::integer) IS DISTINCT FROM ROW(1,NULL::integer) AS d; SELECT * FROM ce_rollback; ROLLBACK; SELECT to_regclass('ce_rollback') IS NULL AS removed",
+      "command_tags": [
+        "BEGIN",
+        "CREATE VIEW",
+        "SELECT 1",
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v",
+            "d"
+          ],
+          "type_oids": [
+            1700,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "removed"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rollback_definition"
+    },
+    {
       "sql": "CREATE VIEW ce_observation AS SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS same, NULLIF(v,ROW(1,NULL)::ce_pair)::text AS n FROM ce_values",
       "command_tags": [
         "CREATE VIEW"
@@ -2319,6 +2836,56 @@
       "reopen": true
     },
     {
+      "sql": "SELECT * FROM ce_distinct_stored",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_distinct",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ce_nested_distinct",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_nested_distinct",
+      "reopen": true
+    },
+    {
       "sql": "SELECT * FROM ce_observation ORDER BY id",
       "command_tags": [
         "SELECT 4"
@@ -2368,14 +2935,14 @@
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "f8d5d77435f786af92c3463892a2f7e61629aa875b3b2b902721c273f9db1f03",
+    "input_sha256": "90d30f43eec5e2c0aa11cb292d3e14b505fbc16fc639da720279485a194ff329",
     "options": [
       "--rows",
       "--details",
       "--notices"
     ],
     "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
-    "fresh_connection_cases": 2,
-    "fresh_connection_output_sha256": "91c6f175260fa3ba3b83a12cc4b525139debe7d2cf1d2cfc097aecd2d9d4231b"
+    "fresh_connection_cases": 4,
+    "fresh_connection_output_sha256": "def563745c93d8c12219b2cb05a478470ec6024699e5d8e3eac8e174e231cb73"
   }
 }

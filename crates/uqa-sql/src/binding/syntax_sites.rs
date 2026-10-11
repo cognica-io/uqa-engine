@@ -15,6 +15,8 @@ use uqa_core::Value;
 /// An expression site of stored syntax and what binding recorded for it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueSite {
+    /// A ROW DISTINCT predicate expanded into its selected field comparisons.
+    RowDistinct,
     /// Positions grouped into a scalar-array comparison; the other IN items become individual comparisons.
     Membership { array_items: Vec<usize> },
     /// A cast, with the type name binding gave it.
@@ -413,6 +415,12 @@ impl Walk {
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        if crate::type_resolution::row_distinct::expanded(lowered, bound) {
+            let mut rewritten = lowered.clone();
+            crate::type_resolution::row_distinct::rewrite_scalar(&mut rewritten)?;
+            self.sites.values.push(ValueSite::RowDistinct);
+            return self.scalar(&rewritten, bound, subqueries);
+        }
         if let ScalarExpr::CompositeRow { items, binding, .. } = bound {
             let source = match lowered {
                 ScalarExpr::Cast { expr, .. } => expr.as_ref(),
