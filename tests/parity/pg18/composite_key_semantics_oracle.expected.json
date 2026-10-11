@@ -1,0 +1,2100 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE ck_pair AS(n numeric,label text); CREATE TYPE ck_other AS(x numeric,y text); CREATE TYPE ck_xid AS(n xid); CREATE TYPE ck_json AS(n integer,j json); CREATE TYPE ck_wrap AS(p ck_pair,a integer[])",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "types"
+    },
+    {
+      "sql": "CREATE TABLE ck_values(id integer PRIMARY KEY,v ck_pair); INSERT INTO ck_values VALUES (1,ROW(1.0,'a')),(2,ROW(1.00,'a')),(3,ROW(2,'b')),(4,ROW('NaN'::numeric,'n')),(5,ROW('NaN'::numeric,'n')),(6,ROW(NULL,NULL)),(7,ROW(NULL,NULL)),(8,NULL),(9,NULL)",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 9"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "values"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v = b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v = b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "unknowns"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,405,504,505,606,607,706,707}",
+              "{108,109,208,209,308,309,408,409,508,509,608,609,708,709,801,802,803,804,805,806,807,808,809,901,902,903,904,905,906,907,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pairs_eq"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v <> b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v <> b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "unknowns"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{103,104,105,106,107,203,204,205,206,207,301,302,304,305,306,307,401,402,403,406,407,501,502,503,506,507,601,602,603,604,605,701,702,703,704,705}",
+              "{108,109,208,209,308,309,408,409,508,509,608,609,708,709,801,802,803,804,805,806,807,808,809,901,902,903,904,905,906,907,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pairs_ne"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v < b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v < b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "unknowns"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{103,104,105,106,107,203,204,205,206,207,304,305,306,307,406,407,506,507}",
+              "{108,109,208,209,308,309,408,409,508,509,608,609,708,709,801,802,803,804,805,806,807,808,809,901,902,903,904,905,906,907,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pairs_lt"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v <= b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v <= b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "unknowns"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,103,104,105,106,107,201,202,203,204,205,206,207,303,304,305,306,307,404,405,406,407,504,505,506,507,606,607,706,707}",
+              "{108,109,208,209,308,309,408,409,508,509,608,609,708,709,801,802,803,804,805,806,807,808,809,901,902,903,904,905,906,907,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pairs_le"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v > b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v > b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "unknowns"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{301,302,401,402,403,501,502,503,601,602,603,604,605,701,702,703,704,705}",
+              "{108,109,208,209,308,309,408,409,508,509,608,609,708,709,801,802,803,804,805,806,807,808,809,901,902,903,904,905,906,907,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pairs_gt"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v >= b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v >= b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "yes",
+            "unknowns"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,301,302,303,401,402,403,404,405,501,502,503,504,505,601,602,603,604,605,606,607,701,702,703,704,705,706,707}",
+              "{108,109,208,209,308,309,408,409,508,509,608,609,708,709,801,802,803,804,805,806,807,808,809,901,902,903,904,905,906,907,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pairs_ge"
+    },
+    {
+      "sql": "SELECT count(*) AS violations FROM ck_values WHERE v<>v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "violations"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reflexivity"
+    },
+    {
+      "sql": "SELECT count(*) AS violations FROM ck_values a CROSS JOIN ck_values b WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "violations"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "symmetry"
+    },
+    {
+      "sql": "SELECT count(*) AS violations FROM ck_values a CROSS JOIN ck_values b CROSS JOIN ck_values c WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "violations"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "transitivity"
+    },
+    {
+      "sql": "SELECT ROW(1.0,'a')::ck_pair=ROW(1.00,'a')::ck_other AS eq, ROW(1,'a')::ck_pair<ROW(2,'a')::ck_other AS lt",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "cross_named"
+    },
+    {
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(1,'a') AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types numeric and integer at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "cross_field_type"
+    },
+    {
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(2::numeric) AS eq,ROW(1,'a')::ck_pair<ROW(2::numeric) AS lt",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "cross_arity_prefix"
+    },
+    {
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(1::numeric) AS v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare record types with different numbers of columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "cross_arity_reached"
+    },
+    {
+      "sql": "SELECT NULL::ck_pair=ROW(NULL,NULL)::ck_pair AS eq, NULL::ck_pair IS NOT DISTINCT FROM ROW(NULL,NULL)::ck_pair AS same,ROW(NULL,NULL)::ck_pair IS NULL AS all_null",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "same",
+            "all_null"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "outer_inner_null"
+    },
+    {
+      "sql": "SELECT ROW(NULL::numeric,NULL::text)=ROW(NULL::numeric,NULL::text) AS eq, ROW(NULL::numeric,NULL::text)<ROW(1::numeric,'a'::text) AS lt",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "anonymous_null"
+    },
+    {
+      "sql": "SELECT count(*) AS groups FROM (SELECT DISTINCT v FROM ck_values) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "groups"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4,5}"
+            ],
+            [
+              "{6,7}"
+            ],
+            [
+              "{8,9}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "group"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id)::text AS pairs FROM ck_values a JOIN ck_values b ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pairs"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,405,504,505,606,607,706,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "join"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id)::text AS pairs FROM ck_values a JOIN ck_values b ON a.v IS NOT DISTINCT FROM b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pairs"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,405,504,505,606,607,706,707,808,809,908,909}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_safe_join"
+    },
+    {
+      "sql": "SELECT id,rank() OVER (ORDER BY v) AS r,dense_rank() OVER (ORDER BY v) AS d,count(*) OVER (PARTITION BY v) AS n FROM ck_values ORDER BY id",
+      "command_tags": [
+        "SELECT 9"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r",
+            "d",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1",
+              "1",
+              "2"
+            ],
+            [
+              "3",
+              "3",
+              "2",
+              "1"
+            ],
+            [
+              "4",
+              "4",
+              "3",
+              "2"
+            ],
+            [
+              "5",
+              "4",
+              "3",
+              "2"
+            ],
+            [
+              "6",
+              "6",
+              "4",
+              "2"
+            ],
+            [
+              "7",
+              "6",
+              "4",
+              "2"
+            ],
+            [
+              "8",
+              "8",
+              "5",
+              "2"
+            ],
+            [
+              "9",
+              "8",
+              "5",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "window"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 UNION SELECT v FROM ck_values WHERE id>=2) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_union"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 UNION ALL SELECT v FROM ck_values WHERE id>=2) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "14"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_union_all"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 INTERSECT SELECT v FROM ck_values WHERE id>=2) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_intersect"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 INTERSECT ALL SELECT v FROM ck_values WHERE id>=2) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_intersect_all"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 EXCEPT SELECT v FROM ck_values WHERE id>=2) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_except"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 EXCEPT ALL SELECT v FROM ck_values WHERE id>=2) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_except_all"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_eq"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v<>ROW(1,'a')::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{3,4,5,6,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_ne"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v>=ROW(2,'b')::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{3,4,5,6,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_range"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IN (ROW(1.000,'a')::ck_pair,ROW(NULL,NULL)::ck_pair)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2,6,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_in"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ANY(ARRAY[ROW(1,'a')::ck_pair,ROW('NaN'::numeric,'n')::ck_pair])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2,4,5}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_any"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{6,7,8,9}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_null"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NOT DISTINCT FROM NULL::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{8,9}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "before_index_outer_null"
+    },
+    {
+      "sql": "CREATE INDEX ck_values_v_idx ON ck_values(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "index"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_eq"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v<>ROW(1,'a')::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{3,4,5,6,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_ne"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v>=ROW(2,'b')::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{3,4,5,6,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_range"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IN (ROW(1.000,'a')::ck_pair,ROW(NULL,NULL)::ck_pair)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2,6,7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_in"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ANY(ARRAY[ROW(1,'a')::ck_pair,ROW('NaN'::numeric,'n')::ck_pair])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2,4,5}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_any"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{6,7,8,9}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_null"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NOT DISTINCT FROM NULL::ck_pair",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{8,9}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "after_index_outer_null"
+    },
+    {
+      "sql": "CREATE TABLE ck_xids(id integer,v ck_xid); INSERT INTO ck_xids VALUES(1,ROW('1'::xid)),(2,ROW('1'::xid)),(3,ROW('2'::xid)),(4,NULL)",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "equality_only_table"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v=ROW('1'::xid)::ck_xid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_lookup_eq"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v<>ROW('1'::xid)::ck_xid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{3}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_lookup_ne"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v IN (ROW('1'::xid)::ck_xid)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_lookup_in"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v=ANY(ARRAY[ROW('1'::xid)::ck_xid])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_lookup_any"
+    },
+    {
+      "sql": "CREATE TABLE ck_prefix(id integer,v ck_json); INSERT INTO ck_prefix VALUES(1,ROW(1,'{}'::json)),(2,ROW(2,'{}'::json))",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prefix_table"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v=ROW(0,'{}'::json)::ck_json",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_lookup_unreached"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v=ROW(1,'{}'::json)::ck_json",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "prefix_lookup_eq"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v<>ROW(1,'{}'::json)::ck_json",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "prefix_lookup_ne"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v IN (ROW(1,'{}'::json)::ck_json)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "prefix_lookup_in"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v BETWEEN ROW(0,'{}'::json)::ck_json AND ROW(3,'{}'::json)::ck_json",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_lookup_range"
+    },
+    {
+      "sql": "CREATE INDEX ck_prefix_v_idx ON ck_prefix(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "prefix_index"
+    },
+    {
+      "sql": "INSERT INTO ck_prefix VALUES(3,ROW(1,'{}'::json))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "prefix_index_reached"
+    },
+    {
+      "sql": "SELECT id FROM ck_prefix ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prefix_index_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_unique(v ck_pair UNIQUE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_setup"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.0,'a'))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_first"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.00,'a'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"ck_unique_v_key\"",
+        "detail": "Key (v)=((1.00,a)) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "unique_duplicate"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(ROW(NULL,NULL))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_inner_null"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(ROW(NULL,NULL))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"ck_unique_v_key\"",
+        "detail": "Key (v)=((,)) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "unique_inner_null_duplicate"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(NULL)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_outer_null"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(NULL)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_outer_null_again"
+    },
+    {
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.000,'a')) ON CONFLICT(v) DO NOTHING RETURNING v::text",
+      "command_tags": [
+        "INSERT 0 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_conflict"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_unique ORDER BY v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ],
+            [
+              "(1.0,a)"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "unique_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_parent(v ck_pair PRIMARY KEY); CREATE TABLE ck_child(id integer PRIMARY KEY,p ck_pair REFERENCES ck_parent(v) ON DELETE CASCADE ON UPDATE CASCADE); INSERT INTO ck_parent VALUES(ROW(1.0,'a')),(ROW(2,'b')),(ROW(NULL,NULL)); INSERT INTO ck_child VALUES(1,ROW(1.00,'a')),(2,ROW(2,'b')),(3,ROW(NULL,NULL)),(4,NULL)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 3",
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "fk_setup"
+    },
+    {
+      "sql": "INSERT INTO ck_child VALUES(5,ROW(5,'e'))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23503",
+        "message": "insert or update on table \"ck_child\" violates foreign key constraint \"ck_child_p_fkey\"",
+        "detail": "Key (p)=((5,e)) is not present in table \"ck_parent\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "fk_missing"
+    },
+    {
+      "sql": "UPDATE ck_parent SET v=ROW(1.000,'a') WHERE v=ROW(1,'a')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1.000,a)"
+            ],
+            [
+              "2",
+              "(2,b)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "fk_equal_update"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "fk_begin"
+    },
+    {
+      "sql": "UPDATE ck_parent SET v=ROW(9,'a') WHERE v=ROW(1,'a')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(9,a)"
+            ],
+            [
+              "2",
+              "(2,b)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "fk_update"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "fk_rollback"
+    },
+    {
+      "sql": "SELECT id,p::text FROM ck_child ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1.000,a)"
+            ],
+            [
+              "2",
+              "(2,b)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "fk_after_rollback"
+    },
+    {
+      "sql": "DELETE FROM ck_parent WHERE v=ROW(2,'b')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id",
+      "command_tags": [
+        "DELETE 1",
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1.000,a)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "fk_delete"
+    },
+    {
+      "sql": "CREATE TABLE ck_nested(id integer,v ck_wrap); INSERT INTO ck_nested VALUES(1,ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])),(2,ROW(ROW(1.00,'a')::ck_pair,ARRAY[1,2])),(3,ROW(ROW(1,'a')::ck_pair,'[0:1]={1,2}'::integer[])),(4,ROW(NULL,ARRAY[NULL]::integer[]))",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "nested"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_nested GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_group"
+    },
+    {
+      "sql": "CREATE INDEX ck_nested_v_idx ON ck_nested(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "nested_index"
+    },
+    {
+      "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_lookup"
+    },
+    {
+      "sql": "SELECT id FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_lookup",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM ck_xids WHERE v=ROW('1'::xid)::ck_xid ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_xid",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT v::text FROM ck_unique ORDER BY v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ],
+            [
+              "(1.0,a)"
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_unique",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id,p::text FROM ck_child ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1.000,a)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_fk",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_nested",
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "5cb8d4f54e5047e33df1bb4d04a40d1f76a1182404543b4ec84bbf4597e6c742",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "fresh_connection_cases": 5,
+    "fresh_connection_output_sha256": "07f94cf55eec62ff0de2d08e2e0d2e30a4ad018b1a1da2fb15587a8b42e80c50"
+  }
+}

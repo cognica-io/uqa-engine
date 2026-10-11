@@ -1,0 +1,345 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "types",
+      "sql": "CREATE TYPE ck_pair AS(n numeric,label text); CREATE TYPE ck_other AS(x numeric,y text); CREATE TYPE ck_xid AS(n xid); CREATE TYPE ck_json AS(n integer,j json); CREATE TYPE ck_wrap AS(p ck_pair,a integer[])"
+    },
+    {
+      "id": "values",
+      "sql": "CREATE TABLE ck_values(id integer PRIMARY KEY,v ck_pair); INSERT INTO ck_values VALUES (1,ROW(1.0,'a')),(2,ROW(1.00,'a')),(3,ROW(2,'b')),(4,ROW('NaN'::numeric,'n')),(5,ROW('NaN'::numeric,'n')),(6,ROW(NULL,NULL)),(7,ROW(NULL,NULL)),(8,NULL),(9,NULL)"
+    },
+    {
+      "id": "pairs_eq",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v = b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v = b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_ne",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v <> b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v <> b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_lt",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v < b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v < b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_le",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v <= b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v <= b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_gt",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v > b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v > b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "pairs_ge",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v >= b.v)::text AS yes,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE (a.v >= b.v) IS NULL)::text AS unknowns FROM ck_values a CROSS JOIN ck_values b"
+    },
+    {
+      "id": "reflexivity",
+      "sql": "SELECT count(*) AS violations FROM ck_values WHERE v<>v"
+    },
+    {
+      "id": "symmetry",
+      "sql": "SELECT count(*) AS violations FROM ck_values a CROSS JOIN ck_values b WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)"
+    },
+    {
+      "id": "transitivity",
+      "sql": "SELECT count(*) AS violations FROM ck_values a CROSS JOIN ck_values b CROSS JOIN ck_values c WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v"
+    },
+    {
+      "id": "cross_named",
+      "sql": "SELECT ROW(1.0,'a')::ck_pair=ROW(1.00,'a')::ck_other AS eq, ROW(1,'a')::ck_pair<ROW(2,'a')::ck_other AS lt"
+    },
+    {
+      "id": "cross_field_type",
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(1,'a') AS v"
+    },
+    {
+      "id": "cross_arity_prefix",
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(2::numeric) AS eq,ROW(1,'a')::ck_pair<ROW(2::numeric) AS lt"
+    },
+    {
+      "id": "cross_arity_reached",
+      "sql": "SELECT ROW(1,'a')::ck_pair=ROW(1::numeric) AS v"
+    },
+    {
+      "id": "outer_inner_null",
+      "sql": "SELECT NULL::ck_pair=ROW(NULL,NULL)::ck_pair AS eq, NULL::ck_pair IS NOT DISTINCT FROM ROW(NULL,NULL)::ck_pair AS same,ROW(NULL,NULL)::ck_pair IS NULL AS all_null"
+    },
+    {
+      "id": "anonymous_null",
+      "sql": "SELECT ROW(NULL::numeric,NULL::text)=ROW(NULL::numeric,NULL::text) AS eq, ROW(NULL::numeric,NULL::text)<ROW(1::numeric,'a'::text) AS lt"
+    },
+    {
+      "id": "distinct",
+      "sql": "SELECT count(*) AS groups FROM (SELECT DISTINCT v FROM ck_values) s"
+    },
+    {
+      "id": "group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "join",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id)::text AS pairs FROM ck_values a JOIN ck_values b ON a.v=b.v"
+    },
+    {
+      "id": "null_safe_join",
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id)::text AS pairs FROM ck_values a JOIN ck_values b ON a.v IS NOT DISTINCT FROM b.v"
+    },
+    {
+      "id": "window",
+      "sql": "SELECT id,rank() OVER (ORDER BY v) AS r,dense_rank() OVER (ORDER BY v) AS d,count(*) OVER (PARTITION BY v) AS n FROM ck_values ORDER BY id"
+    },
+    {
+      "id": "set_union",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 UNION SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_union_all",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 UNION ALL SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_intersect",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 INTERSECT SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_intersect_all",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 INTERSECT ALL SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_except",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 EXCEPT SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "set_except_all",
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM ck_values WHERE id<=6 EXCEPT ALL SELECT v FROM ck_values WHERE id>=2) s"
+    },
+    {
+      "id": "before_index_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair"
+    },
+    {
+      "id": "before_index_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v<>ROW(1,'a')::ck_pair"
+    },
+    {
+      "id": "before_index_range",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v>=ROW(2,'b')::ck_pair"
+    },
+    {
+      "id": "before_index_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IN (ROW(1.000,'a')::ck_pair,ROW(NULL,NULL)::ck_pair)"
+    },
+    {
+      "id": "before_index_any",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ANY(ARRAY[ROW(1,'a')::ck_pair,ROW('NaN'::numeric,'n')::ck_pair])"
+    },
+    {
+      "id": "before_index_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NULL"
+    },
+    {
+      "id": "before_index_outer_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NOT DISTINCT FROM NULL::ck_pair"
+    },
+    {
+      "id": "index",
+      "sql": "CREATE INDEX ck_values_v_idx ON ck_values(v)"
+    },
+    {
+      "id": "after_index_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair"
+    },
+    {
+      "id": "after_index_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v<>ROW(1,'a')::ck_pair"
+    },
+    {
+      "id": "after_index_range",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v>=ROW(2,'b')::ck_pair"
+    },
+    {
+      "id": "after_index_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IN (ROW(1.000,'a')::ck_pair,ROW(NULL,NULL)::ck_pair)"
+    },
+    {
+      "id": "after_index_any",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v=ANY(ARRAY[ROW(1,'a')::ck_pair,ROW('NaN'::numeric,'n')::ck_pair])"
+    },
+    {
+      "id": "after_index_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NULL"
+    },
+    {
+      "id": "after_index_outer_null",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_values WHERE v IS NOT DISTINCT FROM NULL::ck_pair"
+    },
+    {
+      "id": "equality_only_table",
+      "sql": "CREATE TABLE ck_xids(id integer,v ck_xid); INSERT INTO ck_xids VALUES(1,ROW('1'::xid)),(2,ROW('1'::xid)),(3,ROW('2'::xid)),(4,NULL)"
+    },
+    {
+      "id": "xid_lookup_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v=ROW('1'::xid)::ck_xid"
+    },
+    {
+      "id": "xid_lookup_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v<>ROW('1'::xid)::ck_xid"
+    },
+    {
+      "id": "xid_lookup_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v IN (ROW('1'::xid)::ck_xid)"
+    },
+    {
+      "id": "xid_lookup_any",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_xids WHERE v=ANY(ARRAY[ROW('1'::xid)::ck_xid])"
+    },
+    {
+      "id": "prefix_table",
+      "sql": "CREATE TABLE ck_prefix(id integer,v ck_json); INSERT INTO ck_prefix VALUES(1,ROW(1,'{}'::json)),(2,ROW(2,'{}'::json))"
+    },
+    {
+      "id": "prefix_lookup_unreached",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v=ROW(0,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_lookup_eq",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v=ROW(1,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_lookup_ne",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v<>ROW(1,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_lookup_in",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v IN (ROW(1,'{}'::json)::ck_json)"
+    },
+    {
+      "id": "prefix_lookup_range",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_prefix WHERE v BETWEEN ROW(0,'{}'::json)::ck_json AND ROW(3,'{}'::json)::ck_json"
+    },
+    {
+      "id": "prefix_index",
+      "sql": "CREATE INDEX ck_prefix_v_idx ON ck_prefix(v)"
+    },
+    {
+      "id": "prefix_index_reached",
+      "sql": "INSERT INTO ck_prefix VALUES(3,ROW(1,'{}'::json))"
+    },
+    {
+      "id": "prefix_index_after",
+      "sql": "SELECT id FROM ck_prefix ORDER BY id"
+    },
+    {
+      "id": "unique_setup",
+      "sql": "CREATE TABLE ck_unique(v ck_pair UNIQUE)"
+    },
+    {
+      "id": "unique_first",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.0,'a'))"
+    },
+    {
+      "id": "unique_duplicate",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.00,'a'))"
+    },
+    {
+      "id": "unique_inner_null",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(NULL,NULL))"
+    },
+    {
+      "id": "unique_inner_null_duplicate",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(NULL,NULL))"
+    },
+    {
+      "id": "unique_outer_null",
+      "sql": "INSERT INTO ck_unique VALUES(NULL)"
+    },
+    {
+      "id": "unique_outer_null_again",
+      "sql": "INSERT INTO ck_unique VALUES(NULL)"
+    },
+    {
+      "id": "unique_conflict",
+      "sql": "INSERT INTO ck_unique VALUES(ROW(1.000,'a')) ON CONFLICT(v) DO NOTHING RETURNING v::text"
+    },
+    {
+      "id": "unique_after",
+      "sql": "SELECT v::text FROM ck_unique ORDER BY v"
+    },
+    {
+      "id": "fk_setup",
+      "sql": "CREATE TABLE ck_parent(v ck_pair PRIMARY KEY); CREATE TABLE ck_child(id integer PRIMARY KEY,p ck_pair REFERENCES ck_parent(v) ON DELETE CASCADE ON UPDATE CASCADE); INSERT INTO ck_parent VALUES(ROW(1.0,'a')),(ROW(2,'b')),(ROW(NULL,NULL)); INSERT INTO ck_child VALUES(1,ROW(1.00,'a')),(2,ROW(2,'b')),(3,ROW(NULL,NULL)),(4,NULL)"
+    },
+    {
+      "id": "fk_missing",
+      "sql": "INSERT INTO ck_child VALUES(5,ROW(5,'e'))"
+    },
+    {
+      "id": "fk_equal_update",
+      "sql": "UPDATE ck_parent SET v=ROW(1.000,'a') WHERE v=ROW(1,'a')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "fk_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "fk_update",
+      "sql": "UPDATE ck_parent SET v=ROW(9,'a') WHERE v=ROW(1,'a')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "fk_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "fk_after_rollback",
+      "sql": "SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "fk_delete",
+      "sql": "DELETE FROM ck_parent WHERE v=ROW(2,'b')::ck_pair; SELECT id,p::text FROM ck_child ORDER BY id"
+    },
+    {
+      "id": "nested",
+      "sql": "CREATE TABLE ck_nested(id integer,v ck_wrap); INSERT INTO ck_nested VALUES(1,ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])),(2,ROW(ROW(1.00,'a')::ck_pair,ARRAY[1,2])),(3,ROW(ROW(1,'a')::ck_pair,'[0:1]={1,2}'::integer[])),(4,ROW(NULL,ARRAY[NULL]::integer[]))"
+    },
+    {
+      "id": "nested_group",
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM ck_nested GROUP BY v ORDER BY min(id)"
+    },
+    {
+      "id": "nested_index",
+      "sql": "CREATE INDEX ck_nested_v_idx ON ck_nested(v)"
+    },
+    {
+      "id": "nested_lookup",
+      "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id"
+    },
+    {
+      "id": "reopen_lookup",
+      "sql": "SELECT id FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_xid",
+      "sql": "SELECT id FROM ck_xids WHERE v=ROW('1'::xid)::ck_xid ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_unique",
+      "sql": "SELECT v::text FROM ck_unique ORDER BY v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_fk",
+      "sql": "SELECT id,p::text FROM ck_child ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_nested",
+      "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id",
+      "reopen": true
+    }
+  ]
+}

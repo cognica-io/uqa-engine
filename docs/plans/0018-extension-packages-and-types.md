@@ -431,7 +431,7 @@ SQL owns descriptor-aware record equality and ordering in `expr/binary/compariso
 - [ ] Update the manual, compatibility manifest, history and progress ledger with actual completed evidence.
 - [ ] Complete focused verification, review, merge and branch cleanup before starting the next independent extension unit.
 
-Explicit cast namespace retention is the next independent correction: [#748](https://github.com/cognica-io/uqa-engine/issues/748) reproduces the compiler erasing `pg_catalog` before catalog binding and choosing a user type through `search_path`. Complete this correction immediately after PR #746, carrying the same inherited ledger forward.
+Explicit cast namespace retention was corrected in merged PR #749, closing [#748](https://github.com/cognica-io/uqa-engine/issues/748): compilation preserves `pg_catalog` for catalog binding and unqualified names retain `search_path` selection. The inherited ledger continues through the later comparison and consumer corrections below.
 
 ### Array builtin correction
 
@@ -499,4 +499,16 @@ SQL owns capability metadata, source type identity, query analysis and whole-key
 - [x] Preserve admitted row field identities during composite assignment (`6f64d5c8b`); both owner regressions pass.
 - [x] Implement DISTINCT/GROUP BY selection, hash collision equality, constant key removal and equality-only partial merging. The 77-case reference passes every provider and all three persistent reopenings; the final spill-key refinement streams one derived key at a time into the existing external-sort allowance. Owner regressions and final checks are recorded at completion.
 - [x] Pass the final 77-case reference on all four providers and persistent reopen, 28 focused SQL capability/composite checks plus the added builtin-array assignment check, 31 DISTINCT and 49 aggregation owner tests, and compiled/executed manual SQL. The broader composite run passes 161 tests; its four failed provider replays expose the missing builtin-array OID lookup, now corrected with all 330 retained-datum cases passing per provider. Strict SQL/Execution/Engine Clippy, rustfmt, dependency/ownership, harness, Rust source and manifest checks pass. CodeRabbit reviews `172234d76` without actionable comments; it also reports a docstring-coverage warning, and Copilot cannot review because of quota.
-- [ ] Complete review, merge and close reproduced issues, remove the completed branch and return to main before continuing the remaining comparison matrix.
+- [x] Merge as `1b427608d` in PR #755; close #753/#754/#756/#757/#758, remove the completed local/remote branch and update main. All 80 original PR #638 records remain unchanged. Automatic PR Checks passes on final `c9bb85c19`; automatic performance archive builds continue independently. The unrelated parity README edit remains preserved.
+
+## Composite keys and relational consumers
+
+Continue the same comparison requirement from main `1b427608d` with independent PostgreSQL 18.4 evidence for scalar equality/order laws, named versus anonymous descriptors, hash and duplicate-elimination consumers, B-tree and raw-field probes, uniqueness, foreign-key actions, nested arrays, rollback and durable reopen. The new reference contains 84 cases with five fresh-connection observations. Keep all 80 original PR #638 records in the successor PR. This verification complements the array, retained-layout and declared-capability suites; completion of the entire comparison unit requires the combined consumer audit.
+
+SQL owns the selected equality and ordering operations. Execution owns value-index predicate evaluation, relational consumers and mutation/key coordination through those operations. Core and Storage retain their existing value and index carriers; no reverse dependency or Engine algorithm is introduced. Inspect the owning manifests and interfaces before making a correction. The current raw-field predicate evaluator uses an ordering comparison for equality predicates; replay the independent reference before changing it.
+
+- [x] Capture the independent reference, exact diagnostics and fresh-connection observations.
+- [x] Replay current main and register [#759](https://github.com/cognica-io/uqa-engine/issues/759): 3 of 79 initial observations differ because ON UPDATE CASCADE skips an SQL-equal change from `(1.0,a)` to `(1.000,a)`, leaving the child representation `(1.00,a)`. The remaining 76 observations match. Preserve the independent fixture and failing baseline; the five fresh-connection observations await the corrected provider replay.
+- [ ] Correct each reproduced consumer defect in its owning crate, with direct regression coverage.
+- [ ] Verify the complete reference on all four providers and persistent reopen, plus affected owner tests and repository checks.
+- [ ] Reconcile the full composite comparison evidence, update public contracts and the progress ledger, preserve the inherited PR tasks and finish review/merge/cleanup.
