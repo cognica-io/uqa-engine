@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{IntervalFields, RangeSubtype};
 
+mod catalog_names;
 mod display;
 mod identity;
 mod modifiers;

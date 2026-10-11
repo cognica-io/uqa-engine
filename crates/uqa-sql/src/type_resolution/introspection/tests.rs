@@ -251,8 +251,13 @@ fn array_common_type_preserves_coercion_origin_through_controlled_binding() {
         let ScalarExpr::Func { args, .. } = &*output else {
             panic!("common expression")
         };
+        let expected_type = if explicit {
+            "bigint[]"
+        } else {
+            "pg_catalog.\"int8\"[]"
+        };
         assert!(matches!(&args[0], ScalarExpr::Cast { implicit, ty, expr }
-            if *implicit != explicit && ty == "bigint[]" && matches!(expr.as_ref(), ScalarExpr::Array(_))));
+            if *implicit != explicit && ty == expected_type && matches!(expr.as_ref(), ScalarExpr::Array(_))));
         assert!(matches!(&args[1], ScalarExpr::Array(_)));
         assert_eq!(budget.used(), output.reserved_bytes());
         drop(output);
@@ -283,8 +288,12 @@ fn unknown_common_input_relabels_a_domain_but_identical_domains_survive() {
             panic!("common expression")
         };
         if unknown {
-            assert!(matches!(&args[0], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "oid"));
-            assert!(matches!(&args[1], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "oid"));
+            assert!(
+                matches!(&args[0], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "pg_catalog.\"oid\"")
+            );
+            assert!(
+                matches!(&args[1], ScalarExpr::Cast { implicit: true, ty, .. } if ty == "pg_catalog.\"oid\"")
+            );
         } else {
             assert!(args
                 .iter()

@@ -63,6 +63,15 @@ pub fn cast_value_from_with_control(
     if matches!(v, Value::Null) {
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
+    // Physical cast dispatch consumes the SQL owner's resolved builtin class, including quoted identifiers and catalog interval modifiers.
+    let canonical;
+    let ty = if ty.contains('"') || ty.starts_with("pg_catalog.") {
+        canonical = crate::ColumnType::from_sql_name_with_control(ty, control)?
+            .sql_name_with_control(control)?;
+        canonical.as_str()
+    } else {
+        ty
+    };
     let (base, modifier) = crate::ast::split_type_modifier_with_control(ty, control)?;
     let target = base
         .trim()

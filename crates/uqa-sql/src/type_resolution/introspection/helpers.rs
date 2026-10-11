@@ -211,7 +211,7 @@ impl Binder<'_, '_> {
             return Ok(());
         }
         // The cast is resolved again at evaluation, so a user-defined type is named by identity rather than by a search-path-dependent name.
-        let ty = self.control.copy_text(&target.catalog_name())?;
+        let ty = target.catalog_name_with_control(&self.control)?;
         self.install_cast(expression, ty)
     }
 
@@ -289,7 +289,7 @@ impl Binder<'_, '_> {
         };
         let memory = self.control.reserve(size_of::<ScalarExpr>())?;
         *self.memory = self.control.combine(self.memory.take(), memory);
-        let ty = self.control.copy_text(&target.catalog_name())?;
+        let ty = target.catalog_name_with_control(&self.control)?;
         let ty = self.retain(ty);
         let bound_type = target.clone_with_control(&self.control)?;
         let bound_type = self.retain(bound_type);
@@ -308,7 +308,7 @@ impl Binder<'_, '_> {
         expression: &mut ScalarExpr,
         ty: &ColumnType,
     ) -> Result<(), SQLError> {
-        let name = self.control.copy_text(&ty.catalog_name())?;
+        let name = ty.catalog_name_with_control(&self.control)?;
         if matches!(expression, ScalarExpr::Cast {ty, ..} if ty.eq_ignore_ascii_case(&name)) {
             return Ok(());
         }

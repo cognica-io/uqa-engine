@@ -86,7 +86,12 @@ impl SchemaScope {
                 .collect::<Result<Vec<_>, _>>()
                 .map(|fields| Some(fields.into())),
             ScalarExpr::Cast { expr, ty, .. }
-                if crate::type_resolution::canonical_routine_type_name(ty) == "record" =>
+                if matches!(
+                    routines
+                        .resolve_type_name(ty)?
+                        .or_else(|| ColumnType::from_sql_name(ty).ok()),
+                    Some(ColumnType::Record)
+                ) =>
             {
                 self.bind_record_fields(routines, expr, schema, subqueries, params)
             }
@@ -117,7 +122,13 @@ impl SchemaScope {
             _ => {
                 let ty =
                     self.bind_expression_type(routines, expression, schema, subqueries, params)?;
-                let Some(ColumnType::Composite(reference)) = ty else {
+                let Some(mut ty) = ty.as_ref() else {
+                    return Ok(None);
+                };
+                while let ColumnType::Domain { base, .. } = ty {
+                    ty = base;
+                }
+                let ColumnType::Composite(reference) = ty else {
                     return Ok(None);
                 };
                 let descriptor =

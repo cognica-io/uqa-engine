@@ -62,7 +62,7 @@ fn numeric_comparison_binding_retains_selected_casts_without_masking_exact_colum
     let ScalarExpr::Binary { lhs, rhs, .. } = scalar else {
         panic!("binary comparison")
     };
-    assert!(matches!(*lhs, ScalarExpr::Cast { ref ty, .. } if ty == "double precision"));
+    assert!(matches!(*lhs, ScalarExpr::Cast { ref ty, .. } if ty == "pg_catalog.\"float8\""));
     assert!(matches!(*rhs, ScalarExpr::Column(ref name) if name == "f"));
 
     let scalar = crate::bind_type_introspection(expression("n = 1"), &schema, &[]);
@@ -77,7 +77,9 @@ fn numeric_comparison_binding_retains_selected_casts_without_masking_exact_colum
     let ScalarExpr::Binary { lhs, .. } = scalar else {
         panic!("binary comparison")
     };
-    assert!(matches!(*lhs, ScalarExpr::TypedLiteral { ref ty, .. } if ty == "numeric"));
+    assert!(
+        matches!(*lhs, ScalarExpr::TypedLiteral { ref ty, .. } if ty == "pg_catalog.\"numeric\"")
+    );
 }
 
 #[test]
@@ -93,11 +95,11 @@ fn oid_alias_comparisons_relabel_their_operands_to_oid() {
         panic!("binary comparison: {scalar:?}")
     };
     assert!(
-        matches!(*lhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "oid" && matches!(**expr, ScalarExpr::Column(_))),
+        matches!(*lhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "pg_catalog.\"oid\"" && matches!(**expr, ScalarExpr::Column(_))),
         "{lhs:?}"
     );
     assert!(
-        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "oid" && matches!(**expr, ScalarExpr::Cast { .. })),
+        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "pg_catalog.\"oid\"" && matches!(**expr, ScalarExpr::Cast { .. })),
         "{rhs:?}"
     );
     // An `oid` operand needs no relabel; an integer literal is cast to `oid`; an `unknown` literal is read as `oid`.
@@ -106,7 +108,7 @@ fn oid_alias_comparisons_relabel_their_operands_to_oid() {
         panic!("binary comparison: {scalar:?}")
     };
     assert!(
-        matches!(*lhs, ScalarExpr::Cast { ref ty, .. } if ty == "oid"),
+        matches!(*lhs, ScalarExpr::Cast { ref ty, .. } if ty == "pg_catalog.\"oid\""),
         "{lhs:?}"
     );
     assert!(
@@ -118,7 +120,7 @@ fn oid_alias_comparisons_relabel_their_operands_to_oid() {
         panic!("binary comparison: {scalar:?}")
     };
     assert!(
-        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "oid" && matches!(**expr, ScalarExpr::Literal(_))),
+        matches!(*rhs, ScalarExpr::Cast { ref ty, ref expr, .. } if ty == "pg_catalog.\"oid\"" && matches!(**expr, ScalarExpr::Literal(_))),
         "{rhs:?}"
     );
     let scalar = crate::bind_type_introspection(expression("e <> '16384'"), &schema, &[]);
@@ -126,7 +128,7 @@ fn oid_alias_comparisons_relabel_their_operands_to_oid() {
         panic!("binary comparison: {scalar:?}")
     };
     assert!(
-        matches!(*rhs, ScalarExpr::TypedLiteral { ref ty, .. } if ty == "oid"),
+        matches!(*rhs, ScalarExpr::TypedLiteral { ref ty, .. } if ty == "pg_catalog.\"oid\""),
         "{rhs:?}"
     );
 }

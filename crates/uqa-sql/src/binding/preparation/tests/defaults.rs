@@ -100,7 +100,7 @@ fn default_analysis_reads_input_constants_without_evaluating_operators() {
     );
     let mut converted = false;
     plan.scalar.visit(&mut |node| {
-        converted |= matches!(node, ScalarExpr::TypedLiteral { value: uqa_core::Value::Int(12), ty, .. } if ty == "integer");
+        converted |= matches!(node, ScalarExpr::TypedLiteral { value: uqa_core::Value::Int(12), ty, .. } if ty == "pg_catalog.\"int4\"");
     });
     assert!(converted, "the input function's value must be retained");
 }

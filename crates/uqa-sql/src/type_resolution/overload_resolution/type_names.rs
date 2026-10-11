@@ -39,8 +39,23 @@ pub(in crate::type_resolution) fn canonical_routine_type_name_with_control(
         let element = canonical_routine_type_name_with_control(element, control)?;
         return control.format(format_args!("{}[]", element.as_str()));
     }
-    let without_catalog = compact.strip_prefix("pg_catalog.").unwrap_or(&compact);
+    let without_catalog = compact
+        .strip_prefix("pg_catalog.")
+        .or_else(|| compact.strip_prefix("\"pg_catalog\"."))
+        .unwrap_or(&compact);
     let base = strip_type_modifiers(without_catalog, control)?;
+    let base = if compact.starts_with("pg_catalog.") || compact.starts_with("\"pg_catalog\".") {
+        match base
+            .strip_prefix('"')
+            .and_then(|name| name.strip_suffix('"'))
+            .and_then(crate::catalog::type_metadata::builtin_scalar_type_by_name)
+        {
+            Some(ty) => ty.regtype_name_with_control(control)?,
+            None => base,
+        }
+    } else {
+        base
+    };
     let canonical = match base.as_str() {
         "smallint" | "int2" => "int2",
         "integer" | "int" | "int4" | "serial" | "serial4" => "int4",

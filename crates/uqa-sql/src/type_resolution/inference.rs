@@ -60,16 +60,7 @@ pub(super) fn scalar_type_inner_with_control(
             ..
         } => copy_type(Some(ty), control),
         ScalarExpr::TypedLiteral { ty, .. } => {
-            let target = match ColumnType::from_sql_name_with_control(ty, control) {
-                Ok(ty) => Ok(Some(ty)),
-                Err(error @ SQLError::Unsupported(_)) => match resolver {
-                    Some(resolver) => resolver
-                        .resolve_type_name(ty)?
-                        .map_or(Err(error), |ty| Ok(Some(control.finish(ty, None)?))),
-                    None => Err(error),
-                },
-                Err(error) => Err(error),
-            }?;
+            let target = resolved_type_name(ty, resolver, control)?;
             Ok(target)
         }
         ScalarExpr::Param(index) => index
@@ -80,16 +71,7 @@ pub(super) fn scalar_type_inner_with_control(
             .map(Option::flatten),
         ScalarExpr::Cast { expr, ty, .. } => {
             let source = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
-            let target = match ColumnType::from_sql_name_with_control(ty, control) {
-                Ok(ty) => Ok(Some(ty)),
-                Err(error @ SQLError::Unsupported(_)) => match resolver {
-                    Some(resolver) => resolver
-                        .resolve_type_name(ty)?
-                        .map_or(Err(error), |ty| Ok(Some(control.finish(ty, None)?))),
-                    None => Err(error),
-                },
-                Err(error) => Err(error),
-            }?;
+            let target = resolved_type_name(ty, resolver, control)?;
             if let Some(target) = target.as_ref() {
                 cast_compatibility::validate_explicit_cast_with_control(
                     source.as_deref(),
@@ -577,6 +559,21 @@ pub(super) fn field_selection_type(
         field_selection::value_field_type(base.as_deref(), field, resolver)?.as_ref(),
         control,
     )
+}
+
+fn resolved_type_name(
+    name: &str,
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    if let Some(resolver) = resolver {
+        if let Some(ty) = resolver.resolve_type_name(name)? {
+            control.check()?;
+            return control.finish(ty, None).map(Some).map_err(Into::into);
+        }
+        control.check()?;
+    }
+    ColumnType::from_sql_name_with_control(name, control).map(Some)
 }
 
 fn copy_type(

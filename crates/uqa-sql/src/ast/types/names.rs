@@ -23,12 +23,6 @@ impl ColumnType {
         .to_string()
     }
 
-    /// A name that resolves back to this exact type independently of the search path and of later renames: the OID identity of a user-defined type, and the SQL name of a built-in type.
-    #[must_use]
-    pub fn catalog_name(&self) -> String {
-        self.user_type_identity().unwrap_or_else(|| self.sql_name())
-    }
-
     /// Name emitted by `PostgreSQL`'s regtype output, including `pg_typeof`.
     #[must_use]
     pub fn regtype_name(&self) -> String {

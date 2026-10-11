@@ -7,6 +7,7 @@
 use super::*;
 use crate::ast::FunctionDispatch;
 
+mod catalog_qualification;
 mod fixed_overloads;
 mod variadic;
 
@@ -836,7 +837,7 @@ fn array_cast_binding_preserves_the_declared_source_element_type() {
             expr: Box::new(ScalarExpr::Cast {
                 implicit: true,
                 expr: Box::new(source),
-                ty: "smallint[]".into(),
+                ty: "pg_catalog.\"int2\"[]".into(),
             }),
             ty: "bytea[]".into(),
         }
@@ -874,7 +875,7 @@ fn text_cast_binding_preserves_only_legacy_vector_identity() {
             expr: Box::new(ScalarExpr::Cast {
                 implicit: true,
                 expr: Box::new(ScalarExpr::Column("arguments".into())),
-                ty: "oidvector".into(),
+                ty: "pg_catalog.\"oidvector\"".into(),
             }),
             ty: "text".into(),
         }
@@ -915,7 +916,7 @@ fn common_type_binding_coerces_selector_results_before_runtime_evaluation() {
         [
             ScalarExpr::Column(_),
             ScalarExpr::Cast { ty, .. }
-        ] if ty == "double precision"
+        ] if ty == "pg_catalog.\"float8\""
     ));
     assert_eq!(
         scalar_type(&bound, &schema, &[]).unwrap(),

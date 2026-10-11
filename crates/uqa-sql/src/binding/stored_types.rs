@@ -30,7 +30,7 @@ pub enum TypeNameSite {
 }
 
 fn identity(name: &str, resolve: &mut TypeNameResolver<'_>) -> Result<Option<String>, SQLError> {
-    if UserTypeIdentity::parse(name).is_some() || ColumnType::from_sql_name(name).is_ok() {
+    if UserTypeIdentity::parse(name).is_some() {
         return Ok(None);
     }
     Ok(resolve(name)?.and_then(|ty| ty.user_type_identity()))
