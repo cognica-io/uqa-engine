@@ -208,13 +208,13 @@ SELECT round(2.71828::numeric, 2) AS rounded,
 | Function | Result |
 | --- | --- |
 | `gen_random_uuid()`, `uuidv4()` | Random RFC variant version 4 UUID |
-| `uuidv7([shift interval])` | Time-ordered RFC variant version 7 UUID |
+| `uuidv7([shift interval])` | RFC variant version 7 UUID with an optional timestamp shift |
 | `uuid_extract_version(uuid)` | RFC 9562 version nibble as `smallint`, or NULL for a non-RFC variant including the nil UUID |
 | `uuid_extract_timestamp(uuid)` | Version 1 or version 7 timestamp as `timestamp with time zone`, or NULL for every other version or variant |
 
 The extraction functions are strict and immutable. Version 1 timestamps use the UUID 100-nanosecond epoch and are floored to PostgreSQL's microsecond precision, while version 7 timestamps use the leading 48-bit Unix millisecond field; sub-millisecond random or counter bits do not affect the extracted timestamp.
 
-`gen_random_uuid()` and `uuidv4()` accept no arguments. `uuidv7()` also accepts one `interval` argument whose declared name is `shift`; unsupported argument types, names, and arities report SQLSTATE `42883`. The three generator functions are volatile and therefore unavailable in generated expressions. This signature contract does not assert byte-for-byte UUID output or PostgreSQL's complete interval-shift edge semantics.
+`gen_random_uuid()` and `uuidv4()` accept no arguments. `uuidv7()` also accepts one `interval` argument whose declared name is `shift`; unsupported argument types, names, and arities report SQLSTATE `42883`. The three generator functions are volatile and therefore unavailable in generated expressions. UUIDv7 shifts apply interval months and days through the invoking session's `TimeZone`, followed by elapsed microseconds. PostgreSQL retains only the low 48 bits of the shifted Unix millisecond timestamp: accepted pre-1970 or distant-future shifts wrap in that field, and infinite shifts use PostgreSQL's raw timestamp conversion. These shifts need not preserve timestamp ordering. A NULL shift returns NULL; an interval operation outside the valid timestamp domain reports `22008`. Random UUID bits are not reproducible across calls.
 
 ## Array functions
 

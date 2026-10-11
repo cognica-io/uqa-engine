@@ -18,6 +18,8 @@ use uqa_engine::Engine;
 mod interval_arithmetic;
 #[path = "pg18_semantics/jsonb_comparisons.rs"]
 mod jsonb_comparisons;
+#[path = "pg18_semantics/temporal_consumers.rs"]
+mod temporal_consumers;
 
 fn engine() -> Engine {
     Engine::new()

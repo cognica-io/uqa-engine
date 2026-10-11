@@ -131,6 +131,9 @@ pub(super) fn eval_scalar_function_with_context(
     args: &[Value],
     context: &EvalContext<'_>,
 ) -> Result<Value> {
+    if name.strip_prefix("pg_catalog.").unwrap_or(name) == "uuidv7" {
+        return super::uuid::eval_uuid_v7(args, Some(context));
+    }
     if name.strip_prefix("pg_catalog.").unwrap_or(name) == "timezone" {
         return super::time::eval_timezone(args, Some(context), &ProductionControl::uncontrolled())
             .map(|value| value.into_uncontrolled().expect("ordinary temporal result"));
