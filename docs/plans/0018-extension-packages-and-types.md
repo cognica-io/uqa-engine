@@ -567,7 +567,7 @@ The SQL and Execution Cargo manifests, feature settings and dependency policy ha
 - [x] Capture 19 independent PostgreSQL 18.4 NULLIF node and SQL-reconstruction cases and reproduce the ordinary-routine lookup failure in the SQL owner test.
 - [x] Encode the selected equality identity, argument conversions and left result type as NULLIFEXPR; reconstruct both SQL output modes and preserve quoted user routine lookup.
 - [x] Pass the SQL owner tests and focused static checks; record current scope and review evidence.
-- [ ] Merge and clean up the completed branch, then continue the remaining #119 expression and runtime projection work.
+- [x] Merge as `1006e1090`, return to main and remove the completed local and remote branch; continue the remaining #119 expression and runtime projection work.
 
 The expected cases extend `crates/uqa-sql/src/catalog/node_tree/tests/checks.json`; each stores the domain base, written check, PostgreSQL `conbin` and both `pg_get_expr` forms. A disposable database in the existing PostgreSQL 18.4 Docker instance supplied the observations through `capture_command_completion_oracle.py --rows --details`, after `SELECT version()`. The nineteen-case fixture SHA-256 is `008fb457ccef81ba569569b8f9eead7cdcd5546ef69c2abd9e67a1370a23a328`. Raw capture output stays outside version control.
 
@@ -576,3 +576,16 @@ Review expanded the independent reference from 19 to 26 cases to cover result ca
 For selected equality operator $e$ and its coerced arguments $l$ and $r$, NULLIF returns NULL when $e(l,r)$ is true and otherwise returns $l$; its declared result is the selected left operand's type. The encoded node retains $e$'s operator and function identities, both argument trees and that result type. Reconstructing the dedicated NULLIF syntax therefore preserves the same selection, conversions and evaluation boundary. A quoted user routine keeps its ordinary function node and catalog identity instead of becoming syntax. Encoding and reconstruction do not execute either operand or introduce an algebraic carrier or operator.
 
 Reference image: `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25`; collector SHA-256: `13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec`.
+
+## Scalar catalog Datums
+
+The next #119 unit completes bytea, UUID, JSON and JSONB constants in SQL's typed catalog codec. The existing bytea encoder already preserves its payload, but the node deparser rejects it; UUID, JSON and JSONB constants fail during encoding. Runtime table/domain constraint projection and the remaining expression and array forms stay open in #119. This unit adds no dependency or feature, reuses SQL's existing scalar codecs and keeps all implementation and tests in SQL. SQL and Execution manifests, feature settings, dependency policy and manual ownership boundaries have been rechecked.
+
+- [x] Capture 32 independent PostgreSQL 18.4 typed nodes and both SQL forms; reproduce missing scalar Datum encoding and output in the existing SQL owner harness.
+- [ ] Reuse the existing bytea, UUID and JSON codecs for complete constant encoding and SQL reconstruction, with validated Datum bounds.
+- [ ] Verify original JSON text, JSONB normalization and numeric precision, binary bytes, UUID normalization, NULLs and composition; run focused owner/static checks and review.
+- [ ] Merge and remove the completed branch, then continue #119's remaining codecs and runtime catalog projection.
+
+The reference extends `crates/uqa-sql/src/catalog/node_tree/tests/checks.json`. A disposable database in PostgreSQL 18.4 Docker supplied each `conbin` and both `pg_get_expr` outputs through the existing command-completion collector; `SELECT version()` precedes the capture. Fixture SHA-256: `f4de7c6225b12d15b0d500dbeee344380f4495de680e3215de0fef8cc24617c5`. Raw output remains outside version control. The reference image and collector are the same immutable inputs recorded for the NULLIF unit above.
+
+For bytea and JSON, encoding adds the varlena length to the existing payload and decoding validates then removes exactly that header, so the recovered bytes equal the original bytes; JSON text whitespace, duplicate keys and escapes are retained. UUID encoding uses the existing parser's 16 bytes in network order, and canonical output denotes the same byte sequence. JSONB uses the existing SQL container codec: its tags select the same scalar/container carrier, lengths delimit the same children, and recursive decoding preserves array order and canonical object key/value associations; numeric coefficients and scale pass through the existing numeric Datum codec. The catalog wrapper changes neither these carriers nor their operations. Quoting and the catalog-selected cast reconstruct a constant of the retained type, and a NULL node never reads payload bytes. Thus the integration preserves constant observations and their surrounding expression compositions without introducing an algebraic operator.

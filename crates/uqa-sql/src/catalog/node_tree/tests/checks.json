@@ -593,5 +593,229 @@
     "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({MINMAXEXPR :minmaxtype 23 :minmaxcollid 0 :inputcollid 0 :op 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
     "sql": "((GREATEST(VALUE, 0))::numeric > (0)::numeric)",
     "pretty": "GREATEST(VALUE, 0)::numeric > 0::numeric"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE = ''::bytea",
+    "conbin": "{OPEXPR :opno 1955 :opfuncid 1948 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE = '\\x'::bytea)",
+    "pretty": "VALUE = '\\x'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE = '\\x00275c7f80feff'::bytea",
+    "conbin": "{OPEXPR :opno 1955 :opfuncid 1948 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 11 [ 44 0 0 0 0 39 92 127 128 254 255 ]}) :location -1}",
+    "sql": "(VALUE = '\\x00275c7f80feff'::bytea)",
+    "pretty": "VALUE = '\\x00275c7f80feff'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE = '\\000\\377\\\\'::bytea",
+    "conbin": "{OPEXPR :opno 1955 :opfuncid 1948 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 7 [ 28 0 0 0 0 255 92 ]}) :location -1}",
+    "sql": "(VALUE = '\\x00ff5c'::bytea)",
+    "pretty": "VALUE = '\\x00ff5c'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE <> '\\x6162630a'",
+    "conbin": "{OPEXPR :opno 1956 :opfuncid 1953 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 98 99 10 ]}) :location -1}",
+    "sql": "(VALUE <> '\\x6162630a'::bytea)",
+    "pretty": "VALUE <> '\\x6162630a'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "NULLIF(VALUE, '\\x00'::bytea) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 1955 :opfuncid 1948 :opresulttype 17 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 0 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "(NULLIF(VALUE, '\\x00'::bytea) IS NOT NULL)",
+    "pretty": "NULLIF(VALUE, '\\x00'::bytea) IS NOT NULL"
+  },
+  {
+    "base": "bytea",
+    "check": "COALESCE(VALUE, '\\x'::bytea) = '\\x'::bytea",
+    "conbin": "{OPEXPR :opno 1955 :opfuncid 1948 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 17 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+    "sql": "(COALESCE(VALUE, '\\x'::bytea) = '\\x'::bytea)",
+    "pretty": "COALESCE(VALUE, '\\x'::bytea) = '\\x'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE IN ('\\x00'::bytea, '\\xff'::bytea)",
+    "conbin": "{SCALARARRAYOPEXPR :opno 1955 :opfuncid 1948 :hashfuncid 0 :negfuncid 0 :useOr true :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1001 :array_collid 0 :element_typeid 17 :elements ({CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 0 ]} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 255 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE = ANY (ARRAY['\\x00'::bytea, '\\xff'::bytea]))",
+    "pretty": "VALUE = ANY (ARRAY['\\x00'::bytea, '\\xff'::bytea])"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE IS DISTINCT FROM NULL::bytea",
+    "conbin": "{DISTINCTEXPR :opno 1955 :opfuncid 1948 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1}",
+    "sql": "(VALUE IS DISTINCT FROM NULL::bytea)",
+    "pretty": "VALUE IS DISTINCT FROM NULL::bytea"
+  },
+  {
+    "base": "uuid",
+    "check": "VALUE = '00112233-4455-6677-8899-aabbccddeeff'::uuid",
+    "conbin": "{OPEXPR :opno 2972 :opfuncid 2956 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 2950 :typeMod -1 :collation 0 :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 0 17 34 51 68 85 102 119 136 153 170 187 204 221 238 255 ]}) :location -1}",
+    "sql": "(VALUE = '00112233-4455-6677-8899-aabbccddeeff'::uuid)",
+    "pretty": "VALUE = '00112233-4455-6677-8899-aabbccddeeff'::uuid"
+  },
+  {
+    "base": "uuid",
+    "check": "VALUE = '{A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11}'",
+    "conbin": "{OPEXPR :opno 2972 :opfuncid 2956 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 2950 :typeMod -1 :collation 0 :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 160 238 188 153 156 11 78 248 187 109 107 185 189 56 10 17 ]}) :location -1}",
+    "sql": "(VALUE = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid)",
+    "pretty": "VALUE = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid"
+  },
+  {
+    "base": "uuid",
+    "check": "VALUE <> 'a0eebc999c0b4ef8bb6d6bb9bd380a11'::uuid",
+    "conbin": "{OPEXPR :opno 2973 :opfuncid 2959 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 2950 :typeMod -1 :collation 0 :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 160 238 188 153 156 11 78 248 187 109 107 185 189 56 10 17 ]}) :location -1}",
+    "sql": "(VALUE <> 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid)",
+    "pretty": "VALUE <> 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid"
+  },
+  {
+    "base": "uuid",
+    "check": "NULLIF(VALUE, '00000000-0000-0000-0000-000000000000') IS NULL",
+    "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 2972 :opfuncid 2956 :opresulttype 2950 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 2950 :typeMod -1 :collation 0 :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(NULLIF(VALUE, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL)",
+    "pretty": "NULLIF(VALUE, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL"
+  },
+  {
+    "base": "uuid",
+    "check": "COALESCE(VALUE, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid) > '00000000-0000-0000-0000-000000000000'::uuid",
+    "conbin": "{OPEXPR :opno 2975 :opfuncid 2958 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 2950 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 2950 :typeMod -1 :collation 0 :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255 ]}) :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(COALESCE(VALUE, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid) > '00000000-0000-0000-0000-000000000000'::uuid)",
+    "pretty": "COALESCE(VALUE, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid) > '00000000-0000-0000-0000-000000000000'::uuid"
+  },
+  {
+    "base": "uuid",
+    "check": "VALUE IS DISTINCT FROM NULL::uuid",
+    "conbin": "{DISTINCTEXPR :opno 2972 :opfuncid 2956 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 2950 :typeMod -1 :collation 0 :location -1} {CONST :consttype 2950 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1}",
+    "sql": "(VALUE IS DISTINCT FROM NULL::uuid)",
+    "pretty": "VALUE IS DISTINCT FROM NULL::uuid"
+  },
+  {
+    "base": "json",
+    "check": "VALUE IS NOT NULL AND ' { \"a\" : 1, \"a\":2 } '::json IS NOT NULL",
+    "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 24 [ 96 0 0 0 32 123 32 34 97 34 32 58 32 49 44 32 34 97 34 58 50 32 125 32 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+    "sql": "((VALUE IS NOT NULL) AND (' { \"a\" : 1, \"a\":2 } '::json IS NOT NULL))",
+    "pretty": "VALUE IS NOT NULL AND ' { \"a\" : 1, \"a\":2 } '::json IS NOT NULL"
+  },
+  {
+    "base": "json",
+    "check": "VALUE IS NOT NULL AND '{\"quote\":\"a\\\"b\", \"line\":\"\\n\", \"\ud55c\":\"\uae00\"}'::json IS NOT NULL",
+    "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 46 [ 184 0 0 0 123 34 113 117 111 116 101 34 58 34 97 92 34 98 34 44 32 34 108 105 110 101 34 58 34 92 110 34 44 32 34 237 149 156 34 58 34 234 184 128 34 125 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+    "sql": "((VALUE IS NOT NULL) AND ('{\"quote\":\"a\\\"b\", \"line\":\"\\n\", \"\ud55c\":\"\uae00\"}'::json IS NOT NULL))",
+    "pretty": "VALUE IS NOT NULL AND '{\"quote\":\"a\\\"b\", \"line\":\"\\n\", \"\ud55c\":\"\uae00\"}'::json IS NOT NULL"
+  },
+  {
+    "base": "json",
+    "check": "VALUE IS NOT NULL AND '1.2300'::json IS NOT NULL",
+    "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 49 46 50 51 48 48 ]} :nulltesttype 1 :argisrow false :location -1}) :location -1}",
+    "sql": "((VALUE IS NOT NULL) AND ('1.2300'::json IS NOT NULL))",
+    "pretty": "VALUE IS NOT NULL AND '1.2300'::json IS NOT NULL"
+  },
+  {
+    "base": "json",
+    "check": "COALESCE(VALUE, 'null'::json) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {COALESCEEXPR :coalescetype 114 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 110 117 108 108 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "(COALESCE(VALUE, 'null'::json) IS NOT NULL)",
+    "pretty": "COALESCE(VALUE, 'null'::json) IS NOT NULL"
+  },
+  {
+    "base": "json",
+    "check": "COALESCE(VALUE, '[true, false, null, {}, []]'::json) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {COALESCEEXPR :coalescetype 114 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 31 [ 124 0 0 0 91 116 114 117 101 44 32 102 97 108 115 101 44 32 110 117 108 108 44 32 123 125 44 32 91 93 93 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "(COALESCE(VALUE, '[true, false, null, {}, []]'::json) IS NOT NULL)",
+    "pretty": "COALESCE(VALUE, '[true, false, null, {}, []]'::json) IS NOT NULL"
+  },
+  {
+    "base": "json",
+    "check": "VALUE IS NOT NULL AND NULL::json IS NULL",
+    "conbin": "{BOOLEXPR :boolop and :args ({NULLTEST :arg {COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} :nulltesttype 1 :argisrow false :location -1} {NULLTEST :arg {CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>} :nulltesttype 0 :argisrow false :location -1}) :location -1}",
+    "sql": "((VALUE IS NOT NULL) AND (NULL::json IS NULL))",
+    "pretty": "VALUE IS NOT NULL AND NULL::json IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '{}'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 0 0 32 ]}) :location -1}",
+    "sql": "(VALUE = '{}'::jsonb)",
+    "pretty": "VALUE = '{}'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '[]'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 0 0 64 ]}) :location -1}",
+    "sql": "(VALUE = '[]'::jsonb)",
+    "pretty": "VALUE = '[]'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '{\"long\":1.2300,\"a\":-2,\"long\":4.5600}'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 50 [ 200 0 0 0 2 0 0 32 1 0 0 128 4 0 0 0 11 0 0 16 10 0 0 16 97 108 111 110 103 0 0 0 32 0 0 0 0 160 2 0 40 0 0 0 0 130 4 0 224 21 ]}) :location -1}",
+    "sql": "(VALUE = '{\"a\": -2, \"long\": 4.5600}'::jsonb)",
+    "pretty": "VALUE = '{\"a\": -2, \"long\": 4.5600}'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '[null, true, false, \"\ud55c\uae00\", {\"b\":[1,2.50]}, []]'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 92 [ 112 1 0 0 6 0 0 64 0 0 0 192 0 0 0 48 0 0 0 32 6 0 0 0 48 0 0 80 6 0 0 80 237 149 156 234 184 128 0 0 1 0 0 32 1 0 0 128 33 0 0 80 98 0 0 0 2 0 0 64 8 0 0 144 10 0 0 16 32 0 0 0 0 128 1 0 40 0 0 0 0 129 2 0 136 19 0 0 0 0 0 64 ]}) :location -1}",
+    "sql": "(VALUE = '[null, true, false, \"\ud55c\uae00\", {\"b\": [1, 2.50]}, []]'::jsonb)",
+    "pretty": "VALUE = '[null, true, false, \"\ud55c\uae00\", {\"b\": [1, 2.50]}, []]'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '123456789012345678901234567890.00100'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 36 [ 144 0 0 0 1 0 0 80 24 0 0 144 96 0 0 0 135 130 12 0 128 13 210 30 210 4 46 22 52 35 128 13 210 30 10 0 ]}) :location -1}",
+    "sql": "(VALUE = '123456789012345678901234567890.00100'::jsonb)",
+    "pretty": "VALUE = '123456789012345678901234567890.00100'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '-0.000001200'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 20 [ 80 0 0 0 1 0 0 80 8 0 0 144 32 0 0 0 254 164 120 0 ]}) :location -1}",
+    "sql": "(VALUE = '-0.000001200'::jsonb)",
+    "pretty": "VALUE = '-0.000001200'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = 'null'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 1 0 0 80 0 0 0 192 ]}) :location -1}",
+    "sql": "(VALUE = 'null'::jsonb)",
+    "pretty": "VALUE = 'null'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = 'true'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 1 0 0 80 0 0 0 176 ]}) :location -1}",
+    "sql": "(VALUE = 'true'::jsonb)",
+    "pretty": "VALUE = 'true'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE = '\"quote\\\" slash\\\\ line\\n\"'::jsonb",
+    "conbin": "{OPEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 31 [ 124 0 0 0 1 0 0 80 19 0 0 128 113 117 111 116 101 34 32 115 108 97 115 104 92 32 108 105 110 101 10 ]}) :location -1}",
+    "sql": "(VALUE = '\"quote\\\" slash\\\\ line\\n\"'::jsonb)",
+    "pretty": "VALUE = '\"quote\\\" slash\\\\ line\\n\"'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "NULLIF(VALUE, '{\"a\":1}'::jsonb) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 3240 :opfuncid 4043 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 28 [ 112 0 0 0 1 0 0 32 1 0 0 128 11 0 0 16 97 0 0 0 32 0 0 0 0 128 1 0 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "(NULLIF(VALUE, '{\"a\": 1}'::jsonb) IS NOT NULL)",
+    "pretty": "NULLIF(VALUE, '{\"a\": 1}'::jsonb) IS NOT NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "COALESCE(VALUE, 'false'::jsonb) <> 'null'::jsonb",
+    "conbin": "{OPEXPR :opno 3241 :opfuncid 4038 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 3802 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 1 0 0 80 0 0 0 160 ]}) :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 1 0 0 80 0 0 0 192 ]}) :location -1}",
+    "sql": "(COALESCE(VALUE, 'false'::jsonb) <> 'null'::jsonb)",
+    "pretty": "COALESCE(VALUE, 'false'::jsonb) <> 'null'::jsonb"
+  },
+  {
+    "base": "jsonb",
+    "check": "VALUE IS DISTINCT FROM NULL::jsonb",
+    "conbin": "{DISTINCTEXPR :opno 3240 :opfuncid 4043 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1}",
+    "sql": "(VALUE IS DISTINCT FROM NULL::jsonb)",
+    "pretty": "VALUE IS DISTINCT FROM NULL::jsonb"
   }
 ]
