@@ -14,6 +14,9 @@ mod addition;
 #[path = "sql_composites/array_comparisons.rs"]
 mod array_comparisons;
 
+#[path = "sql_composites/comparison_capabilities.rs"]
+mod comparison_capabilities;
+
 #[path = "sql_composites/range_restoration.rs"]
 mod range_restoration;
 #[path = "sql_composites/removal.rs"]
