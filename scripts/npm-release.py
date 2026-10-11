@@ -47,19 +47,9 @@ LEGAL_FILES = (
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
     *licenses.binding_dictionary_payloads(),
 )
-ROOT_RUNTIME_FILES = (
-    "api.js", "index.js", "index.d.ts",
-    'http.js',
-    'http.d.ts',
-    'http-error.js',
-    'http-json.js',
-    'http-values.js',
-    'http-transport.js',
-    'http-cli.js',
-    'http-stream.js',
-    'sql-param.js',
+ROOT_ENTRYPOINT_FILES = (
+    "README.md", "api.js", "index.js", "index.d.ts", "http.js", "http.d.ts",
 )
-ROOT_PACKAGE_FILES = ("README.md", *ROOT_RUNTIME_FILES, *LEGAL_FILES)
 
 
 class ReleaseError(RuntimeError):
@@ -157,7 +147,33 @@ def validate_loader(loader: str, version: str, label: str) -> None:
     require_equal(loader_versions, {version}, f"{label} versions")
 
 
-def validate_node_source(manifest: dict[str, object]) -> str:
+def declared_package_files(manifest: dict[str, object]) -> tuple[str, ...]:
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        raise ReleaseError("npm package files must be a nonempty array")
+    for relative in files:
+        if not isinstance(relative, str) or not relative:
+            raise ReleaseError("npm package files must contain nonempty file names")
+        path = pathlib.PurePosixPath(relative)
+        if (not path.parts or path.is_absolute() or ".." in path.parts or str(path) != relative
+                or "\\" in relative or any(char in relative for char in "*?[]!")):
+            raise ReleaseError(f"npm package files must name literal relative files: {relative}")
+    if len(set(files)) != len(files):
+        raise ReleaseError("npm package files contains duplicate names")
+    return tuple(files)
+
+
+def validate_declared_files(
+    path: pathlib.Path, manifest: dict[str, object], members: dict[str, bytes]
+) -> None:
+    missing = sorted(set(declared_package_files(manifest)) - set(members))
+    if missing:
+        raise ReleaseError(f"npm archive omits declared files: {path}: {missing}")
+
+
+def validate_node_source(
+    manifest: dict[str, object], source_root: pathlib.Path = NODE_ROOT
+) -> str:
     require_equal(manifest.get("name"), ROOT_PACKAGE, "Node.js root package name")
     version = manifest.get("version")
     if not isinstance(version, str) or not version:
@@ -165,14 +181,15 @@ def validate_node_source(manifest: dict[str, object]) -> str:
     require_equal(
         manifest.get("publishConfig"), PUBLISH_CONFIG, "Node.js publishConfig"
     )
-    files = manifest.get("files")
-    if not isinstance(files, list):
-        raise ReleaseError("Node.js root package files must be an array")
-    missing_files = sorted(set(ROOT_PACKAGE_FILES) - set(files))
+    files = declared_package_files(manifest)
+    missing_files = sorted(set((*ROOT_ENTRYPOINT_FILES, *LEGAL_FILES)) - set(files))
     if missing_files:
         raise ReleaseError(f"Node.js root package omits files: {missing_files}")
     if any(isinstance(item, str) and item.endswith(".node") for item in files):
         raise ReleaseError("Node.js root package must not bundle native addons")
+    for relative in files:
+        if not (source_root / relative).is_file():
+            raise ReleaseError(f"Node.js source omits declared file: {relative}")
     napi = manifest.get("napi")
     if not isinstance(napi, dict):
         raise ReleaseError("Node.js root package has no napi configuration")
@@ -183,7 +200,7 @@ def validate_node_source(manifest: dict[str, object]) -> str:
     )
 
     try:
-        loader = (NODE_ROOT / "index.js").read_text(encoding="utf-8")
+        loader = (source_root / "index.js").read_text(encoding="utf-8")
     except OSError as error:
         raise ReleaseError(f"cannot read generated Node.js loader: {error}") from error
     validate_loader(loader, version, "generated Node.js loader")
@@ -200,6 +217,18 @@ def copy_file(
         shutil.copyfile(source, destination)
     except OSError as error:
         raise ReleaseError(f"cannot copy {source} to {destination}: {error}") from error
+
+
+def stage_root_package(
+    manifest: dict[str, object], source_root: pathlib.Path, destination: pathlib.Path
+) -> None:
+    for relative in declared_package_files(manifest):
+        copy_file(source_root, destination, relative)
+    staged = dict(manifest)
+    staged["optionalDependencies"] = {
+        platform.package_name: manifest["version"] for platform in PLATFORMS
+    }
+    write_json(destination / "package.json", staged)
 
 
 def platform_manifest(
@@ -324,13 +353,7 @@ def build_node_packages(args: argparse.Namespace) -> int:
         cache_dir = temporary_root / "npm-cache"
         root_stage = temporary_root / "root"
         root_stage.mkdir()
-        for relative in ROOT_PACKAGE_FILES:
-            copy_file(NODE_ROOT, root_stage, relative)
-        staged_root_manifest = dict(root_manifest)
-        staged_root_manifest["optionalDependencies"] = {
-            platform.package_name: version for platform in PLATFORMS
-        }
-        write_json(root_stage / "package.json", staged_root_manifest)
+        stage_root_package(root_manifest, NODE_ROOT, root_stage)
 
         archives: list[pathlib.Path] = []
         for platform in PLATFORMS:
@@ -458,7 +481,8 @@ def validate_root_package(
         raise ReleaseError(
             f"root uqa package bundles native addons: {path}: {native_members}"
         )
-    for relative in ("README.md", *ROOT_RUNTIME_FILES):
+    validate_declared_files(path, manifest, members)
+    for relative in ROOT_ENTRYPOINT_FILES:
         if relative not in members:
             raise ReleaseError(f"root uqa package omits {relative}: {path}")
     try:
@@ -521,6 +545,7 @@ def validate_archives(
                 f"duplicate npm package {name}: {by_name[name]} and {path}"
             )
         validate_legal_members(path, members)
+        validate_declared_files(path, manifest, members)
         if name == ROOT_PACKAGE:
             validate_root_package(path, manifest, members, version)
         elif name == WASM_PACKAGE:
@@ -612,6 +637,29 @@ def registry_pending(
     return pending
 
 
+def registry_version_present(package_name: str, version: str) -> bool:
+    """Also detect accepted versions not yet visible in the install packument."""
+    encoded = urllib.parse.quote(package_name, safe="")
+    request = urllib.request.Request(
+        f"{NPM_REGISTRY}{encoded}/{urllib.parse.quote(version, safe='')}",
+        headers={"Cache-Control": "no-cache", "User-Agent": "uqa-engine-npm-release-workflow"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return False
+        raise ReleaseError(f"cannot establish unpublished npm version: {error}") from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReleaseError(f"cannot establish unpublished npm version: {error}") from error
+    if not isinstance(payload, dict):
+        raise ReleaseError("npm version metadata must be an object")
+    require_equal(payload.get("name"), package_name, "npm version metadata name")
+    require_equal(payload.get("version"), version, "npm version metadata version")
+    return True
+
+
 def check_packages(args: argparse.Namespace) -> int:
     archives = [path.resolve() for path in args.archives]
     by_name = validate_archives(archives, args.version)
@@ -631,6 +679,54 @@ def check_packages(args: argparse.Namespace) -> int:
         f"; {len(pending)} pending publication" if args.check_registry else ""
     )
     print(f"npm release contract OK: {len(by_name)} package(s){registry_summary}")
+    return 0
+
+
+def repair_root_archive(args: argparse.Namespace) -> int:
+    """Complete an unpublished archive using only its unchanged tagged sources."""
+    source_root = args.source_dir.resolve()
+    archive = args.archive.resolve()
+    source_manifest = load_json(source_root / "package.json")
+    version = validate_node_source(source_manifest, source_root)
+    require_equal(version, args.version, "npm repair source version")
+    manifest, members = package_members(archive)
+    require_equal(validate_common_manifest(archive, manifest, version), ROOT_PACKAGE,
+                  "npm repair package")
+    expected_manifest = dict(source_manifest)
+    expected_manifest["optionalDependencies"] = {
+        platform.package_name: version for platform in PLATFORMS
+    }
+    require_equal(manifest, expected_manifest, "npm repair tagged manifest")
+    files = set(declared_package_files(source_manifest))
+    unexpected = sorted(set(members) - files - {"package.json"})
+    if unexpected:
+        raise ReleaseError(f"npm repair archive has unexpected files: {unexpected}")
+    for relative in sorted(files & set(members)):
+        require_equal(members[relative], (source_root / relative).read_bytes(),
+                      f"npm repair tagged file {relative}")
+    missing = sorted(files - set(members))
+    if missing:
+        if (registry_package(ROOT_PACKAGE, version) is not None
+                or registry_version_present(ROOT_PACKAGE, version)):
+            raise ReleaseError(f"cannot repair immutable published {ROOT_PACKAGE}@{version}")
+        with tempfile.TemporaryDirectory(prefix="uqa-npm-repair-", dir=archive.parent) as temporary:
+            temporary_root = pathlib.Path(temporary)
+            stage = temporary_root / "root"
+            stage.mkdir()
+            output = temporary_root / "dist"
+            output.mkdir()
+            stage_root_package(source_manifest, source_root, stage)
+            repaired = pack_stage(args.npm, stage, output, temporary_root / "npm-cache", archive.name)
+            repaired_manifest, repaired_members = package_members(repaired)
+            validate_root_package(repaired, repaired_manifest, repaired_members, version)
+            validate_legal_members(repaired, repaired_members)
+            os.replace(repaired, archive)
+    else:
+        validate_root_package(archive, manifest, members, version)
+    result = {"repaired": bool(missing), "version": version, "restored_files": missing}
+    if args.result_file is not None:
+        write_json(args.result_file, result)
+    print(json.dumps(result))
     return 0
 
 
@@ -655,6 +751,16 @@ def parse_args() -> argparse.Namespace:
     check.add_argument("--pending-file", type=pathlib.Path)
     check.add_argument("archives", nargs="+", type=pathlib.Path)
     check.set_defaults(handler=check_packages)
+
+    repair = subparsers.add_parser(
+        "repair-root", help="restore omitted files from an unpublished root archive's tagged source"
+    )
+    repair.add_argument("--source-dir", type=pathlib.Path, required=True)
+    repair.add_argument("--archive", type=pathlib.Path, required=True)
+    repair.add_argument("--version", required=True)
+    repair.add_argument("--result-file", type=pathlib.Path)
+    repair.add_argument("--npm", default="npm")
+    repair.set_defaults(handler=repair_root_archive)
     return parser.parse_args()
 
 
