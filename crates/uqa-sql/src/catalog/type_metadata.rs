@@ -464,7 +464,7 @@ pub fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
         ColumnType::Named(name) => {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
-        ColumnType::Array(element) => element.as_ref(),
+        ColumnType::Array(element) => return pg_type_collation_oid(element),
         other => other,
     };
     match scalar {

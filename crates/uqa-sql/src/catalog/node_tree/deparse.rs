@@ -171,6 +171,7 @@ impl Renderer<'_> {
     }
 
     fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {
+        let argument = implicit_cast_input(argument)?;
         if let Field::Node(node) = argument {
             if node.kind == "CONST"
                 && node.integer("consttype")? == oid
@@ -333,6 +334,29 @@ fn atom<'a>(node: &'a Node, name: &str) -> Result<&'a str, SQLError> {
         Field::Atom(value) | Field::String(value) => Ok(value),
         _ => Err(invalid(format!("expected token in {name}"))),
     }
+}
+
+fn implicit_cast_input(mut argument: &Field) -> Result<&Field, SQLError> {
+    while let Field::Node(node) = argument {
+        let format = match node.kind.as_str() {
+            "FUNCEXPR" => "funcformat",
+            "RELABELTYPE" => "relabelformat",
+            "COERCEVIAIO" | "ARRAYCOERCEEXPR" => "coerceformat",
+            "COERCETODOMAIN" => "coercionformat",
+            _ => break,
+        };
+        if node.integer(format)? != 2 {
+            break;
+        }
+        argument = if node.kind == "FUNCEXPR" {
+            list(node, "args")?
+                .first()
+                .ok_or_else(|| invalid("cast function has no argument"))?
+        } else {
+            node.field("arg")?
+        };
+    }
+    Ok(argument)
 }
 
 fn prefix<const N: usize>(bytes: &[u8]) -> Result<[u8; N], SQLError> {

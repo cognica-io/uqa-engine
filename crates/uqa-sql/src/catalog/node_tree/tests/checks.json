@@ -1234,6 +1234,105 @@
     "pretty_nonstandard": "VALUE::timestamp without time zone[] IS NOT NULL"
   },
   {
+    "base": "integer[][]",
+    "check": "VALUE::numeric(8,2)[][] IS NOT NULL",
+    "conbin": "{NULLTEST :arg {ARRAYCOERCEEXPR :arg {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :elemexpr {FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CASETESTEXPR :typeId 23 :typeMod -1 :collation 0}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 8 0 0 0 0 0 ]}) :location -1} :resulttype 1231 :resulttypmod 524294 :resultcollid 0 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::numeric(8,2)[] IS NOT NULL)",
+    "pretty": "VALUE::numeric(8,2)[] IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::numeric(8,2)[] IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::numeric(8,2)[] IS NOT NULL"
+  },
+  {
+    "base": "text[][]",
+    "check": "VALUE::varchar(3)[][] IS NOT NULL",
+    "conbin": "{NULLTEST :arg {ARRAYCOERCEEXPR :arg {COERCETODOMAINVALUE :typeId 1009 :typeMod -1 :collation 100 :location -1} :elemexpr {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {CASETESTEXPR :typeId 25 :typeMod -1 :collation 0} :resulttype 1043 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 1015 :resulttypmod 7 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying(3)[] IS NOT NULL)",
+    "pretty": "VALUE::character varying(3)[] IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying(3)[] IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying(3)[] IS NOT NULL"
+  },
+  {
+    "base": "varchar(5)[]",
+    "check": "VALUE::varchar[] IS NOT NULL",
+    "conbin": "{NULLTEST :arg {RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1015 :typeMod 9 :collation 100 :location -1} :resulttype 1015 :resulttypmod -1 :resultcollid 100 :relabelformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying[] IS NOT NULL)",
+    "pretty": "VALUE::character varying[] IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying[] IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying[] IS NOT NULL"
+  },
+  {
+    "base": "numeric(8,3)[]",
+    "check": "VALUE::numeric[] IS NOT NULL",
+    "conbin": "{NULLTEST :arg {RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1231 :typeMod 524295 :collation 0 :location -1} :resulttype 1231 :resulttypmod -1 :resultcollid 0 :relabelformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::numeric[] IS NOT NULL)",
+    "pretty": "VALUE::numeric[] IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::numeric[] IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::numeric[] IS NOT NULL"
+  },
+  {
+    "base": "varchar(5)",
+    "check": "VALUE::varchar IS NOT NULL",
+    "conbin": "{NULLTEST :arg {RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 9 :collation 100 :location -1} :resulttype 1043 :resulttypmod -1 :resultcollid 100 :relabelformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying IS NOT NULL)",
+    "pretty": "VALUE::character varying IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying IS NOT NULL"
+  },
+  {
+    "base": "numeric(8,3)",
+    "check": "VALUE::numeric IS NOT NULL",
+    "conbin": "{NULLTEST :arg {RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1700 :typeMod 524295 :collation 0 :location -1} :resulttype 1700 :resulttypmod -1 :resultcollid 0 :relabelformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::numeric IS NOT NULL)",
+    "pretty": "VALUE::numeric IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::numeric IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::numeric IS NOT NULL"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE::numeric(8,2) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 8 0 0 0 0 0 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::numeric(8,2) IS NOT NULL)",
+    "pretty": "VALUE::numeric(8,2) IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::numeric(8,2) IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::numeric(8,2) IS NOT NULL"
+  },
+  {
+    "base": "text",
+    "check": "VALUE::varchar(3) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} :resulttype 1043 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying(3) IS NOT NULL)",
+    "pretty": "VALUE::character varying(3) IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying(3) IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying(3) IS NOT NULL"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE::varchar(3) IS NOT NULL",
+    "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCEVIAIO :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :resulttype 1043 :resultcollid 100 :coerceformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying(3) IS NOT NULL)",
+    "pretty": "VALUE::character varying(3) IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying(3) IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying(3) IS NOT NULL"
+  },
+  {
+    "base": "integer[]",
+    "check": "VALUE::varchar(3)[] IS NOT NULL",
+    "conbin": "{NULLTEST :arg {ARRAYCOERCEEXPR :arg {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :elemexpr {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCEVIAIO :arg {CASETESTEXPR :typeId 23 :typeMod -1 :collation 0} :resulttype 1043 :resultcollid 100 :coerceformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 1015 :resulttypmod 7 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying(3)[] IS NOT NULL)",
+    "pretty": "VALUE::character varying(3)[] IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying(3)[] IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying(3)[] IS NOT NULL"
+  },
+  {
+    "base": "varchar(5)[][]",
+    "check": "VALUE::varchar(3)[][] IS NOT NULL",
+    "conbin": "{NULLTEST :arg {ARRAYCOERCEEXPR :arg {COERCETODOMAINVALUE :typeId 1015 :typeMod 9 :collation 100 :location -1} :elemexpr {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 0 :args ({CASETESTEXPR :typeId 1043 :typeMod 9 :collation 0} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 1015 :resulttypmod 7 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+    "sql": "((VALUE)::character varying(3)[] IS NOT NULL)",
+    "pretty": "VALUE::character varying(3)[] IS NOT NULL",
+    "sql_nonstandard": "((VALUE)::character varying(3)[] IS NOT NULL)",
+    "pretty_nonstandard": "VALUE::character varying(3)[] IS NOT NULL"
+  },
+  {
     "base": "integer[]",
     "check": "NULLIF(VALUE, '{1,NULL}'::integer[]) IS NULL",
     "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 1070 :opfuncid 744 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 36 [ 144 0 0 0 1 0 0 0 32 0 0 0 23 0 0 0 2 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
