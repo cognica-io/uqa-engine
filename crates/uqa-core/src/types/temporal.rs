@@ -396,15 +396,40 @@ fn parse_interval_time_token(token: &str) -> IntervalInput<Option<i64>> {
         Some(b'+') => (1, &token[1..]),
         _ => (1, token),
     };
+    let parsed = parse_interval_time_fields(body);
+    // DecodeInterval retries a failed signed time as a signed number. A valid
+    // leading integer leaves the colon as invalid syntax; integer overflow
+    // retains its field-overflow diagnostic.
+    let micros = parsed.map_err(|error| {
+        if body.len() != token.len()
+            && token
+                .split(':')
+                .next()
+                .is_some_and(|hours| hours.parse::<i64>().is_ok())
+        {
+            TemporalInputError::InvalidSyntax
+        } else {
+            error
+        }
+    })?;
+    Ok(Some(
+        sign.checked_mul(micros)
+            .ok_or(TemporalInputError::IntervalFieldOverflow)?,
+    ))
+}
+
+fn parse_interval_time_fields(body: &str) -> IntervalInput<i64> {
+    let integer = |text: &str| {
+        text.parse::<i64>().map_err(|error| match error.kind() {
+            std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
+                TemporalInputError::IntervalFieldOverflow
+            }
+            _ => TemporalInputError::InvalidSyntax,
+        })
+    };
     let mut parts = body.split(':');
-    let hours: i64 = parts
-        .next()
-        .and_then(|part| part.parse().ok())
-        .ok_or(TemporalInputError::InvalidSyntax)?;
-    let minutes: i64 = parts
-        .next()
-        .and_then(|part| part.parse().ok())
-        .ok_or(TemporalInputError::InvalidSyntax)?;
+    let hours = integer(parts.next().ok_or(TemporalInputError::InvalidSyntax)?)?;
+    let minutes = integer(parts.next().ok_or(TemporalInputError::InvalidSyntax)?)?;
     let seconds = parts.next();
     if parts.next().is_some() {
         return Err(TemporalInputError::InvalidSyntax);
@@ -431,7 +456,7 @@ fn parse_interval_time_token(token: &str) -> IntervalInput<Option<i64>> {
             )
             .ok_or_else(overflow)?;
     }
-    Ok(Some(sign.checked_mul(micros).ok_or_else(overflow)?))
+    Ok(micros)
 }
 
 /// The SQL standard year-month literal `[+-]Y-M` as `(years, months)`, or `None` for a token of another shape; a month past 11 is an interval field overflow.
