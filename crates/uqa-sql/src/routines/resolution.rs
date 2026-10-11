@@ -52,6 +52,14 @@ pub struct RoutineOverloadContext<'a> {
 }
 
 impl FunctionTypeResolver for RoutineOverloadContext<'_> {
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        self.catalog.format_type(ty)
+    }
+
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
+        self.catalog.composite_types()
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.catalog.has_registered_scalar_function(name)
     }

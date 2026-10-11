@@ -166,13 +166,15 @@ pub fn validate_query_block_expression_types(
         .chain(statement.distinct_on.iter())
     {
         if let Some(ty) = crate::scalar_type_with_resolver(expression, schema, params, &resolver)? {
-            crate::require_equality_operator(&ty)?;
+            crate::type_resolution::ComparisonSupport::Equality
+                .require_in_catalog(&ty, routines)?;
         }
     }
     for order in &statement.order_by {
         if let Some(ty) = crate::scalar_type_with_resolver(&order.expr, schema, params, &resolver)?
         {
-            crate::require_ordering_operator(&ty)?;
+            crate::type_resolution::ComparisonSupport::Ordering
+                .require_in_catalog(&ty, routines)?;
         }
     }
     Ok(())
@@ -198,7 +200,7 @@ pub fn validate_query_block_references(
     )?;
     if statement.distinct && statement.distinct_on.is_empty() {
         for ty in output.column_types().iter().flatten() {
-            crate::require_equality_operator(ty)?;
+            crate::type_resolution::ComparisonSupport::Equality.require_in_catalog(ty, routines)?;
         }
     }
     SchemaScope::for_analysis(ctes)?

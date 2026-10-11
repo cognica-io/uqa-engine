@@ -495,7 +495,7 @@ SQL owns operator capability metadata and query analysis. Reuse the existing fie
 
 - [x] Capture PostgreSQL type, cardinality, empty-input, nested metadata, diagnostic and fresh-connection observations.
 - [x] Replay main `fb79c7acc`: 37 of 51 initial observations differ. Track missing declared capabilities in [#753](https://github.com/cognica-io/uqa-engine/issues/753) and anonymous-record grouping's premature field validation in [#754](https://github.com/cognica-io/uqa-engine/issues/754). The two fresh-connection observations remain pending until the initial replay passes.
-- [ ] Share catalog-aware comparison capability checks across SQL query analysis without weakening anonymous-record laziness.
+- [x] Share catalog-aware comparison capability checks across SQL query analysis and runtime field lookup without weakening anonymous-record laziness. All 1,622 existing SQL owner tests and four added analysis tests pass. The initial memory replay now has two remaining execution mismatches, down from 37; persistent observations remain pending.
 - [ ] Preserve validation order, equality versus ordering, diagnostic name visibility and aggregate DISTINCT detail.
 - [ ] Pass owning SQL tests, all-provider and persistent replay, affected regressions, documentation and repository checks.
 - [ ] Preserve the inherited ledger in the new PR, complete review, merge and close its reproduced issues before continuing the remaining comparison matrix.

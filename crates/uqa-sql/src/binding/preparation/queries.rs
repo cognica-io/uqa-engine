@@ -77,7 +77,8 @@ impl Preparation<'_> {
                         subqueries,
                         "ORDER BY",
                     )? {
-                        crate::require_ordering_operator(&ty)?;
+                        crate::type_resolution::ComparisonSupport::Ordering
+                            .require_in_catalog(&ty, self.routines)?;
                     }
                 }
                 let input = overlay_outer_schema(&RowSchema::default(), outer);
@@ -122,6 +123,7 @@ impl Preparation<'_> {
             right.record_fields = fields;
         }
         super::super::type_resolution::set_operation_output_schema(
+            self.routines,
             &left.schema(),
             &right.schema(),
             kind,
@@ -161,7 +163,8 @@ impl Preparation<'_> {
                 &block.subqueries,
                 "ORDER BY",
             )? {
-                crate::require_ordering_operator(&ty)?;
+                crate::type_resolution::ComparisonSupport::Ordering
+                    .require_in_catalog(&ty, self.routines)?;
             }
         }
         for expression in block
@@ -182,7 +185,8 @@ impl Preparation<'_> {
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::Text)?;
             if let Some(ty) = &value.ty {
-                crate::require_equality_operator(ty)?;
+                crate::type_resolution::ComparisonSupport::Equality
+                    .require_in_catalog(ty, self.routines)?;
             }
         }
         for expression in &block.distinct_on {
@@ -193,12 +197,14 @@ impl Preparation<'_> {
                 &block.subqueries,
                 "DISTINCT ON",
             )? {
-                crate::require_equality_operator(&ty)?;
+                crate::type_resolution::ComparisonSupport::Equality
+                    .require_in_catalog(&ty, self.routines)?;
             }
         }
         if block.distinct && block.distinct_on.is_empty() {
             for ty in output.types.iter().filter_map(|value| value.ty.as_ref()) {
-                crate::require_equality_operator(ty)?;
+                crate::type_resolution::ComparisonSupport::Equality
+                    .require_in_catalog(ty, self.routines)?;
             }
         }
         self.slice(

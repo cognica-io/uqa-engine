@@ -195,6 +195,10 @@ fn intercepted_call<'expression>(
 }
 
 impl FunctionTypeResolver for ScopedExpressionEvaluator<'_> {
+    fn format_type_name(&self, ty: &uqa_sql::ColumnType) -> Result<String, SQLError> {
+        self.context.format_type_name(ty)
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.context.has_untyped_function(name)
     }

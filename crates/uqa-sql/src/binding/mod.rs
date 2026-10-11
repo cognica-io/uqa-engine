@@ -285,7 +285,7 @@ impl SchemaScope {
                         right.len()
                     )));
                 }
-                let output = set_operation_output_schema(&left, &right, *kind, *all)?;
+                let output = set_operation_output_schema(routines, &left, &right, *kind, *all)?;
                 if self.validate_references {
                     self.validate_set_operation_clauses(
                         routines,

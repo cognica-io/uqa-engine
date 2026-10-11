@@ -12,6 +12,10 @@ use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
 impl FunctionTypeResolver for ScopedEngineHook<'_> {
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        uqa_execution::catalog::projection::format_type_name(&self.catalog_context(), ty)
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.engine.has_untyped_function(name)
     }

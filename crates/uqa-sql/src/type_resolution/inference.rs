@@ -382,7 +382,7 @@ pub(super) fn scalar_type_inner_with_control(
                     if let Some(ty) =
                         scalar_type_inner_with_control(argument, schema, params, resolver, control)?
                     {
-                        operators::require_equality_operator(&ty)?;
+                        super::ComparisonSupport::Equality.require(&ty, resolver, control)?;
                     }
                 }
             }
@@ -390,7 +390,18 @@ pub(super) fn scalar_type_inner_with_control(
                 if let Some(ty) =
                     scalar_type_inner_with_control(&order.expr, schema, params, resolver, control)?
                 {
-                    operators::require_ordering_operator(&ty)?;
+                    super::ComparisonSupport::Ordering.require(&ty, resolver, control)?;
+                }
+            }
+            if *distinct {
+                for argument in args {
+                    if let Some(ty) =
+                        scalar_type_inner_with_control(argument, schema, params, resolver, control)?
+                    {
+                        super::ComparisonSupport::require_aggregate_ordering(
+                            &ty, resolver, control,
+                        )?;
+                    }
                 }
             }
             functions::builtin_function_type_with_control(
@@ -422,14 +433,14 @@ pub(super) fn scalar_type_inner_with_control(
                 if let Some(ty) =
                     scalar_type_inner_with_control(expression, schema, params, resolver, control)?
                 {
-                    operators::require_equality_operator(&ty)?;
+                    super::ComparisonSupport::Equality.require(&ty, resolver, control)?;
                 }
             }
             for order in &spec.order_by {
                 if let Some(ty) =
                     scalar_type_inner_with_control(&order.expr, schema, params, resolver, control)?
                 {
-                    operators::require_ordering_operator(&ty)?;
+                    super::ComparisonSupport::Ordering.require(&ty, resolver, control)?;
                 }
             }
             if let Some(frame) = &spec.frame {

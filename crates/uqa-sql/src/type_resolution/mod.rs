@@ -45,6 +45,7 @@ pub use operator_errors::{
     undefined_binary_operator_named, undefined_prefix_operator,
 };
 mod operators;
+pub(crate) use operators::comparison::ComparisonSupport;
 mod overload_resolution;
 mod qualified_column;
 mod range;
@@ -134,6 +135,11 @@ pub use routine_signature::{
 pub use string_binary::{ResolvedStringBinaryOverload, ResolvedTextByteaOverload};
 
 pub trait FunctionTypeResolver: Send + Sync {
+    /// Format a selected type using the binding catalog's namespace visibility.
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        Ok(ty.sql_name())
+    }
+
     /// Return whether an external runtime callback claims this unbound function
     /// name without exposing a declared SQL return type. Such callbacks must
     /// retain dispatch precedence instead of being rebound to a same-named
