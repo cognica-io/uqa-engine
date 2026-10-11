@@ -1,0 +1,225 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "types",
+      "sql": "CREATE TYPE ce_pair AS(a integer,b integer); CREATE TYPE ce_json AS(a integer,b json)"
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE ce_values(id integer, v ce_pair); INSERT INTO ce_values VALUES(1,ROW(1,NULL)),(2,ROW(1,2)),(3,ROW(NULL,NULL)),(4,NULL)"
+    },
+    {
+      "id": "row_distinct",
+      "sql": "SELECT ROW(1,NULL::integer) IS DISTINCT FROM ROW(1,NULL::integer) AS result"
+    },
+    {
+      "id": "record_distinct",
+      "sql": "SELECT v IS DISTINCT FROM w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_distinct",
+      "sql": "SELECT id,v IS DISTINCT FROM ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_not_distinct",
+      "sql": "SELECT ROW(1,NULL::integer) IS NOT DISTINCT FROM ROW(1,NULL::integer) AS result"
+    },
+    {
+      "id": "record_not_distinct",
+      "sql": "SELECT v IS NOT DISTINCT FROM w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_not_distinct",
+      "sql": "SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_in_one",
+      "sql": "SELECT ROW(1,NULL::integer) IN(ROW(1,NULL::integer)) AS result"
+    },
+    {
+      "id": "record_in_one",
+      "sql": "SELECT v IN(w) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_in_one",
+      "sql": "SELECT id,v IN(ROW(1,NULL)::ce_pair) AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_in_two",
+      "sql": "SELECT ROW(1,NULL::integer) IN(ROW(1,NULL::integer),ROW(9,9)) AS result"
+    },
+    {
+      "id": "record_in_two",
+      "sql": "SELECT v IN(w,ROW(9,9)) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_in_two",
+      "sql": "SELECT id,v IN(ROW(1,NULL)::ce_pair,ROW(9,9)) AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_not_in",
+      "sql": "SELECT ROW(1,NULL::integer) NOT IN(ROW(1,NULL::integer)) AS result"
+    },
+    {
+      "id": "record_not_in",
+      "sql": "SELECT v NOT IN(w) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_not_in",
+      "sql": "SELECT id,v NOT IN(ROW(1,NULL)::ce_pair) AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_any",
+      "sql": "SELECT ROW(1,NULL::integer) = ANY(ARRAY[ROW(1,NULL::integer)]) AS result"
+    },
+    {
+      "id": "record_any",
+      "sql": "SELECT v = ANY(ARRAY[w]) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_any",
+      "sql": "SELECT id,v = ANY(ARRAY[ROW(1,NULL)::ce_pair]) AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_all",
+      "sql": "SELECT ROW(1,NULL::integer) = ALL(ARRAY[ROW(1,NULL::integer)]) AS result"
+    },
+    {
+      "id": "record_all",
+      "sql": "SELECT v = ALL(ARRAY[w]) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_all",
+      "sql": "SELECT id,v = ALL(ARRAY[ROW(1,NULL)::ce_pair]) AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_case",
+      "sql": "SELECT CASE ROW(1,NULL::integer) WHEN ROW(1,NULL::integer) THEN 1 ELSE 0 END AS result"
+    },
+    {
+      "id": "record_case",
+      "sql": "SELECT CASE v WHEN w THEN 1 ELSE 0 END AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_case",
+      "sql": "SELECT id,CASE v WHEN ROW(1,NULL)::ce_pair THEN 1 ELSE 0 END AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_nullif",
+      "sql": "SELECT NULLIF(ROW(1,NULL::integer),ROW(1,NULL::integer))::text AS result"
+    },
+    {
+      "id": "record_nullif",
+      "sql": "SELECT NULLIF(v,w)::text AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_nullif",
+      "sql": "SELECT id,NULLIF(v,ROW(1,NULL)::ce_pair)::text AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_least",
+      "sql": "SELECT LEAST(ROW(1,NULL::integer),ROW(1,NULL::integer))::text AS result"
+    },
+    {
+      "id": "record_least",
+      "sql": "SELECT LEAST(v,w)::text AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_least",
+      "sql": "SELECT id,LEAST(v,ROW(1,NULL)::ce_pair)::text AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_greatest",
+      "sql": "SELECT GREATEST(ROW(1,NULL::integer),ROW(1,NULL::integer))::text AS result"
+    },
+    {
+      "id": "record_greatest",
+      "sql": "SELECT GREATEST(v,w)::text AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_greatest",
+      "sql": "SELECT id,GREATEST(v,ROW(1,NULL)::ce_pair)::text AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_between",
+      "sql": "SELECT ROW(1,NULL::integer) BETWEEN ROW(1,NULL::integer) AND ROW(1,NULL::integer) AS result"
+    },
+    {
+      "id": "record_between",
+      "sql": "SELECT v BETWEEN w AND w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_between",
+      "sql": "SELECT id,v BETWEEN ROW(1,NULL)::ce_pair AND ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "row_between_symmetric",
+      "sql": "SELECT ROW(1,NULL::integer) BETWEEN SYMMETRIC ROW(1,NULL::integer) AND ROW(1,NULL::integer) AS result"
+    },
+    {
+      "id": "record_between_symmetric",
+      "sql": "SELECT v BETWEEN SYMMETRIC w AND w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)"
+    },
+    {
+      "id": "named_between_symmetric",
+      "sql": "SELECT id,v BETWEEN SYMMETRIC ROW(1,NULL)::ce_pair AND ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id"
+    },
+    {
+      "id": "nullif_promoted",
+      "sql": "SELECT NULLIF(1,2.0) AS result,pg_typeof(NULLIF(1,2.0))::text AS type"
+    },
+    {
+      "id": "nullif_smallint",
+      "sql": "SELECT NULLIF(1::smallint,2::integer) AS result,pg_typeof(NULLIF(1::smallint,2::integer))::text AS type"
+    },
+    {
+      "id": "nullif_real",
+      "sql": "SELECT NULLIF(1::real,2::integer) AS result,pg_typeof(NULLIF(1::real,2::integer))::text AS type"
+    },
+    {
+      "id": "nullif_varchar",
+      "sql": "SELECT NULLIF('a'::varchar,'b'::text) AS result,pg_typeof(NULLIF('a'::varchar,'b'::text))::text AS type"
+    },
+    {
+      "id": "nullif_unknown",
+      "sql": "SELECT NULLIF(NULL,2) AS result,pg_typeof(NULLIF(NULL,2))::text AS type"
+    },
+    {
+      "id": "nullif_nulls",
+      "sql": "SELECT NULLIF(NULL,NULL) AS result,pg_typeof(NULLIF(NULL,NULL))::text AS type"
+    },
+    {
+      "id": "nullif_equal",
+      "sql": "SELECT NULLIF(1,1.0) AS result,pg_typeof(NULLIF(1,1.0))::text AS type"
+    },
+    {
+      "id": "nullif_json",
+      "sql": "SELECT NULLIF(NULL::json,NULL::json)"
+    },
+    {
+      "id": "nullif_bad",
+      "sql": "SELECT NULLIF('bad',1)"
+    },
+    {
+      "id": "nullif_invalid",
+      "sql": "SELECT NULLIF(true,1)"
+    },
+    {
+      "id": "stored",
+      "sql": "CREATE VIEW ce_observation AS SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS same, NULLIF(v,ROW(1,NULL)::ce_pair)::text AS n FROM ce_values"
+    },
+    {
+      "id": "stored_initial",
+      "sql": "SELECT * FROM ce_observation ORDER BY id"
+    },
+    {
+      "id": "reopen_values",
+      "sql": "SELECT * FROM ce_observation ORDER BY id",
+      "reopen": true
+    }
+  ]
+}
