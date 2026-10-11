@@ -31,30 +31,8 @@ pub(super) fn volatility(
     let [Some(left), Some(right)] = &sources else {
         return FunctionVolatility::Stable;
     };
-    let Ok([target_left, target_right, _]) =
-        crate::type_resolution::binary_operator_types(op, Some(left), Some(right))
-    else {
-        return FunctionVolatility::Stable;
-    };
-    if crate::type_resolution::cast_volatility(left, &target_left) != FunctionVolatility::Immutable
-        || crate::type_resolution::cast_volatility(right, &target_right)
-            != FunctionVolatility::Immutable
-    {
-        return FunctionVolatility::Stable;
-    }
-    let identity =
-        crate::type_resolution::binary_operator_catalog_entry(op, [&target_left, &target_right]);
-    // PostgreSQL 18.4 pg_proc: these are the stable implementations in the
-    // existing binary-operator catalog. All its other implementations are
-    // immutable and all have proisstrict=true and procost=1.
-    if identity.is_ok_and(|entry| {
-        matches!(entry.function_oid,
-        1189 | 1190 | 2549 | 2351..=2356 | 2377..=2382 | 2520..=2525 | 2527..=2532)
-    }) {
-        FunctionVolatility::Stable
-    } else {
-        FunctionVolatility::Immutable
-    }
+    crate::type_resolution::binary_operator_volatility(op, Some(left), Some(right))
+        .unwrap_or(FunctionVolatility::Stable)
 }
 
 pub(super) fn comparisons<'a>(
