@@ -995,7 +995,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "example-extensibility"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "example-graph-cypher"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "example-storage-transactions"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "example-unified-search"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "example-vector-knn"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -3643,7 +3643,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "uqa"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "serde_json",
@@ -3657,7 +3657,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-analysis"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "miniz_oxide",
@@ -3678,7 +3678,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-api"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-cli"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "rpassword",
  "rustyline",
@@ -3707,7 +3707,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-client"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "axum",
  "getrandom 0.3.4",
@@ -3729,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-core"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "chrono",
@@ -3748,7 +3748,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-engine"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "ahash",
  "arrow-array",
@@ -3791,7 +3791,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-execution"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "ahash",
  "ciborium",
@@ -3824,7 +3824,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-fdw"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "arrow-array",
  "arrow-ipc",
@@ -3838,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-fusion"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "criterion",
  "proptest",
@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-graph"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "criterion",
  "icu_properties",
@@ -3866,7 +3866,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-joins"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "serde_json",
  "uqa-analysis",
@@ -3877,7 +3877,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-kuromoji-data"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "serde_json",
  "sha2",
@@ -3885,7 +3885,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-ml"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -3898,7 +3898,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-node"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "napi",
  "napi-build",
@@ -3915,7 +3915,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-nori-data"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "serde_json",
  "sha2",
@@ -3923,7 +3923,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-operators"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "criterion",
@@ -3939,7 +3939,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-pg-query"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "bindgen",
  "cc",
@@ -3955,7 +3955,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-pg-server"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "getrandom 0.3.4",
  "parking_lot",
@@ -3970,14 +3970,14 @@ dependencies = [
 
 [[package]]
 name = "uqa-pg-wire"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "uqa-planner"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "criterion",
  "proptest",
@@ -3993,7 +3993,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-python"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "pyo3",
  "serde_json",
@@ -4009,7 +4009,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-scoring"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "chrono",
@@ -4025,7 +4025,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-sql"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "chrono",
  "crc32fast",
@@ -4049,7 +4049,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-storage"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "chacha20poly1305",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-storage-redb"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "getrandom 0.3.4",
@@ -4088,7 +4088,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-storage-sqlite"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "allocation-counter",
  "argon2",
@@ -4119,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-wasm"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "base64",
  "parking_lot",
