@@ -233,4 +233,31 @@ mod tests {
             "could not identify an equality operator for type unknown"
         );
     }
+
+    #[test]
+    fn record_null_fields_preserve_distinct_equality_and_ordering_capabilities() {
+        let control = ProductionControl::uncontrolled();
+        // The PostgreSQL array-record oracle captures both selected operators for these types before NULL handling.
+        for (oid, equality, ordering) in [
+            (1790, false, false),
+            (28, true, false),
+            (1033, true, false),
+            (194, true, true),
+            (22, true, true),
+            (2278, false, false),
+        ] {
+            let value = row(vec![Value::Null], &[oid]);
+            let equal = equal_typed_values_with_enum_catalog(&value, &value, &control, None);
+            assert_eq!(equal.is_ok(), equality, "equality for OID {oid}");
+            if let Err(error) = equal {
+                assert_eq!(error.sqlstate(), Some("42883"));
+            }
+            let order =
+                crate::expr::binary::compare_typed_values_with_control(&value, &value, &control);
+            assert_eq!(order.is_ok(), ordering, "ordering for OID {oid}");
+            if let Err(error) = order {
+                assert_eq!(error.sqlstate(), Some("42883"));
+            }
+        }
+    }
 }

@@ -161,7 +161,7 @@ fn require_operator_capability(
 
 fn equality_operator_available(ty: &ColumnType) -> bool {
     match base_type(ty) {
-        ColumnType::Void | ColumnType::Json => false,
+        ColumnType::Void | ColumnType::Json | ColumnType::RefCursor => false,
         ColumnType::Array(element) => equality_operator_available(element),
         _ => true,
     }
@@ -169,7 +169,11 @@ fn equality_operator_available(ty: &ColumnType) -> bool {
 
 fn ordering_operator_available(ty: &ColumnType) -> bool {
     match base_type(ty) {
-        ColumnType::Void | ColumnType::Json => false,
+        ColumnType::Void
+        | ColumnType::Json
+        | ColumnType::RefCursor
+        | ColumnType::Xid
+        | ColumnType::AclItem => false,
         ColumnType::Array(element) => ordering_operator_available(element),
         _ => true,
     }
