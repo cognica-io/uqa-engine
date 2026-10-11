@@ -345,6 +345,7 @@ fn input_error(error: TemporalInputError, ty: &str, text: &str) -> SQLError {
             format!("time zone \"{zone}\" not recognized"),
             None,
         ),
+        TemporalInputError::IntervalOutOfRange => ("22008", "interval out of range".into(), None),
         TemporalInputError::IntervalFieldOverflow => (
             "22015",
             format!("interval field value out of range: \"{text}\""),

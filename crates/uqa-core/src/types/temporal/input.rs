@@ -33,6 +33,8 @@ pub enum TemporalInputError {
     UnknownZone(String),
     /// An interval field does not fit its carrier (`22015`).
     IntervalFieldOverflow,
+    /// The combined year/month fields do not fit an interval (`22008`).
+    IntervalOutOfRange,
 }
 
 type Input<T> = Result<T, TemporalInputError>;

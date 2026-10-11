@@ -7,9 +7,9 @@
 //! Temporal producers use admitted text and borrowed parser tokens.
 
 use super::{
-    epoch_date, parse_interval_literal, wall_clock_micros, DateTime, Duration, ProductionControl,
-    ProductionString, TemporalDateOrder, TemporalInputError, TemporalValue, ValueRetentionError,
-    MICROS_PER_DAY, MICROS_PER_SECOND,
+    epoch_date, wall_clock_micros, DateTime, Duration, ProductionControl, ProductionString,
+    TemporalDateOrder, TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY,
+    MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
 use chrono::{Datelike, NaiveDate, NaiveTime};
@@ -250,7 +250,21 @@ impl TemporalValue {
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         control.check()?;
-        parse_interval_literal(text, control)
+        Self::interval_input_in_style_with_control(
+            text,
+            super::TemporalIntervalStyle::Postgres,
+            control,
+        )
+    }
+
+    /// Read an interval with the selected SQL sign convention; ISO 8601 input is recognized in every style.
+    pub fn interval_input_in_style_with_control(
+        text: &str,
+        style: super::TemporalIntervalStyle,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        control.check()?;
+        super::interval_input::parse_interval_literal(text, style, control)
     }
 
     pub fn to_sql_string_with_control(

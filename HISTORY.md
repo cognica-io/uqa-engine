@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Match PostgreSQL's interval sign prefixes after mixed negative and positive fields, without changing stored interval values or their comparisons.
+- Preserve exact interval input fields, fractional carries, ISO 8601 forms, duplicate-field checks and PostgreSQL overflow diagnostics. Match interval sign prefixes after mixed fields without changing stored values or their comparisons.
 
 - Select range and multirange element containment from both declared operand types, preserving PostgreSQL endpoints, NULLs, incompatible-type diagnostics and domain distinctions through stored expressions and persistent reopening.
 
