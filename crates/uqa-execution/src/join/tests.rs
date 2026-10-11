@@ -12,6 +12,8 @@ use super::*;
 use crate::physical::run_to_rows;
 use crate::scan::TableScan;
 
+mod enum_keys;
+
 fn row(values: &[(&str, Value)]) -> ResultRow {
     values
         .iter()
