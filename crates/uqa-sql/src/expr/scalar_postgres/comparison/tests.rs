@@ -185,3 +185,37 @@ fn quantified_comparison_quota_and_both_cancellation_scopes_release_scratch() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn quantified_values_and_distinct_predicates_select_record_null_equality() {
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let record = Value::Row(vec![Value::Int(1), Value::Null].into());
+    for (dispatch, args, expected) in [
+        (
+            FunctionDispatch::IsDistinct,
+            vec![record.clone(), record.clone()],
+            Value::Bool(false),
+        ),
+        (
+            FunctionDispatch::AnyOperator,
+            vec![
+                record.clone(),
+                array(vec![record.clone()]),
+                Value::Str("=".into()),
+            ],
+            Value::Bool(true),
+        ),
+        (
+            FunctionDispatch::AllOperator,
+            vec![record.clone(), array(vec![record]), Value::Str("=".into())],
+            Value::Bool(true),
+        ),
+    ] {
+        let result = evaluate(dispatch, &args, &control).unwrap().unwrap();
+        assert_eq!(*result, expected);
+        drop(result);
+        assert_eq!(budget.used(), 0);
+    }
+}

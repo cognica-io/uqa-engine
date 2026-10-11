@@ -209,6 +209,131 @@
       "sql": "SELECT NULLIF(true,1)"
     },
     {
+      "id": "domains",
+      "sql": "CREATE DOMAIN ce_positive AS integer CHECK(VALUE>0); CREATE DOMAIN ce_pair_domain AS ce_pair CHECK((VALUE).a>=0)"
+    },
+    {
+      "id": "nullif_type_domain",
+      "sql": "SELECT NULLIF(1::ce_positive,2::ce_positive) AS result,pg_typeof(NULLIF(1::ce_positive,2::ce_positive))::text AS type"
+    },
+    {
+      "id": "nullif_type_named_record",
+      "sql": "SELECT NULLIF(ROW(1,NULL)::ce_pair,ROW(2,NULL)::ce_pair) AS result,pg_typeof(NULLIF(ROW(1,NULL)::ce_pair,ROW(2,NULL)::ce_pair))::text AS type"
+    },
+    {
+      "id": "nullif_type_domain_record",
+      "sql": "SELECT NULLIF(ROW(1,NULL)::ce_pair_domain,ROW(2,NULL)::ce_pair_domain) AS result,pg_typeof(NULLIF(ROW(1,NULL)::ce_pair_domain,ROW(2,NULL)::ce_pair_domain))::text AS type"
+    },
+    {
+      "id": "nullif_type_null_record",
+      "sql": "SELECT NULLIF(NULL,ROW(1,2)) AS result,pg_typeof(NULLIF(NULL,ROW(1,2)))::text AS type"
+    },
+    {
+      "id": "nullif_type_null_named",
+      "sql": "SELECT NULLIF(NULL::ce_pair,ROW(1,2)::ce_pair) AS result,pg_typeof(NULLIF(NULL::ce_pair,ROW(1,2)::ce_pair))::text AS type"
+    },
+    {
+      "id": "nullif_type_numeric_modifier",
+      "sql": "SELECT NULLIF(1.0::numeric(5,2),2::integer) AS result,pg_typeof(NULLIF(1.0::numeric(5,2),2::integer))::text AS type"
+    },
+    {
+      "id": "nullif_type_name",
+      "sql": "SELECT NULLIF('a'::name,'b'::text) AS result,pg_typeof(NULLIF('a'::name,'b'::text))::text AS type"
+    },
+    {
+      "id": "distinct_cross_types",
+      "sql": "SELECT ROW(1::smallint,NULL::integer) IS DISTINCT FROM ROW(1::bigint,NULL::integer) AS result"
+    },
+    {
+      "id": "distinct_arity",
+      "sql": "SELECT ROW(1) IS DISTINCT FROM ROW(1,2) AS result"
+    },
+    {
+      "id": "distinct_early",
+      "sql": "SELECT ROW(1,1/z) IS DISTINCT FROM ROW(2,1/z) AS result FROM (VALUES(0)) a(z)"
+    },
+    {
+      "id": "distinct_nested",
+      "sql": "SELECT ROW(ROW(1::smallint)) IS DISTINCT FROM ROW(ROW(1::bigint)) AS result"
+    },
+    {
+      "id": "record_distinct_types",
+      "sql": "SELECT v IS DISTINCT FROM w AS result FROM (VALUES(ROW(1::smallint))) a(v) CROSS JOIN (VALUES(ROW(1::bigint))) b(w)"
+    },
+    {
+      "id": "any_arity",
+      "sql": "SELECT ROW(1) = ANY(ARRAY[ROW(1,2)]) AS result"
+    },
+    {
+      "id": "any_short_circuit",
+      "sql": "SELECT ROW(1) = ANY(ARRAY[ROW(2,2)]) AS result"
+    },
+    {
+      "id": "json_distinct_skip",
+      "sql": "SELECT ROW(1,'{}'::json)::ce_json IS DISTINCT FROM ROW(2,'{}'::json)::ce_json AS result"
+    },
+    {
+      "id": "json_nullif_reached",
+      "sql": "SELECT NULLIF(ROW(1,NULL::json)::ce_json,ROW(1,NULL::json)::ce_json)::text AS result"
+    },
+    {
+      "id": "json_nullif_skip",
+      "sql": "SELECT NULLIF(ROW(1,'{}'::json)::ce_json,ROW(2,'{}'::json)::ce_json)::text AS result"
+    },
+    {
+      "id": "least_field_null_70",
+      "sql": "SELECT least(ROW(1,NULL::integer),ROW(1,2))::text AS result"
+    },
+    {
+      "id": "least_field_null_71",
+      "sql": "SELECT least(ROW(1,2),ROW(1,NULL::integer))::text AS result"
+    },
+    {
+      "id": "greatest_field_null_72",
+      "sql": "SELECT greatest(ROW(1,NULL::integer),ROW(1,2))::text AS result"
+    },
+    {
+      "id": "greatest_field_null_73",
+      "sql": "SELECT greatest(ROW(1,2),ROW(1,NULL::integer))::text AS result"
+    },
+    {
+      "id": "user_nullif",
+      "sql": "CREATE SCHEMA ce_user; CREATE FUNCTION ce_user.\"nullif\"(integer,integer) RETURNS text LANGUAGE SQL AS $$SELECT 'user'::text$$; SELECT ce_user.\"nullif\"(1,2) AS result,pg_typeof(ce_user.\"nullif\"(1,2))::text AS type"
+    },
+    {
+      "id": "effects_setup",
+      "sql": "CREATE SEQUENCE ce_sequence; CREATE SEQUENCE ce_distinct_sequence"
+    },
+    {
+      "id": "nullif_effects",
+      "sql": "SELECT NULLIF(nextval('ce_sequence'),nextval('ce_sequence')) AS result; SELECT last_value FROM ce_sequence"
+    },
+    {
+      "id": "nullif_null_effects",
+      "sql": "SELECT NULLIF(NULL,nextval('ce_sequence')) AS result; SELECT last_value FROM ce_sequence"
+    },
+    {
+      "id": "distinct_effects",
+      "sql": "SELECT ROW(1,nextval('ce_distinct_sequence')) IS DISTINCT FROM ROW(2,nextval('ce_distinct_sequence')) AS result; SELECT last_value,is_called FROM ce_distinct_sequence"
+    },
+    {
+      "id": "distinct_reached_effects",
+      "sql": "SELECT ROW(1,nextval('ce_distinct_sequence')) IS DISTINCT FROM ROW(1,nextval('ce_distinct_sequence')) AS result; SELECT last_value,is_called FROM ce_distinct_sequence"
+    },
+    {
+      "id": "prepared",
+      "sql": "PREPARE ce_parameter(numeric) AS SELECT NULLIF(1,$1) AS result,pg_typeof(NULLIF(1,$1))::text AS type; EXECUTE ce_parameter(2.0); EXECUTE ce_parameter(1.0)"
+    },
+    {
+      "id": "stored_types",
+      "sql": "CREATE VIEW ce_types AS SELECT NULLIF(1,2.0) AS n,NULLIF('a'::varchar,'b'::text) AS t,CASE ROW(1,NULL::integer) WHEN ROW(1,NULL::integer) THEN 1 ELSE 0 END AS matched; SELECT n,t,matched,pg_typeof(n)::text AS nt,pg_typeof(t)::text AS tt FROM ce_types"
+    },
+    {
+      "id": "reopen_types",
+      "sql": "SELECT n,t,matched,pg_typeof(n)::text AS nt,pg_typeof(t)::text AS tt FROM ce_types",
+      "reopen": true
+    },
+    {
       "id": "stored",
       "sql": "CREATE VIEW ce_observation AS SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS same, NULLIF(v,ROW(1,NULL)::ce_pair)::text AS n FROM ce_values"
     },

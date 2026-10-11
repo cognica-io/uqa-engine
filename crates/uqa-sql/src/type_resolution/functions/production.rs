@@ -788,7 +788,20 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 )),
             },
         },
-        "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif" | "trim_array"
+        "nullif" => {
+            let selected = super::super::operators::binary_operator_types_with_control(
+                BinaryOp::Equal,
+                effective(0),
+                effective(1),
+                control,
+            )?;
+            if matches!(selected[0], ColumnType::Record) && first().is_some() {
+                copy(first(), control)
+            } else {
+                copy(Some(&selected[0]), control)
+            }
+        }
+        "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "trim_array"
         | "array_sample" | "generate_series" => copy(first(), control),
         // `anycompatible` arguments: an `unknown` literal takes the type selected by the known arguments.
         "array_cat" | "array_remove" | "array_replace" | "array_append" | "array_prepend" => {

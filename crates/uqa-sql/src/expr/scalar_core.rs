@@ -9,7 +9,7 @@
 use crate::{
     ast::BinaryOp,
     error::{Result, SQLError},
-    expr::{eval_comparison_truth_with_engine, EvalContext},
+    expr::{eval_value_comparison_truth_with_engine, EvalContext},
 };
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -99,7 +99,7 @@ pub(super) fn selection_with_context(
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("nullif takes 2 args".into()));
             }
-            if eval_comparison_truth_with_engine(
+            if eval_value_comparison_truth_with_engine(
                 BinaryOp::Equal,
                 &args[0],
                 &args[1],
@@ -128,7 +128,7 @@ pub(super) fn selection_with_context(
                         } else {
                             BinaryOp::Greater
                         };
-                        if eval_comparison_truth_with_engine(
+                        if eval_value_comparison_truth_with_engine(
                             op,
                             previous,
                             value,

@@ -6,7 +6,10 @@
 
 //! Bound comparison syntax uses shared SQL comparison and native array traversal owners.
 
-use super::super::{eval_comparison_truth_with_engine, value_to_string_with_control, EvalContext};
+use super::super::{
+    eval_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
+    value_to_string_with_control, EvalContext,
+};
 use crate::{
     ast::{BinaryOp, FunctionDispatch},
     error::{Result, SQLError},
@@ -72,7 +75,7 @@ fn any_all(
     let mut saw_null = false;
     let mut elements = array.elements_with_control(control)?;
     while let Some(item) = elements.next_element()? {
-        match compare(op, &args[0], item, control, context, 0)? {
+        match compare_value(op, &args[0], item, control, context, 0)? {
             Some(true) if is_any => return Ok(Value::Bool(true)),
             Some(false) if !is_any => return Ok(Value::Bool(false)),
             None => saw_null = true,
@@ -100,7 +103,9 @@ fn is_distinct(
     let distinct = match (left, right) {
         (Value::Null, Value::Null) => false,
         (Value::Null, _) | (_, Value::Null) => true,
-        (left, right) => compare(BinaryOp::Equal, left, right, control, context, 0)? != Some(true),
+        (left, right) => {
+            compare_value(BinaryOp::Equal, left, right, control, context, 0)? != Some(true)
+        }
     };
     Ok(Value::Bool(distinct))
 }
@@ -157,6 +162,24 @@ fn compare(
     slot: usize,
 ) -> Result<Option<bool>> {
     eval_comparison_truth_with_engine(
+        op,
+        left,
+        right,
+        control,
+        context.engine,
+        context.enum_comparison_state_at(slot),
+    )
+}
+
+fn compare_value(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    context: &EvalContext<'_>,
+    slot: usize,
+) -> Result<Option<bool>> {
+    eval_value_comparison_truth_with_engine(
         op,
         left,
         right,

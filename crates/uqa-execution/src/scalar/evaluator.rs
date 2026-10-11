@@ -414,8 +414,14 @@ fn eval_case(
         let condition = eval_scalar_inner(condition, context, control)?;
         let matched = match &base {
             Some(base) => {
-                compare_values(BinaryOp::Equal, base, &condition, context, control, || None)?
-                    == Some(true)
+                uqa_sql::expr::eval_value_comparison_truth_with_engine(
+                    BinaryOp::Equal,
+                    base,
+                    &condition,
+                    control,
+                    context.function_hook(),
+                    None,
+                )? == Some(true)
             }
             None => truthy(&condition),
         };

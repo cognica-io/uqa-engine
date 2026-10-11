@@ -22,8 +22,8 @@ pub use comparison::{
     compare_with_control, equal_typed_values_with_enum_catalog, eval_comparison_truth,
     eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
     eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
-    eval_record_comparison_truth_with_engine, type_comparison_can_fail,
-    validate_legacy_vector_comparison, value_comparison_can_fail,
+    eval_record_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
+    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
 };
 pub(in crate::expr) use comparison::{require_array_element_support, ComparisonSupport};

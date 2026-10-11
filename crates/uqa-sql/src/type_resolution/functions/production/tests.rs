@@ -378,3 +378,33 @@ fn legacy_vector_compatible_array_functions_return_and_bind_true_arrays() {
     .unwrap();
     assert_eq!(*result, ColumnType::Array(Box::new(ColumnType::Integer)));
 }
+
+#[test]
+fn nullif_result_follows_its_selected_equality_left_operand() {
+    let budget = MemoryBudget::new(64 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let schema = crate::RowSchema::default();
+    for (source, expected) in [
+        ("NULLIF(1,2.0)", "numeric"),
+        ("NULLIF(1::smallint,2::integer)", "smallint"),
+        ("NULLIF(1::real,2::integer)", "real"),
+        ("NULLIF('a'::varchar,'b'::text)", "text"),
+        ("NULLIF(NULL,2)", "integer"),
+        ("NULLIF(NULL,NULL)", "text"),
+    ] {
+        let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {source}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT expression");
+        };
+        let scalar = crate::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+        let result = crate::scalar_type_with_control(&scalar, &schema, &[], &control)
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.sql_name(), expected, "{source}");
+        drop(result);
+        assert_eq!(budget.used(), 0);
+    }
+}

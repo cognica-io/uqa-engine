@@ -228,7 +228,14 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             for (cond, result) in when {
                 let matched = match &base_value {
                     Some(bv) => {
-                        compare(BinaryOp::Equal, bv, &eval(cond, ctx)?, ctx, 0)? == Some(true)
+                        super::eval_value_comparison_truth_with_engine(
+                            BinaryOp::Equal,
+                            bv,
+                            &eval(cond, ctx)?,
+                            &uqa_core::memory::ProductionControl::uncontrolled(),
+                            ctx.engine,
+                            ctx.enum_comparison_state_at(0),
+                        )? == Some(true)
                     }
                     None => truthy(&eval(cond, ctx)?),
                 };
