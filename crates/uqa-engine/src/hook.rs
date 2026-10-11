@@ -220,6 +220,12 @@ impl uqa_sql::expr::EngineHook for Engine {
         Ok(Some(self.session.interval_style()))
     }
 
+    fn temporal_time_zone(
+        &self,
+    ) -> std::result::Result<Option<uqa_core::TemporalTimeZone>, SQLError> {
+        Ok(Some(self.session.time_zone()))
+    }
+
     fn sleep(&self, duration: std::time::Duration) -> std::result::Result<(), SQLError> {
         Ok(self.runtime.cancellation.sleep(duration)?)
     }

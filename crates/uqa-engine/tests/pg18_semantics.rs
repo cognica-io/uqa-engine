@@ -182,3 +182,6 @@ mod multiple_column_assignment;
 
 #[path = "pg18_semantics/relation_attribute_slots.rs"]
 mod relation_attribute_slots;
+
+#[path = "pg18_semantics/zoned_interval.rs"]
+mod zoned_interval;

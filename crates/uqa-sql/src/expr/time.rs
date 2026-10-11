@@ -19,6 +19,7 @@ use crate::error::{Result, SQLError};
 use super::conversion::to_f64_with_control;
 use super::{datetime_out_of_range, float_to_i64_rounded, out_of_range};
 
+mod calendar;
 mod date_trunc;
 mod extract;
 mod infinite;
@@ -27,6 +28,7 @@ mod number_format;
 mod timezone;
 mod units;
 
+pub(super) use calendar::timestamp_tz_plus_interval;
 pub(super) use date_trunc::zone::{truncate_explicit_zone, truncate_session_zone};
 pub(super) use extract::{extract_from_value, extract_from_value_with_offset};
 pub use interval::IntervalFields;
@@ -92,24 +94,14 @@ pub(super) fn timestamp_plus_interval(
     days: i32,
     micros: i64,
 ) -> Result<i64> {
-    let timestamp = TemporalValue::Timestamp { micros: ts_micros };
-    let interval = TemporalValue::Interval {
-        months,
-        days,
-        micros,
-    };
-    if let Some(infinity) = infinite::add(timestamp.infinity(), interval.infinity(), "timestamp")? {
-        return Ok(infinite::timestamp_micros(infinity));
-    }
-    let naive = naive_from_micros(ts_micros)?;
-    let date = shift_months(naive.date(), months)?;
-    let date = date
-        .checked_add_signed(chrono::Duration::days(i64::from(days)))
-        .ok_or_else(|| datetime_out_of_range("timestamp"))?;
-    let shifted = NaiveDateTime::new(date, naive.time());
-    micros_from_naive(shifted)
-        .checked_add(micros)
-        .ok_or_else(|| datetime_out_of_range("timestamp"))
+    calendar::timestamp_plus_interval(
+        ts_micros,
+        IntervalFields {
+            months,
+            days,
+            micros,
+        },
+    )
 }
 
 /// Binary arithmetic when either operand is temporal. Handles the full
@@ -119,13 +111,16 @@ pub(super) fn temporal_arith_with_control(
     a: &Value,
     b: &Value,
     op: BinaryOp,
+    engine: Option<&dyn super::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     control.check()?;
     let to_f64 = |value| to_f64_with_control(value, control);
     use TemporalValue as T;
     match (a, b) {
-        (Value::Temporal(x), Value::Temporal(y)) => temporal_pair_arith(a, b, x, y, op),
+        (Value::Temporal(x), Value::Temporal(y)) => {
+            temporal_pair_arith(a, b, x, y, op, engine, control)
+        }
         (Value::Temporal(date @ T::Date { .. }), Value::Int(_))
             if !date.is_finite() && matches!(op, BinaryOp::Add | BinaryOp::Subtract) =>
         {
@@ -189,6 +184,8 @@ fn temporal_pair_arith(
     x: &TemporalValue,
     y: &TemporalValue,
     op: BinaryOp,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
 ) -> Result<Value> {
     use TemporalValue as T;
     match (x, y, op) {
@@ -242,13 +239,13 @@ fn temporal_pair_arith(
             )?,
         })),
         (_, T::Interval { .. }, BinaryOp::Add) => {
-            add_interval_to_temporal(x, interval_fields(y)?, false)
+            add_interval_to_temporal(x, interval_fields(y)?, false, engine, control)
         }
         (_, T::Interval { .. }, BinaryOp::Subtract) => {
-            add_interval_to_temporal(x, interval_fields(y)?, true)
+            add_interval_to_temporal(x, interval_fields(y)?, true, engine, control)
         }
         (T::Interval { .. }, _, BinaryOp::Add) => {
-            add_interval_to_temporal(y, interval_fields(x)?, false)
+            add_interval_to_temporal(y, interval_fields(x)?, false, engine, control)
         }
         (T::Time { micros: t1 }, T::Time { micros: t2 }, BinaryOp::Subtract) => {
             Ok(Value::Temporal(T::Interval {
@@ -311,6 +308,8 @@ fn add_interval_to_temporal(
     base: &TemporalValue,
     span: IntervalFields,
     subtract: bool,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
 ) -> Result<Value> {
     use TemporalValue as T;
     if matches!(base, T::Time { .. } | T::TimeTz { .. }) && !span.value().is_finite() {
@@ -343,7 +342,7 @@ fn add_interval_to_temporal(
         T::TimestampTz { micros: ts } => {
             let span = calendar_span()?;
             Ok(Value::Temporal(T::TimestampTz {
-                micros: timestamp_plus_interval(*ts, span.months, span.days, span.micros)?,
+                micros: timestamp_tz_plus_interval(*ts, span, engine, control)?,
             }))
         }
         // time +/- interval wraps within the day; months/days vanish.

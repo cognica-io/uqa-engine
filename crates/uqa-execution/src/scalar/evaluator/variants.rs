@@ -14,8 +14,8 @@ use super::{
 use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{
-    cast_value_with_type_resolution_with_control,
-    eval_binary_values_with_integer_width_with_control, negate_value_with_control, truthy,
+    cast_value_with_type_resolution_with_control, eval_binary_values_with_engine,
+    negate_value_with_control, truthy,
 };
 
 pub(super) fn array(
@@ -162,7 +162,14 @@ pub(super) fn binary(
     } else {
         None
     };
-    eval_binary_values_with_integer_width_with_control(op, &left, &right, integer_width, control)
+    eval_binary_values_with_engine(
+        op,
+        &left,
+        &right,
+        integer_width,
+        context.function_hook(),
+        control,
+    )
 }
 
 pub(super) fn unary_minus(

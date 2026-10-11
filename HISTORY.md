@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Apply PostgreSQL `IntervalStyle` to interval input and SQL output, including prepared casts, arrays, records, JSON, assignment, cursors and stored definitions. Preserve exact input fields, fractional carries, ISO 8601 forms, duplicate-field checks, mixed signs and overflow diagnostics, with unchanged stored carriers and comparisons and ordinary transaction-local settings.
+- Apply session `TimeZone` to calendar months and days in timestamptz interval arithmetic and `RANGE` frames. Preserve daylight-saving transitions and elapsed hours separately, including prepared parameters, function settings and persistent definitions; Planner shares SQL operator volatility instead of folding session-dependent results.
 
 - Select range and multirange element containment from both declared operand types, preserving PostgreSQL endpoints, NULLs, incompatible-type diagnostics and domain distinctions through stored expressions and persistent reopening.
 

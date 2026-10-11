@@ -219,7 +219,7 @@ impl FrameCursor {
                 if stop {
                     break;
                 }
-            } else if uqa_sql::expr::in_range(&head_value, &current_value, offset, sub, less)? {
+            } else if rows.in_range(&head_value, &current_value, offset, sub, less)? {
                 break;
             }
             self.head += 1;
@@ -315,7 +315,7 @@ impl FrameCursor {
                 if stop {
                     break;
                 }
-            } else if !uqa_sql::expr::in_range(&tail_value, &current_value, offset, sub, less)? {
+            } else if !rows.in_range(&tail_value, &current_value, offset, sub, less)? {
                 break;
             }
             self.tail += 1;

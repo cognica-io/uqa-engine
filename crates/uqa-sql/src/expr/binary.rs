@@ -82,7 +82,15 @@ pub(super) fn eval_binary(
     if is_arithmetic(op) && real_expr(lhs, ctx.params) && real_expr(rhs, ctx.params) {
         return super::eval_float_arithmetic(op, &l, &r, super::FloatWidth::Real);
     }
-    eval_binary_values_with_integer_width(op, &l, &r, integer_binary_width(lhs, rhs))
+    eval_binary_values_with_engine(
+        op,
+        &l,
+        &r,
+        integer_binary_width(lhs, rhs),
+        ctx.engine,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|value| value.into_uncontrolled().expect("ordinary binary result"))
 }
 
 pub(super) fn is_arithmetic(op: BinaryOp) -> bool {
@@ -198,23 +206,35 @@ pub fn eval_binary_values_with_control(
     r: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    binary_values(op, l, r, None, control)
+}
+
+fn binary_values(
+    op: BinaryOp,
+    l: &Value,
+    r: &Value,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     control.check()?;
     if matches!(l, Value::Null) || matches!(r, Value::Null) {
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
     if let (true, Value::Datum(datum)) = (is_arithmetic(op), l) {
-        return eval_binary_values_with_control(
+        return binary_values(
             op,
             &*super::datums::read_with_control(datum, control)?,
             r,
+            engine,
             control,
         );
     }
     if let (true, Value::Datum(datum)) = (is_arithmetic(op), r) {
-        return eval_binary_values_with_control(
+        return binary_values(
             op,
             l,
             &*super::datums::read_with_control(datum, control)?,
+            engine,
             control,
         );
     }
@@ -233,7 +253,7 @@ pub fn eval_binary_values_with_control(
                 .map_err(Into::into)
         }
         BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
-            arith(l, r, op, control)
+            arith(l, r, op, engine, control)
         }
     }
 }
@@ -269,7 +289,19 @@ pub fn eval_binary_values_with_integer_width_with_control(
     integer_width: Option<IntegerWidth>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    let result = eval_binary_values_with_control(op, l, r, control)?;
+    eval_binary_values_with_engine(op, l, r, integer_width, None, control)
+}
+
+/// Evaluate already produced operands with their selected integer width and live session inputs.
+pub fn eval_binary_values_with_engine(
+    op: BinaryOp,
+    l: &Value,
+    r: &Value,
+    integer_width: Option<IntegerWidth>,
+    engine: Option<&dyn super::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let result = binary_values(op, l, r, engine, control)?;
     let Some(integer_width) = integer_width else {
         return Ok(result);
     };
@@ -435,6 +467,7 @@ fn arith(
     a: &Value,
     b: &Value,
     op: BinaryOp,
+    engine: Option<&dyn super::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
@@ -480,7 +513,7 @@ fn arith(
         }
     }
     if matches!(a, Value::Temporal(_)) || matches!(b, Value::Temporal(_)) {
-        let value = time::temporal_arith_with_control(a, b, op, control)?;
+        let value = time::temporal_arith_with_control(a, b, op, engine, control)?;
         return control
             .finish(value, control.empty_reservation())
             .map_err(Into::into);

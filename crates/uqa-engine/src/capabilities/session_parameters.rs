@@ -48,6 +48,20 @@ pub(crate) fn parameter_key(name: &str) -> String {
 }
 
 impl SessionContext {
+    /// Borrow the validated session zone without allocating a setting string for each operation.
+    pub(crate) fn time_zone(&self) -> uqa_core::TemporalTimeZone {
+        let decode = |setting: &str| {
+            uqa_core::TemporalTimeZone::named(setting).expect("validated session TimeZone")
+        };
+        if let Some(setting) = self.state.read().session_vars.get("timezone") {
+            return decode(setting);
+        }
+        self.parameters
+            .lock()
+            .client_setting("TimeZone")
+            .map_or_else(|| decode("UTC"), decode)
+    }
+
     /// Borrow the validated interval setting without allocating a SHOW result for each converted value.
     pub(crate) fn interval_style(&self) -> uqa_core::TemporalIntervalStyle {
         let decode = |setting: &str| {

@@ -81,13 +81,13 @@ pub use binary::{
     compare_grouping_values_with_enum_catalog, compare_nullable_with_control,
     compare_typed_values_with_control, compare_typed_values_with_enum_catalog,
     compare_with_control, equal_typed_values_with_enum_catalog, eval_binary_values,
-    eval_binary_values_with_control, eval_binary_values_with_integer_width,
-    eval_binary_values_with_integer_width_with_control, eval_comparison_truth,
-    eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
-    eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
-    eval_record_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
-    integer_width_for_literal, integer_width_for_type, truthy, type_comparison_can_fail,
-    validate_legacy_vector_comparison, value_comparison_can_fail,
+    eval_binary_values_with_control, eval_binary_values_with_engine,
+    eval_binary_values_with_integer_width, eval_binary_values_with_integer_width_with_control,
+    eval_comparison_truth, eval_comparison_truth_with_control,
+    eval_comparison_truth_with_deferred_state, eval_comparison_truth_with_engine,
+    eval_comparison_truth_with_enum_catalog, eval_record_comparison_truth_with_engine,
+    eval_value_comparison_truth_with_engine, integer_width_for_literal, integer_width_for_type,
+    truthy, type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
@@ -115,7 +115,7 @@ pub use current_time::{clock_timestamp_micros, transaction_clock_micros, Transac
 pub use floating::{
     eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
 };
-pub use in_range::in_range;
+pub use in_range::{in_range, in_range_with_engine};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
 pub(crate) use scalar_helpers::append_sql_literal;

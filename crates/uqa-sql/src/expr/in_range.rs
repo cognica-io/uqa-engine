@@ -16,6 +16,18 @@ use crate::error::{Result, SQLError};
 
 /// `in_range(val, base, offset, sub, less)` for a non-null `val` and `base` of one ordering type and an `offset` of the type `transformFrameOffset` selected for it.
 pub fn in_range(val: &Value, base: &Value, offset: &Value, sub: bool, less: bool) -> Result<bool> {
+    in_range_with_engine(val, base, offset, sub, less, None)
+}
+
+/// Apply the ordering family's frame predicate with live session calendar arithmetic.
+pub fn in_range_with_engine(
+    val: &Value,
+    base: &Value,
+    offset: &Value,
+    sub: bool,
+    less: bool,
+    engine: Option<&dyn super::EngineHook>,
+) -> Result<bool> {
     match (val, base, offset) {
         (Value::Int(val), Value::Int(base), Value::Int(offset)) => {
             integer_in_range(*val, *base, *offset, sub, less)
@@ -27,7 +39,7 @@ pub fn in_range(val: &Value, base: &Value, offset: &Value, sub: bool, less: bool
             numeric_in_range(val, base, offset, sub, less)
         }
         (Value::Temporal(val), Value::Temporal(base), Value::Temporal(offset)) => {
-            temporal_in_range(val, base, offset, sub, less)
+            temporal_in_range(val, base, offset, sub, less, engine)
         }
         _ => Err(SQLError::Internal(format!(
             "RANGE frame offset {offset:?} does not apply to ordering values {val:?} and {base:?}"
@@ -155,6 +167,7 @@ fn temporal_in_range(
     offset: &TemporalValue,
     sub: bool,
     less: bool,
+    engine: Option<&dyn super::EngineHook>,
 ) -> Result<bool> {
     use TemporalValue as T;
     let offset = interval_fields(offset)?;
@@ -221,6 +234,7 @@ fn temporal_in_range(
             Ok(bound(val.cmp(&target.value()), less))
         }
         _ => {
+            let zoned = matches!(base, T::TimestampTz { .. });
             // date2timestamp promotes both dates before validating the offset.
             let val = T::Timestamp {
                 micros: timestamp_micros(val)?,
@@ -236,12 +250,21 @@ fn temporal_in_range(
             }
             // `timestamp_mi_interval` adds the interval that `interval_um` negates.
             let offset = if sub { offset.negate()? } else { offset };
-            let target = super::time::timestamp_plus_interval(
-                timestamp_micros(&base)?,
-                offset.months,
-                offset.days,
-                offset.micros,
-            )?;
+            let target = if zoned {
+                super::time::timestamp_tz_plus_interval(
+                    timestamp_micros(&base)?,
+                    offset,
+                    engine,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )?
+            } else {
+                super::time::timestamp_plus_interval(
+                    timestamp_micros(&base)?,
+                    offset.months,
+                    offset.days,
+                    offset.micros,
+                )?
+            };
             Ok(bound(val.cmp(&T::Timestamp { micros: target }), less))
         }
     }
