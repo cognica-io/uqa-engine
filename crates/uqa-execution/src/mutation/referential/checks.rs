@@ -86,10 +86,19 @@ impl ForeignKeyCheck {
     }
 }
 
-fn changed(columns: &[String], old: &Document, new: &Document) -> bool {
+fn referencing_key_changed(columns: &[String], old: &Document, new: &Document) -> bool {
     columns
         .iter()
         .any(|column| old.get(column) != new.get(column))
+}
+
+/// Referenced-key triggers observe representation changes even when SQL equality holds, so actions propagate numeric scale, signed zero and nested stored values. Referencing-row checks keep their equality rule.
+pub(super) fn referenced_key_changed(columns: &[String], old: &Document, new: &Document) -> bool {
+    columns.iter().any(|column| {
+        !old.get(column)
+            .unwrap_or(&Value::Null)
+            .has_same_representation(new.get(column).unwrap_or(&Value::Null))
+    })
 }
 
 /// The checks of the referencing row that `table` holds at `doc_id` after an insert, or after an update when `old` holds the row it replaced, as `RI_FKey_check_ins` and `RI_FKey_check_upd` are queued: an update checks only a foreign key whose columns it changed, a key that NULLs exempt needs no check, and a deferred foreign key waits for its transaction instead.
@@ -110,7 +119,7 @@ pub fn referencing_checks(
     let mut checks = Vec::new();
     for (ordinal, foreign_key) in foreign_keys.into_iter().enumerate() {
         if !foreign_key.enforced
-            || old.is_some_and(|old| !changed(&foreign_key.local_columns, old, new))
+            || old.is_some_and(|old| !referencing_key_changed(&foreign_key.local_columns, old, new))
         {
             continue;
         }
@@ -217,7 +226,7 @@ fn collect_referenced_checks(
             foreign_key.on_delete
         };
         if !foreign_key.enforced
-            || new.is_some_and(|new| !changed(&foreign_key.ref_columns, old, new))
+            || new.is_some_and(|new| !referenced_key_changed(&foreign_key.ref_columns, old, new))
         {
             continue;
         }

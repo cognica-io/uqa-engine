@@ -317,6 +317,190 @@
       "sql": "SELECT id FROM ck_nested WHERE v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap ORDER BY id"
     },
     {
+      "id": "numeric_fk_setup",
+      "sql": "CREATE TABLE ck_numeric_parent(v numeric PRIMARY KEY,note integer); CREATE TABLE ck_numeric_child(id integer PRIMARY KEY,v numeric REFERENCES ck_numeric_parent(v) ON UPDATE CASCADE); CREATE TABLE ck_audit(old_v text,new_v text); CREATE FUNCTION ck_audit_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO ck_audit VALUES(OLD.v::text,NEW.v::text); RETURN NEW; END $$; CREATE TRIGGER ck_audit_update AFTER UPDATE ON ck_numeric_child FOR EACH ROW EXECUTE FUNCTION ck_audit_update(); INSERT INTO ck_numeric_parent VALUES(1.0,0); INSERT INTO ck_numeric_child VALUES(1,1.00)"
+    },
+    {
+      "id": "numeric_fk_same",
+      "sql": "UPDATE ck_numeric_parent SET v=v; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_representation",
+      "sql": "UPDATE ck_numeric_parent SET v=1.000; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_same_representation",
+      "sql": "UPDATE ck_numeric_parent SET v=1.000; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_non_key",
+      "sql": "UPDATE ck_numeric_parent SET note=1; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "numeric_fk_rollback_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "numeric_fk_rollback_change",
+      "sql": "UPDATE ck_numeric_parent SET v=1.0000; SELECT v::text FROM ck_numeric_child; SELECT count(*) AS n FROM ck_audit"
+    },
+    {
+      "id": "numeric_fk_rollback",
+      "sql": "ROLLBACK"
+    },
+    {
+      "id": "numeric_fk_rollback_result",
+      "sql": "SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v"
+    },
+    {
+      "id": "zero_fk_setup",
+      "sql": "CREATE TABLE ck_zero_parent(v double precision PRIMARY KEY); CREATE TABLE ck_zero_child(v double precision REFERENCES ck_zero_parent(v) ON UPDATE CASCADE); INSERT INTO ck_zero_parent VALUES('-0'::double precision); INSERT INTO ck_zero_child VALUES('-0'::double precision)"
+    },
+    {
+      "id": "zero_fk_change",
+      "sql": "UPDATE ck_zero_parent SET v='0'::double precision; SELECT v::text FROM ck_zero_child"
+    },
+    {
+      "id": "interval_fk_setup",
+      "sql": "CREATE TABLE ck_interval_parent(v interval PRIMARY KEY); CREATE TABLE ck_interval_child(v interval REFERENCES ck_interval_parent(v) ON UPDATE CASCADE); INSERT INTO ck_interval_parent VALUES('1 month'::interval); INSERT INTO ck_interval_child VALUES('1 month'::interval)"
+    },
+    {
+      "id": "interval_fk_change",
+      "sql": "UPDATE ck_interval_parent SET v='30 days'::interval; SELECT v::text FROM ck_interval_child"
+    },
+    {
+      "id": "array_fk_setup",
+      "sql": "CREATE TABLE ck_array_parent(v numeric[] PRIMARY KEY); CREATE TABLE ck_array_child(v numeric[] REFERENCES ck_array_parent(v) ON UPDATE CASCADE); INSERT INTO ck_array_parent VALUES(ARRAY[1.0,2.00]); INSERT INTO ck_array_child VALUES(ARRAY[1.0,2.00])"
+    },
+    {
+      "id": "array_fk_change",
+      "sql": "UPDATE ck_array_parent SET v=ARRAY[1.000,2.0]; SELECT v::text FROM ck_array_child"
+    },
+    {
+      "id": "nested_fk_setup",
+      "sql": "CREATE TABLE ck_nested_parent(v ck_wrap PRIMARY KEY); CREATE TABLE ck_nested_child(v ck_wrap REFERENCES ck_nested_parent(v) ON UPDATE CASCADE); INSERT INTO ck_nested_parent VALUES(ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])::ck_wrap); INSERT INTO ck_nested_child VALUES(ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])::ck_wrap)"
+    },
+    {
+      "id": "nested_fk_change",
+      "sql": "UPDATE ck_nested_parent SET v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap; SELECT v::text FROM ck_nested_child"
+    },
+    {
+      "id": "restrict_fk_setup",
+      "sql": "CREATE TABLE ck_restrict_parent(v numeric PRIMARY KEY); CREATE TABLE ck_restrict_child(v numeric DEFAULT 2.50 REFERENCES ck_restrict_parent(v) ON UPDATE RESTRICT); INSERT INTO ck_restrict_parent VALUES(1.0),(2.5); INSERT INTO ck_restrict_child VALUES(1.00)"
+    },
+    {
+      "id": "restrict_fk_change",
+      "sql": "UPDATE ck_restrict_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "restrict_fk_after",
+      "sql": "SELECT v::text FROM ck_restrict_parent ORDER BY v; SELECT v::text FROM ck_restrict_child"
+    },
+    {
+      "id": "no_action_fk_setup",
+      "sql": "CREATE TABLE ck_no_action_parent(v numeric PRIMARY KEY); CREATE TABLE ck_no_action_child(v numeric DEFAULT 2.50 REFERENCES ck_no_action_parent(v) ON UPDATE NO ACTION); INSERT INTO ck_no_action_parent VALUES(1.0),(2.5); INSERT INTO ck_no_action_child VALUES(1.00)"
+    },
+    {
+      "id": "no_action_fk_change",
+      "sql": "UPDATE ck_no_action_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "no_action_fk_after",
+      "sql": "SELECT v::text FROM ck_no_action_parent ORDER BY v; SELECT v::text FROM ck_no_action_child"
+    },
+    {
+      "id": "set_null_fk_setup",
+      "sql": "CREATE TABLE ck_set_null_parent(v numeric PRIMARY KEY); CREATE TABLE ck_set_null_child(v numeric DEFAULT 2.50 REFERENCES ck_set_null_parent(v) ON UPDATE SET NULL); INSERT INTO ck_set_null_parent VALUES(1.0),(2.5); INSERT INTO ck_set_null_child VALUES(1.00)"
+    },
+    {
+      "id": "set_null_fk_change",
+      "sql": "UPDATE ck_set_null_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "set_null_fk_after",
+      "sql": "SELECT v::text FROM ck_set_null_parent ORDER BY v; SELECT v::text FROM ck_set_null_child"
+    },
+    {
+      "id": "set_default_fk_setup",
+      "sql": "CREATE TABLE ck_set_default_parent(v numeric PRIMARY KEY); CREATE TABLE ck_set_default_child(v numeric DEFAULT 2.50 REFERENCES ck_set_default_parent(v) ON UPDATE SET DEFAULT); INSERT INTO ck_set_default_parent VALUES(1.0),(2.5); INSERT INTO ck_set_default_child VALUES(1.00)"
+    },
+    {
+      "id": "set_default_fk_change",
+      "sql": "UPDATE ck_set_default_parent SET v=1.000 WHERE v=1"
+    },
+    {
+      "id": "set_default_fk_after",
+      "sql": "SELECT v::text FROM ck_set_default_parent ORDER BY v; SELECT v::text FROM ck_set_default_child"
+    },
+    {
+      "id": "deferred_fk_setup",
+      "sql": "CREATE TABLE ck_deferred_parent(v numeric PRIMARY KEY); CREATE TABLE ck_deferred_child(v numeric REFERENCES ck_deferred_parent(v) DEFERRABLE INITIALLY DEFERRED); INSERT INTO ck_deferred_parent VALUES(1.0); INSERT INTO ck_deferred_child VALUES(1.00)"
+    },
+    {
+      "id": "deferred_fk_begin",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "deferred_fk_equal",
+      "sql": "UPDATE ck_deferred_parent SET v=1.000; SAVEPOINT ck_before_ddl"
+    },
+    {
+      "id": "deferred_fk_pending",
+      "sql": "ALTER TABLE ck_deferred_parent ADD COLUMN note integer"
+    },
+    {
+      "id": "deferred_fk_recover",
+      "sql": "ROLLBACK TO ck_before_ddl"
+    },
+    {
+      "id": "deferred_fk_immediate",
+      "sql": "SET CONSTRAINTS ALL IMMEDIATE; ALTER TABLE ck_deferred_parent ADD COLUMN note integer"
+    },
+    {
+      "id": "deferred_fk_commit",
+      "sql": "COMMIT"
+    },
+    {
+      "id": "deferred_fk_after",
+      "sql": "SELECT v::text FROM ck_deferred_parent; SELECT v::text FROM ck_deferred_child"
+    },
+    {
+      "id": "child_equal_setup",
+      "sql": "CREATE TABLE ck_child_equal_parent(v numeric PRIMARY KEY); CREATE TABLE ck_child_equal(v numeric REFERENCES ck_child_equal_parent(v)); SET session_replication_role=replica; INSERT INTO ck_child_equal VALUES(1.00); SET session_replication_role=origin"
+    },
+    {
+      "id": "child_equal_update",
+      "sql": "UPDATE ck_child_equal SET v=1.000; SELECT v::text FROM ck_child_equal"
+    },
+    {
+      "id": "child_unequal_update",
+      "sql": "UPDATE ck_child_equal SET v=2"
+    },
+    {
+      "id": "child_equal_after",
+      "sql": "SELECT v::text FROM ck_child_equal"
+    },
+    {
+      "id": "child_composite_equal_setup",
+      "sql": "CREATE TABLE ck_child_record_parent(v ck_pair PRIMARY KEY); CREATE TABLE ck_child_record(v ck_pair REFERENCES ck_child_record_parent(v)); SET session_replication_role=replica; INSERT INTO ck_child_record VALUES(ROW(1.00,'a')); SET session_replication_role=origin"
+    },
+    {
+      "id": "child_composite_equal_update",
+      "sql": "UPDATE ck_child_record SET v=ROW(1.000,'a'); SELECT v::text FROM ck_child_record"
+    },
+    {
+      "id": "child_composite_unequal_update",
+      "sql": "UPDATE ck_child_record SET v=ROW(2,'a')"
+    },
+    {
+      "id": "child_composite_equal_after",
+      "sql": "SELECT v::text FROM ck_child_record"
+    },
+    {
+      "id": "partial_null",
+      "sql": "SELECT ROW(1,NULL)::ck_pair IS NULL AS all_null, ROW(1,NULL)::ck_pair IS NOT NULL AS all_present, ROW(1,NULL)::ck_pair=ROW(1,NULL)::ck_pair AS same, ROW(1,NULL)::ck_pair>ROW(1,'a')::ck_pair AS greater"
+    },
+    {
       "id": "reopen_lookup",
       "sql": "SELECT id FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair ORDER BY id",
       "reopen": true

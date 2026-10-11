@@ -22,7 +22,9 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
     new_doc: &Document,
 ) -> Result<(), SQLError> {
     for (ref_table, fk) in referrers_to_for_actions(context.constraints.referrers, table)? {
-        if fk.on_update != ForeignKeyAction::NoAction {
+        if fk.on_update != ForeignKeyAction::NoAction
+            || !super::checks::referenced_key_changed(&fk.ref_columns, old_doc, new_doc)
+        {
             continue;
         }
         let old_values: Vec<Value> = fk
@@ -30,12 +32,7 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
             .iter()
             .map(|c| old_doc.get(c).cloned().unwrap_or(Value::Null))
             .collect();
-        let new_values: Vec<Value> = fk
-            .ref_columns
-            .iter()
-            .map(|c| new_doc.get(c).cloned().unwrap_or(Value::Null))
-            .collect();
-        if old_values == new_values || old_values.iter().any(|v| matches!(v, Value::Null)) {
+        if old_values.iter().any(|v| matches!(v, Value::Null)) {
             continue;
         }
         let firing = uqa_sql::schema::referenced_partitions::firing_constraint(

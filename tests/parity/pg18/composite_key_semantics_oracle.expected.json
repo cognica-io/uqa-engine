@@ -1930,6 +1930,1399 @@
       "id": "nested_lookup"
     },
     {
+      "sql": "CREATE TABLE ck_numeric_parent(v numeric PRIMARY KEY,note integer); CREATE TABLE ck_numeric_child(id integer PRIMARY KEY,v numeric REFERENCES ck_numeric_parent(v) ON UPDATE CASCADE); CREATE TABLE ck_audit(old_v text,new_v text); CREATE FUNCTION ck_audit_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO ck_audit VALUES(OLD.v::text,NEW.v::text); RETURN NEW; END $$; CREATE TRIGGER ck_audit_update AFTER UPDATE ON ck_numeric_child FOR EACH ROW EXECUTE FUNCTION ck_audit_update(); INSERT INTO ck_numeric_parent VALUES(1.0,0); INSERT INTO ck_numeric_child VALUES(1,1.00)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "CREATE FUNCTION",
+        "CREATE TRIGGER",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_numeric_parent SET v=v; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1",
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.00"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "old_v",
+            "new_v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_same"
+    },
+    {
+      "sql": "UPDATE ck_numeric_parent SET v=1.000; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "old_v",
+            "new_v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1.00",
+              "1.000"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_representation"
+    },
+    {
+      "sql": "UPDATE ck_numeric_parent SET v=1.000; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "old_v",
+            "new_v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1.00",
+              "1.000"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_same_representation"
+    },
+    {
+      "sql": "UPDATE ck_numeric_parent SET note=1; SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "old_v",
+            "new_v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1.00",
+              "1.000"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_non_key"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_rollback_begin"
+    },
+    {
+      "sql": "UPDATE ck_numeric_parent SET v=1.0000; SELECT v::text FROM ck_numeric_child; SELECT count(*) AS n FROM ck_audit",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.0000"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_rollback_change"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_rollback"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_numeric_child; SELECT old_v,new_v FROM ck_audit ORDER BY old_v,new_v",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "old_v",
+            "new_v"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1.00",
+              "1.000"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_fk_rollback_result"
+    },
+    {
+      "sql": "CREATE TABLE ck_zero_parent(v double precision PRIMARY KEY); CREATE TABLE ck_zero_child(v double precision REFERENCES ck_zero_parent(v) ON UPDATE CASCADE); INSERT INTO ck_zero_parent VALUES('-0'::double precision); INSERT INTO ck_zero_child VALUES('-0'::double precision)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "zero_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_zero_parent SET v='0'::double precision; SELECT v::text FROM ck_zero_child",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "zero_fk_change"
+    },
+    {
+      "sql": "CREATE TABLE ck_interval_parent(v interval PRIMARY KEY); CREATE TABLE ck_interval_child(v interval REFERENCES ck_interval_parent(v) ON UPDATE CASCADE); INSERT INTO ck_interval_parent VALUES('1 month'::interval); INSERT INTO ck_interval_child VALUES('1 month'::interval)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "interval_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_interval_parent SET v='30 days'::interval; SELECT v::text FROM ck_interval_child",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "30 days"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_fk_change"
+    },
+    {
+      "sql": "CREATE TABLE ck_array_parent(v numeric[] PRIMARY KEY); CREATE TABLE ck_array_child(v numeric[] REFERENCES ck_array_parent(v) ON UPDATE CASCADE); INSERT INTO ck_array_parent VALUES(ARRAY[1.0,2.00]); INSERT INTO ck_array_child VALUES(ARRAY[1.0,2.00])",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_array_parent SET v=ARRAY[1.000,2.0]; SELECT v::text FROM ck_array_child",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1.000,2.0}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_fk_change"
+    },
+    {
+      "sql": "CREATE TABLE ck_nested_parent(v ck_wrap PRIMARY KEY); CREATE TABLE ck_nested_child(v ck_wrap REFERENCES ck_nested_parent(v) ON UPDATE CASCADE); INSERT INTO ck_nested_parent VALUES(ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])::ck_wrap); INSERT INTO ck_nested_child VALUES(ROW(ROW(1.0,'a')::ck_pair,ARRAY[1,2])::ck_wrap)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "nested_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_nested_parent SET v=ROW(ROW(1.000,'a')::ck_pair,ARRAY[1,2])::ck_wrap; SELECT v::text FROM ck_nested_child",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(\"(1.000,a)\",\"{1,2}\")"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_fk_change"
+    },
+    {
+      "sql": "CREATE TABLE ck_restrict_parent(v numeric PRIMARY KEY); CREATE TABLE ck_restrict_child(v numeric DEFAULT 2.50 REFERENCES ck_restrict_parent(v) ON UPDATE RESTRICT); INSERT INTO ck_restrict_parent VALUES(1.0),(2.5); INSERT INTO ck_restrict_child VALUES(1.00)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 2",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "restrict_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_restrict_parent SET v=1.000 WHERE v=1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23001",
+        "message": "update or delete on table \"ck_restrict_parent\" violates RESTRICT setting of foreign key constraint \"ck_restrict_child_v_fkey\" on table \"ck_restrict_child\"",
+        "detail": "Key (v)=(1.0) is referenced from table \"ck_restrict_child\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "restrict_fk_change"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_restrict_parent ORDER BY v; SELECT v::text FROM ck_restrict_child",
+      "command_tags": [
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.0"
+            ],
+            [
+              "2.5"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.00"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "restrict_fk_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_no_action_parent(v numeric PRIMARY KEY); CREATE TABLE ck_no_action_child(v numeric DEFAULT 2.50 REFERENCES ck_no_action_parent(v) ON UPDATE NO ACTION); INSERT INTO ck_no_action_parent VALUES(1.0),(2.5); INSERT INTO ck_no_action_child VALUES(1.00)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 2",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "no_action_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_no_action_parent SET v=1.000 WHERE v=1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "no_action_fk_change"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_no_action_parent ORDER BY v; SELECT v::text FROM ck_no_action_child",
+      "command_tags": [
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ],
+            [
+              "2.5"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.00"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "no_action_fk_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_set_null_parent(v numeric PRIMARY KEY); CREATE TABLE ck_set_null_child(v numeric DEFAULT 2.50 REFERENCES ck_set_null_parent(v) ON UPDATE SET NULL); INSERT INTO ck_set_null_parent VALUES(1.0),(2.5); INSERT INTO ck_set_null_child VALUES(1.00)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 2",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "set_null_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_set_null_parent SET v=1.000 WHERE v=1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "set_null_fk_change"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_set_null_parent ORDER BY v; SELECT v::text FROM ck_set_null_child",
+      "command_tags": [
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ],
+            [
+              "2.5"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_null_fk_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_set_default_parent(v numeric PRIMARY KEY); CREATE TABLE ck_set_default_child(v numeric DEFAULT 2.50 REFERENCES ck_set_default_parent(v) ON UPDATE SET DEFAULT); INSERT INTO ck_set_default_parent VALUES(1.0),(2.5); INSERT INTO ck_set_default_child VALUES(1.00)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 2",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "set_default_fk_setup"
+    },
+    {
+      "sql": "UPDATE ck_set_default_parent SET v=1.000 WHERE v=1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "set_default_fk_change"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_set_default_parent ORDER BY v; SELECT v::text FROM ck_set_default_child",
+      "command_tags": [
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ],
+            [
+              "2.5"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "2.50"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "set_default_fk_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_deferred_parent(v numeric PRIMARY KEY); CREATE TABLE ck_deferred_child(v numeric REFERENCES ck_deferred_parent(v) DEFERRABLE INITIALLY DEFERRED); INSERT INTO ck_deferred_parent VALUES(1.0); INSERT INTO ck_deferred_child VALUES(1.00)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_setup"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_begin"
+    },
+    {
+      "sql": "UPDATE ck_deferred_parent SET v=1.000; SAVEPOINT ck_before_ddl",
+      "command_tags": [
+        "UPDATE 1",
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_equal"
+    },
+    {
+      "sql": "ALTER TABLE ck_deferred_parent ADD COLUMN note integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55006",
+        "message": "cannot ALTER TABLE \"ck_deferred_parent\" because it has pending trigger events",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "deferred_fk_pending"
+    },
+    {
+      "sql": "ROLLBACK TO ck_before_ddl",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_recover"
+    },
+    {
+      "sql": "SET CONSTRAINTS ALL IMMEDIATE; ALTER TABLE ck_deferred_parent ADD COLUMN note integer",
+      "command_tags": [
+        "SET CONSTRAINTS",
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_immediate"
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_commit"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_deferred_parent; SELECT v::text FROM ck_deferred_child",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.00"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "deferred_fk_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_child_equal_parent(v numeric PRIMARY KEY); CREATE TABLE ck_child_equal(v numeric REFERENCES ck_child_equal_parent(v)); SET session_replication_role=replica; INSERT INTO ck_child_equal VALUES(1.00); SET session_replication_role=origin",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "SET",
+        "INSERT 0 1",
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "child_equal_setup"
+    },
+    {
+      "sql": "UPDATE ck_child_equal SET v=1.000; SELECT v::text FROM ck_child_equal",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "child_equal_update"
+    },
+    {
+      "sql": "UPDATE ck_child_equal SET v=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23503",
+        "message": "insert or update on table \"ck_child_equal\" violates foreign key constraint \"ck_child_equal_v_fkey\"",
+        "detail": "Key (v)=(2) is not present in table \"ck_child_equal_parent\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "child_unequal_update"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_child_equal",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "1.000"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "child_equal_after"
+    },
+    {
+      "sql": "CREATE TABLE ck_child_record_parent(v ck_pair PRIMARY KEY); CREATE TABLE ck_child_record(v ck_pair REFERENCES ck_child_record_parent(v)); SET session_replication_role=replica; INSERT INTO ck_child_record VALUES(ROW(1.00,'a')); SET session_replication_role=origin",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "SET",
+        "INSERT 0 1",
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "child_composite_equal_setup"
+    },
+    {
+      "sql": "UPDATE ck_child_record SET v=ROW(1.000,'a'); SELECT v::text FROM ck_child_record",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1.000,a)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "child_composite_equal_update"
+    },
+    {
+      "sql": "UPDATE ck_child_record SET v=ROW(2,'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23503",
+        "message": "insert or update on table \"ck_child_record\" violates foreign key constraint \"ck_child_record_v_fkey\"",
+        "detail": "Key (v)=((2,a)) is not present in table \"ck_child_record_parent\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "child_composite_unequal_update"
+    },
+    {
+      "sql": "SELECT v::text FROM ck_child_record",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1.000,a)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "child_composite_equal_after"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL)::ck_pair IS NULL AS all_null, ROW(1,NULL)::ck_pair IS NOT NULL AS all_present, ROW(1,NULL)::ck_pair=ROW(1,NULL)::ck_pair AS same, ROW(1,NULL)::ck_pair>ROW(1,'a')::ck_pair AS greater",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "all_null",
+            "all_present",
+            "same",
+            "greater"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "partial_null"
+    },
+    {
       "sql": "SELECT id FROM ck_values WHERE v=ROW(1.00,'a')::ck_pair ORDER BY id",
       "command_tags": [
         "SELECT 2"
@@ -2087,7 +3480,7 @@
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "5cb8d4f54e5047e33df1bb4d04a40d1f76a1182404543b4ec84bbf4597e6c742",
+    "input_sha256": "16de4e6f9dfe9255ddc0f6d577f2a4671b3fd17c5df116aff27a17384f62e9af",
     "options": [
       "--rows",
       "--details",
