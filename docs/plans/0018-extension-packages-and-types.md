@@ -513,6 +513,18 @@ SQL owns the selected equality and ordering operations. Execution owns value-ind
 - [x] Reproduce [#761](https://github.com/cognica-io/uqa-engine/issues/761) with direct typed-row stored and command-overlay lookup tests. SQL now marks retained row descriptors as requiring fallible comparison; Execution uses equality for exact document and overlay matches. Keep B-tree probes and unique-index validation on ordering support. All 55 focused index, exact-lookup and overlay owner tests and four SQL record-operator tests pass. The final 130-case reference passes every provider and persistent reopening; the focused referential-action and manual SQL harness also passes.
 - [x] Pass the final 130-case reference on all four providers and persistent reopen, 55 Execution index/exact-lookup/overlay tests, four SQL record-operator tests and 40 Engine reference/referential-action/manual tests. Manual SQL is compiled and executed; strict SQL/Execution/Engine Clippy, rustfmt, dependency/ownership, integration registration, Rust headers/line ceiling and manifest checks pass.
 - [x] Update the public type, FK and ownership contracts, compatibility manifest, history and progress ledger. Preserve the complete original PR #638 task records.
-- [ ] Finish this PR's review, merge, issue closure and branch cleanup.
+- [x] Merge as `25c154022` in PR #760; close #759/#761, update main and remove the completed local/remote branch. Automatic PR Checks passes on final `c81c76e93`; performance archive CI continues independently. Automated code review could not complete because of service quotas; local review is complete. Preserve the unrelated parity README edit.
 
 The wider comparison closeout still requires the join-strategy and catalog-dependent hash-key audit, with the retained-descriptor and consumer evidence reconciled against the original composite exit requirements. This bounded correction does not close the composite or later extension units.
+
+## Composite join equality and strategy selection
+
+The successor to merged PR #760 addresses [#762](https://github.com/cognica-io/uqa-engine/issues/762) from main `25c154022`. The independent PostgreSQL 18.4 reference contains 41 cases and three fresh-connection observations. The initial replay differs in 9 of 38 observations on all four providers: anonymous ROW NULL equality, record-column NULL equality, reached arity/type errors, JSON field errors and FULL JOIN eligibility. Keep all 80 original PR #638 records unchanged; this correction remains within the original composite comparison unit.
+
+SQL owns equality selection and declared type capabilities. Execution owns physical join selection, catalog-aware hash keys and collision checks through those operations. Reuse the existing statement type/value catalogs and bounded join stores; no new dependency, Cargo feature or Engine algorithm is required. The relevant SQL, Execution, Joins and Planner manifests and dependency boundaries have been inspected.
+
+- [x] Capture an independent PostgreSQL reference and reproduce the nine differences on every provider; register #762.
+- [ ] Preserve the selected ROW versus record equality, declared hash/ordering capabilities and FULL JOIN diagnostics through physical join selection.
+- [ ] Verify direct, encoded and spilled keys with the pinned value catalog, retained fields, enum lifecycle and persistent reopen.
+- [ ] Complete owner regressions, reference replay, formatting, ownership/dependency checks and focused review; synchronize contracts, history and this ledger.
+- [ ] Merge the bounded PR, close its fixed issues, update main and remove the completed branch.

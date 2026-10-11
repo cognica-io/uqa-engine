@@ -1,0 +1,1142 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE cj_pair AS(n numeric,label text); CREATE TYPE cj_other AS(x numeric,y text); CREATE TYPE cj_xid AS(n xid); CREATE TYPE cj_json AS(n integer,j json); CREATE TYPE cj_enum AS ENUM ('a','b'); CREATE TYPE cj_enums AS(e cj_enum); CREATE TYPE cj_physical AS(a text,b integer)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "types"
+    },
+    {
+      "sql": "CREATE TABLE cj_left(id integer,v cj_pair); CREATE TABLE cj_right(id integer,v cj_other); INSERT INTO cj_left VALUES (1,ROW(1.0,'a')),(2,ROW(1.00,'a')),(3,ROW(2,'b')),(4,ROW(NULL,NULL)),(5,NULL); INSERT INTO cj_right VALUES (1,ROW(1.000,'a')),(2,ROW(2,'b')),(3,ROW(NULL,NULL)),(4,NULL)",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 5",
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "values"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_join"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a LEFT JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ],
+            [
+              "5",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_left_join"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a RIGHT JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ],
+            [
+              null,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_right_join"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              null,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_full_join"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v AND a.id>b.id ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              null,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_residual"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,1),(2,NULL)) a(id,n) JOIN (VALUES(1,1),(2,NULL)) b(id,n) ON ROW(a.n)=ROW(b.n) ORDER BY l,r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "anonymous_null"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) a(id,v) JOIN (VALUES(1,ROW(1)),(2,ROW(NULL::integer))) b(id,v) ON a.v=b.v ORDER BY l,r",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_null"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(1,2))) b(v) ON a.v=b.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare record types with different numbers of columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "arity_reached"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1))) a(v) JOIN (VALUES(ROW(2,2))) b(v) ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "arity_unreached"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1,2))) a(v) JOIN (VALUES(ROW(1,2::bigint))) b(v) ON a.v=b.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types integer and bigint at record column 2",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "field_type_reached"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(ROW(1,2))) a(v) JOIN (VALUES(ROW(2,2::bigint))) b(v) ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "field_type_unreached"
+    },
+    {
+      "sql": "CREATE TABLE cj_xids(id integer,v cj_xid); INSERT INTO cj_xids VALUES(1,ROW('1'::xid)),(2,ROW('1'::xid)),(3,ROW('2'::xid)),(4,NULL)",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "xids"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_xids a JOIN cj_xids b ON a.v=b.v ORDER BY l,r",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_join"
+    },
+    {
+      "sql": "CREATE TABLE cj_json_left(id integer,v cj_json); CREATE TABLE cj_json_right(id integer,v cj_json); INSERT INTO cj_json_left VALUES(1,ROW(1,'{}'::json)); INSERT INTO cj_json_right VALUES(1,ROW(2,'{}'::json))",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsons"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_unreached"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_json_left a FULL JOIN cj_json_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "FULL JOIN is only supported with merge-joinable or hash-joinable join conditions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_unmatched_outer"
+    },
+    {
+      "sql": "UPDATE cj_json_right SET v=ROW(1,'[]'::json)",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "json_reached_update"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_reached_different"
+    },
+    {
+      "sql": "UPDATE cj_json_right SET v=ROW(1,'{}'::json)",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "json_same_update"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_reached_same"
+    },
+    {
+      "sql": "INSERT INTO cj_json_right VALUES(2,ROW(1,'{}'::json))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "json_duplicate"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_reached_duplicate"
+    },
+    {
+      "sql": "UPDATE cj_json_left SET v=ROW(1,NULL); UPDATE cj_json_right SET v=ROW(1,NULL)",
+      "command_tags": [
+        "UPDATE 1",
+        "UPDATE 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "json_null_update"
+    },
+    {
+      "sql": "SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_declared_null"
+    },
+    {
+      "sql": "DELETE FROM cj_json_right; SELECT count(*) FROM cj_json_left a JOIN cj_json_right b ON a.v=b.v",
+      "command_tags": [
+        "DELETE 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_empty"
+    },
+    {
+      "sql": "CREATE TABLE cj_enum_values(id integer,v cj_enums); INSERT INTO cj_enum_values VALUES(1,ROW('a'::cj_enum)),(2,ROW('a'::cj_enum)),(3,ROW('b'::cj_enum)); PREPARE cj_enum_join(cj_enums) AS SELECT a.id AS l,b.id AS r FROM cj_enum_values a JOIN (SELECT 1 AS id,$1 AS v UNION ALL SELECT 2,ROW('a'::cj_enum)::cj_enums) b ON a.v=b.v ORDER BY l,r",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 3",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enums"
+    },
+    {
+      "sql": "EXECUTE cj_enum_join(ROW('a'::cj_enum)::cj_enums)",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_join"
+    },
+    {
+      "sql": "ALTER TYPE cj_enum RENAME VALUE 'a' TO 'renamed'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "enum_rename"
+    },
+    {
+      "sql": "EXECUTE cj_enum_join(ROW('renamed'::cj_enum)::cj_enums)",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "enum_join_renamed"
+    },
+    {
+      "sql": "PREPARE cj_physical_join(cj_physical) AS SELECT a.id AS l,b.id AS r FROM (VALUES(1,'(hello,8)'::cj_physical),(2,'(other,9)'::cj_physical)) a(id,v) JOIN (SELECT 1 AS id,$1 AS v) b ON a.v=b.v ORDER BY l,r; ALTER TYPE cj_physical ALTER ATTRIBUTE a TYPE bytea",
+      "command_tags": [
+        "PREPARE",
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "physical_prepare"
+    },
+    {
+      "sql": "EXECUTE cj_physical_join(ROW(decode('68656c6c6f','hex'),8)::cj_physical)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "physical_join"
+    },
+    {
+      "sql": "SET work_mem='64kB'",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "spill_allowance"
+    },
+    {
+      "sql": "SELECT count(*) FROM generate_series(1,200) a(i) JOIN generate_series(1,200) b(i) ON ROW(a.i::numeric,repeat('x',1024))::cj_pair=ROW(b.i::numeric,repeat('x',1024))::cj_other",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "200"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "spill_named"
+    },
+    {
+      "sql": "SELECT count(*) FROM generate_series(1,200) a(i) JOIN generate_series(1,200) b(i) ON ROW((a.i::text)::xid)::cj_xid=ROW((b.i::text)::xid)::cj_xid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "200"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "spill_xid"
+    },
+    {
+      "sql": "RESET work_mem",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "reset_allowance"
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_left a FULL JOIN cj_right b ON a.v=b.v ORDER BY l NULLS LAST,r NULLS LAST",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ],
+            [
+              "5",
+              null
+            ],
+            [
+              null,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_named",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_xids a JOIN cj_xids b ON a.v=b.v ORDER BY l,r",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_xid",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT a.id AS l,b.id AS r FROM cj_enum_values a JOIN (VALUES(1,ROW('renamed'::cj_enum)::cj_enums)) b(id,v) ON a.v=b.v ORDER BY l,r",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_enum",
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "575f72eacb35b0c76511295d95d3e17af018e4ac95aa0dc16cf924f7c4970629",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "fresh_connection_cases": 3,
+    "fresh_connection_output_sha256": "1b0eba2d128e9d6b0cba03391e401c4e84b3fee40dbf925834620cdaa16cbf9a"
+  }
+}
