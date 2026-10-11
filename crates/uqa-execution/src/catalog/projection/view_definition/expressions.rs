@@ -334,6 +334,39 @@ impl Deparser<'_> {
         self.typed_literal(&constant, ty).map(Some)
     }
 
+    fn value_null_test(
+        &self,
+        args: &[ScalarExpr],
+        binding: Option<&FunctionBinding>,
+        negated: bool,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let [argument] = args else {
+            return Err(SQLError::Internal("invalid outer NULL test".into()));
+        };
+        let ty = binding
+            .and_then(|binding| binding.argument_types.first())
+            .and_then(|name| self.resolved_type(name));
+        let mut ty = ty.as_ref();
+        while let Some(ColumnType::Domain { base, .. }) = ty {
+            ty = Some(base);
+        }
+        let operator = match (
+            matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_))),
+            negated,
+        ) {
+            (true, true) => "IS DISTINCT FROM NULL",
+            (true, false) => "IS NOT DISTINCT FROM NULL",
+            (false, true) => "IS NOT NULL",
+            (false, false) => "IS NULL",
+        };
+        Ok(self.parenthesize(format!(
+            "{} {operator}",
+            self.operand(argument, 40, false, scope, subqueries)?
+        )))
+    }
+
     pub fn function(
         &self,
         name: &str,
@@ -377,29 +410,7 @@ impl Deparser<'_> {
         }
         match binding.and_then(|binding| binding.dispatch) {
             Some(FunctionDispatch::ValueNullTest { negated }) => {
-                let [argument] = args else {
-                    return Err(SQLError::Internal("invalid outer NULL test".into()));
-                };
-                let ty = binding
-                    .and_then(|binding| binding.argument_types.first())
-                    .and_then(|name| self.resolved_type(name));
-                let mut ty = ty.as_ref();
-                while let Some(ColumnType::Domain { base, .. }) = ty {
-                    ty = Some(base);
-                }
-                let operator = match (
-                    matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_))),
-                    negated,
-                ) {
-                    (true, true) => "IS DISTINCT FROM NULL",
-                    (true, false) => "IS NOT DISTINCT FROM NULL",
-                    (false, true) => "IS NOT NULL",
-                    (false, false) => "IS NULL",
-                };
-                return Ok(self.parenthesize(format!(
-                    "{} {operator}",
-                    self.operand(argument, 40, false, scope, subqueries)?
-                )));
+                return self.value_null_test(args, binding, negated, scope, subqueries);
             }
             // `get_rule_expr` prints a `DistinctExpr` as an operator.
             Some(FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct) => {
