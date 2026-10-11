@@ -76,16 +76,27 @@ impl AdaptiveAggregateSet {
         let enums = uqa_sql::expr::EngineHook::enum_labels(context);
         let partial_schema =
             super::super::partial_state::partial_schema(self.partial_relation, group_count);
-        let scan: Box<dyn PhysicalOperator + '_> =
+        let mut scan: Box<dyn PhysicalOperator + '_> =
             Box::new(SpillScan::new(partial_schema, partials));
-        let keys = (0..group_count)
+        let evaluator = context.expression_evaluator(params);
+        let positions = if self.order_group_values {
+            0..group_count
+        } else {
+            scan = Box::new(super::merge_keys::KeyedPartials::new(
+                scan,
+                self.partial_relation,
+                group_count,
+                std::sync::Arc::clone(&evaluator),
+            ));
+            group_count + 1..group_count + 2
+        };
+        let keys = positions
             .map(|index| SortKey {
                 expr: ScalarExpr::InternalColumn(self.partial_relation.column(index)),
                 descending: false,
                 nulls_first: None,
             })
             .collect();
-        let evaluator = context.expression_evaluator(params);
         let mut sorted = ExternalSort::new(scan, keys, evaluator, None, self.spill_budget);
         sorted
             .open()
@@ -101,6 +112,13 @@ impl AdaptiveAggregateSet {
                 .map_err(super::super::sort_fallback::exec_to_sql_error)?
             {
                 for row in batch.rows {
+                    let row = if self.order_group_values {
+                        row
+                    } else {
+                        let mut values = row.into_physical_values();
+                        values.pop();
+                        PhysicalRow::from_values(values)
+                    };
                     let (key, mut accumulators) =
                         super::super::partial_state::decode_partial_group(
                             row,

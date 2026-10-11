@@ -123,10 +123,27 @@ pub(super) fn encode_key_with_enum_catalog<'a>(
     values: impl ExactSizeIterator<Item = Option<&'a Value>>,
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<Vec<u8>> {
+    encode_catalog_key(values, enums, false)
+}
+
+/// A selected SQL hash path observes physical values through their declared input-free reader before forming the exact spill key.
+pub(crate) fn encode_sql_key_with_enum_catalog<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+) -> ExecResult<Vec<u8>> {
+    encode_catalog_key(values, enums, true)
+}
+
+fn encode_catalog_key<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+    sql_hash: bool,
+) -> ExecResult<Vec<u8>> {
     let estimated_capacity = encoded_key_capacity(values.len())?;
     let mut output = CatalogKeyOutput {
         values: Vec::with_capacity(estimated_capacity),
         enums,
+        sql_hash,
     };
     encode_len(values.len(), &mut output)?;
     for value in values {
@@ -141,9 +158,14 @@ pub(super) fn encode_key_with_enum_catalog<'a>(
 struct CatalogKeyOutput<'a> {
     values: Vec<u8>,
     enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+    sql_hash: bool,
 }
 
 impl KeyOutput for CatalogKeyOutput<'_> {
+    fn invokes_sql_hash_operator(&self) -> bool {
+        self.sql_hash
+    }
+
     fn enum_catalog(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
         self.enums
     }

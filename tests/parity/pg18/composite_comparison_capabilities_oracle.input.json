@@ -105,7 +105,7 @@
       "sql": "SELECT ROW('1'::xid)::rc_xid = ROW('1'::xid)::rc_xid AS v"
     },
     {
-      "id": "xid_order",
+      "id": "xid_scalar_order",
       "sql": "SELECT ROW('1'::xid)::rc_xid < ROW('2'::xid)::rc_xid AS v"
     },
     {
@@ -212,6 +212,103 @@
     {
       "id": "reopen_order",
       "sql": "SELECT NULL::rc_xid AS v WHERE false ORDER BY v",
+      "reopen": true
+    },
+    {
+      "id": "equality_only_setup",
+      "sql": "CREATE DOMAIN public.rc_xid_domain AS rc_xid; CREATE TABLE public.rc_xid_values(v rc_xid); INSERT INTO public.rc_xid_values VALUES (ROW('1'::xid)),(ROW('1'::xid)),(ROW('2'::xid))"
+    },
+    {
+      "id": "xid_array_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ARRAY[v] FROM rc_xid_values) t"
+    },
+    {
+      "id": "xid_domain_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v::rc_xid_domain FROM rc_xid_values) t"
+    },
+    {
+      "id": "xid_distinct_on",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ON (v) v FROM rc_xid_values) t"
+    },
+    {
+      "id": "mixed_capabilities_distinct",
+      "sql": "SELECT DISTINCT ROW(1) AS a, NULL::rc_xid AS b WHERE false"
+    },
+    {
+      "id": "mixed_populated_distinct",
+      "sql": "SELECT DISTINCT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n"
+    },
+    {
+      "id": "mixed_populated_group",
+      "sql": "SELECT count(*) FROM (SELECT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n) t GROUP BY a,b"
+    },
+    {
+      "id": "mixed_nonconstant_empty_distinct",
+      "sql": "SELECT DISTINCT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,0) n"
+    },
+    {
+      "id": "mixed_nonconstant_filtered_group",
+      "sql": "SELECT count(*) FROM (SELECT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n WHERE false) t GROUP BY a,b"
+    },
+    {
+      "id": "constant_anonymous_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW('{}'::json) AS a FROM generate_series(1,2)) s"
+    },
+    {
+      "id": "constant_mixed_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW(1) AS a,'1'::xid AS b FROM generate_series(1,2)) s"
+    },
+    {
+      "id": "constant_after_star_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT t.*,ROW('{}'::json) AS fixed FROM (VALUES (1),(1),(2)) t(n)) s"
+    },
+    {
+      "id": "constant_distinct_on_duplicate_keys",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ON (fixed,n,fixed) ROW('{}'::json) AS fixed,n FROM (VALUES (1),(1),(2)) t(n)) s"
+    },
+    {
+      "id": "mixed_capabilities_group",
+      "sql": "SELECT count(*) FROM (SELECT ROW(1) AS a, NULL::rc_xid AS b WHERE false) t GROUP BY a,b"
+    },
+    {
+      "id": "anonymous_json_singleton_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json))) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "anonymous_json_reached_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json)),(ROW(1,'{\"x\":1}'::json))) t(v) GROUP BY v) s"
+    },
+    {
+      "id": "anonymous_json_distinct_aggregate_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(DISTINCT n) FROM (VALUES (ROW(1,'{}'::json),1),(ROW(2,'{}'::json),2)) t(v,n) GROUP BY v) s"
+    },
+    {
+      "id": "small_work_mem",
+      "sql": "SET work_mem='64kB'"
+    },
+    {
+      "id": "spilled_anonymous_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT ROW(n,repeat('x',2000)::text) AS v,count(*) FROM generate_series(1,150) n GROUP BY v) s"
+    },
+    {
+      "id": "spilled_xid_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW(n::text::xid)::rc_xid AS v FROM generate_series(1,2500) n) s"
+    },
+    {
+      "id": "spilled_xid_group",
+      "sql": "SELECT count(*) AS v FROM (SELECT ROW(n::text::xid)::rc_xid AS v,count(*) FROM generate_series(1,1500) n GROUP BY v) s"
+    },
+    {
+      "id": "spilled_xid_group_duplicates",
+      "sql": "SELECT count(*) AS groups,min(c) AS smallest,max(c) AS largest,sum(c) AS total FROM (SELECT ROW((n%512)::text::xid)::rc_xid AS v,count(*) AS c FROM generate_series(0,4095) n GROUP BY v) s"
+    },
+    {
+      "id": "reset_work_mem",
+      "sql": "RESET work_mem"
+    },
+    {
+      "id": "reopen_xid_distinct",
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM public.rc_xid_values) t",
       "reopen": true
     }
   ]

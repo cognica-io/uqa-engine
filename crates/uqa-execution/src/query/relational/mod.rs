@@ -22,6 +22,7 @@ pub use operators::build_relational_operator;
 
 #[derive(Default)]
 pub struct RelationalResjunk {
+    pub(super) constant_distinct_columns: Vec<usize>,
     pub distinct_on: Vec<(usize, uqa_sql::ast::InternalColumnRef)>,
     pub order_by: Vec<(usize, uqa_sql::ast::InternalColumnRef)>,
 }

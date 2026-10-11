@@ -169,3 +169,28 @@ fn anonymous_record_capabilities_do_not_inspect_unreached_field_types() {
         analyze(sql, &Types(ColumnType::Json)).unwrap_or_else(|error| panic!("{sql}: {error}"));
     }
 }
+
+#[test]
+fn hashing_and_ordering_require_independent_declared_field_support() {
+    use crate::type_resolution::{
+        type_supports_hashing, type_supports_ordering, ComparisonKeySupport,
+    };
+    for ty in [
+        ColumnType::Record,
+        ColumnType::Array(Box::new(ColumnType::Record)),
+    ] {
+        assert!(!type_supports_hashing(&ty, &Types(ColumnType::Text)).unwrap());
+        assert!(type_supports_ordering(&ty, &Types(ColumnType::Text)).unwrap());
+    }
+    assert!(type_supports_hashing(&pair(), &Types(ColumnType::Xid)).unwrap());
+    assert!(!type_supports_ordering(&pair(), &Types(ColumnType::Xid)).unwrap());
+    assert!(!type_supports_hashing(&pair(), &Types(ColumnType::Json)).unwrap());
+    let mut support = ComparisonKeySupport::default();
+    support
+        .include(&ColumnType::Record, &Types(ColumnType::Xid))
+        .unwrap();
+    support.include(&pair(), &Types(ColumnType::Xid)).unwrap();
+    let error = support.require_implementation("GROUP BY").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert_eq!(error.to_string(), "could not implement GROUP BY");
+}

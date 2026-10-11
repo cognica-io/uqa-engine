@@ -580,3 +580,7 @@ cargo test -p uqa-pg-server --test integration prepared_plan_
 ## Typed view mutation results
 
 `typed_view_returning_oracle.input.json` and its independent PostgreSQL 18.4 transcript contain 21 cases for typed view INSERT VALUES/SELECT, rule OLD/NEW rows and RETURNING, validated INSTEAD OF trigger results, fresh text input, NULL suppression, incompatible descriptor details and rollback. All four providers pass the existing `sql_views::common_coercions` integration replay, including three independently captured fresh-connection observations after reopening persistent providers. Capture with `capture_command_completion_oracle.py --rows --details --notices`; the expected fixture retains input and collector hashes, Docker image identity and the fresh-connection checksum.
+
+## Declared composite comparison capabilities
+
+`composite_comparison_capabilities_oracle.input.json` and its independent PostgreSQL 18.4 transcript retain 77 cases, including three fresh-connection observations, for declared equality/ordering, empty inputs, nested named types, anonymous reached-field comparisons, exact SQLSTATE/DETAIL/HINT, constant and mixed keys, admitted ROW assignment, equality-only DISTINCT and spilled grouping. The existing `queries::sql_composites::comparison_capabilities` submodule replays each provider and reopens persistent storage for the fresh-connection cases. Capture with `capture_command_completion_oracle.py --rows --details --notices`; compact provenance includes collector/input hashes, the Docker image and a fresh-connection checksum.

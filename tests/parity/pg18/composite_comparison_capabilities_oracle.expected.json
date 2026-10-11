@@ -518,7 +518,7 @@
       },
       "results": [],
       "notices": [],
-      "id": "xid_order"
+      "id": "xid_scalar_order"
     },
     {
       "sql": "CREATE DOMAIN rc_domain AS rc_json; CREATE TYPE rc_wrap AS(v rc_json)",
@@ -886,6 +886,494 @@
       "id": "quoted_name"
     },
     {
+      "sql": "CREATE DOMAIN public.rc_xid_domain AS rc_xid; CREATE TABLE public.rc_xid_values(v rc_xid); INSERT INTO public.rc_xid_values VALUES (ROW('1'::xid)),(ROW('1'::xid)),(ROW('2'::xid))",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "CREATE TABLE",
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "equality_only_setup"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ARRAY[v] FROM rc_xid_values) t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_array_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v::rc_xid_domain FROM rc_xid_values) t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_domain_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ON (v) v FROM rc_xid_values) t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "xid_distinct_on"
+    },
+    {
+      "sql": "SELECT DISTINCT ROW(1) AS a, NULL::rc_xid AS b WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            2249,
+            23173
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "mixed_capabilities_distinct"
+    },
+    {
+      "sql": "SELECT DISTINCT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not implement DISTINCT",
+        "detail": "Some of the datatypes only support hashing, while others only support sorting.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "mixed_populated_distinct"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n) t GROUP BY a,b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not implement GROUP BY",
+        "detail": "Some of the datatypes only support hashing, while others only support sorting.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "mixed_populated_group"
+    },
+    {
+      "sql": "SELECT DISTINCT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,0) n",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not implement DISTINCT",
+        "detail": "Some of the datatypes only support hashing, while others only support sorting.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "mixed_nonconstant_empty_distinct"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT ROW(n) AS a, n::text::xid AS b FROM generate_series(1,2) n WHERE false) t GROUP BY a,b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "could not implement GROUP BY",
+        "detail": "Some of the datatypes only support hashing, while others only support sorting.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "mixed_nonconstant_filtered_group"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW('{}'::json) AS a FROM generate_series(1,2)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constant_anonymous_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW(1) AS a,'1'::xid AS b FROM generate_series(1,2)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constant_mixed_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT t.*,ROW('{}'::json) AS fixed FROM (VALUES (1),(1),(2)) t(n)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constant_after_star_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ON (fixed,n,fixed) ROW('{}'::json) AS fixed,n FROM (VALUES (1),(1),(2)) t(n)) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "constant_distinct_on_duplicate_keys"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT ROW(1) AS a, NULL::rc_xid AS b WHERE false) t GROUP BY a,b",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "mixed_capabilities_group"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json))) t(v) GROUP BY v) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "anonymous_json_singleton_group"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(*) FROM (VALUES (ROW(1,'{}'::json)),(ROW(1,'{\"x\":1}'::json))) t(v) GROUP BY v) s",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify a comparison function for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "anonymous_json_reached_group"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT v,count(DISTINCT n) FROM (VALUES (ROW(1,'{}'::json),1),(ROW(2,'{}'::json),2)) t(v,n) GROUP BY v) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "anonymous_json_distinct_aggregate_group"
+    },
+    {
+      "sql": "SET work_mem='64kB'",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "small_work_mem"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT ROW(n,repeat('x',2000)::text) AS v,count(*) FROM generate_series(1,150) n GROUP BY v) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "150"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "spilled_anonymous_group"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT ROW(n::text::xid)::rc_xid AS v FROM generate_series(1,2500) n) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2500"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "spilled_xid_distinct"
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT ROW(n::text::xid)::rc_xid AS v,count(*) FROM generate_series(1,1500) n GROUP BY v) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1500"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "spilled_xid_group"
+    },
+    {
+      "sql": "SELECT count(*) AS groups,min(c) AS smallest,max(c) AS largest,sum(c) AS total FROM (SELECT ROW((n%512)::text::xid)::rc_xid AS v,count(*) AS c FROM generate_series(0,4095) n GROUP BY v) s",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "groups",
+            "smallest",
+            "largest",
+            "total"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20,
+            1700
+          ],
+          "rows": [
+            [
+              "512",
+              "8",
+              "8",
+              "4096"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "spilled_xid_group_duplicates"
+    },
+    {
+      "sql": "RESET work_mem",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "reset_work_mem"
+    },
+    {
       "sql": "SELECT DISTINCT NULL::rc_wrap AS v WHERE false",
       "command_tags": [],
       "error": {
@@ -912,19 +1400,44 @@
       "notices": [],
       "id": "reopen_order",
       "reopen": true
+    },
+    {
+      "sql": "SELECT count(*) AS v FROM (SELECT DISTINCT v FROM public.rc_xid_values) t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_xid_distinct",
+      "reopen": true
     }
   ],
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "af9d09a38e8226591bf4b2b54632f19fe4fbcd9875a8273cb0e0a511dee80b0d",
+    "input_sha256": "e3e6869e695b888f34f3865db57f87048d59c088f7d458fd1c0cc8a92c44e63d",
     "options": [
       "--rows",
       "--details",
       "--notices"
     ],
     "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
-    "fresh_connection_cases": 2,
-    "fresh_connection_output_sha256": "0d339796d888d3f01e28f0f9598b799b9338f03046d9219c47a62acbc85d3c44"
+    "fresh_connection_cases": 3,
+    "fresh_connection_output_sha256": "40941b3d8ba4a8ac0c5224e6ec3eb15503eb02229ac38e999db3794df2dc61dd"
   }
 }

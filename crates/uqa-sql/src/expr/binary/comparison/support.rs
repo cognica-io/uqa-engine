@@ -29,6 +29,7 @@ impl ComparisonSupport {
         let capability = match self {
             Self::Equality => "an equality operator",
             Self::Ordering => "a comparison function",
+            Self::Hashing => "a hash function",
         };
         SQLError::Routine {
             sqlstate: sqlstate.into(),

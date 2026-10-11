@@ -67,6 +67,17 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
         })
         .transpose()?;
     let statement = expanded_statement.as_ref().unwrap_or(statement);
+    if statement.distinct {
+        resjunk.constant_distinct_columns = statement
+            .projections
+            .iter()
+            .enumerate()
+            .filter_map(|(position, projection)| {
+                uqa_sql::type_resolution::comparison_key_is_constant(&projection.expr)
+                    .then_some(position)
+            })
+            .collect();
+    }
     validate_distinct_ordering(statement)?;
     if ctes.streams_command_progress() {
         operator = Box::new(RowAtATime::new(operator));

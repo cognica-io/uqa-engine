@@ -46,6 +46,9 @@ pub use operator_errors::{
 };
 mod operators;
 pub(crate) use operators::comparison::ComparisonSupport;
+pub use operators::comparison::{
+    comparison_key_is_constant, type_supports_hashing, type_supports_ordering, ComparisonKeySupport,
+};
 mod overload_resolution;
 mod qualified_column;
 mod range;
