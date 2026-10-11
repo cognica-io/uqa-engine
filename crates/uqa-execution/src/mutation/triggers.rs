@@ -17,6 +17,9 @@ use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
 use context::TriggerContext;
+
+#[cfg(test)]
+mod tests;
 use uqa_core::RelationIdentity;
 pub mod context;
 
@@ -259,7 +262,6 @@ fn positional_trigger_record(
 }
 
 fn normalize_instead_of_trigger_record(
-    context: &TriggerContext<'_>,
     columns: &[(String, uqa_sql::ast::ColumnType)],
     value: Value,
 ) -> Result<Option<Vec<Value>>> {
@@ -279,17 +281,13 @@ fn normalize_instead_of_trigger_record(
     {
         return Err(SQLError::UnknownColumn(unknown.clone()));
     }
-    columns
-        .iter()
-        .map(|(name, ty)| {
-            uqa_sql::assignment::conversion::convert_value_to_column_type_with_context(
-                context.expressions,
-                fields.get(name).cloned().unwrap_or(Value::Null),
-                ty,
-            )
-        })
-        .collect::<Result<Vec<_>>>()
-        .map(Some)
+    // The routine result has already passed descriptor validation; these values are admitted, not new input.
+    Ok(Some(
+        columns
+            .iter()
+            .map(|(name, _)| fields.get(name).cloned().unwrap_or(Value::Null))
+            .collect(),
+    ))
 }
 
 /// Run the `INSTEAD OF` row triggers of `view` for one row in name order, as `ExecIRInsertTriggers`, `ExecIRUpdateTriggers` and `ExecIRDeleteTriggers` do, and return the row the command then counts, checks and returns: the last trigger's result for INSERT and UPDATE and the original OLD row for DELETE, or `None` when a trigger returns NULL. When `session_replication_role` suppresses every trigger, the row is counted as it stands, although nothing performs the command.
@@ -340,7 +338,7 @@ pub fn fire_instead_of_row_triggers(
             },
             None,
         )?;
-        let Some(values) = normalize_instead_of_trigger_record(context, &columns, returned)? else {
+        let Some(values) = normalize_instead_of_trigger_record(&columns, returned)? else {
             return Ok(None);
         };
         if event != TriggerEvent::Delete {
@@ -352,7 +350,7 @@ pub fn fire_instead_of_row_triggers(
     } else {
         new
     };
-    normalize_instead_of_trigger_record(context, &columns, final_record)
+    normalize_instead_of_trigger_record(&columns, final_record)
 }
 
 pub fn fire_statement_triggers(

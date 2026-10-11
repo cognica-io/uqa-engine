@@ -47,6 +47,39 @@ fn common_coercions_match_postgresql_and_survive_reopen(#[case] provider: usize)
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn typed_view_returning_matches_postgresql_and_survives_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("typed-view-returning.db");
+    let engine = open(provider, &path);
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/parity/pg18/typed_view_returning_oracle.expected.json"
+    ))
+    .unwrap();
+    let mut initial = reference.clone();
+    initial["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] != true);
+    crate::pg18_oracle::verify(&engine, &initial.to_string());
+    let engine = if provider == 0 {
+        engine
+    } else {
+        drop(engine);
+        open(provider, &path)
+    };
+    let mut durable = reference;
+    durable["cases"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|case| case["reopen"] == true);
+    crate::pg18_oracle::verify(&engine, &durable.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn operator_coercions_match_postgresql_and_survive_reopen(#[case] provider: usize) {
     verify_coercions(
         provider,

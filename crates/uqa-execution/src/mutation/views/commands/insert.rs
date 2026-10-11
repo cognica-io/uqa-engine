@@ -160,34 +160,56 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     }
                 }
                 let mut source_scope = ctes.returning_statement_snapshot_scope();
-                values_from_result(crate::query::statement::execute_query_plan_with_ctes(
+                let result = crate::query::statement::execute_query_plan_with_ctes(
                     &read_context.query,
                     &source,
                     params,
                     &mut source_scope,
-                )?)?
+                )?;
+                let types = result.column_types.clone();
+                values_from_result(result)?
+                    .into_iter()
+                    .map(|row| {
+                        row.into_iter()
+                            .enumerate()
+                            .map(|(position, value)| {
+                                (value, types.get(position).cloned().flatten())
+                            })
+                            .collect()
+                    })
+                    .collect()
             } else {
                 let snapshot = ctes.returning_statement_snapshot_scope();
+                let expressions = read_context
+                    .mutation
+                    .preparation
+                    .referential
+                    .assignment
+                    .expressions;
+                let hook = expressions.expressions.bind_scope(snapshot.clone());
+                let schema = crate::RowSchema::default();
                 stmt.rows
                     .iter()
                     .map(|row| {
                         row.iter()
                             .map(|expression| {
                                 if matches!(expression, ScalarExpr::Default) {
-                                    Ok(Value::Null)
+                                    Ok((Value::Null, None))
                                 } else {
-                                    eval_mutation_expr(
-                                        read_context
-                                            .mutation
-                                            .preparation
-                                            .referential
-                                            .assignment
-                                            .expressions,
+                                    let source = uqa_sql::type_resolution::assignment_source_type(
+                                        expression,
+                                        &schema,
+                                        params,
+                                        hook.as_ref(),
+                                    )?;
+                                    let value = eval_mutation_expr(
+                                        expressions,
                                         &snapshot,
                                         expression,
                                         None,
                                         params,
-                                    )
+                                    )?;
+                                    Ok((value, source))
                                 }
                             })
                             .collect()
@@ -207,7 +229,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 }
                 let mut new = vec![Value::Null; target.columns.len()];
                 for (input_position, target_position) in positions.iter().copied().enumerate() {
-                    if let Some(value) = input.get(input_position) {
+                    if let Some((value, source)) = input.get(input_position) {
                         new[target_position] =
                             crate::mutation::assignment::coerce_typed_assignment(
                                 read_context.mutation.preparation.referential.assignment,
@@ -221,7 +243,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                                         .any(|next| next.column == columns[input_position].column),
                                 },
                                 value.clone(),
-                                None,
+                                source.as_ref(),
                                 None,
                                 params,
                             )?;

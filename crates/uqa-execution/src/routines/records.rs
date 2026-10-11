@@ -80,6 +80,7 @@ impl Interpreter<'_> {
 pub fn shape_trigger_outcome(
     outcome: RoutineOutcome,
     context: &TriggerRoutineContext,
+    catalog: &dyn uqa_sql::routines::declaration::RoutineTypeCatalog,
 ) -> Result<Value, SQLError> {
     let values = match outcome.value {
         Value::Null => return Ok(Value::Null),
@@ -93,19 +94,27 @@ pub fn shape_trigger_outcome(
     let types = outcome
         .anonymous_record_column_types
         .unwrap_or_else(|| values.iter().map(runtime_record_column_type).collect());
-    if values.len() != context.column_types.len()
-        || types.len() != context.column_types.len()
-        || types
-            .iter()
-            .zip(&context.column_types)
-            .any(|(source, target)| !record_types_match(source.as_ref(), target.as_ref()))
-    {
+    if values.len() != types.len() {
         return Err(trigger_shape_error());
     }
     let fields = match (&context.new, &context.old) {
         (Value::Record(fields), _) | (_, Value::Record(fields)) => fields,
         _ => return Err(trigger_shape_error()),
     };
+    if fields.len() != context.column_types.len() {
+        return Err(trigger_shape_error());
+    }
+    let target = fields
+        .iter()
+        .zip(&context.column_types)
+        .map(|((name, _), ty)| {
+            Ok(uqa_sql::routines::result_check::SQLFunctionResultColumn {
+                name: name.clone(),
+                ty: ty.clone().ok_or_else(trigger_shape_error)?,
+            })
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    uqa_sql::routines::result_check::validate_trigger_record_result(catalog, &types, &target)?;
     Ok(Value::Record(uqa_core::RecordValue::from_parts(
         fields
             .iter()
@@ -114,23 +123,6 @@ pub fn shape_trigger_outcome(
             .collect(),
         fields.type_oid(),
     )))
-}
-
-fn record_types_match(source: Option<&ColumnType>, target: Option<&ColumnType>) -> bool {
-    match (source, target) {
-        (
-            Some(ColumnType::Domain { oid: source, .. }),
-            Some(ColumnType::Domain { oid: target, .. }),
-        ) => source == target,
-        (Some(ColumnType::Domain { .. }), _) | (_, Some(ColumnType::Domain { .. })) => false,
-        (Some(source), Some(target)) => {
-            let source = uqa_sql::catalog::result_type::postgres_result_type(source);
-            let target = uqa_sql::catalog::result_type::postgres_result_type(target);
-            source.type_oid == target.type_oid
-                && (target.type_modifier < 0 || source.type_modifier == target.type_modifier)
-        }
-        _ => false,
-    }
 }
 
 fn trigger_shape_error() -> SQLError {

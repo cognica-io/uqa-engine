@@ -153,7 +153,7 @@ pub fn execute_trigger_routine(
         let mut interpreter = Interpreter::new(context.runtime, &function.def, parsed, Vec::new())?;
         interpreter.initialize_trigger_context(parsed, trigger)?;
         interpreter.run(&parsed.action)?;
-        crate::routines::shape_trigger_outcome(interpreter.into_outcome(), trigger)
+        crate::routines::shape_trigger_outcome(interpreter.into_outcome(), trigger, context.types)
     })
 }
 

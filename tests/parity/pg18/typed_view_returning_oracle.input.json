@@ -1,0 +1,91 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "trigger_setup",
+      "sql": "CREATE TABLE tv_trigger_base (id integer PRIMARY KEY,c pg_catalog.\"char\"); CREATE VIEW tv_trigger_view AS SELECT id,c FROM tv_trigger_base; CREATE FUNCTION tv_trigger_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = 'INSERT' THEN IF NEW.id = 99 THEN RETURN NULL; END IF; INSERT INTO tv_trigger_base VALUES (NEW.id,NEW.c); RETURN NEW; ELSIF TG_OP = 'UPDATE' THEN UPDATE tv_trigger_base SET c=NEW.c WHERE id=OLD.id; RETURN NEW; ELSE DELETE FROM tv_trigger_base WHERE id=OLD.id; RETURN OLD; END IF; END $$; CREATE TRIGGER tv_trigger INSTEAD OF INSERT OR UPDATE OR DELETE ON tv_trigger_view FOR EACH ROW EXECUTE FUNCTION tv_trigger_apply()"
+    },
+    {
+      "id": "trigger_insert",
+      "sql": "INSERT INTO tv_trigger_view VALUES (1,'\\377'::pg_catalog.\"char\"),(2,'\\200'::pg_catalog.\"char\"),(99,'\\376'::pg_catalog.\"char\") RETURNING id,c::integer AS c"
+    },
+    {
+      "id": "trigger_insert_select",
+      "sql": "INSERT INTO tv_trigger_view SELECT 3,'\\377'::pg_catalog.\"char\" RETURNING c::integer AS c; DELETE FROM tv_trigger_view WHERE id=3 RETURNING c::integer AS c"
+    },
+    {
+      "id": "trigger_text_input",
+      "sql": "INSERT INTO tv_trigger_view VALUES (3,'\u00ff'),(4,'\\377') RETURNING id,c::integer AS c; DELETE FROM tv_trigger_view WHERE id IN (3,4)"
+    },
+    {
+      "id": "trigger_stored",
+      "sql": "SELECT id,c::integer AS c FROM tv_trigger_base ORDER BY id"
+    },
+    {
+      "id": "trigger_update",
+      "sql": "UPDATE tv_trigger_view SET c='\\376'::pg_catalog.\"char\" WHERE id=1 RETURNING old.c::integer AS old_c,new.c::integer AS new_c,c::integer AS c"
+    },
+    {
+      "id": "trigger_delete",
+      "sql": "DELETE FROM tv_trigger_view WHERE id=2 RETURNING old.c::integer AS old_c,new.c::integer AS new_c,c::integer AS c"
+    },
+    {
+      "id": "rule_setup",
+      "sql": "CREATE TABLE tv_rule_base (id integer PRIMARY KEY,c pg_catalog.\"char\"); CREATE VIEW tv_rule_view AS SELECT id,c FROM tv_rule_base; CREATE RULE tv_rule_insert AS ON INSERT TO tv_rule_view DO INSTEAD INSERT INTO tv_rule_base VALUES (NEW.id,NEW.c) RETURNING id,c; CREATE RULE tv_rule_update AS ON UPDATE TO tv_rule_view DO INSTEAD UPDATE tv_rule_base SET c=NEW.c WHERE id=OLD.id RETURNING id,c; CREATE RULE tv_rule_delete AS ON DELETE TO tv_rule_view DO INSTEAD DELETE FROM tv_rule_base WHERE id=OLD.id RETURNING id,c"
+    },
+    {
+      "id": "rule_insert",
+      "sql": "INSERT INTO tv_rule_view VALUES (1,'\\377'::pg_catalog.\"char\"),(2,'\\200'::pg_catalog.\"char\") RETURNING id,c::integer AS c"
+    },
+    {
+      "id": "rule_insert_select",
+      "sql": "INSERT INTO tv_rule_view SELECT 3,'\\377'::pg_catalog.\"char\" RETURNING c::integer AS c; DELETE FROM tv_rule_view WHERE id=3 RETURNING c::integer AS c"
+    },
+    {
+      "id": "rule_stored",
+      "sql": "SELECT id,c::integer AS c FROM tv_rule_base ORDER BY id"
+    },
+    {
+      "id": "rule_update",
+      "sql": "UPDATE tv_rule_view SET c='\\376'::pg_catalog.\"char\" WHERE id=1 RETURNING old.c::integer AS old_c,new.c::integer AS new_c,c::integer AS c"
+    },
+    {
+      "id": "rule_delete",
+      "sql": "DELETE FROM tv_rule_view WHERE id=2 RETURNING old.c::integer AS old_c,new.c::integer AS new_c,c::integer AS c"
+    },
+    {
+      "id": "wrong_trigger_setup",
+      "sql": "CREATE VIEW tv_bad_view AS SELECT id,c FROM tv_trigger_base; CREATE FUNCTION tv_bad_return() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN ROW(NEW.id::bigint,NEW.c); END $$; CREATE TRIGGER tv_bad INSTEAD OF INSERT ON tv_bad_view FOR EACH ROW EXECUTE FUNCTION tv_bad_return()"
+    },
+    {
+      "id": "wrong_trigger_shape",
+      "sql": "INSERT INTO tv_bad_view VALUES (10,'a') RETURNING *"
+    },
+    {
+      "id": "wrong_trigger_count",
+      "sql": "CREATE OR REPLACE FUNCTION tv_bad_return() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN ROW(NEW.id); END $$; INSERT INTO tv_bad_view VALUES (11,'a') RETURNING *"
+    },
+    {
+      "id": "rollback",
+      "sql": "BEGIN; UPDATE tv_trigger_view SET c='\\375'::pg_catalog.\"char\" WHERE id=1 RETURNING c::integer AS c; UPDATE tv_rule_view SET c='\\375'::pg_catalog.\"char\" WHERE id=1 RETURNING c::integer AS c; ROLLBACK; SELECT c::integer AS c FROM tv_trigger_base; SELECT c::integer AS c FROM tv_rule_base"
+    },
+    {
+      "id": "reopen_values",
+      "sql": "SELECT c::integer AS c FROM tv_trigger_base; SELECT c::integer AS c FROM tv_rule_base",
+      "reopen": true
+    },
+    {
+      "id": "reopen_trigger",
+      "sql": "UPDATE tv_trigger_view SET c='\\377'::pg_catalog.\"char\" WHERE id=1 RETURNING old.c::integer AS old_c,new.c::integer AS new_c,c::integer AS c",
+      "reopen": true
+    },
+    {
+      "id": "reopen_rule",
+      "sql": "UPDATE tv_rule_view SET c='\\377'::pg_catalog.\"char\" WHERE id=1 RETURNING old.c::integer AS old_c,new.c::integer AS new_c,c::integer AS c",
+      "reopen": true
+    }
+  ]
+}

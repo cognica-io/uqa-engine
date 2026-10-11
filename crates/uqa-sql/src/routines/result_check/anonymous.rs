@@ -11,6 +11,13 @@ use super::{
     SQLFunctionResultColumn, SQLFunctionResultKind,
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecordResultContext {
+    SQLTuple,
+    Procedural,
+    Trigger,
+}
+
 /// SQL target lists assign each column; a whole SQL or procedural record keeps its producer's field identities.
 pub fn validate_anonymous_record_result(
     types: &dyn RoutineTypeCatalog,
@@ -28,7 +35,34 @@ pub fn validate_anonymous_record_result(
                 .collect::<Vec<_>>(),
         );
     }
-    let tuple = sql_kind == Some(SQLFunctionResultKind::Tuple);
+    validate_record_fields(
+        types,
+        source,
+        target,
+        if sql_kind == Some(SQLFunctionResultKind::Tuple) {
+            RecordResultContext::SQLTuple
+        } else {
+            RecordResultContext::Procedural
+        },
+    )
+}
+
+/// A trigger returns its relation's exact descriptor; validating the fields does not coerce their values again.
+pub fn validate_trigger_record_result(
+    types: &dyn RoutineTypeCatalog,
+    source: &[Option<ColumnType>],
+    target: &[SQLFunctionResultColumn],
+) -> Result<(), SQLError> {
+    validate_record_fields(types, source, target, RecordResultContext::Trigger)
+}
+
+fn validate_record_fields(
+    types: &dyn RoutineTypeCatalog,
+    source: &[Option<ColumnType>],
+    target: &[SQLFunctionResultColumn],
+    context: RecordResultContext,
+) -> Result<(), SQLError> {
+    let tuple = context == RecordResultContext::SQLTuple;
     if source.len() != target.len() {
         let detail = if tuple {
             format!(
@@ -46,7 +80,7 @@ pub fn validate_anonymous_record_result(
                 target.len()
             )
         };
-        return Err(mismatch(tuple, detail));
+        return Err(mismatch(context, detail));
     }
     for (index, (source, target)) in source.iter().zip(target).enumerate() {
         if tuple
@@ -75,7 +109,7 @@ pub fn validate_anonymous_record_result(
         } else {
             format!("Returned type {source} does not match expected type {expected} in column \"{}\" (position {}).", target.name, index + 1)
         };
-        return Err(mismatch(tuple, detail));
+        return Err(mismatch(context, detail));
     }
     Ok(())
 }
@@ -86,13 +120,24 @@ fn same_identity(source: &ColumnType, target: &ColumnType) -> bool {
         && (pg_type_modifier(target) < 0 || pg_type_modifier(source) == pg_type_modifier(target))
 }
 
-fn mismatch(tuple: bool, detail: String) -> SQLError {
+fn mismatch(context: RecordResultContext, detail: String) -> SQLError {
     SQLError::Diagnostic {
-        sqlstate: if tuple { "42P13" } else { "42804" }.into(),
-        message: if tuple {
-            "return type mismatch in function declared to return record"
+        sqlstate: if context == RecordResultContext::SQLTuple {
+            "42P13"
         } else {
-            "returned record type does not match expected record type"
+            "42804"
+        }
+        .into(),
+        message: match context {
+            RecordResultContext::SQLTuple => {
+                "return type mismatch in function declared to return record"
+            }
+            RecordResultContext::Procedural => {
+                "returned record type does not match expected record type"
+            }
+            RecordResultContext::Trigger => {
+                "returned row structure does not match the structure of the triggering table"
+            }
         }
         .into(),
         detail: Some(detail),

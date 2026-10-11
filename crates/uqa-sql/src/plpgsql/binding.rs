@@ -25,7 +25,7 @@ impl ResolvedVariable {
         }
     }
 
-    fn into_expression(self) -> Expr {
+    pub(crate) fn into_expression(self) -> Expr {
         match self.declared_type {
             Some(ty) => Expr::TypedLiteral {
                 composite_source: None,
