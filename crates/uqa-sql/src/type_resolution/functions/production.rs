@@ -6,6 +6,8 @@
 
 //! Built-in result inference retains type buffers and selected payloads under its caller's control.
 
+mod nullif;
+
 use super::super::common::{base_type, common_numeric_type, numeric_type};
 use super::super::{
     array_transform,
@@ -789,19 +791,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 )),
             },
         },
-        "nullif" => {
-            let selected = super::super::operators::binary_operator_types_with_control(
-                BinaryOp::Equal,
-                effective(0),
-                effective(1),
-                control,
-            )?;
-            if matches!(selected[0], ColumnType::Record) && first().is_some() {
-                copy(first(), control)
-            } else {
-                copy(Some(&selected[0]), control)
-            }
-        }
+        "nullif" => nullif::result_type(first(), &call_arguments, &effective_types, control),
         "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "trim_array"
         | "array_sample" | "generate_series" => copy(first(), control),
         // `anycompatible` arguments: an `unknown` literal takes the type selected by the known arguments.

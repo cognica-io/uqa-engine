@@ -16,6 +16,14 @@ use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 
 use super::FunctionTypeResolver;
 
+/// Inputs whose absent type means `PostgreSQL` `unknown`, rather than an unresolved UQA runtime value.
+pub(super) fn unknown_input(expression: &ScalarExpr) -> bool {
+    matches!(
+        expression,
+        ScalarExpr::Literal(Value::Null | Value::Str(_)) | ScalarExpr::Param(_)
+    )
+}
+
 /// Decoded function-call argument names, effective overload types, and whether the call used explicit `VARIADIC` syntax.
 #[doc(hidden)]
 pub type FunctionCallArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);

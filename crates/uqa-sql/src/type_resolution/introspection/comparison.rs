@@ -11,6 +11,8 @@ use crate::ast::{BinaryOp, FunctionDispatch};
 use crate::type_resolution::{common::base_type, operators::binary_operator_types_with_control};
 use uqa_core::Value;
 
+pub(super) use crate::type_resolution::common::unknown_input;
+
 impl Binder<'_, '_> {
     /// Selected operand and result types for a binary operator before its inputs are coerced.
     pub(super) fn binary_operand_types(
@@ -201,13 +203,6 @@ fn comparison_operator(operator: &str) -> Option<BinaryOp> {
         ">=" => BinaryOp::GreaterEqual,
         _ => return None,
     })
-}
-
-pub(super) fn unknown_input(expression: &ScalarExpr) -> bool {
-    matches!(
-        expression,
-        ScalarExpr::Literal(Value::Null | Value::Str(_)) | ScalarExpr::Param(_)
-    )
 }
 
 #[cfg(test)]

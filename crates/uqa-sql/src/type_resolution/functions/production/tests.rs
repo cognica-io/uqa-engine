@@ -408,3 +408,38 @@ fn nullif_result_follows_its_selected_equality_left_operand() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn nullif_dynamic_inputs_keep_the_original_left_result_type() {
+    let schema = crate::RowSchema::with_types(
+        vec!["dynamic".into(), "other".into(), "declared".into()],
+        vec![None, None, Some(ColumnType::Integer)],
+    );
+    let budget = MemoryBudget::new(64 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (source, expected) in [
+        ("NULLIF(dynamic,other)", None),
+        ("NULLIF(dynamic,1)", None),
+        ("NULLIF(dynamic,declared)", None),
+        ("NULLIF(1,dynamic)", Some("integer")),
+        ("NULLIF(declared,dynamic)", Some("integer")),
+        ("NULLIF('a',dynamic)", Some("text")),
+    ] {
+        let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {source}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT expression");
+        };
+        let scalar = crate::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+        let result = crate::scalar_type_with_control(&scalar, &schema, &[], &control).unwrap();
+        assert_eq!(
+            result.as_ref().map(|ty| ty.sql_name()).as_deref(),
+            expected,
+            "{source}"
+        );
+        drop(result);
+        assert_eq!(budget.used(), 0);
+    }
+}
