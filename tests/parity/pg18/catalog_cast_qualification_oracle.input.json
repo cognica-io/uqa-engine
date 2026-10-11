@@ -126,7 +126,7 @@
     },
     {
       "id": "char_multibyte",
-      "sql": "SELECT 'é'::pg_catalog.\"char\" AS v,'é'::pg_catalog.\"char\"::pg_catalog.text AS t"
+      "sql": "SELECT '\u00e9'::pg_catalog.\"char\" AS v,'\u00e9'::pg_catalog.\"char\"::pg_catalog.text AS t"
     },
     {
       "id": "char_octal",
@@ -146,11 +146,11 @@
     },
     {
       "id": "char_unsigned_order",
-      "sql": "SELECT 'a'::pg_catalog.\"char\" < '\\377'::pg_catalog.\"char\" AS lt,'\\377'::pg_catalog.\"char\" > 'é'::pg_catalog.\"char\" AS gt"
+      "sql": "SELECT 'a'::pg_catalog.\"char\" < '\\377'::pg_catalog.\"char\" AS lt,'\\377'::pg_catalog.\"char\" > '\u00e9'::pg_catalog.\"char\" AS gt"
     },
     {
       "id": "create_char_storage",
-      "sql": "CREATE TYPE cq_scope.byte_holder AS(c pg_catalog.\"char\"); CREATE TABLE public.cq_bytes(id integer PRIMARY KEY,c pg_catalog.\"char\",a pg_catalog.\"char\"[],r cq_scope.byte_holder); INSERT INTO public.cq_bytes VALUES(1,'\\377',ARRAY['\\377'::pg_catalog.\"char\",'é'::pg_catalog.\"char\"],ROW('é'::pg_catalog.\"char\")::cq_scope.byte_holder); CREATE VIEW public.cq_byte_view AS SELECT id,c,c::pg_catalog.\"char\" AS same,c::pg_catalog.text AS rendered,a,r FROM public.cq_bytes"
+      "sql": "CREATE TYPE cq_scope.byte_holder AS(c pg_catalog.\"char\"); CREATE TABLE public.cq_bytes(id integer PRIMARY KEY,c pg_catalog.\"char\",a pg_catalog.\"char\"[],r cq_scope.byte_holder); INSERT INTO public.cq_bytes VALUES(1,'\\377',ARRAY['\\377'::pg_catalog.\"char\",'\u00e9'::pg_catalog.\"char\"],ROW('\u00e9'::pg_catalog.\"char\")::cq_scope.byte_holder); CREATE VIEW public.cq_byte_view AS SELECT id,c,c::pg_catalog.\"char\" AS same,c::pg_catalog.text AS rendered,a,r FROM public.cq_bytes"
     },
     {
       "id": "char_storage_values",
@@ -234,7 +234,7 @@
     },
     {
       "id": "create_char_literal_view",
-      "sql": "CREATE VIEW public.cq_byte_literal AS SELECT 'é'::pg_catalog.\"char\" AS c"
+      "sql": "CREATE VIEW public.cq_byte_literal AS SELECT '\u00e9'::pg_catalog.\"char\" AS c"
     },
     {
       "id": "char_literal_definition",
@@ -267,6 +267,38 @@
     {
       "id": "routine_search_path_shadow",
       "sql": "SET search_path=cq_scope,pg_catalog,public; SELECT public.cq_text() AS v"
+    },
+    {
+      "id": "char_cascade_setup",
+      "sql": "CREATE TABLE public.cq_char_parent(id pg_catalog.\"char\" PRIMARY KEY); CREATE TABLE public.cq_char_child(id pg_catalog.int4 PRIMARY KEY, p pg_catalog.\"char\" REFERENCES public.cq_char_parent(id) ON UPDATE CASCADE); INSERT INTO public.cq_char_parent VALUES('a'); INSERT INTO public.cq_char_child VALUES(1,'a')"
+    },
+    {
+      "id": "char_cascade_update",
+      "sql": "UPDATE public.cq_char_parent SET id='\\377'::pg_catalog.\"char\"; SELECT id::pg_catalog.int4 AS v FROM public.cq_char_parent; SELECT p::pg_catalog.int4 AS v FROM public.cq_char_child"
+    },
+    {
+      "id": "char_fk_same",
+      "sql": "INSERT INTO public.cq_char_child VALUES(2,'\\377'::pg_catalog.\"char\")"
+    },
+    {
+      "id": "char_fk_different",
+      "sql": "INSERT INTO public.cq_char_child VALUES(3,'\\303'::pg_catalog.\"char\")"
+    },
+    {
+      "id": "char_point_setup",
+      "sql": "CREATE TABLE public.cq_char_point(id pg_catalog.int4 PRIMARY KEY, c pg_catalog.\"char\"); INSERT INTO public.cq_char_point VALUES(1,'a')"
+    },
+    {
+      "id": "char_point_update",
+      "sql": "UPDATE public.cq_char_point SET c='\\377'::pg_catalog.\"char\" WHERE id=1; SELECT c::pg_catalog.int4 AS v FROM public.cq_char_point"
+    },
+    {
+      "id": "char_generated_setup",
+      "sql": "CREATE TABLE public.cq_char_generated(c pg_catalog.\"char\", g pg_catalog.\"char\" GENERATED ALWAYS AS (c) STORED, v pg_catalog.\"char\" GENERATED ALWAYS AS (c) VIRTUAL); INSERT INTO public.cq_char_generated(c) VALUES ('\\377'::pg_catalog.\"char\"); SELECT c::pg_catalog.int4 AS c,g::pg_catalog.int4 AS g,v::pg_catalog.int4 AS v FROM public.cq_char_generated"
+    },
+    {
+      "id": "char_default_setup",
+      "sql": "CREATE TABLE public.cq_char_default(id pg_catalog.int4 PRIMARY KEY, p pg_catalog.\"char\" DEFAULT '\\377'::pg_catalog.\"char\" REFERENCES public.cq_char_parent(id) ON UPDATE SET DEFAULT); INSERT INTO public.cq_char_parent VALUES('b'); INSERT INTO public.cq_char_default VALUES(1,'b'); UPDATE public.cq_char_parent SET id='c' WHERE id='b'; SELECT p::pg_catalog.int4 AS v FROM public.cq_char_default"
     },
     {
       "id": "reopen_view",
@@ -311,6 +343,11 @@
     {
       "id": "reopen_builtin_text_routine",
       "sql": "SELECT public.cq_text() AS v",
+      "reopen": true
+    },
+    {
+      "id": "reopen_char_cascade",
+      "sql": "SELECT p::pg_catalog.int4 AS v FROM public.cq_char_child ORDER BY id; SELECT c::pg_catalog.int4 AS c,g::pg_catalog.int4 AS g,v::pg_catalog.int4 AS v FROM public.cq_char_generated",
       "reopen": true
     }
   ]

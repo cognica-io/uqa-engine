@@ -22,14 +22,28 @@ pub struct ForeignKeyLookup {
 
 pub struct ForeignKeyComparison {
     pub comparison_types: Vec<ColumnType>,
+    /// Stored key carriers retain each side's declared input identity before comparison coercion.
+    pub local_types: Vec<ColumnType>,
+    pub referenced_types: Vec<ColumnType>,
     pub exact_reference_lookup: bool,
     /// Whether child index equality has the same operand types as the FK comparison.
     pub exact_local_lookup: bool,
 }
 
+#[cfg(test)]
+mod tests;
+
 impl ForeignKeyComparison {
     pub fn normalize(&self, values: Vec<Value>) -> Result<Vec<Value>, SQLError> {
         normalize_foreign_key_values(values, &self.comparison_types)
+    }
+
+    pub fn normalize_local(&self, values: Vec<Value>) -> Result<Vec<Value>, SQLError> {
+        normalize_typed_values(values, &self.local_types, &self.comparison_types)
+    }
+
+    pub fn normalize_referenced(&self, values: Vec<Value>) -> Result<Vec<Value>, SQLError> {
+        normalize_typed_values(values, &self.referenced_types, &self.comparison_types)
     }
 }
 
@@ -71,7 +85,7 @@ pub fn foreign_key_values(
                 "FOREIGN KEY local and referenced column counts diverged after validation".into(),
             ));
         }
-        return comparison.normalize(local_values).map(Some);
+        return comparison.normalize_local(local_values).map(Some);
     }
     match fk.match_type {
         ForeignKeyMatch::Simple => Ok(None),
@@ -108,6 +122,8 @@ pub fn foreign_key_comparison_types(
         .map_err(|error| dml_storage_error("FOREIGN KEY referenced columns", error))?
         .ok_or_else(|| SQLError::UnknownTable(fk.ref_table.clone()))?;
     let mut comparison_types = Vec::with_capacity(fk.local_columns.len());
+    let mut local_types = Vec::with_capacity(fk.local_columns.len());
+    let mut referenced_types = Vec::with_capacity(fk.ref_columns.len());
     let mut exact_reference_lookup = true;
     let mut exact_local_lookup = true;
     for (local_column, referenced_column) in fk.local_columns.iter().zip(&fk.ref_columns) {
@@ -137,9 +153,13 @@ pub fn foreign_key_comparison_types(
         exact_reference_lookup &= comparison_type == *referenced_type;
         exact_local_lookup &= comparison_type == *local_type;
         comparison_types.push(comparison_type);
+        local_types.push(local_type.clone());
+        referenced_types.push(referenced_type.clone());
     }
     Ok(ForeignKeyComparison {
         comparison_types,
+        local_types,
+        referenced_types,
         exact_reference_lookup,
         exact_local_lookup,
     })
@@ -150,12 +170,36 @@ pub fn foreign_key_parent_values(
     document: &Document,
     comparison: &ForeignKeyComparison,
 ) -> Result<Vec<Value>, SQLError> {
-    comparison.normalize(
+    comparison.normalize_referenced(
         fk.ref_columns
             .iter()
             .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
             .collect(),
     )
+}
+
+fn normalize_typed_values(
+    values: Vec<Value>,
+    source_types: &[ColumnType],
+    comparison_types: &[ColumnType],
+) -> Result<Vec<Value>, SQLError> {
+    if values.len() != source_types.len() || values.len() != comparison_types.len() {
+        return Err(SQLError::Internal(
+            "FOREIGN KEY value and comparison-type counts diverged after validation".into(),
+        ));
+    }
+    values
+        .into_iter()
+        .zip(source_types)
+        .zip(comparison_types)
+        .map(|((value, source), target)| {
+            crate::assignment::conversion::convert_value_to_column_type_from(
+                value,
+                target,
+                Some(source),
+            )
+        })
+        .collect()
 }
 
 pub fn normalize_foreign_key_values(

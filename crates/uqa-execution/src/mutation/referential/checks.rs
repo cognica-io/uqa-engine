@@ -357,7 +357,7 @@ fn check_referenced_key<S: Clone + 'static>(
         &key.constraint_table,
         foreign_key,
     )?;
-    let expected = comparison.normalize(key.key.clone())?;
+    let expected = comparison.normalize_referenced(key.key.clone())?;
     let referenced = if foreign_key.period {
         period_key_referenced(context, key, &expected)?
     } else {

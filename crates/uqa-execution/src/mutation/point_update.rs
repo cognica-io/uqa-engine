@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    assignment::columns::coerce_to_column_type,
+    assignment::columns::coerce_to_column_type_from,
     ast::{BinaryOp, ColumnType},
     plan::UpdatePlan,
     semantics::{
@@ -195,6 +195,11 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         stmt.statement_privilege_subject.as_ref(),
         stmt.relations_bound,
     )?;
+    let hook = context
+        .assignment
+        .expressions
+        .expressions
+        .bind_scope(ctes.clone());
     for assignment in &stmt.assignments {
         let uqa_sql::ast::AssignmentTargets::Single(target) = &assignment.target else {
             return Ok(None);
@@ -202,7 +207,13 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         if !target.is_whole_column() || !expr_is_row_independent(&assignment.value) {
             return Ok(None);
         }
-        let value = coerce_to_column_type(
+        let source = uqa_sql::type_resolution::assignment_source_type(
+            &assignment.value,
+            &crate::RowSchema::default(),
+            params,
+            hook.as_ref(),
+        )?;
+        let value = coerce_to_column_type_from(
             context.assignment.assignment,
             context.assignment.columns,
             &stmt.table,
@@ -214,6 +225,7 @@ pub fn row_independent_update_values<S: Clone + 'static>(
                 None,
                 params,
             )?,
+            source.as_ref(),
         )?;
         if let Some(ty @ (ColumnType::Vector(_) | ColumnType::Tensor(_))) = context
             .constraints

@@ -102,8 +102,37 @@ fn generated_reads_borrow_retained_column_types_without_changing_results() {
         ("label".into(), Value::Str("text".into())),
     ]);
     materialize_missing_generated_columns(&columns, &mut document).unwrap();
-    assert_eq!(document["kind"], Value::Str("smallint".into()));
+    assert_eq!(document["kind"], Value::Int(21));
     assert_eq!(document["v"], Value::Int(3));
+}
+
+#[test]
+fn generated_byte_values_keep_source_identity_under_the_original_allowance() {
+    let uqa_sql::Statement::CreateTable(table) = uqa_sql::compile(
+        "CREATE TABLE t(c pg_catalog.\"char\", g pg_catalog.\"char\" GENERATED ALWAYS AS(c) STORED, v pg_catalog.\"char\" GENERATED ALWAYS AS(c) VIRTUAL)",
+    ).unwrap().remove(0) else { panic!("table declaration"); };
+    let budget = MemoryBudget::new(65536);
+    let token = CancellationToken::new();
+    let control = GeneratedControl {
+        budget: &budget,
+        original: &token,
+        invoking: &token,
+    };
+    let mut memory = budget.empty_reservation();
+    let mut document = Document::from([("c".into(), Value::Str("ÿ".into()))]);
+    materialize_missing_generated_columns_with_control(
+        &table.columns,
+        &mut document,
+        &mut memory,
+        &control,
+    )
+    .unwrap();
+    assert_eq!(document["g"], document["c"]);
+    assert_eq!(document["v"], document["c"]);
+    assert_eq!(budget.used(), memory.bytes());
+    drop(document);
+    drop(memory);
+    assert_eq!(budget.used(), 0);
 }
 
 struct CancelOnLookup<'a> {
@@ -213,7 +242,7 @@ fn generated_preparation_retains_binder_allocations_and_rejects_partial_quota() 
     assert!(budget.used() > initial);
     assert_eq!(
         evaluate_generated_expression(&prepared.scalar, &Document::new()).unwrap(),
-        Value::Str("smallint".into())
+        Value::Int(21)
     );
     drop(prepared);
     assert_eq!(budget.used(), 0);

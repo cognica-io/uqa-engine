@@ -20,6 +20,27 @@ use uqa_core::{
 
 type Result<T> = std::result::Result<T, SQLError>;
 
+/// Preserve already admitted carriers without repeating their input function; new text input still follows the selected conversion.
+pub fn convert_value_to_column_type_from_with_control(
+    value: Produced<Value>,
+    ty: &ColumnType,
+    source: Option<&ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
+    let (value, memory) = value.into_parts();
+    let value = control.finish(value, memory)?;
+    if source.is_some_and(|source| super::same_catalog_value_type(source, ty)) {
+        return super::normalize_legacy_vector_carrier_with_control(&value, ty, control)
+            .map(|normalized| normalized.unwrap_or(value));
+    }
+    if let (ColumnType::InternalChar, Some(source)) = (ty, source) {
+        let name = source.catalog_name_with_control(control)?;
+        return cast_value_from_with_control(&value, "\"char\"", Some(&name), control);
+    }
+    convert_value_to_column_type_with_control(value, ty, control)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "assignment matrix preserves conversion and validation order"

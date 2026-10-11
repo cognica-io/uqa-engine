@@ -752,7 +752,7 @@
       "id": "char_empty"
     },
     {
-      "sql": "SELECT 'é'::pg_catalog.\"char\" AS v,'é'::pg_catalog.\"char\"::pg_catalog.text AS t",
+      "sql": "SELECT '\u00e9'::pg_catalog.\"char\" AS v,'\u00e9'::pg_catalog.\"char\"::pg_catalog.text AS t",
       "command_tags": [
         "SELECT 1"
       ],
@@ -859,7 +859,7 @@
       "id": "char_integer_low"
     },
     {
-      "sql": "SELECT 'a'::pg_catalog.\"char\" < '\\377'::pg_catalog.\"char\" AS lt,'\\377'::pg_catalog.\"char\" > 'é'::pg_catalog.\"char\" AS gt",
+      "sql": "SELECT 'a'::pg_catalog.\"char\" < '\\377'::pg_catalog.\"char\" AS lt,'\\377'::pg_catalog.\"char\" > '\u00e9'::pg_catalog.\"char\" AS gt",
       "command_tags": [
         "SELECT 1"
       ],
@@ -886,7 +886,7 @@
       "id": "char_unsigned_order"
     },
     {
-      "sql": "CREATE TYPE cq_scope.byte_holder AS(c pg_catalog.\"char\"); CREATE TABLE public.cq_bytes(id integer PRIMARY KEY,c pg_catalog.\"char\",a pg_catalog.\"char\"[],r cq_scope.byte_holder); INSERT INTO public.cq_bytes VALUES(1,'\\377',ARRAY['\\377'::pg_catalog.\"char\",'é'::pg_catalog.\"char\"],ROW('é'::pg_catalog.\"char\")::cq_scope.byte_holder); CREATE VIEW public.cq_byte_view AS SELECT id,c,c::pg_catalog.\"char\" AS same,c::pg_catalog.text AS rendered,a,r FROM public.cq_bytes",
+      "sql": "CREATE TYPE cq_scope.byte_holder AS(c pg_catalog.\"char\"); CREATE TABLE public.cq_bytes(id integer PRIMARY KEY,c pg_catalog.\"char\",a pg_catalog.\"char\"[],r cq_scope.byte_holder); INSERT INTO public.cq_bytes VALUES(1,'\\377',ARRAY['\\377'::pg_catalog.\"char\",'\u00e9'::pg_catalog.\"char\"],ROW('\u00e9'::pg_catalog.\"char\")::cq_scope.byte_holder); CREATE VIEW public.cq_byte_view AS SELECT id,c,c::pg_catalog.\"char\" AS same,c::pg_catalog.text AS rendered,a,r FROM public.cq_bytes",
       "command_tags": [
         "CREATE TYPE",
         "CREATE TABLE",
@@ -938,7 +938,7 @@
             18,
             23,
             1002,
-            22775,
+            22872,
             25
           ],
           "rows": [
@@ -1400,7 +1400,7 @@
       "id": "routine_execute"
     },
     {
-      "sql": "CREATE VIEW public.cq_byte_literal AS SELECT 'é'::pg_catalog.\"char\" AS c",
+      "sql": "CREATE VIEW public.cq_byte_literal AS SELECT '\u00e9'::pg_catalog.\"char\" AS c",
       "command_tags": [
         "CREATE VIEW"
       ],
@@ -1602,6 +1602,255 @@
       "id": "routine_search_path_shadow"
     },
     {
+      "sql": "CREATE TABLE public.cq_char_parent(id pg_catalog.\"char\" PRIMARY KEY); CREATE TABLE public.cq_char_child(id pg_catalog.int4 PRIMARY KEY, p pg_catalog.\"char\" REFERENCES public.cq_char_parent(id) ON UPDATE CASCADE); INSERT INTO public.cq_char_parent VALUES('a'); INSERT INTO public.cq_char_child VALUES(1,'a')",
+      "command_tags": [
+        "CREATE TABLE",
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "char_cascade_setup"
+    },
+    {
+      "sql": "UPDATE public.cq_char_parent SET id='\\377'::pg_catalog.\"char\"; SELECT id::pg_catalog.int4 AS v FROM public.cq_char_parent; SELECT p::pg_catalog.int4 AS v FROM public.cq_char_child",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "char_cascade_update"
+    },
+    {
+      "sql": "INSERT INTO public.cq_char_child VALUES(2,'\\377'::pg_catalog.\"char\")",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "char_fk_same"
+    },
+    {
+      "sql": "INSERT INTO public.cq_char_child VALUES(3,'\\303'::pg_catalog.\"char\")",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23503",
+        "message": "insert or update on table \"cq_char_child\" violates foreign key constraint \"cq_char_child_p_fkey\"",
+        "detail": "Key (p)=(\\303) is not present in table \"cq_char_parent\".",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "char_fk_different"
+    },
+    {
+      "sql": "CREATE TABLE public.cq_char_point(id pg_catalog.int4 PRIMARY KEY, c pg_catalog.\"char\"); INSERT INTO public.cq_char_point VALUES(1,'a')",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "char_point_setup"
+    },
+    {
+      "sql": "UPDATE public.cq_char_point SET c='\\377'::pg_catalog.\"char\" WHERE id=1; SELECT c::pg_catalog.int4 AS v FROM public.cq_char_point",
+      "command_tags": [
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "char_point_update"
+    },
+    {
+      "sql": "CREATE TABLE public.cq_char_generated(c pg_catalog.\"char\", g pg_catalog.\"char\" GENERATED ALWAYS AS (c) STORED, v pg_catalog.\"char\" GENERATED ALWAYS AS (c) VIRTUAL); INSERT INTO public.cq_char_generated(c) VALUES ('\\377'::pg_catalog.\"char\"); SELECT c::pg_catalog.int4 AS c,g::pg_catalog.int4 AS g,v::pg_catalog.int4 AS v FROM public.cq_char_generated",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "c",
+            "g",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "-1",
+              "-1",
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "char_generated_setup"
+    },
+    {
+      "sql": "CREATE TABLE public.cq_char_default(id pg_catalog.int4 PRIMARY KEY, p pg_catalog.\"char\" DEFAULT '\\377'::pg_catalog.\"char\" REFERENCES public.cq_char_parent(id) ON UPDATE SET DEFAULT); INSERT INTO public.cq_char_parent VALUES('b'); INSERT INTO public.cq_char_default VALUES(1,'b'); UPDATE public.cq_char_parent SET id='c' WHERE id='b'; SELECT p::pg_catalog.int4 AS v FROM public.cq_char_default",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1",
+        "INSERT 0 1",
+        "UPDATE 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "char_default_setup"
+    },
+    {
       "sql": "SET search_path=cq_scope,pg_catalog,public; SELECT id,i,t,f::pg_catalog.text AS f FROM public.cq_bound",
       "command_tags": [
         "SET",
@@ -1710,7 +1959,7 @@
             18,
             23,
             1002,
-            22775,
+            22872,
             25
           ],
           "rows": [
@@ -1852,19 +2101,67 @@
       "notices": [],
       "id": "reopen_builtin_text_routine",
       "reopen": true
+    },
+    {
+      "sql": "SELECT p::pg_catalog.int4 AS v FROM public.cq_char_child ORDER BY id; SELECT c::pg_catalog.int4 AS c,g::pg_catalog.int4 AS g,v::pg_catalog.int4 AS v FROM public.cq_char_generated",
+      "command_tags": [
+        "SELECT 2",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ],
+            [
+              "-1"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "c",
+            "g",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "-1",
+              "-1",
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_char_cascade",
+      "reopen": true
     }
   ],
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
     "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "31d374ee4357a8dc48d43961d5208b29b74099f431f6aadfe0f6e10173ecf1aa",
+    "input_sha256": "f5cf6140e2f499bd347232c2f9db25f03b21018bbb454181420a8433814f23bb",
     "options": [
       "--rows",
       "--details",
       "--notices"
     ],
     "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
-    "fresh_connection_cases": 9,
-    "fresh_connection_output_sha256": "b85e4276f6fa3bf8051f59074a22a4178f5b86ec4c4d0ebb1c151eca89fea964"
+    "fresh_connection_cases": 10,
+    "fresh_connection_output_sha256": "f49be8ddef38f62bb9091f875296bf09de66f0c82d34ace3d8f4c28abc74822a"
   }
 }

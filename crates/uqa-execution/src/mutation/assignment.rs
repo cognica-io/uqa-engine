@@ -378,7 +378,7 @@ pub fn refresh_selected_stored_generated_columns<S: Clone + 'static>(
         selected,
         document,
         &mut |expression, row, schema| {
-            crate::query::catalog_expression::eval_lowered_expression_with_schema(
+            crate::query::catalog_expression::eval_lowered_expression_with_schema_and_type(
                 services.expressions.expressions,
                 services.scopes.current_routine_scope(),
                 expression,

@@ -97,18 +97,30 @@ fn materialize_matching_missing_generated_columns(
         }
         let value = if let Some((control, _)) = &retained {
             let expression = prepare_generated_column_with_control(&schema, generated, control)?;
-            evaluate_generated_expression_with_control(&expression.scalar, document, &production)?
+            let source =
+                uqa_sql::scalar_type_with_control(&expression.scalar, &schema, &[], &production)?;
+            let value = evaluate_generated_expression_with_control(
+                &expression.scalar,
+                document,
+                &production,
+            )?;
+            uqa_sql::assignment::conversion::convert_value_to_column_type_from_with_control(
+                value,
+                &column.ty,
+                source.as_deref(),
+                &production,
+            )?
         } else {
+            let (value, source) = evaluate_generated_column(&schema, generated, document)?;
             production.finish(
-                evaluate_generated_column(&schema, generated, document)?,
+                uqa_sql::assignment::conversion::convert_value_to_column_type_from(
+                    value,
+                    &column.ty,
+                    source.as_ref(),
+                )?,
                 None,
             )?
         };
-        let value = uqa_sql::assignment::conversion::convert_value_to_column_type_with_control(
-            value,
-            &column.ty,
-            &production,
-        )?;
         let name = production.copy_text(&column.name)?;
         let entry_memory = production.reserve(size_of::<(String, uqa_core::Value)>())?;
         let (value, value_memory) = value.into_parts();
@@ -145,10 +157,14 @@ fn materialize_matching_virtual_generated_columns(
         if !selected(&column.name) {
             continue;
         }
-        let value = evaluate_generated_column(&schema, generated, document)?;
+        let (value, source) = evaluate_generated_column(&schema, generated, document)?;
         document.insert(
             column.name.clone(),
-            uqa_sql::assignment::conversion::convert_value_to_column_type(value, &column.ty)?,
+            uqa_sql::assignment::conversion::convert_value_to_column_type_from(
+                value,
+                &column.ty,
+                source.as_ref(),
+            )?,
         );
     }
     Ok(())
@@ -158,9 +174,10 @@ fn evaluate_generated_column(
     schema: &dyn ScalarTypeSchema,
     generated: &uqa_sql::ast::GeneratedColumn,
     document: &Document,
-) -> Result<uqa_core::Value, SQLError> {
+) -> Result<(uqa_core::Value, Option<uqa_sql::ColumnType>), SQLError> {
     let expression = prepare_generated_column(schema, generated)?;
-    evaluate_generated_expression(&expression, document)
+    let source = uqa_sql::scalar_type(&expression, schema, &[])?;
+    evaluate_generated_expression(&expression, document).map(|value| (value, source))
 }
 
 pub(crate) fn prepare_generated_column(
