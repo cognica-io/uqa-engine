@@ -339,10 +339,24 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("IS DISTINCT FROM without rhs".into()))?;
-            let call = dispatched_call(
-                FunctionDispatch::IsDistinct,
-                vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            );
+            let left = compile_expr(lhs)?;
+            let right = compile_expr(rhs)?;
+            if matches!(left, Expr::Literal(Value::Null))
+                || matches!(right, Expr::Literal(Value::Null))
+            {
+                let argument = if matches!(right, Expr::Literal(Value::Null)) {
+                    left
+                } else {
+                    right
+                };
+                return Ok(dispatched_call(
+                    FunctionDispatch::ValueNullTest {
+                        negated: matches!(kind, AExprKind::AexprDistinct),
+                    },
+                    vec![argument],
+                ));
+            }
+            let call = dispatched_call(FunctionDispatch::IsDistinct, vec![left, right]);
             Ok(if matches!(kind, AExprKind::AexprNotDistinct) {
                 Expr::Not(Box::new(call))
             } else {

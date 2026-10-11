@@ -198,7 +198,9 @@ impl Binder<'_, '_> {
         let source = self.semantic(self.common_context(expression))?.flatten();
         if let Some(source) = source {
             let source = source.without_type_modifiers_with_control(&self.control)?;
-            if *source == *target {
+            if *source == *target
+                || super::super::cast_compatibility::preserves_record_identity(&source, &target)
+            {
                 return Ok(());
             }
         }

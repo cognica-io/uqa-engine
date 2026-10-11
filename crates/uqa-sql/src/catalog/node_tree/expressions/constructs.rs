@@ -23,6 +23,24 @@ impl ExpressionContext<'_> {
         args: &[Expr],
     ) -> Result<Option<TypedNode>, SQLError> {
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::ValueNullTest { negated }) => {
+                let [argument] = args else {
+                    return Err(SQLError::Internal("invalid outer NULL test".into()));
+                };
+                let argument = self.encode(argument, None)?;
+                return Ok(Some(TypedNode {
+                    node: Node::new(
+                        "NULLTEST",
+                        [
+                            ("arg", argument.node.into()),
+                            ("nulltesttype", i64::from(negated).into()),
+                            ("argisrow", false.into()),
+                            ("location", (-1).into()),
+                        ],
+                    ),
+                    ty: ColumnType::Boolean,
+                }));
+            }
             Some(FunctionDispatch::NumericOperator(operator)) => {
                 return self.numeric_operator(operator, args).map(Some);
             }
@@ -56,7 +74,7 @@ impl ExpressionContext<'_> {
                     )
                     .map(Some);
             }
-            Some(FunctionDispatch::IsDistinct) => {
+            Some(FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct) => {
                 let [lhs, rhs] = args else {
                     return Err(SQLError::Internal("invalid distinct operands".into()));
                 };

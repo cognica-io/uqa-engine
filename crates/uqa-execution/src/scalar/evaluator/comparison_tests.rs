@@ -63,6 +63,45 @@ fn record_columns_and_row_constructors_select_distinct_null_rules() {
     }
 }
 
+#[test]
+fn simple_case_uses_record_equality_in_ordinary_and_generated_evaluation() {
+    let row = ResultRow::from([
+        (
+            "l".into(),
+            Value::Row(vec![Value::Int(1), Value::Null].into()),
+        ),
+        (
+            "r".into(),
+            Value::Row(vec![Value::Int(1), Value::Null].into()),
+        ),
+    ]);
+    let schema = RowSchema::with_types(
+        vec!["l".into(), "r".into()],
+        vec![Some(uqa_sql::ColumnType::Record); 2],
+    );
+    let budget = MemoryBudget::new(16 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let uqa_sql::Statement::Select(mut query) =
+        uqa_sql::compile("SELECT CASE l WHEN r THEN 1 ELSE 0 END")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("SELECT expression");
+    };
+    let scalar = uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+    let bound = uqa_sql::bind_type_introspection(scalar, &schema, &[]);
+    assert_eq!(
+        eval_scalar(&bound, &ScalarEvalContext::from_row_lookup(&row, &[])).unwrap(),
+        Value::Int(1)
+    );
+    assert_eq!(
+        *eval_generated_scalar_with_control(&bound, &row, &control).unwrap(),
+        Value::Int(1)
+    );
+    assert_eq!(budget.used(), 0);
+}
+
 #[derive(serde::Deserialize)]
 struct Oracle {
     postgresql: String,

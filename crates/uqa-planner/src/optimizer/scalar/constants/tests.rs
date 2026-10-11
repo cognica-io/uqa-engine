@@ -17,6 +17,15 @@ fn constant_folding_retains_row_and_record_comparison_selection() {
         for (source, expected) in [
             ("SELECT ROW(NULL::integer)=ROW(NULL::integer)", Value::Null),
             (
+                "SELECT CASE ROW(1,NULL::integer) WHEN ROW(1,NULL::integer) THEN 1 ELSE 0 END",
+                Value::Int(1),
+            ),
+            (
+                "SELECT NULLIF(ROW(1,NULL::integer),ROW(1,NULL::integer))",
+                Value::Null,
+            ),
+            ("SELECT NULLIF(NULL,nextval('must_not_run'))", Value::Null),
+            (
                 "SELECT ROW(NULL::integer)::record=ROW(NULL::integer)::record",
                 Value::Bool(true),
             ),

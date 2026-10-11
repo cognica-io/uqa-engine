@@ -11,6 +11,8 @@ use crate::{
     plan::UnifiedPlan, routines::RoutineResolution, RowSchema, SQLError, SQLParam, ScalarExpr,
 };
 
+mod comparisons;
+
 pub(crate) fn retain_composite_inputs(
     routines: &dyn RoutineResolution,
     plan: &mut UnifiedPlan,
@@ -22,6 +24,7 @@ pub(crate) fn retain_composite_inputs(
         has_composite_input |= matches!(node, ScalarExpr::Func { binding: Some(binding), .. } if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect));
         has_composite_input |= matches!(node, ScalarExpr::Cast { expr, .. } if matches!(expr.as_ref(), ScalarExpr::Row(_)));
         has_composite_input |= matches!(node, ScalarExpr::CompositeRow { .. });
+        has_composite_input |= matches!(node, ScalarExpr::Func { binding: Some(binding), .. } if matches!(binding.dispatch, Some(crate::ast::FunctionDispatch::IsDistinct | crate::ast::FunctionDispatch::ValueNullTest { .. })));
     }));
     if !has_composite_input {
         return Ok(());
@@ -59,6 +62,10 @@ impl SchemaScope {
                 ) {
                     failure = Some(error);
                 } else if let Err(error) = retain_field(node, schema, params, &resolver) {
+                    failure = Some(error);
+                } else if let Err(error) =
+                    comparisons::retain_comparison_inputs(node, schema, params, &resolver)
+                {
                     failure = Some(error);
                 }
             }

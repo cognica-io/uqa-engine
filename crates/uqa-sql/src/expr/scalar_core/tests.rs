@@ -273,3 +273,18 @@ fn controlled_core_preserves_error_precedence_and_zero_payload_results() {
         assert_eq!(zero.used(), 0);
     }
 }
+
+#[test]
+fn selection_uses_record_equality_and_total_field_null_order() {
+    // Independent cases: composite_expression_comparisons_oracle on PostgreSQL 18.4.
+    let missing = Value::Row(vec![Value::Int(1), Value::Null].into());
+    let present = Value::Row(vec![Value::Int(1), Value::Int(2)].into());
+    assert_value("nullif", &[missing.clone(), missing.clone()], Value::Null);
+    for arguments in [
+        vec![missing.clone(), present.clone()],
+        vec![present.clone(), missing.clone()],
+    ] {
+        assert_value("least", &arguments, present.clone());
+        assert_value("greatest", &arguments, missing.clone());
+    }
+}

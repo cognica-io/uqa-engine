@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 
 use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::eval_binary_values;
+use uqa_sql::expr::eval_value_comparison_truth_with_engine;
 
 use super::constants::literal_value;
 use super::{optimize_optional, optimize_scalar, OptimizerConfig, SQLError, ScalarExpr, Value};
@@ -91,9 +91,18 @@ pub(super) fn optimize_case(
             (None, Some(Value::Bool(value))) => Some(*value),
             (None, Some(Value::Null)) => Some(false),
             (Some(base), Some(condition)) => literal_value(base)
-                .map(|base| eval_binary_values(BinaryOp::Equal, base, condition))
+                .map(|base| {
+                    eval_value_comparison_truth_with_engine(
+                        BinaryOp::Equal,
+                        base,
+                        condition,
+                        &uqa_core::memory::ProductionControl::uncontrolled(),
+                        None,
+                        None,
+                    )
+                })
                 .transpose()?
-                .map(|value| matches!(value, Value::Bool(true))),
+                .map(|value| value == Some(true)),
             _ => None,
         };
         if config.coerced_conditionals {

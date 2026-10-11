@@ -419,6 +419,13 @@ fn strict_null_expression(expression: &ScalarExpr) -> bool {
             args,
             ..
         } => {
+            if name.eq_ignore_ascii_case("nullif")
+                && binding.as_ref().is_none_or(|binding| binding.builtin)
+                && args.len() == 2
+                && null(&args[0])
+            {
+                return true;
+            }
             uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
                 == Some(true)
                 && args.iter().any(null)

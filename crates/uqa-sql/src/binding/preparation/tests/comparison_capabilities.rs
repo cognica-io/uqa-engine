@@ -36,6 +36,7 @@ impl FunctionTypeResolver for Types {
         Ok(match name {
             "pair" => Some(pair()),
             "pair[]" => Some(ColumnType::Array(Box::new(pair()))),
+            _ if name == pair().catalog_name() => Some(pair()),
             _ => None,
         })
     }
@@ -193,4 +194,30 @@ fn hashing_and_ordering_require_independent_declared_field_support() {
     let error = support.require_implementation("GROUP BY").unwrap_err();
     assert_eq!(error.sqlstate(), Some("0A000"));
     assert_eq!(error.to_string(), "could not implement GROUP BY");
+}
+
+#[test]
+fn row_distinct_binds_each_field_before_reading_rows() {
+    let catalog = Types(ColumnType::Json);
+    let analyze = |sql: &str| {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        crate::binding::composite_inputs::retain_composite_inputs(
+            &catalog,
+            &mut plan,
+            &[],
+            &crate::binding::fixture::empty_binding_context(),
+        )
+    };
+    for (sql, state) in [
+        ("SELECT ROW(1) IS DISTINCT FROM ROW(1,2)", "42601"),
+        (
+            "SELECT ROW(1,'{}'::json)::pair IS DISTINCT FROM ROW(2,'{}'::json)::pair WHERE false",
+            "42883",
+        ),
+    ] {
+        let error = analyze(sql).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+    }
+    analyze("SELECT ROW(1::smallint,NULL::integer) IS DISTINCT FROM ROW(1::bigint,NULL::integer)")
+        .unwrap();
 }

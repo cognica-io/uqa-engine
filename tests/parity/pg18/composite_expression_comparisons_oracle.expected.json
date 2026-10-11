@@ -1,0 +1,3155 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE ce_pair AS(a integer,b integer); CREATE TYPE ce_json AS(a integer,b json)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "types"
+    },
+    {
+      "sql": "CREATE TABLE ce_values(id integer, v ce_pair); INSERT INTO ce_values VALUES(1,ROW(1,NULL)),(2,ROW(1,2)),(3,ROW(NULL,NULL)),(4,NULL)",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "table"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) IS DISTINCT FROM ROW(1,NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_distinct"
+    },
+    {
+      "sql": "SELECT v IS DISTINCT FROM w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_distinct"
+    },
+    {
+      "sql": "SELECT id,v IS DISTINCT FROM ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ],
+            [
+              "2",
+              "t"
+            ],
+            [
+              "3",
+              "t"
+            ],
+            [
+              "4",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_distinct"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) IS NOT DISTINCT FROM ROW(1,NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_not_distinct"
+    },
+    {
+      "sql": "SELECT v IS NOT DISTINCT FROM w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_not_distinct"
+    },
+    {
+      "sql": "SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_not_distinct"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) IN(ROW(1,NULL::integer)) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_in_one"
+    },
+    {
+      "sql": "SELECT v IN(w) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_in_one"
+    },
+    {
+      "sql": "SELECT id,v IN(ROW(1,NULL)::ce_pair) AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_in_one"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) IN(ROW(1,NULL::integer),ROW(9,9)) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_in_two"
+    },
+    {
+      "sql": "SELECT v IN(w,ROW(9,9)) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_in_two"
+    },
+    {
+      "sql": "SELECT id,v IN(ROW(1,NULL)::ce_pair,ROW(9,9)) AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_in_two"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) NOT IN(ROW(1,NULL::integer)) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_not_in"
+    },
+    {
+      "sql": "SELECT v NOT IN(w) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_not_in"
+    },
+    {
+      "sql": "SELECT id,v NOT IN(ROW(1,NULL)::ce_pair) AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ],
+            [
+              "2",
+              "t"
+            ],
+            [
+              "3",
+              "t"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_not_in"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) = ANY(ARRAY[ROW(1,NULL::integer)]) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_any"
+    },
+    {
+      "sql": "SELECT v = ANY(ARRAY[w]) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_any"
+    },
+    {
+      "sql": "SELECT id,v = ANY(ARRAY[ROW(1,NULL)::ce_pair]) AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_any"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) = ALL(ARRAY[ROW(1,NULL::integer)]) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_all"
+    },
+    {
+      "sql": "SELECT v = ALL(ARRAY[w]) AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_all"
+    },
+    {
+      "sql": "SELECT id,v = ALL(ARRAY[ROW(1,NULL)::ce_pair]) AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_all"
+    },
+    {
+      "sql": "SELECT CASE ROW(1,NULL::integer) WHEN ROW(1,NULL::integer) THEN 1 ELSE 0 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_case"
+    },
+    {
+      "sql": "SELECT CASE v WHEN w THEN 1 ELSE 0 END AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_case"
+    },
+    {
+      "sql": "SELECT id,CASE v WHEN ROW(1,NULL)::ce_pair THEN 1 ELSE 0 END AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "0"
+            ],
+            [
+              "3",
+              "0"
+            ],
+            [
+              "4",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_case"
+    },
+    {
+      "sql": "SELECT NULLIF(ROW(1,NULL::integer),ROW(1,NULL::integer))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_nullif"
+    },
+    {
+      "sql": "SELECT NULLIF(v,w)::text AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_nullif"
+    },
+    {
+      "sql": "SELECT id,NULLIF(v,ROW(1,NULL)::ce_pair)::text AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              null
+            ],
+            [
+              "2",
+              "(1,2)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_nullif"
+    },
+    {
+      "sql": "SELECT LEAST(ROW(1,NULL::integer),ROW(1,NULL::integer))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_least"
+    },
+    {
+      "sql": "SELECT LEAST(v,w)::text AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_least"
+    },
+    {
+      "sql": "SELECT id,LEAST(v,ROW(1,NULL)::ce_pair)::text AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,)"
+            ],
+            [
+              "2",
+              "(1,2)"
+            ],
+            [
+              "3",
+              "(1,)"
+            ],
+            [
+              "4",
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_least"
+    },
+    {
+      "sql": "SELECT GREATEST(ROW(1,NULL::integer),ROW(1,NULL::integer))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_greatest"
+    },
+    {
+      "sql": "SELECT GREATEST(v,w)::text AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_greatest"
+    },
+    {
+      "sql": "SELECT id,GREATEST(v,ROW(1,NULL)::ce_pair)::text AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "(1,)"
+            ],
+            [
+              "2",
+              "(1,)"
+            ],
+            [
+              "3",
+              "(,)"
+            ],
+            [
+              "4",
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_greatest"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) BETWEEN ROW(1,NULL::integer) AND ROW(1,NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_between"
+    },
+    {
+      "sql": "SELECT v BETWEEN w AND w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_between"
+    },
+    {
+      "sql": "SELECT id,v BETWEEN ROW(1,NULL)::ce_pair AND ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_between"
+    },
+    {
+      "sql": "SELECT ROW(1,NULL::integer) BETWEEN SYMMETRIC ROW(1,NULL::integer) AND ROW(1,NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "row_between_symmetric"
+    },
+    {
+      "sql": "SELECT v BETWEEN SYMMETRIC w AND w AS result FROM (VALUES(ROW(1,NULL::integer))) a(v) CROSS JOIN (VALUES(ROW(1,NULL::integer))) b(w)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_between_symmetric"
+    },
+    {
+      "sql": "SELECT id,v BETWEEN SYMMETRIC ROW(1,NULL)::ce_pair AND ROW(1,NULL)::ce_pair AS result FROM ce_values ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "f"
+            ],
+            [
+              "3",
+              "f"
+            ],
+            [
+              "4",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "named_between_symmetric"
+    },
+    {
+      "sql": "SELECT NULLIF(1,2.0) AS result,pg_typeof(NULLIF(1,2.0))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            1700,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "numeric"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_promoted"
+    },
+    {
+      "sql": "SELECT NULLIF(1::smallint,2::integer) AS result,pg_typeof(NULLIF(1::smallint,2::integer))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "smallint"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_smallint"
+    },
+    {
+      "sql": "SELECT NULLIF(1::real,2::integer) AS result,pg_typeof(NULLIF(1::real,2::integer))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "real"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_real"
+    },
+    {
+      "sql": "SELECT NULLIF('a'::varchar,'b'::text) AS result,pg_typeof(NULLIF('a'::varchar,'b'::text))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "a",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_varchar"
+    },
+    {
+      "sql": "SELECT NULLIF(NULL,2) AS result,pg_typeof(NULLIF(NULL,2))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "integer"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_unknown"
+    },
+    {
+      "sql": "SELECT NULLIF(NULL,NULL) AS result,pg_typeof(NULLIF(NULL,NULL))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_nulls"
+    },
+    {
+      "sql": "SELECT NULLIF(1,1.0) AS result,pg_typeof(NULLIF(1,1.0))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            1700,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "numeric"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_equal"
+    },
+    {
+      "sql": "SELECT NULLIF(NULL::json,NULL::json)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: json = json",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "nullif_json"
+    },
+    {
+      "sql": "SELECT NULLIF('bad',1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "nullif_bad"
+    },
+    {
+      "sql": "SELECT NULLIF(true,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: boolean = integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "nullif_invalid"
+    },
+    {
+      "sql": "CREATE DOMAIN ce_positive AS integer CHECK(VALUE>0); CREATE DOMAIN ce_pair_domain AS ce_pair CHECK((VALUE).a>=0)",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "domains"
+    },
+    {
+      "sql": "SELECT NULLIF(1::ce_positive,2::ce_positive) AS result,pg_typeof(NULLIF(1::ce_positive,2::ce_positive))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "integer"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_domain"
+    },
+    {
+      "sql": "SELECT NULLIF(ROW(1,NULL)::ce_pair,ROW(2,NULL)::ce_pair) AS result,pg_typeof(NULLIF(ROW(1,NULL)::ce_pair,ROW(2,NULL)::ce_pair))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            24546,
+            25
+          ],
+          "rows": [
+            [
+              "(1,)",
+              "ce_pair"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_named_record"
+    },
+    {
+      "sql": "SELECT NULLIF(ROW(1,NULL)::ce_pair_domain,ROW(2,NULL)::ce_pair_domain) AS result,pg_typeof(NULLIF(ROW(1,NULL)::ce_pair_domain,ROW(2,NULL)::ce_pair_domain))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            24546,
+            25
+          ],
+          "rows": [
+            [
+              "(1,)",
+              "ce_pair_domain"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_domain_record"
+    },
+    {
+      "sql": "SELECT NULLIF(NULL,ROW(1,2)) AS result,pg_typeof(NULLIF(NULL,ROW(1,2)))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            2249,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "record"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_null_record"
+    },
+    {
+      "sql": "SELECT NULLIF(NULL::ce_pair,ROW(1,2)::ce_pair) AS result,pg_typeof(NULLIF(NULL::ce_pair,ROW(1,2)::ce_pair))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            24546,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "ce_pair"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_null_named"
+    },
+    {
+      "sql": "SELECT NULLIF(1.0::numeric(5,2),2::integer) AS result,pg_typeof(NULLIF(1.0::numeric(5,2),2::integer))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            1700,
+            25
+          ],
+          "rows": [
+            [
+              "1.00",
+              "numeric"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_numeric_modifier"
+    },
+    {
+      "sql": "SELECT NULLIF('a'::name,'b'::text) AS result,pg_typeof(NULLIF('a'::name,'b'::text))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "a",
+              "name"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_type_name"
+    },
+    {
+      "sql": "SELECT ROW(1::smallint,NULL::integer) IS DISTINCT FROM ROW(1::bigint,NULL::integer) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_cross_types"
+    },
+    {
+      "sql": "SELECT ROW(1) IS DISTINCT FROM ROW(1,2) AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "unequal number of entries in row expressions",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "distinct_arity"
+    },
+    {
+      "sql": "SELECT ROW(1,1/z) IS DISTINCT FROM ROW(2,1/z) AS result FROM (VALUES(0)) a(z)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_early"
+    },
+    {
+      "sql": "SELECT ROW(ROW(1::smallint)) IS DISTINCT FROM ROW(ROW(1::bigint)) AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types smallint and bigint at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "distinct_nested"
+    },
+    {
+      "sql": "SELECT v IS DISTINCT FROM w AS result FROM (VALUES(ROW(1::smallint))) a(v) CROSS JOIN (VALUES(ROW(1::bigint))) b(w)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare dissimilar column types smallint and bigint at record column 1",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "record_distinct_types"
+    },
+    {
+      "sql": "SELECT ROW(1) = ANY(ARRAY[ROW(1,2)]) AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot compare record types with different numbers of columns",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "any_arity"
+    },
+    {
+      "sql": "SELECT ROW(1) = ANY(ARRAY[ROW(2,2)]) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "any_short_circuit"
+    },
+    {
+      "sql": "SELECT ROW(1,'{}'::json)::ce_json IS DISTINCT FROM ROW(2,'{}'::json)::ce_json AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: json = json",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_distinct_skip"
+    },
+    {
+      "sql": "SELECT NULLIF(ROW(1,NULL::json)::ce_json,ROW(1,NULL::json)::ce_json)::text AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "could not identify an equality operator for type json",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "json_nullif_reached"
+    },
+    {
+      "sql": "SELECT NULLIF(ROW(1,'{}'::json)::ce_json,ROW(2,'{}'::json)::ce_json)::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,{})"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_nullif_skip"
+    },
+    {
+      "sql": "SELECT least(ROW(1,NULL::integer),ROW(1,2))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,2)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "least_field_null_70"
+    },
+    {
+      "sql": "SELECT least(ROW(1,2),ROW(1,NULL::integer))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,2)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "least_field_null_71"
+    },
+    {
+      "sql": "SELECT greatest(ROW(1,NULL::integer),ROW(1,2))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "greatest_field_null_72"
+    },
+    {
+      "sql": "SELECT greatest(ROW(1,2),ROW(1,NULL::integer))::text AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "greatest_field_null_73"
+    },
+    {
+      "sql": "CREATE SCHEMA ce_user; CREATE FUNCTION ce_user.\"nullif\"(integer,integer) RETURNS text LANGUAGE SQL AS $$SELECT 'user'::text$$; SELECT ce_user.\"nullif\"(1,2) AS result,pg_typeof(ce_user.\"nullif\"(1,2))::text AS type",
+      "command_tags": [
+        "CREATE SCHEMA",
+        "CREATE FUNCTION",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "user",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "user_nullif"
+    },
+    {
+      "sql": "CREATE SEQUENCE ce_sequence; CREATE SEQUENCE ce_distinct_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE",
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "effects_setup"
+    },
+    {
+      "sql": "SELECT NULLIF(nextval('ce_sequence'),nextval('ce_sequence')) AS result; SELECT last_value FROM ce_sequence",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_effects"
+    },
+    {
+      "sql": "SELECT NULLIF(NULL,nextval('ce_sequence')) AS result; SELECT last_value FROM ce_sequence",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_null_effects"
+    },
+    {
+      "sql": "SELECT ROW(1,nextval('ce_distinct_sequence')) IS DISTINCT FROM ROW(2,nextval('ce_distinct_sequence')) AS result; SELECT last_value,is_called FROM ce_distinct_sequence",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_effects"
+    },
+    {
+      "sql": "SELECT ROW(1,nextval('ce_distinct_sequence')) IS DISTINCT FROM ROW(1,nextval('ce_distinct_sequence')) AS result; SELECT last_value,is_called FROM ce_distinct_sequence",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "2",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_reached_effects"
+    },
+    {
+      "sql": "PREPARE ce_parameter(numeric) AS SELECT NULLIF(1,$1) AS result,pg_typeof(NULLIF(1,$1))::text AS type; EXECUTE ce_parameter(2.0); EXECUTE ce_parameter(1.0)",
+      "command_tags": [
+        "PREPARE",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            1700,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "numeric"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "result",
+            "type"
+          ],
+          "type_oids": [
+            1700,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "numeric"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "prepared"
+    },
+    {
+      "sql": "CREATE VIEW ce_types AS SELECT NULLIF(1,2.0) AS n,NULLIF('a'::varchar,'b'::text) AS t,CASE ROW(1,NULL::integer) WHEN ROW(1,NULL::integer) THEN 1 ELSE 0 END AS matched; SELECT n,t,matched,pg_typeof(n)::text AS nt,pg_typeof(t)::text AS tt FROM ce_types",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "n",
+            "t",
+            "matched",
+            "nt",
+            "tt"
+          ],
+          "type_oids": [
+            1700,
+            25,
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a",
+              "1",
+              "numeric",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_types"
+    },
+    {
+      "sql": "SELECT ROW(NULL::integer,NULL::integer) IS DISTINCT FROM NULL AS result,ROW(NULL::integer,NULL::integer) IS NOT DISTINCT FROM NULL AS opposite",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "opposite"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "raw_null_distinct"
+    },
+    {
+      "sql": "SELECT '{}'::json IS DISTINCT FROM NULL AS result,NULL IS NOT DISTINCT FROM '{}'::json AS opposite",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "opposite"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_null_distinct"
+    },
+    {
+      "sql": "SELECT '{}'::json IS DISTINCT FROM NULL::json AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: json = json",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": [],
+      "notices": [],
+      "id": "typed_json_null_distinct"
+    },
+    {
+      "sql": "SELECT ROW(1::smallint)::record IS DISTINCT FROM ROW(1::bigint)::record AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "record_cast_distinct"
+    },
+    {
+      "sql": "SELECT ROW() IS DISTINCT FROM ROW() AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "empty_row_distinct"
+    },
+    {
+      "sql": "SELECT NULLIF(v,nextval('ce_sequence')) AS result FROM (VALUES(NULL::bigint)) a(v); SELECT last_value FROM ce_sequence",
+      "command_tags": [
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nullif_dynamic_effects"
+    },
+    {
+      "sql": "PREPARE ce_effect(bigint) AS SELECT NULLIF($1,nextval('ce_sequence')) AS result; SET plan_cache_mode='force_generic_plan'; EXECUTE ce_effect(NULL); SELECT last_value FROM ce_sequence; RESET plan_cache_mode",
+      "command_tags": [
+        "PREPARE",
+        "SET",
+        "SELECT 1",
+        "SELECT 1",
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "nullif_parameter_effects"
+    },
+    {
+      "sql": "CREATE TYPE ce_stored_pair AS(a integer,b text); CREATE VIEW ce_distinct_stored AS SELECT ROW(1,'a')::ce_stored_pair IS DISTINCT FROM ROW(2,'b')::ce_stored_pair AS result; SELECT pg_get_viewdef('ce_distinct_stored'::regclass,true)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE VIEW",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT 1 IS DISTINCT FROM 2 OR 'a'::text IS DISTINCT FROM 'b'::text AS result;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_stored_definition"
+    },
+    {
+      "sql": "ALTER TYPE ce_stored_pair ALTER ATTRIBUTE b TYPE integer; SELECT * FROM ce_distinct_stored",
+      "command_tags": [
+        "ALTER TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_stored_change"
+    },
+    {
+      "sql": "DROP TYPE ce_stored_pair; SELECT * FROM ce_distinct_stored",
+      "command_tags": [
+        "DROP TYPE",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "distinct_stored_drop"
+    },
+    {
+      "sql": "CREATE VIEW ce_outer_null AS SELECT id,v IS DISTINCT FROM NULL AS present,v IS NOT DISTINCT FROM NULL AS absent FROM ce_values; SELECT * FROM ce_outer_null ORDER BY id; SELECT pg_get_viewdef('ce_outer_null'::regclass,true)",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 4",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "id",
+            "present",
+            "absent"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "f"
+            ],
+            [
+              "2",
+              "t",
+              "f"
+            ],
+            [
+              "3",
+              "t",
+              "f"
+            ],
+            [
+              "4",
+              "f",
+              "t"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    v IS DISTINCT FROM NULL AS present,\n    v IS NOT DISTINCT FROM NULL AS absent\n   FROM ce_values;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "outer_null_stored"
+    },
+    {
+      "sql": "CREATE DOMAIN ce_present_json AS json CHECK(VALUE IS DISTINCT FROM NULL); SELECT pg_get_constraintdef(oid,true) FROM pg_constraint WHERE contypid='ce_present_json'::regtype; SELECT '{}'::ce_present_json",
+      "command_tags": [
+        "CREATE DOMAIN",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CHECK (VALUE IS NOT NULL)"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "ce_present_json"
+          ],
+          "type_oids": [
+            114
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json_null_stored"
+    },
+    {
+      "sql": "CREATE VIEW ce_nested_distinct AS SELECT ROW(ROW(1,NULL)::ce_pair) IS DISTINCT FROM ROW(ROW(1,NULL)::ce_pair) AS same; SELECT * FROM ce_nested_distinct; SELECT pg_get_viewdef('ce_nested_distinct'::regclass,true)",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "same"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT ROW(1, NULL::integer)::ce_pair IS DISTINCT FROM ROW(1, NULL::integer)::ce_pair AS same;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "nested_distinct_stored"
+    },
+    {
+      "sql": "BEGIN; CREATE VIEW ce_rollback AS SELECT NULLIF(1,2.0) AS v,ROW(1,NULL::integer) IS DISTINCT FROM ROW(1,NULL::integer) AS d; SELECT * FROM ce_rollback; ROLLBACK; SELECT to_regclass('ce_rollback') IS NULL AS removed",
+      "command_tags": [
+        "BEGIN",
+        "CREATE VIEW",
+        "SELECT 1",
+        "ROLLBACK",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "v",
+            "d"
+          ],
+          "type_oids": [
+            1700,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "removed"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "rollback_definition"
+    },
+    {
+      "sql": "CREATE VIEW ce_observation AS SELECT id,v IS NOT DISTINCT FROM ROW(1,NULL)::ce_pair AS same, NULLIF(v,ROW(1,NULL)::ce_pair)::text AS n FROM ce_values",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "stored"
+    },
+    {
+      "sql": "SELECT * FROM ce_observation ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "same",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              null
+            ],
+            [
+              "2",
+              "f",
+              "(1,2)"
+            ],
+            [
+              "3",
+              "f",
+              "(,)"
+            ],
+            [
+              "4",
+              "f",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "stored_initial"
+    },
+    {
+      "sql": "CREATE VIEW ce_precedence AS SELECT id,(ROW(id) IS DISTINCT FROM ROW(id+1)) = true AS row_left,true = (ROW(id) IS DISTINCT FROM ROW(id+1)) AS row_right,(v IS DISTINCT FROM NULL) = false AS present_left,false = (v IS DISTINCT FROM NULL) AS present_right,(v IS NOT DISTINCT FROM NULL) = true AS absent_left,true = (v IS NOT DISTINCT FROM NULL) AS absent_right,(id IS DISTINCT FROM NULL) = true AS scalar_left,true = (id IS DISTINCT FROM NULL) AS scalar_right FROM ce_values; SELECT pg_get_viewdef('ce_precedence'::regclass,false); SELECT pg_get_viewdef('ce_precedence'::regclass,true)",
+      "command_tags": [
+        "CREATE VIEW",
+        "SELECT 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    ((id IS DISTINCT FROM (id + 1)) = true) AS row_left,\n    (true = (id IS DISTINCT FROM (id + 1))) AS row_right,\n    ((v IS DISTINCT FROM NULL) = false) AS present_left,\n    (false = (v IS DISTINCT FROM NULL)) AS present_right,\n    ((v IS NOT DISTINCT FROM NULL) = true) AS absent_left,\n    (true = (v IS NOT DISTINCT FROM NULL)) AS absent_right,\n    ((id IS NOT NULL) = true) AS scalar_left,\n    (true = (id IS NOT NULL)) AS scalar_right\n   FROM ce_values;"
+            ]
+          ]
+        },
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (id IS DISTINCT FROM (id + 1)) = true AS row_left,\n    true = (id IS DISTINCT FROM (id + 1)) AS row_right,\n    (v IS DISTINCT FROM NULL) = false AS present_left,\n    false = (v IS DISTINCT FROM NULL) AS present_right,\n    (v IS NOT DISTINCT FROM NULL) = true AS absent_left,\n    true = (v IS NOT DISTINCT FROM NULL) AS absent_right,\n    (id IS NOT NULL) = true AS scalar_left,\n    true = (id IS NOT NULL) AS scalar_right\n   FROM ce_values;"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "precedence_definition"
+    },
+    {
+      "sql": "SELECT * FROM ce_precedence ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "row_left",
+            "row_right",
+            "present_left",
+            "present_right",
+            "absent_left",
+            "absent_right",
+            "scalar_left",
+            "scalar_right"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "3",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "4",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "precedence_values"
+    },
+    {
+      "sql": "SELECT n,t,matched,pg_typeof(n)::text AS nt,pg_typeof(t)::text AS tt FROM ce_types",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "t",
+            "matched",
+            "nt",
+            "tt"
+          ],
+          "type_oids": [
+            1700,
+            25,
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "a",
+              "1",
+              "numeric",
+              "text"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_types",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ce_distinct_stored",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_distinct",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ce_nested_distinct",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_nested_distinct",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ce_observation ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "same",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              null
+            ],
+            [
+              "2",
+              "f",
+              "(1,2)"
+            ],
+            [
+              "3",
+              "f",
+              "(,)"
+            ],
+            [
+              "4",
+              "f",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_values",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ce_precedence ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "row_left",
+            "row_right",
+            "present_left",
+            "present_right",
+            "absent_left",
+            "absent_right",
+            "scalar_left",
+            "scalar_right"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "3",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "4",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "reopen_precedence",
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "3687879c13bd90979065a921846a069061c66bd5cd1baf163043e71a6fa8f68f",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "fresh_connection_cases": 5,
+    "fresh_connection_output_sha256": "dbb96da6ce583e0cee89f4daea0b3630bcd5e748fe64afd19a242e4e04169a3e"
+  }
+}

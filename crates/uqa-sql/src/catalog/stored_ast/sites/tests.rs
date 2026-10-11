@@ -44,6 +44,38 @@ fn resolved_order(node: &mut ScalarExpr) {
 }
 
 #[test]
+fn row_distinct_sites_drop_constructor_casts_and_preserve_subquery_order() {
+    let mut syntax = expression("ROW((SELECT lower('A')),(SELECT lower('B')))::pair IS DISTINCT FROM ROW((SELECT lower('C')),(SELECT lower('D')))::pair");
+    let original = ExpressionPlan::lower(syntax.clone());
+    let mut bound = original.clone();
+    crate::type_resolution::row_distinct::rewrite_scalar(&mut bound.scalar).unwrap();
+    let sites = expression_syntax_sites(&original, &bound).unwrap();
+    assert!(bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+    let mut expected = expression("(SELECT lower('A')) IS DISTINCT FROM (SELECT lower('C')) OR (SELECT lower('B')) IS DISTINCT FROM (SELECT lower('D'))");
+    visit_stored_expression(&mut expected, &mut |node| {
+        if let Expr::Func {
+            binding: Some(binding),
+            ..
+        } = node
+        {
+            if binding.dispatch == Some(crate::ast::FunctionDispatch::IsDistinct) {
+                binding.dispatch = Some(crate::ast::FunctionDispatch::ValueIsDistinct);
+            }
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(syntax, expected);
+    let restored = ExpressionPlan::lower(syntax.clone());
+    let sites = expression_syntax_sites(&restored, &restored).unwrap();
+    assert!(!bind_stored_expression_sites(&mut syntax, &sites).unwrap());
+    assert_eq!(
+        serde_json::from_str::<Expr>(&serde_json::to_string(&syntax).unwrap()).unwrap(),
+        syntax
+    );
+}
+
+#[test]
 fn composite_constructor_sites_preserve_children_and_rebinding_is_idempotent() {
     for sql in [
         "ROW(1, lower('A'))::pair",

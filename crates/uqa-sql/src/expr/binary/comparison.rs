@@ -64,6 +64,22 @@ pub fn eval_comparison_truth_with_engine(
     eval_comparison_truth_with_deferred_state(op, left, right, control, engine, || state)
 }
 
+/// Compare complete SQL values selected by a consumer such as CASE, NULLIF or ANY. Anonymous record carriers retain record operators; three-valued ROW constructor comparison is selected separately by expression syntax.
+pub fn eval_value_comparison_truth_with_engine(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+    state: Option<&EnumComparisonState>,
+) -> Result<Option<bool>> {
+    if matches!((left, right), (Value::Row(_), Value::Row(_))) {
+        eval_record_comparison_truth_with_engine(op, left, right, control, engine)
+    } else {
+        eval_comparison_truth_with_engine(op, left, right, control, engine, state)
+    }
+}
+
 /// Compare record operands selected by SQL syntax. A record-valued column, cast or parameter retains record field operators even when its carrier is an anonymous `Row`; only two uncast ROW constructors select three-valued row comparison.
 pub fn eval_record_comparison_truth_with_engine(
     op: BinaryOp,
