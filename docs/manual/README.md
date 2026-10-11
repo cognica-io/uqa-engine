@@ -57,8 +57,8 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 
 ## Version and compatibility scope
 
-This manual targets UQA Engine 0.5.2 and Rust 1.90 or newer; see the [release history](../../HISTORY.md#052---2026-10-08) and [version-tagged manual](https://github.com/cognica-io/uqa-engine/tree/v0.5.2/docs/manual). UQA Engine implements a large PostgreSQL 18-compatible surface across its verified behavior, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states the verification boundary and behavior that remains incomplete.
+This manual targets UQA Engine 0.5.3 and Rust 1.90 or newer; see the [release history](../../HISTORY.md#053---2026-10-11) and [version-tagged manual](https://github.com/cognica-io/uqa-engine/tree/v0.5.3/docs/manual). UQA Engine implements a large PostgreSQL 18-compatible surface across its verified behavior, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states the verification boundary and behavior that remains incomplete.
 
-For an existing installation, follow the [0.5.2 upgrade guide](reference/10-upgrading.md#052), including SQLite record format 60/native mapping 15, redb record format 56, shared coordination format 2, custom Rust provider interfaces, backup and rollback requirements, and the migration requirements for earlier releases.
+For an existing installation, follow the [0.5.3 upgrade guide](reference/10-upgrading.md#053), including SQLite record format 61/native mapping 17, redb record format 57, shared coordination format 2, custom Rust provider interfaces, backup and rollback requirements, and the migration requirements for earlier releases.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-11
+
 ### Added
 
 - Preserve bounded HTTP SQL diagnostics across Rust, Python and Node.js clients, retain parser character positions and expose the failing member through `Engine::sql_batch_diagnosed` without changing atomic batch execution or replaying statements.
@@ -19,6 +21,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Remove composite attributes with PostgreSQL DROP ATTRIBUTE semantics, including mixed ADD/DROP order, stable surviving field identities, retained constructor effects, nested stored values and atomic rollback across all storage providers.
 
 ### Fixed
+
+- Bound full-text occurrence commit spill reads with independent ordered-cursor and point-read caches, and reuse validated immutable commit metadata within the selected snapshots. Preserve encrypted spill, conflict checks and the original memory allowance.
+
+- Restore legacy catalogs whose derived relation, row-type or RULE OIDs fall below the modern user range only when the complete identity tuple matches its original derivation. Preserve collision checks, recorded identities and migration rollback across persistent providers.
 
 - Reuse HNSW candidate vectors between scoring and diversity selection, and retain exact query distances across hierarchy levels within bounded portions of the original memory allowance. Preserve floating-point bits, graph construction order, candidate ties and uncached results.
 
@@ -38,7 +44,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Restrict unindexed scalar filters in retrieval intersections to selected candidate documents without changing KNN boundaries, payload merge order, column validation or error precedence.
 
-- Seek cold native SQLite scalar and composite equality indexes directly across session refreshes instead of hydrating complete value indexes for constraint checks and result projection. Preserve complete index support, private writes, savepoints, fixed snapshots, typed comparisons and serializable observations; upgrade the physical equality projection and population certificates atomically through native mapping 16.
+- Seek cold native SQLite scalar and composite equality indexes directly across session refreshes instead of hydrating complete value indexes for constraint checks and result projection. Preserve complete index support, private writes, savepoints, fixed snapshots, typed comparisons and serializable observations; upgrade the physical equality projection and population certificates atomically through native mapping 17. Store canonical equality keys in an ordinary indexed provider table so integrity checks, VACUUM, REINDEX, backups and SQLCipher exports do not require connection-local UQA functions.
 
 - Preserve represented composite fields when a later field extends beyond the retained tuple, and reject actual out-of-bounds reads with `XX001` while preserving lazy evaluation, rollback and reopening. Keep already-folded prepared view constants across representation-only descriptor projection, while retaining invalidation for actual definition changes.
 
