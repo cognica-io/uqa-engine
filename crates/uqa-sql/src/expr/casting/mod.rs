@@ -72,6 +72,15 @@ pub fn cast_value_from_with_control(
     } else {
         ty
     };
+    let canonical_source;
+    let source_ty = match source_ty {
+        Some(source) if source.contains('"') || source.starts_with("pg_catalog.") => {
+            canonical_source = crate::ColumnType::from_sql_name_with_control(source, control)?
+                .sql_name_with_control(control)?;
+            Some(canonical_source.as_str())
+        }
+        source => source,
+    };
     let (base, modifier) = crate::ast::split_type_modifier_with_control(ty, control)?;
     let target = base
         .trim()
@@ -240,17 +249,17 @@ pub fn cast_value_from_with_control(
         | "pg_catalog.regrole" => return cast_named_oid(v, target, source_ty, control),
         "xid" | "pg_catalog.xid" => cast_xid(v, source_ty, control),
         "\"char\"" => {
-            let text = value_to_string_with_control(v, control)?;
-            let mut characters = text.chars();
-            if let Some(character) = characters.next() {
-                if characters.next().is_some() || !character.is_ascii() {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "value too long for type character(1): {:?}",
-                        text.as_str()
-                    )));
-                }
-            }
-            return text_value(text, false, control);
+            let source = canonical_cast_source_with_control(source_ty, v, control)?;
+            let byte = if source.as_str() == "\"char\"" {
+                super::internal_char::value_byte(v)
+                    .ok_or_else(|| SQLError::Internal("invalid internal char carrier".into()))?
+            } else if let ("int4", Value::Int(value)) = (source.as_str(), v) {
+                i8::try_from(*value).map_err(|_| out_of_range("\"char\""))? as u8
+            } else {
+                let text = value_to_string_with_control(v, control)?;
+                super::internal_char::input_byte(&text)
+            };
+            return Ok(super::internal_char::carrier_with_control(byte, control)?);
         }
         "uuid" => return cast_uuid(v, control),
         // Every row is a record; `record_in` cannot read text without a composite type to read it as.
@@ -621,6 +630,11 @@ fn cast_text(
     source: Option<&str>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
+    if source == Some("\"char\"") {
+        let byte = super::internal_char::value_byte(value)
+            .ok_or_else(|| SQLError::Internal("invalid internal char carrier".into()))?;
+        return Ok(super::internal_char::output_with_control(byte, control)?);
+    }
     if let (Value::Float(value), Some(source)) = (value, source) {
         let source = crate::ast::ColumnType::from_sql_name_with_control(source, control);
         match source {

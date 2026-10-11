@@ -540,8 +540,8 @@ fn type_introspection_binds_before_integer_width_is_erased() {
         bind_type_introspection(expression, &schema, &[]),
         ScalarExpr::Cast {
             implicit: true,
-            expr: Box::new(ScalarExpr::Literal(Value::Str("smallint".into()))),
-            ty: "regtype".into(),
+            expr: Box::new(ScalarExpr::Literal(Value::Int(21))),
+            ty: "pg_catalog.\"regtype\"".into(),
         }
     );
 }
@@ -779,8 +779,8 @@ fn qualified_type_introspection_binds_inside_an_expression() {
         ScalarExpr::IsNull {
             expr: Box::new(ScalarExpr::Cast {
                 implicit: true,
-                expr: Box::new(ScalarExpr::Literal(Value::Str("real".into()))),
-                ty: "regtype".into(),
+                expr: Box::new(ScalarExpr::Literal(Value::Int(700))),
+                ty: "pg_catalog.\"regtype\"".into(),
             }),
             negated: false,
         }

@@ -54,6 +54,7 @@ mod conversion;
 mod current_time;
 pub mod enums;
 pub(crate) mod hashing;
+pub(crate) mod internal_char;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;

@@ -29,8 +29,8 @@ pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
     Some(match (base(ty), value) {
         (ColumnType::Enum(_), Value::Enum(value)) => u64::from(value.label_oid()?),
         (ColumnType::Boolean, Value::Bool(value)) => u64::from(*value),
-        (ColumnType::InternalChar, Value::Str(value)) => {
-            u64::from(value.as_bytes().first().copied().unwrap_or(0))
+        (ColumnType::InternalChar, Value::Str(_)) => {
+            u64::from(crate::expr::internal_char::value_byte(value)?)
         }
         (ColumnType::SmallInteger, Value::Int(value)) => u64::from(*value as u16),
         (ColumnType::Integer, Value::Int(value)) => u64::from(*value as u32),
@@ -54,7 +54,7 @@ pub(crate) fn decode_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
             (bits as u32).to_le_bytes().to_vec(),
         ))),
         ColumnType::Boolean => Some(Value::Bool(bits as u8 != 0)),
-        ColumnType::InternalChar => Some(Value::Str(if bits == 0 {
+        ColumnType::InternalChar => Some(Value::Str(if bits as u8 == 0 {
             String::new()
         } else {
             char::from(bits as u8).to_string()

@@ -63,10 +63,10 @@ impl Binder<'_, '_> {
         let Some(resolver) = self.resolver else {
             return Ok(None);
         };
-        if ColumnType::from_sql_name(ty).is_ok() {
-            return Ok(None);
-        }
-        Ok(self.semantic(resolver.resolve_type_name(ty))?.flatten())
+        Ok(self
+            .semantic(resolver.resolve_type_name(ty))?
+            .flatten()
+            .filter(super::helpers::is_user_defined_type))
     }
 
     /// An explicit cast of an `unknown` literal: an enum or enum-array target takes the constant itself; a domain over one takes the constant of its base type under the domain cast, which `coerce_type` builds as `CoerceToDomain` over the converted literal.

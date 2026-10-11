@@ -558,18 +558,12 @@ impl Binder<'_, '_> {
             } else {
                 self.semantic(self.infer(&call.arguments[0]))?.flatten()
             };
-            let cast = control.copy_text("regtype")?;
-            // A user-defined type is folded by OID: its name may be shadowed by a built-in type or depend on the search path.
-            if let Some(ty) = ty.as_deref().filter(|ty| helpers::is_user_defined_type(ty)) {
-                let oid = crate::catalog::type_metadata::pg_type_oid(ty);
-                return self.cast(ScalarExpr::Literal(Value::Int(oid)), cast);
-            }
-            let name = ty.map_or_else(
-                || control.copy_text("unknown"),
-                |ty| ty.regtype_name_with_control(&control),
-            )?;
-            let name = self.retain(name);
-            return self.cast(ScalarExpr::Literal(Value::Str(name)), cast);
+            let cast = ColumnType::Regtype.catalog_name_with_control(&control)?;
+            // The selected type is an OID value; resolving its output name again could select a shadowing type.
+            let oid = ty
+                .as_deref()
+                .map_or(705, crate::catalog::type_metadata::pg_type_oid);
+            return self.cast(ScalarExpr::Literal(Value::Int(oid)), cast);
         }
         Ok(call.into_expression())
     }

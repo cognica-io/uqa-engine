@@ -189,7 +189,8 @@ fn operand_type_name(
         } else {
             base_type(ty, control)?
         };
-        ty.sql_name_with_control(control).map_err(SQLError::from)
+        ty.catalog_name_with_control(control)
+            .map_err(SQLError::from)
     };
     let name = match expression {
         ScalarExpr::Cast { expr, ty, .. } => {
@@ -255,9 +256,11 @@ fn operand_type_name(
                 .map(type_name)
                 .transpose();
         }
-        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
-        ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
-        ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
+            return type_name(&ColumnType::Integer).map(Some);
+        }
+        ScalarExpr::Literal(Value::Int(_)) => return type_name(&ColumnType::BigInteger).map(Some),
+        ScalarExpr::Literal(Value::Bytes(_)) => return type_name(&ColumnType::Bytea).map(Some),
         ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return Ok(None),
         _ => {
             let Some(ty) = inferred_type(expression, schema, params, control)? else {

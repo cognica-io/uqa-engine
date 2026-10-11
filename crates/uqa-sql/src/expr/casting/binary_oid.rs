@@ -25,6 +25,11 @@ pub(super) fn cast_integer_from(
     let source = source_ty
         .map(str::trim)
         .map(|source| source.strip_prefix("pg_catalog.").unwrap_or(source));
+    if source == Some("\"char\"") {
+        let byte = crate::expr::internal_char::value_byte(value)
+            .ok_or_else(|| SQLError::Internal("invalid internal char carrier".into()))?;
+        return Ok(Value::Int(i64::from(byte as i8)));
+    }
     if matches!(
         source,
         Some(

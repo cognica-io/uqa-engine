@@ -110,13 +110,13 @@ fn record_cast_names_preserve_named_sources_but_not_anonymous_nulls() {
         for (source, expected_source, expected_operand) in [
             (
                 ScalarExpr::Position(0),
-                composite.sql_name(),
-                composite.sql_name(),
+                composite.catalog_name(),
+                composite.catalog_name(),
             ),
             (
                 ScalarExpr::Position(1),
-                domain.sql_name(),
-                composite.sql_name(),
+                domain.catalog_name(),
+                composite.catalog_name(),
             ),
             (
                 ScalarExpr::Literal(Value::Null),
@@ -257,12 +257,12 @@ fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators(
             scalar_cast_source_type_name_with_control(&expression, &schema, &params, &control)
                 .unwrap()
                 .unwrap();
-        assert_eq!(&*name, &ty.sql_name());
+        assert_eq!(&*name, &ty.catalog_name());
         drop(name);
         let name = scalar_operand_type_name_with_control(&expression, &schema, &params, &control)
             .unwrap()
             .unwrap();
-        assert_eq!(&*name, "int2vector");
+        assert_eq!(&*name, "pg_catalog.\"int2vector\"");
         drop(name);
         assert_eq!(budget.used(), 0);
     }
@@ -276,7 +276,10 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
     let ty = domain(domain(ColumnType::Varchar(Some(12))));
     let schema = RowSchema::with_types(vec!["value".into()], vec![Some(ty.clone())]);
     for (expression, expected) in [
-        (ScalarExpr::Column("value".into()), "character varying(12)"),
+        (
+            ScalarExpr::Column("value".into()),
+            "pg_catalog.\"varchar\"(12)",
+        ),
         (
             ScalarExpr::TypedLiteral {
                 composite_source: None,
@@ -285,7 +288,7 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
                 bound_type: Some(domain(ColumnType::SmallInteger)),
                 parameter_index: None,
             },
-            "smallint",
+            "pg_catalog.\"int2\"",
         ),
         (
             ScalarExpr::Cast {
@@ -295,7 +298,10 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
             },
             "pg_catalog.int8",
         ),
-        (ScalarExpr::Literal(Value::Int(i64::MAX)), "bigint"),
+        (
+            ScalarExpr::Literal(Value::Int(i64::MAX)),
+            "pg_catalog.\"int8\"",
+        ),
     ] {
         let name = scalar_operand_type_name_with_control(&expression, &schema, &[], &control)
             .unwrap()

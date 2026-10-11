@@ -35,23 +35,23 @@ fn input(expression: &Expr, budget: &MemoryBudget) -> Produced<ScalarExpr> {
 fn typeof_distinguishes_unknown_literals_from_resolved_text_inputs() {
     let schema = RowSchema::with_types(vec!["s".into()], vec![Some(ColumnType::Text)]);
     for (argument, expected) in [
-        (Expr::Literal(Value::Null), "unknown"),
-        (Expr::Literal(Value::Str("label".into())), "unknown"),
-        (Expr::Column("s".into()), "text"),
+        (Expr::Literal(Value::Null), 705),
+        (Expr::Literal(Value::Str("label".into())), 705),
+        (Expr::Column("s".into()), 25),
         (
             Expr::Cast {
                 implicit: false,
                 expr: Box::new(Expr::Literal(Value::Null)),
                 ty: "text".into(),
             },
-            "text",
+            25,
         ),
     ] {
         let expression = ExpressionPlan::lower(call("pg_typeof", vec![argument])).scalar;
         let bound = bind_type_introspection(expression, &schema, &[]);
         assert!(matches!(
             bound, ScalarExpr::Cast {ty, expr, ..}
-                if ty == "regtype" && matches!(*expr, ScalarExpr::Literal(Value::Str(ref name)) if name == expected)
+                if ty == "pg_catalog.\"regtype\"" && matches!(*expr, ScalarExpr::Literal(Value::Int(oid)) if oid == expected)
         ));
     }
 }
@@ -145,7 +145,7 @@ fn controlled_binding_admits_new_ir_before_mutating_the_owned_root() {
                     panic!("row remains a row")
                 };
                 assert!(
-                    matches!(&items[0], ScalarExpr::Cast {ty, expr, .. } if ty == "regtype" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(name)) if name == "smallint"))
+                    matches!(&items[0], ScalarExpr::Cast {ty, expr, .. } if ty == "pg_catalog.\"regtype\"" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Int(21))))
                 );
                 assert_eq!(
                     items[1],

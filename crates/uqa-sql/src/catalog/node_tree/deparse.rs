@@ -208,14 +208,15 @@ impl Renderer<'_> {
                 };
                 quoted(&uqa_core::format_float_pg(value))
             }
-            18 => quoted(
-                std::str::from_utf8(
-                    bytes
-                        .get(..1)
-                        .ok_or_else(|| invalid("empty character Datum"))?,
-                )
-                .map_err(|_| invalid("invalid character Datum"))?,
-            ),
+            18 => {
+                let byte = *bytes
+                    .first()
+                    .ok_or_else(|| invalid("empty character Datum"))?;
+                quoted(&crate::expr::internal_char::output_with_control(
+                    byte,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )?)
+            }
             19 => {
                 let end = bytes
                     .iter()
