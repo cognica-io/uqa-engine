@@ -7,6 +7,8 @@
 use super::in_range;
 use uqa_core::{DecimalValue, TemporalValue, Value};
 
+mod temporal;
+
 fn decimal(text: &str) -> Value {
     Value::Decimal(DecimalValue::parse(text).unwrap())
 }

@@ -106,32 +106,57 @@ pub(in crate::expr) fn parse_range_with_control(
         memory: control.combine(lower_memory, upper_memory),
     };
     let range = &mut owned.value;
+    if bounds_are_empty(range, control)? {
+        owned.value = CanonicalRange::empty(subtype);
+        return Ok(control.finish(owned.value, owned.memory)?);
+    }
     if is_discrete(subtype) {
         if !range.lower_inclusive {
-            if let Some(value) = range.lower.as_ref() {
+            if let Some(value) = range
+                .lower
+                .as_ref()
+                .filter(|value| finite_discrete_bound(value))
+            {
                 range.lower = Some(increment_discrete(value, subtype)?);
                 range.lower_inclusive = true;
             }
         }
         if range.upper_inclusive {
-            if let Some(value) = range.upper.as_ref() {
+            if let Some(value) = range
+                .upper
+                .as_ref()
+                .filter(|value| finite_discrete_bound(value))
+            {
                 range.upper = Some(increment_discrete(value, subtype)?);
                 range.upper_inclusive = false;
             }
         }
     }
-    let empty = match (&range.lower, &range.upper) {
+    if bounds_are_empty(range, control)? {
+        owned.value = CanonicalRange::empty(subtype);
+    }
+    Ok(control.finish(owned.value, owned.memory)?)
+}
+
+fn finite_discrete_bound(value: &Value) -> bool {
+    !matches!(value, Value::Temporal(temporal) if !temporal.is_finite())
+}
+
+fn bounds_are_empty(range: &CanonicalRange, control: &ProductionControl<'_>) -> Result<bool> {
+    Ok(match (&range.lower, &range.upper) {
         (Some(lower), Some(upper)) => match compare_values(lower, upper, control)? {
-            Ordering::Greater => true,
+            Ordering::Greater => {
+                return Err(SQLError::Routine {
+                    sqlstate: "22000".into(),
+                    message: "range lower bound must be less than or equal to range upper bound"
+                        .into(),
+                })
+            }
             Ordering::Equal => !(range.lower_inclusive && range.upper_inclusive),
             Ordering::Less => false,
         },
         _ => false,
-    };
-    if empty {
-        owned.value = CanonicalRange::empty(subtype);
-    }
-    Ok(control.finish(owned.value, owned.memory)?)
+    })
 }
 
 pub(in crate::expr) fn parse_multirange_with_control(

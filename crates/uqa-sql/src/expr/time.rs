@@ -374,7 +374,7 @@ fn wrap_time(time: i64, span: i64, subtract: bool) -> i64 {
 }
 
 /// Absolute timestamp microseconds for datetime-like temporal values.
-fn temporal_timestamp_micros(t: &TemporalValue) -> Result<i64> {
+pub(super) fn temporal_timestamp_micros(t: &TemporalValue) -> Result<i64> {
     use TemporalValue as T;
     match t {
         T::Date { days } => date_time_micros(*days, 0, 0),
