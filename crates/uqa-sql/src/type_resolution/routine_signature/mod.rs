@@ -314,11 +314,39 @@ impl MatchedRoutineSignature {
         };
         RoutineInvocationBinding {
             argument_positions: self.argument_positions.clone(),
-            argument_targets: self.argument_targets.clone(),
-            argument_sources: self.argument_sources.clone(),
-            parameter_types: self.parameter_types.clone(),
-            return_type: declared_return_type
-                .and_then(|type_name| self.substitute_type_name(type_name)),
+            argument_targets: self
+                .coercion_targets
+                .iter()
+                .map(|target| {
+                    target
+                        .column_type
+                        .as_ref()
+                        .map_or_else(|| target.type_name.clone(), ColumnType::catalog_name)
+                })
+                .collect(),
+            argument_sources: self
+                .argument_sources
+                .iter()
+                .map(|source| {
+                    source.as_ref().map(|name| {
+                        ColumnType::from_sql_name(name)
+                            .map_or_else(|_| name.clone(), |ty| ty.catalog_name())
+                    })
+                })
+                .collect(),
+            parameter_types: self
+                .parameter_types
+                .iter()
+                .zip(&self.parameter_type_values)
+                .map(|(name, ty)| {
+                    ty.as_ref()
+                        .map_or_else(|| name.clone(), ColumnType::catalog_name)
+                })
+                .collect(),
+            return_type: declared_return_type.map(|type_name| {
+                self.substitute_type(type_name)
+                    .map_or_else(|| type_name.to_owned(), |ty| ty.catalog_name())
+            }),
             variadic_mode,
         }
     }

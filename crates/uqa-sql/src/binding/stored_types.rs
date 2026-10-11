@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Stored plans and stored syntax record the user-defined types they cast to by OID identity, as `PostgreSQL` stores type OIDs, so a rename, a schema move or another search path cannot change which type they mean.
+//! Stored plans and syntax keep selected type identities: user-defined types by OID and builtins by qualified catalog identifier, so renames, schema moves and search_path changes cannot reinterpret a binding.
 
 use crate::ast::{ColumnType, Expr, Statement, UserTypeIdentity};
 use crate::catalog::stored_ast::StoredAstVisitor;
@@ -33,10 +33,12 @@ fn identity(name: &str, resolve: &mut TypeNameResolver<'_>) -> Result<Option<Str
     if UserTypeIdentity::parse(name).is_some() {
         return Ok(None);
     }
-    Ok(resolve(name)?.and_then(|ty| ty.user_type_identity()))
+    Ok(resolve(name)?
+        .map(|ty| ty.catalog_name())
+        .filter(|selected| selected != name))
 }
 
-/// Replace the names of user-defined types in the casts and typed constants of one stored scalar expression with their identities.
+/// Retain selected catalog identities in the casts and typed constants of a stored scalar expression.
 pub fn bind_scalar_type_identities(
     expression: &mut ScalarExpr,
     resolve: &mut TypeNameResolver<'_>,
@@ -63,7 +65,7 @@ pub fn bind_scalar_type_identities(
     failure.map_or(Ok(()), Err)
 }
 
-/// Replace the names of user-defined types in the casts and typed constants of a stored plan with their identities.
+/// Retain selected catalog identities in the casts and typed constants of a stored plan.
 pub fn bind_query_plan_type_identities(
     plan: &mut QueryPlan,
     resolve: &mut TypeNameResolver<'_>,
@@ -71,7 +73,7 @@ pub fn bind_query_plan_type_identities(
     bind_plan_type_identities(|rewrite| plan.rewrite_scalar_expressions(rewrite), resolve)
 }
 
-/// Replace the names of user-defined types in the casts and typed constants of a compiled statement with their identities.
+/// Retain selected catalog identities in the casts and typed constants of a compiled statement.
 pub fn bind_unified_plan_type_identities(
     plan: &mut crate::plan::UnifiedPlan,
     resolve: &mut TypeNameResolver<'_>,
@@ -146,7 +148,7 @@ fn visit_type_names(
     failure.map_or(Ok(()), Err)
 }
 
-/// Replace the names of user-defined types in the casts and typed constants of stored syntax with their identities.
+/// Retain selected catalog identities in the casts and typed constants of stored syntax.
 pub fn bind_stored_expression_type_identities(
     expression: &mut Expr,
     resolve: &mut TypeNameResolver<'_>,
@@ -156,7 +158,7 @@ pub fn bind_stored_expression_type_identities(
     })
 }
 
-/// Replace the names of user-defined types in the casts and typed constants of a stored statement with their identities.
+/// Retain selected catalog identities in the casts and typed constants of a stored statement.
 pub fn bind_stored_statement_type_identities(
     statement: &mut Statement,
     resolve: &mut TypeNameResolver<'_>,

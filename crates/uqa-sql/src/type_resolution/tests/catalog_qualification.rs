@@ -62,6 +62,30 @@ fn written_identifier_uses_catalog_selection_while_qualified_builtin_keeps_its_c
 }
 
 #[test]
+fn stored_builtin_cast_cannot_rebind_to_a_later_shadowing_type() {
+    let crate::Statement::Select(mut select) =
+        crate::compile("SELECT 'x'::text").unwrap().remove(0)
+    else {
+        unreachable!()
+    };
+    let mut syntax = select.projections.remove(0).expr;
+    crate::binding::stored_types::bind_stored_expression_type_identities(
+        &mut syntax,
+        &mut |name| Ok(ColumnType::from_sql_name(name).ok()),
+    )
+    .unwrap();
+    let crate::ast::Expr::Cast { ty, .. } = &syntax else {
+        panic!("stored cast")
+    };
+    assert_eq!(ty, &ColumnType::Text.catalog_name());
+    let scalar = crate::plan::ExpressionPlan::lower(syntax).scalar;
+    assert_eq!(
+        scalar_type_with_resolver(&scalar, &RowSchema::default(), &[], &Catalog).unwrap(),
+        Some(ColumnType::Text)
+    );
+}
+
+#[test]
 fn selected_common_type_does_not_rebind_to_a_shadowing_domain() {
     let schema = RowSchema::with_types(vec!["s".into()], vec![Some(ColumnType::Text)]);
     let mut stored = expression("COALESCE(s, NULL)");
