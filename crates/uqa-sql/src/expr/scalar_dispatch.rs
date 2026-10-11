@@ -131,6 +131,10 @@ pub(super) fn eval_scalar_function_with_context(
     args: &[Value],
     context: &EvalContext<'_>,
 ) -> Result<Value> {
+    if name.strip_prefix("pg_catalog.").unwrap_or(name) == "timezone" {
+        return super::time::eval_timezone(args, Some(context), &ProductionControl::uncontrolled())
+            .map(|value| value.into_uncontrolled().expect("ordinary temporal result"));
+    }
     if let Some(result) = eval_array_comparison_with_context(
         name.strip_prefix("pg_catalog.").unwrap_or(name),
         args,
@@ -171,6 +175,9 @@ pub(super) fn eval_generated_scalar_function_with_context(
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
 ) -> Result<Produced<Value>> {
+    if name.strip_prefix("pg_catalog.").unwrap_or(name) == "timezone" {
+        return super::time::eval_timezone(args, Some(context), control);
+    }
     if let Some(result) = eval_array_comparison_with_context(
         name.strip_prefix("pg_catalog.").unwrap_or(name),
         args,

@@ -28,6 +28,9 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if name == "timezone" {
+        return Some(super::super::time::eval_timezone(args, None, control));
+    }
     if !matches!(
         name,
         "to_timestamp"

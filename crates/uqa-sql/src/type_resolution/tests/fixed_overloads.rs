@@ -8,6 +8,56 @@ use super::super::*;
 use crate::ast::FunctionDispatch;
 
 #[test]
+fn timestamp_zone_binding_retains_postgresql_result_types_and_volatility() {
+    // Six pg_proc identities independently captured in the timezone reference.
+    for (arguments, expected) in [
+        (vec![ColumnType::Timestamp], ColumnType::TimestampTz),
+        (vec![ColumnType::TimestampTz], ColumnType::Timestamp),
+        (
+            vec![ColumnType::Text, ColumnType::Timestamp],
+            ColumnType::TimestampTz,
+        ),
+        (
+            vec![ColumnType::Text, ColumnType::TimestampTz],
+            ColumnType::Timestamp,
+        ),
+        (
+            vec![ColumnType::Interval, ColumnType::Timestamp],
+            ColumnType::TimestampTz,
+        ),
+        (
+            vec![ColumnType::Interval, ColumnType::TimestampTz],
+            ColumnType::Timestamp,
+        ),
+    ] {
+        let types: Vec<_> = arguments.iter().cloned().map(Some).collect();
+        let resolved = resolve_fixed_builtin_call(
+            "PG_CATALOG.TIMEZONE",
+            None,
+            &vec![None; types.len()],
+            &types,
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.selected.return_type, expected);
+        assert_eq!(resolved.selected.binding.name, "pg_catalog.timezone");
+        assert_eq!(resolved.builtin_non_immutable, types.len() == 1);
+        assert_eq!(
+            resolved
+                .selected
+                .binding
+                .argument_types
+                .iter()
+                .map(|name| ColumnType::from_sql_name(name).unwrap())
+                .collect::<Vec<_>>(),
+            arguments
+        );
+    }
+}
+
+#[test]
 fn current_setting_overloads_preserve_argument_types_and_session_dependence() {
     for types in [
         vec![Some(ColumnType::Text)],

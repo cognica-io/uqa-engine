@@ -24,11 +24,13 @@ mod extract;
 mod infinite;
 mod interval;
 mod number_format;
+mod timezone;
 mod units;
 
 pub(super) use date_trunc::zone::{truncate_explicit_zone, truncate_session_zone};
 pub(super) use extract::{extract_from_value, extract_from_value_with_offset};
 pub use interval::IntervalFields;
+pub(super) use timezone::eval_timezone;
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;

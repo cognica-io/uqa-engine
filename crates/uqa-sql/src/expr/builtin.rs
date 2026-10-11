@@ -159,7 +159,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
             Some(true)
         }
         "random" if argument_count == 2 => Some(true),
-        "age" | "btrim" | "ltrim" | "rtrim" | "trim" | "log" | "round" | "trunc"
+        "age" | "timezone" | "btrim" | "ltrim" | "rtrim" | "trim" | "log" | "round" | "trunc"
         | "json_strip_nulls" | "jsonb_strip_nulls"
             if matches!(argument_count, 1 | 2) =>
         {
