@@ -113,6 +113,44 @@ fn scalar_inference_preserves_common_array_case_and_operator_types() {
 }
 
 #[test]
+fn record_coercion_preserves_named_composite_and_domain_result_types() {
+    let composite = ColumnType::Composite(crate::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 90010,
+        array_oid: 90011,
+        relation_oid: 90012,
+    });
+    let mut domain = domain();
+    if let ColumnType::Domain { base, .. } = &mut domain {
+        *base = Box::new(composite.clone());
+    }
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for source in [composite, domain, ColumnType::Record] {
+        let schema = RowSchema::with_types(vec!["value".into()], vec![Some(source.clone())]);
+        let params = [SQLParam::typed_scalar(Value::Null, source.clone())];
+        for target in ["record", "pg_catalog.record"] {
+            for inner in [ScalarExpr::Position(0), ScalarExpr::Param(1)] {
+                let expression = ScalarExpr::Cast {
+                    implicit: false,
+                    expr: Box::new(inner),
+                    ty: target.into(),
+                };
+                let output = infer(&expression, &schema, &params, &control)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(*output, source);
+                assert_eq!(budget.used(), output.reserved_bytes());
+                drop(output);
+                assert_eq!(budget.used(), 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn scalar_inference_releases_partial_type_construction_on_quota_and_both_tokens() {
     let token = CancellationToken::new();
     let schema = RowSchema::with_types(vec!["value".into()], vec![Some(domain())]);

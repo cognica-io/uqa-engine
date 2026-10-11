@@ -97,27 +97,21 @@ pub(super) fn scalar_type_inner_with_control(
                     control,
                 )?;
             }
+            if source
+                .as_deref()
+                .zip(target.as_deref())
+                .is_some_and(|(source, target)| {
+                    cast_compatibility::preserves_record_identity(source, target)
+                })
+            {
+                return Ok(source);
+            }
             Ok(target)
         }
         ScalarExpr::Array(items) => {
-            if items.is_empty() {
-                return Ok(None);
-            }
-            let mut element = None;
-            for item in items {
-                element = common::merge_value_types_in(
-                    common::CommonTypeContext::Array,
-                    element,
-                    common::common_context_expression_type_with_control(
-                        item, schema, params, resolver, control,
-                    )?,
-                    control,
-                )?;
-            }
-            let element =
-                element.map_or_else(|| ColumnType::Text.clone_with_control(control), Ok)?;
-            common::read_unknown_literals(items.iter(), &element)?;
-            Ok(Some(ColumnType::array_with_control(element, control)?))
+            array_element_type_with_control(items, schema, params, resolver, control)?
+                .map(|element| ColumnType::array_with_control(element, control).map_err(Into::into))
+                .transpose()
         }
         ScalarExpr::CompositeRow {
             binding,
@@ -501,6 +495,32 @@ pub(super) fn scalar_type_inner_with_control(
         }
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
     }
+}
+
+pub(super) fn array_element_type_with_control(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    if items.is_empty() {
+        return Ok(None);
+    }
+    let mut element = None;
+    for item in items {
+        element = common::merge_value_types_in(
+            common::CommonTypeContext::Array,
+            element,
+            common::common_context_expression_type_with_control(
+                item, schema, params, resolver, control,
+            )?,
+            control,
+        )?;
+    }
+    let element = element.map_or_else(|| ColumnType::Text.clone_with_control(control), Ok)?;
+    common::read_unknown_literals(items.iter(), &element)?;
+    Ok(Some(element))
 }
 
 /// `(expression).field`: a whole-row reference selects its relation's column, a row constructor its `fN` field, and any other expression its composite type's attribute.

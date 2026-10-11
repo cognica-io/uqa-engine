@@ -190,6 +190,11 @@ fn record_coercion(source: &ColumnType, target: &ColumnType) -> bool {
     )
 }
 
+/// `coerce_type` leaves a named composite, including a domain over it, unchanged when the requested target is the record pseudotype.
+pub(crate) fn preserves_record_identity(source: &ColumnType, target: &ColumnType) -> bool {
+    matches!(target, ColumnType::Record) && matches!(base_type(source), ColumnType::Composite(_))
+}
+
 fn array_element(mut ty: &ColumnType) -> &ColumnType {
     while let ColumnType::Array(element) = ty {
         ty = element;

@@ -55,9 +55,10 @@ mod routine_signature;
 mod scalar_input;
 mod stored_constants;
 pub use scalar_input::{
-    scalar_cast_source_type_name_with_control, scalar_integer_operation_width,
-    scalar_integer_operation_width_with_control, scalar_operand_type_name,
-    scalar_operand_type_name_with_control, scalar_record_field_type_with_control,
+    scalar_array_element_oid_with_control, scalar_cast_source_type_name_with_control,
+    scalar_integer_operation_width, scalar_integer_operation_width_with_control,
+    scalar_operand_type_name, scalar_operand_type_name_with_control,
+    scalar_record_field_type_with_control,
 };
 pub use stored_constants::{
     contains_unknown_literal, fold_stored_enum_constants, store_operand_coercions,
@@ -65,11 +66,11 @@ pub use stored_constants::{
 };
 mod string_binary;
 
-pub(crate) use cast_compatibility::cast_catalog_entry_with_control;
 pub use cast_compatibility::{
     assignment_type_compatible, cast_catalog_entry, cast_volatility, explicit_type_compatible,
     CastCatalogEntry, CastMethod,
 };
+pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_record_identity};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
