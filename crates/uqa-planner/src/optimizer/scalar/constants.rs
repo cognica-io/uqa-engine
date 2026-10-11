@@ -73,7 +73,26 @@ pub(in crate::optimizer) fn immutable_cast_type(ty: &ColumnType) -> bool {
     }
 }
 
-fn is_constant(expression: &ScalarExpr) -> bool {
+fn constant_cast_type(
+    name: &str,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+) -> Option<ColumnType> {
+    if let Some(types) = types {
+        return types.resolve_catalog_column_type_name(name).ok();
+    }
+    // Only a parser-selected namespace determines a type without the live catalog. A free identifier can select a domain through search_path.
+    let parsed = uqa_sql::parse_regtype_name(name).ok()??;
+    if !matches!(parsed.names.as_slice(), [schema, _] if schema == "pg_catalog") {
+        return None;
+    }
+    ColumnType::from_sql_name(name).ok()
+}
+
+fn is_constant(
+    expression: &ScalarExpr,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+) -> bool {
+    let constant = |expression: &ScalarExpr| is_constant(expression, types);
     match expression {
         ScalarExpr::Literal(value) => {
             !uqa_sql::expr::composites::literal::contains_records(value)
@@ -87,15 +106,15 @@ fn is_constant(expression: &ScalarExpr) -> bool {
         } => {
             !uqa_sql::expr::composites::literal::contains_records(value)
                 && !uqa_sql::expr::datums::contains_datum(value)
-                && (bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok())
+                && (bound_type.is_some() || constant_cast_type(ty, types).is_some())
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().all(is_constant),
+        | ScalarExpr::Or(items) => items.iter().all(constant),
         ScalarExpr::Cast { expr, ty, .. } => {
-            is_constant(expr)
-                && ColumnType::from_sql_name(ty).is_ok_and(|target| {
+            constant(expr)
+                && constant_cast_type(ty, types).is_some_and(|target| {
                     immutable_cast_type(&target)
                         && scalar_type(expr, &RowSchema::default(), &[]).is_ok_and(|source| {
                             source.is_none_or(|source| {
@@ -107,31 +126,31 @@ fn is_constant(expression: &ScalarExpr) -> bool {
         }
         // A named ROW constructor reads its current catalog descriptor even when every argument is a constant.
         ScalarExpr::CompositeRow { .. } => false,
-        ScalarExpr::Binary { lhs, rhs, .. } => is_constant(lhs) && is_constant(rhs),
+        ScalarExpr::Binary { lhs, rhs, .. } => constant(lhs) && constant(rhs),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. } => is_constant(inner),
+        | ScalarExpr::IsNull { expr: inner, .. } => constant(inner),
         ScalarExpr::Between { expr, low, high } => {
-            is_constant(expr) && is_constant(low) && is_constant(high)
+            constant(expr) && constant(low) && constant(high)
         }
-        ScalarExpr::InList { expr, list, .. } => is_constant(expr) && list.iter().all(is_constant),
+        ScalarExpr::InList { expr, list, .. } => constant(expr) && list.iter().all(constant),
         ScalarExpr::Case {
             base,
             when,
             else_branch,
         } => {
-            base.as_deref().is_none_or(is_constant)
+            base.as_deref().is_none_or(constant)
                 && when
                     .iter()
-                    .all(|(condition, value)| is_constant(condition) && is_constant(value))
-                && else_branch.as_deref().is_none_or(is_constant)
+                    .all(|(condition, value)| constant(condition) && constant(value))
+                && else_branch.as_deref().is_none_or(constant)
         }
         ScalarExpr::Func {
             name,
             binding,
             args,
             ..
-        } if is_coalesce(name, binding.as_ref()) => args.iter().all(is_constant),
+        } if is_coalesce(name, binding.as_ref()) => args.iter().all(constant),
         ScalarExpr::Func {
             order_syntax: _,
             name,
@@ -152,7 +171,7 @@ fn is_constant(expression: &ScalarExpr) -> bool {
                 args.len(),
             ) == uqa_sql::ast::FunctionVolatility::Immutable =>
         {
-            args.iter().all(is_constant)
+            args.iter().all(constant)
         }
         _ => false,
     }
@@ -180,7 +199,7 @@ pub(super) fn fold_authorized_literal(
     }
     if let ScalarExpr::Cast { expr, ty, .. } = &expression {
         if literal_value(expr).is_some_and(|value| matches!(value, Value::Null)) {
-            if let Ok(target) = ColumnType::from_sql_name(ty) {
+            if let Some(target) = constant_cast_type(ty, types) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
                         composite_source: None,
@@ -197,7 +216,7 @@ pub(super) fn fold_authorized_literal(
         return literal;
     }
     let strict_null = strict_null_expression(&expression);
-    if literal_value(&expression).is_some() || (!strict_null && !is_constant(&expression)) {
+    if literal_value(&expression).is_some() || (!strict_null && !is_constant(&expression, types)) {
         return Ok(expression);
     }
     let schema = RowSchema::default();
