@@ -60,6 +60,7 @@ pub use scalar_input::{
     scalar_operand_type_name, scalar_operand_type_name_with_control,
     scalar_record_field_type_with_control,
 };
+pub(crate) use stored_constants::store_syntax_operand_coercions;
 pub use stored_constants::{
     contains_unknown_literal, fold_stored_enum_constants, store_operand_coercions,
     stored_enum_constant,

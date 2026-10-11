@@ -348,29 +348,31 @@ impl Binder<'_, '_> {
     }
 
     pub(super) fn cast_requires_source(&self, target: &str) -> Result<bool, SQLError> {
-        let mut target = target.trim();
-        while let Some(element) = target.strip_suffix("[]") {
-            target = element.trim_end();
+        let Some(target) = self
+            .semantic(super::super::inference::resolved_type_name(
+                target,
+                self.resolver,
+                &self.control,
+            ))?
+            .flatten()
+        else {
+            return Ok(false);
+        };
+        let mut target = &*target;
+        while let ColumnType::Array(element) | ColumnType::Domain { base: element, .. } = target {
+            self.control.check()?;
+            target = element;
         }
-        if self.is_character_target(target)? {
-            return Ok(true);
-        }
-        Ok([
-            "bytea",
-            "pg_catalog.bytea",
-            "oid",
-            "pg_catalog.oid",
-            "xid",
-            "pg_catalog.xid",
-            "text",
-            "pg_catalog.text",
-            "int2vector",
-            "pg_catalog.int2vector",
-            "oidvector",
-            "pg_catalog.oidvector",
-        ]
-        .iter()
-        .any(|name| target.eq_ignore_ascii_case(name)))
+        Ok(target.is_character_string()
+            || matches!(
+                target,
+                ColumnType::Bytea
+                    | ColumnType::Oid
+                    | ColumnType::Xid
+                    | ColumnType::Int2Vector
+                    | ColumnType::OidVector
+                    | ColumnType::InternalChar
+            ))
     }
 
     pub(super) fn declared_source(
@@ -380,9 +382,10 @@ impl Binder<'_, '_> {
     ) -> Result<Option<Produced<ColumnType>>, SQLError> {
         if self.is_character_target(target)? {
             return match base_type(&source) {
-                source @ (ColumnType::Int2Vector | ColumnType::OidVector | ColumnType::Real) => {
-                    Ok(Some(source.clone_with_control(&self.control)?))
-                }
+                source @ (ColumnType::Int2Vector
+                | ColumnType::OidVector
+                | ColumnType::Real
+                | ColumnType::InternalChar) => Ok(Some(source.clone_with_control(&self.control)?)),
                 _ => Ok(None),
             };
         }

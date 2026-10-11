@@ -561,7 +561,7 @@ pub(super) fn field_selection_type(
     )
 }
 
-fn resolved_type_name(
+pub(super) fn resolved_type_name(
     name: &str,
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &ProductionControl<'_>,

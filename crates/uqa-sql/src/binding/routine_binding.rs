@@ -695,7 +695,13 @@ impl SchemaScope {
             params,
         )?;
         // The coercions binding adds to an operator's operands, the constants it reads from `unknown` literals and the relabels of `oid` alias operands, are stored, as `PostgreSQL` stores them in an analyzed expression.
-        crate::type_resolution::store_operand_coercions(expression, schema, params, &resolver)?;
+        if self.preserve_syntax_shape {
+            crate::type_resolution::store_syntax_operand_coercions(
+                expression, schema, params, &resolver,
+            )?;
+        } else {
+            crate::type_resolution::store_operand_coercions(expression, schema, params, &resolver)?;
+        }
         if !crate::type_resolution::contains_unknown_literal(expression) {
             return Ok(());
         }

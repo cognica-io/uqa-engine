@@ -48,6 +48,26 @@ pub fn store_operand_coercions(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, SQLError> {
+    store_coercions(expression, schema, params, resolver, false)
+}
+
+/// Bind coercions in a lowered copy of stored syntax while retaining its written cast sites for the syntax-site transfer.
+pub(crate) fn store_syntax_operand_coercions(
+    expression: &mut ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<bool, SQLError> {
+    store_coercions(expression, schema, params, resolver, true)
+}
+
+fn store_coercions(
+    expression: &mut ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+    preserve_syntax_shape: bool,
+) -> Result<bool, SQLError> {
     let bound =
         super::introspection::bind_stored_inputs(expression.clone(), schema, params, resolver)?;
     transfer(
@@ -57,12 +77,16 @@ pub fn store_operand_coercions(
             schema,
             params,
             resolver,
+            preserve_syntax_shape,
         },
     )
 }
 
 /// What a transfer takes from the bound copy of a stored expression.
 trait Folding {
+    fn identity_cast(&mut self, _: &mut ScalarExpr) -> Result<bool, SQLError> {
+        Ok(false)
+    }
     fn array_domain_input(&mut self, _: &mut ScalarExpr) -> Result<bool, SQLError> {
         Ok(false)
     }
@@ -101,9 +125,48 @@ struct OperatorCoercions<'a> {
     schema: &'a dyn ScalarTypeSchema,
     params: &'a [SQLParam],
     resolver: &'a dyn FunctionTypeResolver,
+    preserve_syntax_shape: bool,
 }
 
 impl Folding for OperatorCoercions<'_> {
+    fn identity_cast(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
+        if self.preserve_syntax_shape {
+            return Ok(false);
+        }
+        let ScalarExpr::Cast { expr, ty, .. } = stored else {
+            return Ok(false);
+        };
+        // Retained input constants keep their written coercion boundary and modifier; reconstruction already prints that boundary once.
+        if matches!(
+            **expr,
+            ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
+        ) {
+            return Ok(false);
+        }
+        let target = super::inference::resolved_type_name(
+            ty,
+            Some(self.resolver),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
+        let source =
+            super::scalar_type_with_resolver(expr, self.schema, self.params, self.resolver)?;
+        if !source
+            .as_ref()
+            .zip(target.as_deref())
+            .is_some_and(|(source, target)| source == target)
+        {
+            return Ok(false);
+        }
+        // Parse analysis keeps the existing expression when its exact selected type and modifier already match the requested coercion.
+        let ScalarExpr::Cast { expr, .. } =
+            std::mem::replace(stored, ScalarExpr::Literal(Value::Null))
+        else {
+            unreachable!()
+        };
+        *stored = *expr;
+        Ok(true)
+    }
+
     fn array_domain_input(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
         if super::composite_rows::bind_stored_row(stored, self.schema, self.params, self.resolver)?
         {
@@ -263,6 +326,7 @@ fn transfer(
     };
     changed |= folding.added_casts(stored, &added);
     changed |= folding.array_domain_input(stored)?;
+    changed |= folding.identity_cast(stored)?;
     Ok(changed || reshaped)
 }
 

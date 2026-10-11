@@ -319,6 +319,7 @@ fn composite_record_operand_keeps_its_catalog_type_without_a_runtime_carrier_cas
         schema: &schema,
         params: &[],
         resolver: &Catalog,
+        preserve_syntax_shape: false,
     };
     assert!(!folding.added_casts(&mut stored, &["record"]));
     assert_eq!(stored, expression("p"));
