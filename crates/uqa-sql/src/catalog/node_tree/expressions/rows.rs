@@ -24,6 +24,21 @@ impl ExpressionContext<'_> {
         inputs::anonymous_row(self.row_inputs(elements)?)
     }
 
+    /// Observe a selected field from the same inputs used to construct the complete ROW.
+    pub(super) fn row_with_selected_type(
+        &self,
+        elements: &[Expr],
+        position: usize,
+    ) -> Result<(TypedNode, Option<ColumnType>), SQLError> {
+        let fields = self.row_inputs(elements)?;
+        let selected = fields
+            .get(position)
+            .ok_or_else(|| super::super::invalid("invalid ROW field position"))?
+            .ty()
+            .cloned();
+        Ok((inputs::anonymous_row(fields)?, selected))
+    }
+
     pub(super) fn row_comparison(
         &self,
         op: BinaryOp,
@@ -36,7 +51,7 @@ impl ExpressionContext<'_> {
             .zip(right)
             .map(|(left, right)| {
                 let selected = self.scalar_binary(op, left, right)?;
-                row_comparison::require_boolean(&selected.ty)?;
+                row_comparison::require_boolean(selected.type_ref()?)?;
                 Ok(selected.node)
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
@@ -150,6 +165,6 @@ fn boolean(operator: &str, values: Vec<Node>) -> Node {
 fn boolean_node(node: Node) -> TypedNode {
     TypedNode {
         node,
-        ty: ColumnType::Boolean,
+        ty: Some(ColumnType::Boolean),
     }
 }

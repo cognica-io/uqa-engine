@@ -26,6 +26,11 @@ impl ExpressionContext<'_> {
             return Ok(Some(value));
         }
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::FieldSelect) => {
+                return self
+                    .field_select(binding.expect("field selection dispatch"), args)
+                    .map(Some)
+            }
             Some(FunctionDispatch::BooleanTest(test)) => {
                 return self.boolean_test(args, test).map(Some);
             }
@@ -97,7 +102,7 @@ impl ExpressionContext<'_> {
                 ],
             )
         };
-        Ok(Some(TypedNode { node, ty }))
+        Ok(Some(TypedNode { node, ty: Some(ty) }))
     }
 
     fn quantified_operator(&self, args: &[Expr], any: bool) -> Result<TypedNode, SQLError> {
@@ -145,7 +150,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: ColumnType::Boolean,
+            ty: Some(ColumnType::Boolean),
         })
     }
 
@@ -164,7 +169,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: ColumnType::Boolean,
+            ty: Some(ColumnType::Boolean),
         })
     }
 
@@ -184,7 +189,7 @@ impl ExpressionContext<'_> {
         )?;
         let left = self.encode(lhs, Some(&left))?;
         let right = self.encode(rhs, Some(&right))?;
-        let result = left.ty.clone();
+        let result = left.type_ref()?.clone();
         let mut value =
             super::operator_node(identity.oid, identity.function_oid, [left, right], result);
         value.node.kind = "NULLIFEXPR".into();
@@ -209,14 +214,14 @@ impl ExpressionContext<'_> {
                     node: Node::new(
                         "CASETESTEXPR",
                         [
-                            ("typeId", pg_type_oid(&base.ty).into()),
-                            ("typeMod", pg_type_modifier(&base.ty).into()),
-                            ("collation", pg_type_collation_oid(&base.ty).into()),
+                            ("typeId", pg_type_oid(base.type_ref()?).into()),
+                            ("typeMod", pg_type_modifier(base.type_ref()?).into()),
+                            ("collation", pg_type_collation_oid(base.type_ref()?).into()),
                         ],
                     ),
                     ty: base.ty.clone(),
                 };
-                let condition = self.encode(condition, Some(&base.ty))?;
+                let condition = self.encode(condition, base.ty.as_ref())?;
                 Self::typed_binary(BinaryOp::Equal, test, condition)?
             } else {
                 self.encode(condition, Some(&ColumnType::Boolean))?
@@ -250,7 +255,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty,
+            ty: Some(ty),
         })
     }
 }

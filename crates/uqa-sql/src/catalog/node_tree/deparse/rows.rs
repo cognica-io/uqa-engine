@@ -13,27 +13,7 @@ impl Renderer<'_> {
         let Field::Node(node) = argument else {
             return Err(invalid("NULL test argument is not an expression"));
         };
-        let field = match node.kind.as_str() {
-            "ROWEXPR" => return Ok(true),
-            "BOOLEXPR" | "BOOLEANTEST" | "NULLTEST" | "DISTINCTEXPR" | "SCALARARRAYOPEXPR"
-            | "ROWCOMPAREEXPR" => return Ok(false),
-            "COLLATEEXPR" => return self.is_record_argument(node.field("arg")?),
-            "VAR" => "vartype",
-            "PARAM" => "paramtype",
-            "CONST" => "consttype",
-            "COERCETODOMAINVALUE" | "CASETESTEXPR" => "typeId",
-            "OPEXPR" | "NULLIFEXPR" => "opresulttype",
-            "FUNCEXPR" => "funcresulttype",
-            "RELABELTYPE" | "COERCEVIAIO" | "COERCETODOMAIN" | "ARRAYCOERCEEXPR" => "resulttype",
-            "ARRAYEXPR" => "array_typeid",
-            "SUBSCRIPTINGREF" => "refrestype",
-            "CASEEXPR" => "casetype",
-            "COALESCEEXPR" => "coalescetype",
-            "MINMAXEXPR" => "minmaxtype",
-            _ => return Err(invalid("unknown NULL test argument type")),
-        };
-        let oid = u32::try_from(node.integer(field)?)
-            .map_err(|_| invalid("invalid NULL test argument type"))?;
+        let oid = super::types::result_type(node)?;
         if i64::from(oid) == crate::catalog::type_metadata::pg_type_oid(&crate::ColumnType::Record)
         {
             return Ok(true);

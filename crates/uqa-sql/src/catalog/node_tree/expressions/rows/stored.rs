@@ -46,7 +46,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty,
+            ty: Some(ty),
         })
     }
 
@@ -85,7 +85,7 @@ impl ExpressionContext<'_> {
             {
                 fields.push(TypedNode {
                     node: values::constant(&Value::Null, &ColumnType::Integer)?,
-                    ty: ColumnType::Integer,
+                    ty: Some(ColumnType::Integer),
                 });
                 continue;
             }

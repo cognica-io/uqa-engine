@@ -46,6 +46,26 @@ pub(super) fn assign(node: &mut Node) -> Result<(), SQLError> {
     visit(node, None).map(|_| ())
 }
 
+/// FIELDSELECT observes the selected ROW child's parse-time collation before the enclosing collation pass.
+pub(super) fn initial(node: &Node) -> Result<u32, SQLError> {
+    let field = match node.kind.as_str() {
+        "COLLATEEXPR" => "collOid",
+        "VAR" => "varcollid",
+        "CONST" => "constcollid",
+        "PARAM" => "paramcollid",
+        "COERCETODOMAINVALUE" | "CASETESTEXPR" => "collation",
+        "FIELDSELECT" => "resultcollid",
+        // These children acquire a collation in the later pass; its type defaults are not parse-time identities.
+        "RELABELTYPE" | "COERCEVIAIO" | "COERCETODOMAIN" | "ARRAYCOERCEEXPR" | "OPEXPR"
+        | "NULLIFEXPR" | "DISTINCTEXPR" | "FUNCEXPR" | "SUBSCRIPTINGREF" | "ARRAYEXPR"
+        | "CASEEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ROWEXPR" | "ROWCOMPAREEXPR"
+        | "BOOLEXPR" | "BOOLEANTEST" | "NULLTEST" | "SCALARARRAYOPEXPR" => return Ok(0),
+        _ => return Err(super::super::invalid("unknown fresh expression collation")),
+    };
+    u32::try_from(node.integer(field)?)
+        .map_err(|_| super::super::invalid("invalid expression collation"))
+}
+
 pub(super) fn collate(argument: Node, oid: i64) -> Node {
     Node::new(
         "COLLATEEXPR",
@@ -88,6 +108,10 @@ fn visit(node: &mut Node, case_value: Option<i64>) -> Result<Derivation, SQLErro
         return Ok(Derivation::implicit(node.integer(field)?));
     }
     match node.kind.as_str() {
+        "FIELDSELECT" => {
+            visit_field(field_mut(node, "arg")?, case_value)?;
+            Ok(Derivation::implicit(node.integer("resultcollid")?))
+        }
         "ROWEXPR" => {
             for item in list_mut(node, "args")? {
                 visit_field(item, case_value)?;

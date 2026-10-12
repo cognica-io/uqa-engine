@@ -11,9 +11,11 @@ use crate::SQLError;
 
 mod bodies;
 mod control;
+mod fields;
 mod operators;
 mod rows;
 mod subscripts;
+mod types;
 
 pub use bodies::return_body;
 
@@ -93,6 +95,7 @@ impl Renderer<'_> {
             }
             "PARAM" => self.parameter(node),
             "SUBSCRIPTINGREF" => self.array_access(node),
+            "FIELDSELECT" => self.field_select(node),
             "CONST" => self.constant(node),
             "COLLATEEXPR" => self.collate(node, outer),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
@@ -218,7 +221,7 @@ impl Renderer<'_> {
             node.kind.as_str(),
             "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"
                 | "NULLIFEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ARRAYEXPR" | "CASEEXPR"
-                | "ROWEXPR" | "SUBSCRIPTINGREF"
+                | "ROWEXPR" | "SUBSCRIPTINGREF" | "FIELDSELECT"
         ));
         Ok(format!(
             "{}::{}",

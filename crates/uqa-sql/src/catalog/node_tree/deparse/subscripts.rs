@@ -43,7 +43,7 @@ impl Renderer<'_> {
             return Err(invalid("array read operand is not an expression"));
         };
         let input_text = self.node(input, self.pretty)?;
-        let mut text = if input.kind == "VAR" {
+        let mut text = if matches!(input.kind.as_str(), "VAR" | "FIELDSELECT") {
             input_text
         } else {
             format!("({input_text})")

@@ -1,0 +1,350 @@
+{
+  "catalog": [
+    {
+      "oid": 28856,
+      "name": "node_inner",
+      "array_oid": 28855,
+      "relation_oid": 28854,
+      "kind": "c",
+      "base": null,
+      "attributes": [
+        {
+          "name": "........pg.dropped.1........",
+          "number": 1,
+          "type": "-",
+          "dropped": true,
+          "length": -1,
+          "alignment": "i",
+          "collation_oid": 100
+        },
+        {
+          "name": "number",
+          "number": 2,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i",
+          "collation_oid": 0
+        },
+        {
+          "name": "Label Name",
+          "number": 3,
+          "type": "character varying(8)",
+          "dropped": false,
+          "length": -1,
+          "alignment": "i",
+          "collation_oid": 950
+        }
+      ]
+    },
+    {
+      "oid": 28859,
+      "name": "node_outer",
+      "array_oid": 28858,
+      "relation_oid": 28857,
+      "kind": "c",
+      "base": null,
+      "attributes": [
+        {
+          "name": "id",
+          "number": 1,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i",
+          "collation_oid": 0
+        },
+        {
+          "name": "child",
+          "number": 2,
+          "type": "node_inner",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d",
+          "collation_oid": 0
+        },
+        {
+          "name": "children",
+          "number": 3,
+          "type": "node_inner[]",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d",
+          "collation_oid": 0
+        }
+      ]
+    },
+    {
+      "oid": 28861,
+      "name": "node_record",
+      "array_oid": 28860,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "node_inner",
+      "attributes": null
+    }
+  ],
+  "renamed_catalog": [
+    {
+      "oid": 28856,
+      "name": "node_inner",
+      "array_oid": 28855,
+      "relation_oid": 28854,
+      "kind": "c",
+      "base": null,
+      "attributes": [
+        {
+          "name": "........pg.dropped.1........",
+          "number": 1,
+          "type": "-",
+          "dropped": true,
+          "length": -1,
+          "alignment": "i",
+          "collation_oid": 100
+        },
+        {
+          "name": "renamed",
+          "number": 2,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i",
+          "collation_oid": 0
+        },
+        {
+          "name": "Label Name",
+          "number": 3,
+          "type": "character varying(8)",
+          "dropped": false,
+          "length": -1,
+          "alignment": "i",
+          "collation_oid": 950
+        }
+      ]
+    },
+    {
+      "oid": 28859,
+      "name": "node_outer",
+      "array_oid": 28858,
+      "relation_oid": 28857,
+      "kind": "c",
+      "base": null,
+      "attributes": [
+        {
+          "name": "id",
+          "number": 1,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i",
+          "collation_oid": 0
+        },
+        {
+          "name": "child",
+          "number": 2,
+          "type": "node_inner",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d",
+          "collation_oid": 0
+        },
+        {
+          "name": "children",
+          "number": 3,
+          "type": "node_inner[]",
+          "dropped": false,
+          "length": -1,
+          "alignment": "d",
+          "collation_oid": 0
+        }
+      ]
+    },
+    {
+      "oid": 28861,
+      "name": "node_record",
+      "array_oid": 28860,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "node_inner",
+      "attributes": null
+    }
+  ],
+  "cases": [
+    {
+      "base": "node_inner",
+      "check": "(VALUE).number > 0",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((VALUE).number > 0)",
+      "pretty": "(VALUE).number > 0",
+      "renamed": {
+        "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+        "sql": "((VALUE).renamed > 0)",
+        "pretty": "(VALUE).renamed > 0"
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "(VALUE).\"Label Name\" IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE).\"Label Name\" IS NULL)",
+      "pretty": "(VALUE).\"Label Name\" IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((VALUE).\"Label Name\" IS NULL)",
+        "pretty": "(VALUE).\"Label Name\" IS NULL"
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "(VALUE).\"Label Name\" COLLATE \"POSIX\" = 'x'",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 951 :args ({COLLATEEXPR :arg {RELABELTYPE :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :resulttype 25 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} :collOid 951 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+      "sql": "((((VALUE).\"Label Name\")::text COLLATE \"POSIX\") = 'x'::text)",
+      "pretty": "((VALUE).\"Label Name\"::text COLLATE \"POSIX\") = 'x'::text",
+      "renamed": {
+        "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 951 :args ({COLLATEEXPR :arg {RELABELTYPE :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :resulttype 25 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} :collOid 951 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+        "sql": "((((VALUE).\"Label Name\")::text COLLATE \"POSIX\") = 'x'::text)",
+        "pretty": "((VALUE).\"Label Name\"::text COLLATE \"POSIX\") = 'x'::text"
+      }
+    },
+    {
+      "base": "node_outer",
+      "check": "((VALUE).child).number IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28859 :typeMod -1 :collation 0 :location -1} :fieldnum 2 :resulttype 28856 :resulttypmod -1 :resultcollid 0} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE).child.number IS NULL)",
+      "pretty": "(VALUE).child.number IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28859 :typeMod -1 :collation 0 :location -1} :fieldnum 2 :resulttype 28856 :resulttypmod -1 :resultcollid 0} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((VALUE).child.renamed IS NULL)",
+        "pretty": "(VALUE).child.renamed IS NULL"
+      }
+    },
+    {
+      "base": "node_outer",
+      "check": "((VALUE).children[1]).number IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {SUBSCRIPTINGREF :refcontainertype 28855 :refelemtype 28856 :refrestype 28856 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28859 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 28855 :resulttypmod -1 :resultcollid 0} :refassgnexpr <>} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE).children[1].number IS NULL)",
+      "pretty": "(VALUE).children[1].number IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {SUBSCRIPTINGREF :refcontainertype 28855 :refelemtype 28856 :refrestype 28856 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28859 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 28855 :resulttypmod -1 :resultcollid 0} :refassgnexpr <>} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((VALUE).children[1].renamed IS NULL)",
+        "pretty": "(VALUE).children[1].renamed IS NULL"
+      }
+    },
+    {
+      "base": "node_outer",
+      "check": "((VALUE).children[1]).\"Label Name\" IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {SUBSCRIPTINGREF :refcontainertype 28855 :refelemtype 28856 :refrestype 28856 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28859 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 28855 :resulttypmod -1 :resultcollid 0} :refassgnexpr <>} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE).children[1].\"Label Name\" IS NULL)",
+      "pretty": "(VALUE).children[1].\"Label Name\" IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {SUBSCRIPTINGREF :refcontainertype 28855 :refelemtype 28856 :refrestype 28856 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28859 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 28855 :resulttypmod -1 :resultcollid 0} :refassgnexpr <>} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((VALUE).children[1].\"Label Name\" IS NULL)",
+        "pretty": "(VALUE).children[1].\"Label Name\" IS NULL"
+      }
+    },
+    {
+      "base": "node_record",
+      "check": "(VALUE).number IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28861 :typeMod -1 :collation 0 :location -1} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE).number IS NULL)",
+      "pretty": "(VALUE).number IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28861 :typeMod -1 :collation 0 :location -1} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((VALUE).renamed IS NULL)",
+        "pretty": "(VALUE).renamed IS NULL"
+      }
+    },
+    {
+      "base": "node_record",
+      "check": "(VALUE).\"Label Name\" IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28861 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE).\"Label Name\" IS NULL)",
+      "pretty": "(VALUE).\"Label Name\" IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28861 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((VALUE).\"Label Name\" IS NULL)",
+        "pretty": "(VALUE).\"Label Name\" IS NULL"
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "(ROW(1, 'x'::text)).f1 > 0",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 1 :resulttype 23 :resulttypmod -1 :resultcollid 0} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((ROW(1, 'x'::text)).f1 > 0)",
+      "pretty": "(ROW(1, 'x'::text)).f1 > 0",
+      "renamed": {
+        "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 1 :resulttype 23 :resulttypmod -1 :resultcollid 0} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+        "sql": "((ROW(1, 'x'::text)).f1 > 0)",
+        "pretty": "(ROW(1, 'x'::text)).f1 > 0"
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "(ROW(1, 'x'::text)).f2 IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 25 :resulttypmod -1 :resultcollid 100} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((ROW(1, 'x'::text)).f2 IS NULL)",
+      "pretty": "(ROW(1, 'x'::text)).f2 IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 25 :resulttypmod -1 :resultcollid 100} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((ROW(1, 'x'::text)).f2 IS NULL)",
+        "pretty": "(ROW(1, 'x'::text)).f2 IS NULL"
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "((ROW(1, VALUE)).f2).number IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 28856 :resulttypmod -1 :resultcollid 0} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((ROW(1, VALUE)).f2.number IS NULL)",
+      "pretty": "(ROW(1, VALUE)).f2.number IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 28856 :resulttypmod -1 :resultcollid 0} :fieldnum 2 :resulttype 23 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((ROW(1, VALUE)).f2.renamed IS NULL)",
+        "pretty": "(ROW(1, VALUE)).f2.renamed IS NULL"
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "(ROW(1, (VALUE).\"Label Name\")).f2 IS NULL",
+      "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((ROW(1, (VALUE).\"Label Name\")).f2 IS NULL)",
+      "pretty": "(ROW(1, (VALUE).\"Label Name\")).f2 IS NULL",
+      "renamed": {
+        "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {FIELDSELECT :arg {COERCETODOMAINVALUE :typeId 28856 :typeMod -1 :collation 0 :location -1} :fieldnum 3 :resulttype 1043 :resulttypmod 12 :resultcollid 950}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 1043 :resulttypmod 12 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+        "sql": "((ROW(1, (VALUE).\"Label Name\")).f2 IS NULL)",
+        "pretty": "(ROW(1, (VALUE).\"Label Name\")).f2 IS NULL"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "base": "node_inner",
+      "check": "(VALUE).missing IS NULL",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" not found in data type node_inner",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "base": "integer",
+      "check": "(VALUE).number IS NULL",
+      "error": {
+        "sqlstate": "42809",
+        "message": "column notation .number applied to type integer, which is not a composite type",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "base": "node_inner",
+      "check": "(ROW(1,2)).f3 IS NULL",
+      "error": {
+        "sqlstate": "42703",
+        "message": "could not identify column \"f3\" in record data type",
+        "detail": null,
+        "hint": null
+      }
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 mod coercion;
 mod collations;
 mod constructs;
+mod fields;
 mod operators;
 mod rows;
 mod schema;
@@ -48,7 +49,16 @@ pub struct ExpressionContext<'a> {
 
 struct TypedNode {
     node: Node,
-    ty: ColumnType,
+    /// `None` retains the non-literal `PostgreSQL` unknown result identity until a context selects a cast.
+    ty: Option<ColumnType>,
+}
+
+impl TypedNode {
+    fn type_ref(&self) -> Result<&ColumnType, SQLError> {
+        self.ty
+            .as_ref()
+            .ok_or_else(|| super::invalid("expected a selected expression type"))
+    }
 }
 
 impl ExpressionContext<'_> {
@@ -116,7 +126,7 @@ impl ExpressionContext<'_> {
                             ("location", (-1).into()),
                         ],
                     ),
-                    ty: ColumnType::Boolean,
+                    ty: Some(ColumnType::Boolean),
                 }
             }
             Expr::Between { expr, low, high } => self.boolean(
@@ -223,7 +233,7 @@ impl ExpressionContext<'_> {
                 source,
                 self.types.and_then(FunctionTypeResolver::composite_types),
             )?,
-            ty,
+            ty: Some(ty),
         })
     }
 
@@ -237,7 +247,7 @@ impl ExpressionContext<'_> {
         let mut value = self.constant(value, ty, source)?;
         if let Some(oid) = collation {
             crate::catalog::collations::expression::validate_literal_collation(
-                Some(&value.ty),
+                value.ty.as_ref(),
                 Some(oid),
             )?;
             value
@@ -275,7 +285,7 @@ impl ExpressionContext<'_> {
                         ("location", (-1).into()),
                     ],
                 ),
-                ty: ty.clone(),
+                ty: Some(ty.clone()),
             });
         }
         let column = self.schema.column_reference(name, qualifier)?;
@@ -298,7 +308,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: ty.clone(),
+            ty: Some(ty.clone()),
         })
     }
 
@@ -343,7 +353,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: ColumnType::Boolean,
+            ty: Some(ColumnType::Boolean),
         })
     }
 
@@ -397,7 +407,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: routine.result_type,
+            ty: Some(routine.result_type),
         })
     }
 }
@@ -426,6 +436,6 @@ fn operator_node(
                 ("location", (-1).into()),
             ],
         ),
-        ty: result,
+        ty: Some(result),
     }
 }
