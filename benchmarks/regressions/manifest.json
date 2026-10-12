@@ -3367,6 +3367,35 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "analyzed_inference_and_stored_index_syntax_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/conflict/inference.rs",
+      "capability": "Expression-index inference identity",
+      "workload": "Eight independent PostgreSQL ON CONFLICT observations bind stored index syntax and analyzed inference expressions, including partial predicates, explicit collations and distinct casts or routines.",
+      "invariant": "Derived result envelopes do not prevent an exact stored-expression match; explicit collations, actual conversions, selected routine identities and PostgreSQL rejection diagnostics remain intact."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "expression_index_inference_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/sql_unique_constraint/expressions/inference.rs",
+      "capability": "Persistent expression-index conflict inference",
+      "workload": "Eighteen independent PostgreSQL commands cover partial unique indexes, aliases, view rewrites, explicit C/POSIX clauses, rejected casts and persistent reopening across memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "ON CONFLICT selects the same unique arbiter and produces the same rows, completions and rejection diagnostics before and after reopening."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_view_coercions_preserve_prepared_result_collations",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",

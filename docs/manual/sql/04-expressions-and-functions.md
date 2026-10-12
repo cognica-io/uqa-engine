@@ -34,7 +34,7 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 Composite values compare field by field: equality treats two NULL fields as equal, and ordering places NULL fields after all other values, as PostgreSQL's record operators do; anonymous rows compare with SQL's three-valued row comparison instead. `IS NULL` is true for a row or composite value whose fields are all NULL, and `IS NOT NULL` is true when none of its fields is NULL, so a value with both kinds of fields satisfies neither.
 
 ```sql execute
-SELECT (ROW(1, 'a')).f2 AS second_field,
+SELECT (ROW(1, 'a'::text)).f2 AS second_field,
        ROW(NULL, NULL) IS NULL AS all_null,
        ROW(1, NULL) IS NOT NULL AS none_null,
        ROW(1, NULL) IS NULL AS some_null;
