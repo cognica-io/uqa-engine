@@ -33,6 +33,7 @@ impl SQLExecution {
             result: SQLResult {
                 kind: uqa_sql::SQLResultKind::Unknown,
                 command_tag: None,
+                row_schema: None,
                 columns: response.columns,
                 column_types,
                 rows: response.rows,

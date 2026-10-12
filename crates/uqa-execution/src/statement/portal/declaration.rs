@@ -95,10 +95,7 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
         CommandPlan::Explain { body, format, .. } => {
             validate_explain_cursor_body(inputs, params, body)?;
             let result = (inputs.explain)(body, false, format.as_deref(), None)?;
-            Some(crate::RowSchema::with_types(
-                result.columns,
-                result.column_types,
-            ))
+            Some(result.row_schema().into_owned())
         }
         _ => None,
     }
@@ -117,8 +114,7 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
             },
             command: Box::new(command.clone()),
             params: params.to_vec(),
-            columns: schema.columns().to_vec(),
-            column_types: schema.column_types().to_vec(),
+            schema: schema.for_result_columns(schema.columns()),
             null_returning_values,
         })
 }
@@ -211,8 +207,7 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
             },
             query: query.clone(),
             params: params.to_vec(),
-            columns: schema.columns().to_vec(),
-            column_types: schema.column_types().to_vec(),
+            schema: schema.for_result_columns(schema.columns()),
         })?;
     Ok(())
 }

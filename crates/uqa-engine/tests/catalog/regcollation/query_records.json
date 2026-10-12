@@ -1,0 +1,763 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE FUNCTION record_static() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN SELECT 'x'::text COLLATE \"C\" AS value INTO r; RETURN pg_collation_for(r.value); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_static()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_static"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_empty() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN SELECT 'x'::text COLLATE \"POSIX\" AS value INTO r WHERE false; RETURN pg_collation_for(r.value); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_empty()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_empty"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_dynamic() RETURNS text LANGUAGE plpgsql AS $body$ DECLARE r record; BEGIN EXECUTE $sql$SELECT 'x'::text COLLATE \"C\" AS value$sql$ INTO r; RETURN pg_collation_for(r.value); END $body$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_dynamic()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_dynamic"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_loop() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN FOR r IN SELECT 'x'::text COLLATE \"POSIX\" AS value LOOP RETURN pg_collation_for(r.value); END LOOP; RETURN NULL; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_loop()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_loop"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_cursor() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; c CURSOR FOR SELECT 'x'::text COLLATE \"C\" AS value; BEGIN OPEN c; FETCH c INTO r; CLOSE c; RETURN pg_collation_for(r.value); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_cursor()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_cursor"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_copy() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; s record; BEGIN SELECT NULL::text COLLATE \"C\" AS value INTO r; s := r; RETURN pg_collation_for(s.value); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_copy()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_copy"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_static(), record_empty(), record_dynamic(), record_loop(), record_cursor(), record_copy()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_static",
+            "record_empty",
+            "record_dynamic",
+            "record_loop",
+            "record_cursor",
+            "record_copy"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"C\"",
+              "\"POSIX\"",
+              "\"C\"",
+              "\"POSIX\"",
+              "\"C\"",
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE query_records(id integer PRIMARY KEY, value text COLLATE \"POSIX\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_change(mode integer, v text) RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; n bigint; BEGIN IF mode = 0 THEN INSERT INTO query_records VALUES (1,v) RETURNING value INTO r; ELSIF mode = 1 THEN UPDATE query_records SET value = v WHERE id = 1 RETURNING value INTO r; ELSE DELETE FROM query_records WHERE id = 1 RETURNING value INTO r; END IF; GET DIAGNOSTICS n = ROW_COUNT; RETURN pg_collation_for(r.value) || ':' || coalesce(r.value,'NULL') || ':' || n::text || ':' || FOUND::text; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_change(0,'one')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_change"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":one:1:true"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_change(1,NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_change"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":NULL:1:true"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_change(2,'ignored')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_change"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":NULL:1:true"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_change(2,'empty')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_change"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":NULL:0:false"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_switch(use_c boolean, v text) RETURNS text LANGUAGE plpgsql AS $body$ DECLARE r record; BEGIN IF use_c THEN EXECUTE $sql$SELECT $1::text COLLATE \"C\" AS value$sql$ INTO r USING v; ELSE SELECT v COLLATE \"POSIX\" AS value INTO r; END IF; RETURN pg_collation_for(r.value) || ':' || coalesce(r.value,'NULL'); END $body$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_switch(true,'first'), record_switch(false,'second'), record_switch(true,NULL), record_switch(false,'last')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_switch",
+            "record_switch",
+            "record_switch",
+            "record_switch"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"C\":first",
+              "\"C\":second",
+              "\"C\":NULL",
+              "\"C\":last"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_empty_loop() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN FOR r IN SELECT 'x'::text COLLATE \"POSIX\" AS value WHERE false LOOP NULL; END LOOP; RETURN pg_collation_for(r.value) || ':' || FOUND::text; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_empty_loop()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_empty_loop"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":false"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_scroll() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; c SCROLL CURSOR FOR SELECT value COLLATE \"C\" AS value FROM (VALUES ('a'::text),('b')) q(value) ORDER BY value; result text; BEGIN OPEN c; FETCH LAST FROM c INTO r; result := pg_collation_for(r.value) || ':' || r.value; FETCH PRIOR FROM c INTO r; result := result || ':' || pg_collation_for(r.value) || ':' || r.value; FETCH PRIOR FROM c INTO r; result := result || ':' || pg_collation_for(r.value) || ':' || FOUND::text; CLOSE c; RETURN result; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_scroll()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_scroll"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\":b:\"C\":a:\"C\":false"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_nested() RETURNS text LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN SELECT ROW('x'::text COLLATE \"C\") AS value INTO r; RETURN pg_collation_for((r.value).f1); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_nested()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "could not identify column \"f1\" in record data type",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE query_records ALTER COLUMN value TYPE text COLLATE \"C\"",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_change(0,'temporary')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_change"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":temporary:1:true"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_change(0,'restored')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_change"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"POSIX\":restored:1:true"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE held_query_collations(n integer, value text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE record_held_loop() LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN FOR r IN SELECT n, 'value'::text COLLATE \"C\" AS value FROM generate_series(1,12) g(n) ORDER BY n LOOP COMMIT; INSERT INTO held_query_collations VALUES (r.n, pg_collation_for(r.value)); END LOOP; END $$",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CALL record_held_loop()",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT n,value FROM held_query_collations ORDER BY n",
+      "command_tags": [
+        "SELECT 12"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n",
+            "value"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "\"C\""
+            ],
+            [
+              "2",
+              "\"C\""
+            ],
+            [
+              "3",
+              "\"C\""
+            ],
+            [
+              "4",
+              "\"C\""
+            ],
+            [
+              "5",
+              "\"C\""
+            ],
+            [
+              "6",
+              "\"C\""
+            ],
+            [
+              "7",
+              "\"C\""
+            ],
+            [
+              "8",
+              "\"C\""
+            ],
+            [
+              "9",
+              "\"C\""
+            ],
+            [
+              "10",
+              "\"C\""
+            ],
+            [
+              "11",
+              "\"C\""
+            ],
+            [
+              "12",
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT record_static(), record_empty(), record_dynamic(), record_loop(), record_cursor(), record_copy(), record_empty_loop(), record_scroll(), record_switch(false,'reopened'), record_change(2,'ignored')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "record_static",
+            "record_empty",
+            "record_dynamic",
+            "record_loop",
+            "record_cursor",
+            "record_copy",
+            "record_empty_loop",
+            "record_scroll",
+            "record_switch",
+            "record_change"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"C\"",
+              "\"POSIX\"",
+              "\"C\"",
+              "\"POSIX\"",
+              "\"C\"",
+              "\"C\"",
+              "\"POSIX\":false",
+              "\"C\":b:\"C\":a:\"C\":false",
+              "\"POSIX\":reopened",
+              "\"POSIX\":restored:1:true"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    }
+  ]
+}

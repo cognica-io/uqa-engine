@@ -130,6 +130,8 @@ fn materialized_query_outputs_preserve_postgresql_slots_and_collations() {
             .collect::<Vec<_>>();
         assert_eq!(actual, expected);
         let result = materialize(case, spilled).into_sql_result().unwrap();
+        check_schema(&result.row_schema(), case);
+        assert!(matches!(result.row_schema(), std::borrow::Cow::Borrowed(_)));
         assert_eq!(result.columns, ["x", "x"]);
         assert_eq!(result.positional_rows.as_ref(), Some(&expected));
     }

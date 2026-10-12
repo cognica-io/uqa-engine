@@ -274,9 +274,8 @@ pub fn dml_returning_result_with_projections<S: Clone + 'static>(
         }
         named_rows.push(row.into_result_row());
     }
-    let mut result = SQLResult::from_typed_rows_with_positions(
-        output.columns().to_vec(),
-        output.column_types().to_vec(),
+    let mut result = SQLResult::from_schema_rows_with_positions(
+        output.for_result_columns(output.columns()),
         named_rows,
         positional_rows,
     );
