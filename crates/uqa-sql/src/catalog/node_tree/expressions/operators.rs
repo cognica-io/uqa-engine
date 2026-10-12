@@ -16,6 +16,39 @@ use crate::type_resolution::{
 };
 
 impl ExpressionContext<'_> {
+    pub(super) fn named_binary_operator(
+        &self,
+        name: &str,
+        arguments: &[Expr],
+    ) -> Result<TypedNode, SQLError> {
+        let [left, right] = arguments else {
+            return Err(SQLError::Internal(
+                "invalid binary operator operands".into(),
+            ));
+        };
+        let types = [self.expression_type(left)?, self.expression_type(right)?];
+        let selected = crate::type_resolution::named_binary_operator_types(
+            name,
+            types[0].as_ref(),
+            types[1].as_ref(),
+        )?;
+        let identity = crate::type_resolution::named_binary_operator_catalog_entry(
+            name,
+            [&selected[0], &selected[1]],
+        )?;
+        let arguments = [
+            self.encode(left, Some(&selected[0]))?,
+            self.encode(right, Some(&selected[1]))?,
+        ];
+        let [_, _, result] = selected;
+        Ok(operator_node(
+            identity.oid,
+            identity.function_oid,
+            arguments,
+            result,
+        ))
+    }
+
     pub(super) fn concatenation(&self, arguments: &[Expr]) -> Result<TypedNode, SQLError> {
         let [left, right] = arguments else {
             return Err(SQLError::Internal("invalid concatenation operands".into()));

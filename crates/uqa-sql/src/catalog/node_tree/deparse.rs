@@ -10,6 +10,7 @@ use super::{invalid, values, Field, Node};
 use crate::SQLError;
 
 mod bodies;
+mod coercions;
 mod control;
 mod fields;
 mod operators;
@@ -112,17 +113,9 @@ impl Renderer<'_> {
                 ))
             }
             "FUNCEXPR" => self.function(node),
-            "RELABELTYPE" => self.cast(
-                node.field("arg")?,
-                node.integer("resulttype")?,
-                node.integer("resulttypmod")?,
-            ),
-            "COERCEVIAIO" => self.cast(node.field("arg")?, node.integer("resulttype")?, -1),
-            "COERCETODOMAIN" | "ARRAYCOERCEEXPR" => self.cast(
-                node.field("arg")?,
-                node.integer("resulttype")?,
-                node.integer("resulttypmod")?,
-            ),
+            "RELABELTYPE" | "COERCEVIAIO" | "COERCETODOMAIN" | "ARRAYCOERCEEXPR" => {
+                self.coercion(node, outer)
+            }
             "BOOLEXPR" => self.boolean(node, outer),
             "BOOLEANTEST" => self.boolean_test(node, outer),
             "NULLTEST" => self.null_test(node, outer),
@@ -199,35 +192,6 @@ impl Renderer<'_> {
         Ok(parentheses(
             format!("{} COLLATE {name}", self.field(node.field("arg")?, false)?),
             !outer,
-        ))
-    }
-
-    fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {
-        let argument = implicit_cast_input(argument)?;
-        if let Field::Node(node) = argument {
-            if node.kind == "CONST"
-                && node.integer("consttype")? == oid
-                && node.integer("consttypmod")? == -1
-            {
-                return Ok(format!(
-                    "{}::{}",
-                    self.constant_labeled(node, false)?,
-                    self.names.type_name(oid, modifier)?
-                ));
-            }
-        }
-        let text = self.field(argument, false)?;
-        let atomic = matches!(argument, Field::Node(node) if matches!(
-            node.kind.as_str(),
-            "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"
-                | "NULLIFEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ARRAYEXPR" | "CASEEXPR"
-                | "ROWEXPR" | "SUBSCRIPTINGREF" | "FIELDSELECT" | "RELABELTYPE" | "COERCEVIAIO"
-                | "COERCETODOMAIN" | "ARRAYCOERCEEXPR"
-        ));
-        Ok(format!(
-            "{}::{}",
-            parentheses(text, !self.pretty || !atomic),
-            self.names.type_name(oid, modifier)?
         ))
     }
 
@@ -365,29 +329,6 @@ fn atom<'a>(node: &'a Node, name: &str) -> Result<&'a str, SQLError> {
         Field::Atom(value) | Field::String(value) => Ok(value),
         _ => Err(invalid(format!("expected token in {name}"))),
     }
-}
-
-fn implicit_cast_input(mut argument: &Field) -> Result<&Field, SQLError> {
-    while let Field::Node(node) = argument {
-        let format = match node.kind.as_str() {
-            "FUNCEXPR" => "funcformat",
-            "RELABELTYPE" => "relabelformat",
-            "COERCEVIAIO" | "ARRAYCOERCEEXPR" => "coerceformat",
-            "COERCETODOMAIN" => "coercionformat",
-            _ => break,
-        };
-        if node.integer(format)? != 2 {
-            break;
-        }
-        argument = if node.kind == "FUNCEXPR" {
-            list(node, "args")?
-                .first()
-                .ok_or_else(|| invalid("cast function has no argument"))?
-        } else {
-            node.field("arg")?
-        };
-    }
-    Ok(argument)
 }
 
 fn prefix<const N: usize>(bytes: &[u8]) -> Result<[u8; N], SQLError> {

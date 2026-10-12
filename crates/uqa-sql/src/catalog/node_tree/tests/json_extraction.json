@@ -1,0 +1,332 @@
+[
+  {
+    "base": "json",
+    "check": "(VALUE -> 'field') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3962 :opfuncid 3947 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE -> 'field'::text) IS NULL)",
+    "pretty": "(VALUE -> 'field'::text) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE -> 0) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3964 :opfuncid 3949 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE -> 0) IS NULL)",
+    "pretty": "(VALUE -> 0) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE ->> 'field') = 'x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+    "sql": "((VALUE ->> 'field'::text) = 'x'::text)",
+    "pretty": "(VALUE ->> 'field'::text) = 'x'::text"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE ->> (-1)::smallint) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3965 :opfuncid 3950 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 313 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 255 255 255 255 255 255 255 255 ]}) :location -1}) :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE ->> (('-1'::integer)::smallint)::integer) IS NULL)",
+    "pretty": "(VALUE ->> '-1'::integer::smallint::integer) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE #> ARRAY['field','0']) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3966 :opfuncid 3951 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 48 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #> ARRAY['field'::text, '0'::text]) IS NULL)",
+    "pretty": "(VALUE #> ARRAY['field'::text, '0'::text]) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE #>> ARRAY['field']) = 'x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 3967 :opfuncid 3953 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+    "sql": "((VALUE #>> ARRAY['field'::text]) = 'x'::text)",
+    "pretty": "(VALUE #>> ARRAY['field'::text]) = 'x'::text"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE -> NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3962 :opfuncid 3947 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE -> NULL::text) IS NULL)",
+    "pretty": "(VALUE -> NULL::text) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE #> NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3966 :opfuncid 3951 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1009 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #> NULL::text[]) IS NULL)",
+    "pretty": "(VALUE #> NULL::text[]) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE #>> ARRAY[]::text[]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3967 :opfuncid 3953 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements <> :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #>> ARRAY[]::text[]) IS NULL)",
+    "pretty": "(VALUE #>> ARRAY[]::text[]) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE -> 'field' -> 0 ->> 'nested') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({OPEXPR :opno 3964 :opfuncid 3949 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 3962 :opfuncid 3947 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 110 101 115 116 101 100 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((((VALUE -> 'field'::text) -> 0) ->> 'nested'::text) IS NULL)",
+    "pretty": "(((VALUE -> 'field'::text) -> 0) ->> 'nested'::text) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE ->> 'n')::integer > 0",
+    "error": null,
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 110 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(((VALUE ->> 'n'::text))::integer > 0)",
+    "pretty": "((VALUE ->> 'n'::text)::integer) > 0"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE ->> 'k') COLLATE \"C\" > 'x' COLLATE \"C\"",
+    "error": null,
+    "conbin": "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COLLATEEXPR :arg {OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]}) :location -1} :collOid 950 :location -1} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1}) :location -1}",
+    "sql": "(((VALUE ->> 'k'::text) COLLATE \"C\") > ('x'::text COLLATE \"C\"))",
+    "pretty": "((VALUE ->> 'k'::text) COLLATE \"C\") > ('x'::text COLLATE \"C\")"
+  },
+  {
+    "base": "json",
+    "check": "(ROW(VALUE ->> 'k')).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW((VALUE ->> 'k'::text))).f1 IS NULL)",
+    "pretty": "(ROW(VALUE ->> 'k'::text)).f1 IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE #>> ARRAY['k'::varchar(3)]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3967 :opfuncid 3953 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 114 :typeMod -1 :collation 0 :location -1} {ARRAYCOERCEEXPR :arg {ARRAYEXPR :array_typeid 1015 :array_collid 100 :element_typeid 1043 :elements ({FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :multidims false :list_start -1 :list_end -1 :location -1} :elemexpr {RELABELTYPE :arg {CASETESTEXPR :typeId 1043 :typeMod 7 :collation 0} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} :resulttype 1009 :resulttypmod -1 :resultcollid 100 :coerceformat 2 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #>> (ARRAY['k'::character varying(3)])::text[]) IS NULL)",
+    "pretty": "(VALUE #>> ARRAY['k'::character varying(3)]::text[]) IS NULL"
+  },
+  {
+    "base": "json",
+    "check": "(VALUE -> true) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: json -> boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "json",
+    "check": "(VALUE -> 1::bigint) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: json -> bigint",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "json",
+    "check": "(VALUE #> ARRAY[1]) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: json #> integer[]",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "json",
+    "check": "(' { \"k\" : 1.00 } '::json -> 'k') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3962 :opfuncid 3947 :opresulttype 114 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 20 [ 80 0 0 0 32 123 32 34 107 34 32 58 32 49 46 48 48 32 125 32 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((' { \"k\" : 1.00 } '::json -> 'k'::text) IS NULL)",
+    "pretty": "(' { \"k\" : 1.00 } '::json -> 'k'::text) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE -> 'field') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3211 :opfuncid 3478 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE -> 'field'::text) IS NULL)",
+    "pretty": "(VALUE -> 'field'::text) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE -> 0) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3212 :opfuncid 3215 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE -> 0) IS NULL)",
+    "pretty": "(VALUE -> 0) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE ->> 'field') = 'x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 3477 :opfuncid 3214 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+    "sql": "((VALUE ->> 'field'::text) = 'x'::text)",
+    "pretty": "(VALUE ->> 'field'::text) = 'x'::text"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE ->> (-1)::smallint) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3481 :opfuncid 3216 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 313 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 255 255 255 255 255 255 255 255 ]}) :location -1}) :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE ->> (('-1'::integer)::smallint)::integer) IS NULL)",
+    "pretty": "(VALUE ->> '-1'::integer::smallint::integer) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE #> ARRAY['field','0']) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3213 :opfuncid 3217 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 48 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #> ARRAY['field'::text, '0'::text]) IS NULL)",
+    "pretty": "(VALUE #> ARRAY['field'::text, '0'::text]) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE #>> ARRAY['field']) = 'x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 3206 :opfuncid 3940 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+    "sql": "((VALUE #>> ARRAY['field'::text]) = 'x'::text)",
+    "pretty": "(VALUE #>> ARRAY['field'::text]) = 'x'::text"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE -> NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3211 :opfuncid 3478 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE -> NULL::text) IS NULL)",
+    "pretty": "(VALUE -> NULL::text) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE #> NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3213 :opfuncid 3217 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1009 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #> NULL::text[]) IS NULL)",
+    "pretty": "(VALUE #> NULL::text[]) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE #>> ARRAY[]::text[]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3206 :opfuncid 3940 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements <> :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #>> ARRAY[]::text[]) IS NULL)",
+    "pretty": "(VALUE #>> ARRAY[]::text[]) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE -> 'field' -> 0 ->> 'nested') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3477 :opfuncid 3214 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({OPEXPR :opno 3212 :opfuncid 3215 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 3211 :opfuncid 3478 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 102 105 101 108 100 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 110 101 115 116 101 100 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((((VALUE -> 'field'::text) -> 0) ->> 'nested'::text) IS NULL)",
+    "pretty": "(((VALUE -> 'field'::text) -> 0) ->> 'nested'::text) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE ->> 'n')::integer > 0",
+    "error": null,
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {OPEXPR :opno 3477 :opfuncid 3214 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 110 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(((VALUE ->> 'n'::text))::integer > 0)",
+    "pretty": "((VALUE ->> 'n'::text)::integer) > 0"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE ->> 'k') COLLATE \"C\" > 'x' COLLATE \"C\"",
+    "error": null,
+    "conbin": "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COLLATEEXPR :arg {OPEXPR :opno 3477 :opfuncid 3214 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]}) :location -1} :collOid 950 :location -1} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1}) :location -1}",
+    "sql": "(((VALUE ->> 'k'::text) COLLATE \"C\") > ('x'::text COLLATE \"C\"))",
+    "pretty": "((VALUE ->> 'k'::text) COLLATE \"C\") > ('x'::text COLLATE \"C\")"
+  },
+  {
+    "base": "jsonb",
+    "check": "(ROW(VALUE ->> 'k')).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({OPEXPR :opno 3477 :opfuncid 3214 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW((VALUE ->> 'k'::text))).f1 IS NULL)",
+    "pretty": "(ROW(VALUE ->> 'k'::text)).f1 IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE #>> ARRAY['k'::varchar(3)]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3206 :opfuncid 3940 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 3802 :typeMod -1 :collation 0 :location -1} {ARRAYCOERCEEXPR :arg {ARRAYEXPR :array_typeid 1015 :array_collid 100 :element_typeid 1043 :elements ({FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :multidims false :list_start -1 :list_end -1 :location -1} :elemexpr {RELABELTYPE :arg {CASETESTEXPR :typeId 1043 :typeMod 7 :collation 0} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} :resulttype 1009 :resulttypmod -1 :resultcollid 100 :coerceformat 2 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE #>> (ARRAY['k'::character varying(3)])::text[]) IS NULL)",
+    "pretty": "(VALUE #>> ARRAY['k'::character varying(3)]::text[]) IS NULL"
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE -> true) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb -> boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE -> 1::bigint) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb -> bigint",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "jsonb",
+    "check": "(VALUE #> ARRAY[1]) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb #> integer[]",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "jsonb",
+    "check": "(' { \"k\" : 1.00 } '::jsonb -> 'k') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3211 :opfuncid 3478 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 28 [ 112 0 0 0 1 0 0 32 1 0 0 128 11 0 0 16 107 0 0 0 32 0 0 0 0 129 1 0 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 107 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('{\"k\": 1.00}'::jsonb -> 'k'::text) IS NULL)",
+    "pretty": "('{\"k\": 1.00}'::jsonb -> 'k'::text) IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(NULL::integer -> NULL) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer -> unknown",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "integer",
+    "check": "('{}' -> 'k') IS NULL",
+    "error": {
+      "sqlstate": "42725",
+      "message": "operator is not unique: unknown -> unknown",
+      "detail": null,
+      "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "integer",
+    "check": "(NULL #>> NULL) IS NULL",
+    "error": {
+      "sqlstate": "42725",
+      "message": "operator is not unique: unknown #>> unknown",
+      "detail": null,
+      "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+    }
+  }
+]

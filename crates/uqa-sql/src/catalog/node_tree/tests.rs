@@ -8,9 +8,11 @@ use super::*;
 
 mod arrays;
 mod catalog;
+mod coercions;
 mod collations;
 mod concatenation;
 mod fields;
+mod json_extraction;
 mod rows;
 mod scalar;
 mod subscripts;
