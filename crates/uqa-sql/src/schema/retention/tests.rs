@@ -85,6 +85,7 @@ fn column_types_charge_domain_names_and_every_boxed_base() {
     let name = spare_text("domain", 1027);
     let expected = schema.capacity() + name.capacity() + 2 * size_of::<ColumnType>();
     let ty = ColumnType::Domain {
+        collation_oid: None,
         schema,
         name,
         oid: 42,

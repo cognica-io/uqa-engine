@@ -32,6 +32,7 @@ pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<Crea
         name,
         base,
         collation,
+        collation_oid: None,
         default: None,
         not_null: None,
         checks: Vec::new(),

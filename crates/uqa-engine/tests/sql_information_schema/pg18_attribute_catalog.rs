@@ -20,6 +20,7 @@ fn information_schema_catalog_name_preserves_its_pg18_composite_identity() {
     assert_eq!(
         catalog_name.column_types,
         [Some(ColumnType::Domain {
+            collation_oid: None,
             schema: "information_schema".into(),
             name: "sql_identifier".into(),
             oid: 13_312,

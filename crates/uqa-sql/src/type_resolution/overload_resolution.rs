@@ -391,6 +391,7 @@ mod tests {
     #[test]
     fn signature_matcher_distinguishes_domain_and_base_exactness() {
         let domain = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
@@ -445,6 +446,7 @@ mod tests {
     #[test]
     fn raw_domain_exact_match_precedes_base_type_ranking() {
         let domain = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,

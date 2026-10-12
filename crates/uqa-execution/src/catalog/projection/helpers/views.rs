@@ -24,6 +24,7 @@ pub fn view_columns_for(
         .iter()
         .enumerate()
         .map(|(position, name)| SQLColumnDef {
+            collation_oid: None,
             name: schema.public_name(position).unwrap_or(name).to_string(),
             ty: schema
                 .column_type(position)

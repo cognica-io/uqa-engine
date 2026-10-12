@@ -89,6 +89,7 @@ fn simple_family_requires_known_consistent_types_and_substitutes_outputs() {
 #[test]
 fn invocation_types_keep_catalog_identities_separate_from_overload_keys() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "first".into(),
         name: "text".into(),
         oid: 50_010,
@@ -120,6 +121,7 @@ fn invocation_types_keep_catalog_identities_separate_from_overload_keys() {
 #[test]
 fn simple_anyarray_flattens_array_domains() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "ints".into(),
         oid: 42,
@@ -329,6 +331,7 @@ fn compatible_range_family_promotes_the_subtype_without_inventing_range_casts() 
 #[test]
 fn compatible_family_preserves_equal_domains_and_flattens_mixed_domains() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive_int".into(),
         oid: 43,

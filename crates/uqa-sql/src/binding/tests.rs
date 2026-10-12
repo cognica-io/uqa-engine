@@ -160,6 +160,7 @@ fn result_schema_keeps_correlated_columns_without_reference_validation() {
 
 fn column(name: &str, ty: ColumnType) -> ColumnDef {
     ColumnDef {
+        collation_oid: None,
         name: name.into(),
         ty,
         object_id: None,

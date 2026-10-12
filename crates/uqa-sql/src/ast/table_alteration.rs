@@ -156,6 +156,8 @@ pub enum AlterTableAction {
         name: String,
         ty: ColumnType,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        collation: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         using: Option<Expr>,
     },
     /// `ALTER COLUMN name ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY [ ( options ) ]`.

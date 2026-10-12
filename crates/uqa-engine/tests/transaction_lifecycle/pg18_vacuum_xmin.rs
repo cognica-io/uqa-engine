@@ -606,6 +606,7 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
     eng.register_column(
         "legacy_xmin",
         uqa_sql::ast::ColumnDef {
+            collation_oid: None,
             name: "xmin".into(),
             ty: uqa_sql::ast::ColumnType::Text,
             object_id: None,

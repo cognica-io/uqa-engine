@@ -268,6 +268,7 @@ fn hidden_enum_domain() -> crate::catalog::domain::StoredDomain {
         identity: uqa_core::RelationIdentity::new("hidden", "checked_color"),
         owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
         definition: crate::ast::CreateDomain {
+            collation_oid: None,
             name: "hidden.checked_color".into(),
             base: ColumnType::Enum(crate::ast::EnumTypeReference {
                 schema: "hidden".into(),

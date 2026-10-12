@@ -10,6 +10,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn domain(base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "app".into(),
         name: "bounded".into(),
         oid: 91_001,
@@ -381,6 +382,7 @@ fn optional_operand_inference_does_not_swallow_allocation_failure() {
     let held = control.copy_text("previous result").unwrap();
     let retained = budget.used();
     let ty = ColumnType::Domain {
+        collation_oid: None,
         schema: "app".into(),
         name: "n".repeat(4096),
         oid: 91_002,

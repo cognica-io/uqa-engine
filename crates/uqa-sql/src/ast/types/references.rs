@@ -62,6 +62,7 @@ mod tests {
             array_oid: 20_001,
         });
         let mut column = ColumnType::Array(Box::new(ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "good_mood".into(),
             oid: 20_002,

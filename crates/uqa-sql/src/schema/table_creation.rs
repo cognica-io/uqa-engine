@@ -93,6 +93,7 @@ pub fn create_table_as_columns(
         .into_iter()
         .enumerate()
         .map(|(position, name)| ColumnDef {
+            collation_oid: None,
             name,
             ty: query_schema
                 .column_type(position)

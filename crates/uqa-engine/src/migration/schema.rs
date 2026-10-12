@@ -164,6 +164,7 @@ pub(super) fn infer_vector_fields(
 pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonMigrationError> {
     let ty = rust_column_type(col)?;
     Ok(ColumnDef {
+        collation_oid: None,
         name: col.name.clone(),
         ty,
         object_id: None,

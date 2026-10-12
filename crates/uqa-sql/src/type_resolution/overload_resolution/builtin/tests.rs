@@ -20,6 +20,7 @@ fn overload(argument: ColumnType, result: ColumnType) -> BuiltinFunctionOverload
 #[test]
 fn local_resolution_borrows_rejected_declarations_and_retains_only_selected_result() {
     let huge_result = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "rejected".repeat(1 << 15),
         oid: 90_001,

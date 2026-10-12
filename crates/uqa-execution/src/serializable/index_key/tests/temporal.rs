@@ -95,6 +95,7 @@ fn temporal_keys_cover_native_predicates_and_future_text_matches() {
             }
         }
         let alias = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "clock_value".into(),
             oid: 42_001,

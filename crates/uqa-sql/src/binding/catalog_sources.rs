@@ -90,6 +90,7 @@ mod tests {
     #[test]
     fn relation_schema_binds_against_catalog_fixture_without_engine() {
         let column = ColumnDef {
+            collation_oid: None,
             name: "id".into(),
             ty: ColumnType::BigInteger,
             object_id: None,

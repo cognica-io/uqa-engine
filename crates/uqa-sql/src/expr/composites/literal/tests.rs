@@ -34,6 +34,7 @@ impl CompositeTypeCatalog for Catalog {
             attributes.push(CompositeAttribute {
                 name: "b".into(),
                 ty: ColumnType::Domain {
+                    collation_oid: None,
                     schema: "public".into(),
                     name: "required".into(),
                     oid: 20_010,

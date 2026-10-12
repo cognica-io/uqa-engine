@@ -26,6 +26,7 @@ impl RoutineTypeCatalog for Catalog {
             }))
         } else if name == "text" {
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "first".into(),
                 name: "text".into(),
                 oid: 50_010,

@@ -97,6 +97,7 @@ impl RoutineTypeCatalog for Types {
             "rb.pair" => Ok(pair(16384)),
             "rb.other" => Ok(pair(16385)),
             "rb.pair_domain" => Ok(ColumnType::Domain {
+                collation_oid: None,
                 schema: "rb".into(),
                 name: "pair_domain".into(),
                 array_oid: Some(16396),

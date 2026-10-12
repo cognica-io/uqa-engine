@@ -61,7 +61,13 @@ fn publish_property(
             ColumnProperty::Generated(generated) => {
                 publication::set_column_generated(context, table, column, generated)?
             }
-            ColumnProperty::Type(ty) => publication::set_column_type(context, table, column, ty)?,
+            ColumnProperty::Type(ty, collation_oid) => publication::set_column_type_with_collation(
+                context,
+                table,
+                column,
+                ty,
+                collation_oid,
+            )?,
             ColumnProperty::AutoIncrement(provenance) => {
                 publication::set_column_auto_increment(context, table, column, provenance)?
             }
@@ -203,6 +209,7 @@ pub fn begin_type_change<S: Clone + 'static>(
     qualifier: &str,
     name: &str,
     ty: &ColumnType,
+    collation_oid: u32,
 ) -> Result<Option<GeneratedColumnKind>, SQLError> {
     let target_generated_kind =
         alteration::analyze_column_type(&context.analysis, table, qualifier, name, ty)?;
@@ -227,8 +234,13 @@ pub fn begin_type_change<S: Clone + 'static>(
             .drop_vector_indexes(table, name)
             .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
     }
-    publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
-        .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
+    publish_property(
+        context.transactions,
+        table,
+        name,
+        ColumnProperty::Type(ty, collation_oid),
+    )
+    .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     Ok(target_generated_kind)
 }
 

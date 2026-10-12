@@ -155,6 +155,7 @@ fn information_schema_uses_pg18_domain_type_identities() {
         result.column_types,
         [
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "information_schema".into(),
                 name: "sql_identifier".into(),
                 oid: 13_312,
@@ -162,6 +163,7 @@ fn information_schema_uses_pg18_domain_type_identities() {
                 base: Box::new(ColumnType::Name),
             }),
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "information_schema".into(),
                 name: "cardinal_number".into(),
                 oid: 13_307,
@@ -169,6 +171,7 @@ fn information_schema_uses_pg18_domain_type_identities() {
                 base: Box::new(ColumnType::Integer),
             }),
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "information_schema".into(),
                 name: "yes_or_no".into(),
                 oid: 13_320,

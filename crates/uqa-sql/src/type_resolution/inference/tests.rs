@@ -19,6 +19,7 @@ fn infer(
 
 fn domain() -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive_integer".into(),
         oid: 90001,

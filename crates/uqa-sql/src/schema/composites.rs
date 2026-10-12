@@ -103,7 +103,16 @@ fn prepare_attribute(
 ) -> Result<StoredCompositeAttribute, SQLError> {
     let ty = resolve_declared_column_type(types, declared)?;
     types.require_type_usage(&ty)?;
-    let collation = attribute_collation(&ty, attribute.collation.as_deref())?;
+    let collation_oid = crate::catalog::collations::declarations::select(
+        types,
+        &ty,
+        attribute.collation.as_deref(),
+    )?;
+    let collation = attribute
+        .collation
+        .as_ref()
+        .and_then(|_| crate::catalog::collations::builtin_collation_name(i64::from(collation_oid)))
+        .map(str::to_owned);
     if check_setof && attribute.setof {
         return Err(SQLError::Routine {
             sqlstate: "42P16".into(),
@@ -124,6 +133,7 @@ fn prepare_attribute(
         name: attribute.name.clone(),
         ty,
         collation,
+        collation_oid: Some(collation_oid),
         number,
         dropped: false,
     })
@@ -148,44 +158,6 @@ pub fn type_is_collatable(ty: &ColumnType) -> bool {
 }
 
 pub use crate::catalog::collations::builtin_collation_oid;
-
-/// `GetColumnDefCollation`: an explicit collation must exist and the type must be collatable. The canonical collation name is kept.
-fn attribute_collation(
-    ty: &ColumnType,
-    collation: Option<&str>,
-) -> Result<Option<String>, SQLError> {
-    let Some(collation) = collation else {
-        return Ok(None);
-    };
-    let names = crate::compiler::parse_regobject_name(collation)
-        .ok_or_else(|| SQLError::Internal(format!("malformed collation name {collation}")))?;
-    let (schema, name) = match names.as_slice() {
-        [name] => (None, name.as_str()),
-        [schema, name] => (Some(schema.as_str()), name.as_str()),
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "malformed collation name {collation}"
-            )))
-        }
-    };
-    if schema.is_some_and(|schema| schema != "pg_catalog") || builtin_collation_oid(name).is_none()
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!(
-                "collation \"{}\" for encoding \"UTF8\" does not exist",
-                names.join(".")
-            ),
-        });
-    }
-    if !type_is_collatable(ty) {
-        return Err(SQLError::Routine {
-            sqlstate: "42804".into(),
-            message: format!("collations are not supported by type {}", ty.display_name()),
-        });
-    }
-    Ok(Some(name.to_owned()))
-}
 
 /// Check and bind the declared attributes of a new composite type, numbering them from one.
 pub fn prepare_composite_attributes(
@@ -213,7 +185,18 @@ pub fn prepare_composite_attributes(
     for (position, attribute) in attributes.iter().enumerate() {
         let ty = resolve_declared_column_type(types, &attribute.ty)?;
         types.require_type_usage(&ty)?;
-        let collation = attribute_collation(&ty, attribute.collation.as_deref())?;
+        let collation_oid = crate::catalog::collations::declarations::select(
+            types,
+            &ty,
+            attribute.collation.as_deref(),
+        )?;
+        let collation = attribute
+            .collation
+            .as_ref()
+            .and_then(|_| {
+                crate::catalog::collations::builtin_collation_name(i64::from(collation_oid))
+            })
+            .map(str::to_owned);
         if attribute.setof {
             return Err(SQLError::Routine {
                 sqlstate: "42P16".into(),
@@ -224,6 +207,7 @@ pub fn prepare_composite_attributes(
             name: attribute.name.clone(),
             ty,
             collation,
+            collation_oid: Some(collation_oid),
             number: i16::try_from(position + 1)
                 .map_err(|_| SQLError::Internal("composite attribute number overflow".into()))?,
             dropped: false,

@@ -15,6 +15,8 @@ pub struct CreateDomain {
     pub name: String,
     pub base: ColumnType,
     pub collation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
     pub default: Option<Expr>,
     pub not_null: Option<DomainNotNull>,
     pub checks: Vec<DomainCheck>,

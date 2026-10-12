@@ -91,6 +91,7 @@ fn controlled_assignment_preserves_character_array_numeric_and_vector_results() 
         (
             Value::Str("5".into()),
             ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "number".into(),
                 oid: 12,

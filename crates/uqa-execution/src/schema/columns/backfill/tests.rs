@@ -42,6 +42,7 @@ impl Fixture {
                 identity: RelationIdentity::new("public", "checked"),
                 owner: RoleIdentity::BOOTSTRAP,
                 definition: CreateDomain {
+                    collation_oid: None,
                     name: "public.checked".into(),
                     base: ColumnType::Integer,
                     collation: None,

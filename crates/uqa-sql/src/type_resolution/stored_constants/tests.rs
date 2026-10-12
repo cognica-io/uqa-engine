@@ -22,6 +22,7 @@ impl FunctionTypeResolver for Catalog {
             _ => return Ok(None),
         };
         Ok(Some(ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: name.into(),
             oid,
@@ -66,6 +67,7 @@ fn schema() -> RowSchema {
             Some(ColumnType::Real),
             Some(ColumnType::DoublePrecision),
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "operand_numeric".into(),
                 oid: 50_001,
@@ -255,6 +257,7 @@ fn stored_domain_inputs_are_read_once_without_invoking_checks_during_introspecti
     impl FunctionTypeResolver for Inputs {
         fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
             let day = ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "day".into(),
                 oid: 50_020,

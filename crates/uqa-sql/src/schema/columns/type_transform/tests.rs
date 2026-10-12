@@ -448,6 +448,7 @@ fn planned_constant(value: Value, source: ColumnType) -> AnalyzedTypeTransform {
 
 fn domain(base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "checked_value".into(),
         oid: 16384,

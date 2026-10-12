@@ -49,6 +49,7 @@ fn common_type_control_preserves_domain_identity_and_mixed_array_rules() {
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "schema".into(),
         name: "number".into(),
         oid: 40000,
@@ -137,6 +138,7 @@ fn literal_type_resource_errors_are_not_unknown_type_fallbacks() {
 fn common_input_type_keeps_a_domain_only_when_every_input_has_it() {
     let control = ProductionControl::uncontrolled();
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive".into(),
         oid: 40001,

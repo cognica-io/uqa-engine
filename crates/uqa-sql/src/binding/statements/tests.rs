@@ -320,6 +320,7 @@ struct DomainInputs(std::sync::atomic::AtomicUsize);
 
 fn positive_type() -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive".into(),
         oid: 16_384,

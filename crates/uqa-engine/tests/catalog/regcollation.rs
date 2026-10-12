@@ -13,6 +13,9 @@ use uqa_engine::Engine;
 #[path = "regcollation/values.rs"]
 mod values;
 
+#[path = "regcollation/declarations.rs"]
+mod declarations;
+
 fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::new(),

@@ -57,6 +57,11 @@ pub(in crate::compiler) fn compile_column_declaration(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(ColumnDeclaration {
+        collation: column
+            .coll_clause
+            .as_ref()
+            .map(|clause| crate::compiler::domains::qualified_name(&clause.collname))
+            .transpose()?,
         serial,
         serial_array,
         clauses,

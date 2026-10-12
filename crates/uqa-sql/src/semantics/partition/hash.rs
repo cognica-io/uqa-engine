@@ -291,6 +291,7 @@ mod tests {
             5
         );
         let domain = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "positive_integer".into(),
             oid: 42,

@@ -219,6 +219,7 @@ fn check_typed_nodes(fixtures: &str) {
     for fixture in fixtures {
         let base = if fixture.base == "d_base" {
             crate::ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "d_base".into(),
                 oid: 16385,
@@ -413,6 +414,7 @@ fn domain_integer_check_matches_postgresql_typed_tree() {
 #[test]
 fn nested_domain_value_retains_its_oid_before_base_type_coercion() {
     let base = crate::ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "d".into(),
         oid: 16385,

@@ -153,6 +153,7 @@ fn retained_enum_inputs_keep_label_identity_and_array_bounds_after_rename() {
 
 fn domain_array() -> ColumnType {
     ColumnType::Array(Box::new(ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive".into(),
         oid: 16_384,

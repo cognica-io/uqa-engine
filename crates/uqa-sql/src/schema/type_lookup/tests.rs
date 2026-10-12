@@ -40,6 +40,7 @@ fn scalar(sql: &str) -> ScalarExpr {
 fn declared_lookup_borrows_exact_types_and_matches_unqualified_physical_schema() {
     let mut columns = columns();
     columns[3].ty = ColumnType::Array(Box::new(ColumnType::Domain {
+        collation_oid: None,
         schema: "Quoted.Schema".into(),
         name: "Domain.Name".into(),
         oid: 123,
@@ -105,6 +106,7 @@ fn declared_lookup_borrows_exact_types_and_matches_unqualified_physical_schema()
 fn borrowed_generated_type_binding_matches_existing_schema_semantics() {
     let mut columns = columns();
     columns[0].ty = ColumnType::Domain {
+        collation_oid: None,
         schema: "Typed.Schema".into(),
         name: "Small Domain".into(),
         oid: 456,

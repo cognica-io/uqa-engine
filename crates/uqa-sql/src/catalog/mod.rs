@@ -675,6 +675,7 @@ impl VirtualRelation {
 
 fn ag_catalog_domain(name: &str, base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: AG_CATALOG_SCHEMA.into(),
         name: name.into(),
         oid: ag_catalog_type_oid(name),
@@ -731,6 +732,7 @@ fn array(element: ColumnType) -> ColumnType {
 /// An `information_schema` domain; initdb assigned each domain's array type the preceding OID.
 fn information_schema_domain(name: &str, oid: u32, base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "information_schema".into(),
         name: name.into(),
         oid,

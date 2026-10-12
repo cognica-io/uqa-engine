@@ -532,6 +532,7 @@ impl EventAnalysisContext<'_> {
 
 fn trigger_column(name: String, ty: ColumnType) -> ColumnDef {
     ColumnDef {
+        collation_oid: None,
         name,
         ty,
         object_id: None,

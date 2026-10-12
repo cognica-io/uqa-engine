@@ -33,6 +33,7 @@ impl EngineHook for DomainCastHook {
             _ => return Ok(None),
         };
         Ok(Some(ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: name.into(),
             base: Box::new(base),

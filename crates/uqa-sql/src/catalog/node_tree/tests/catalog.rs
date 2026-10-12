@@ -66,6 +66,7 @@ impl Catalog<'_> {
                 relation_oid: item.relation_oid,
             }),
             "d" => ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: item.name.clone(),
                 oid: item.oid,

@@ -40,6 +40,7 @@ fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
 
 fn domain() -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "guarded".into(),
         oid: 20_001,

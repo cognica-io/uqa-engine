@@ -250,6 +250,7 @@ mod tests {
         let catalog = catalog();
         let outer = reference(20_012, "outer_t");
         let column = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "outer_domain".into(),
             oid: 20_020,

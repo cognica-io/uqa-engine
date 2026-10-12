@@ -122,6 +122,7 @@ fn python_array_types_preserve_elements_and_dimensions() {
         ),
     ]);
     let text_column = ColumnDef {
+        collation_oid: None,
         name: "tags".into(),
         ty: ColumnType::Array(Box::new(ColumnType::Text)),
         object_id: None,

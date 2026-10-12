@@ -45,7 +45,7 @@ pub fn remove_local_column(hierarchy: &mut crate::ast::TableHierarchy, name: &st
 pub enum ColumnProperty<'a> {
     Default(Option<Expr>),
     Generated(Option<GeneratedColumn>),
-    Type(&'a ColumnType),
+    Type(&'a ColumnType, u32),
     /// The `SERIAL` or identity provenance of the column.
     AutoIncrement(Option<crate::ast::AutoIncrement>),
 }
@@ -69,7 +69,10 @@ pub fn apply_property(
     match property {
         ColumnProperty::Default(default) => definition.default = default,
         ColumnProperty::Generated(generated) => definition.generated = generated,
-        ColumnProperty::Type(ty) => definition.ty.clone_from(ty),
+        ColumnProperty::Type(ty, collation_oid) => {
+            definition.ty.clone_from(ty);
+            definition.collation_oid = Some(collation_oid);
+        }
         ColumnProperty::AutoIncrement(provenance) => definition.auto_increment = provenance,
     }
     // Each change removes the column's `pg_attrdef` row; an expression that remains is stored again under a new OID, as `ATExecAlterColumnType` and `ATExecColumnDefault` store it.

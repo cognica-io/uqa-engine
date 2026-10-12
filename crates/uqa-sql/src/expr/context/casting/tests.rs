@@ -103,6 +103,7 @@ impl EngineHook for Catalog<'_> {
         }
         let ty = match name {
             "label" | "app.label" => Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "app".into(),
                 name: "label".into(),
                 oid: 16384,
@@ -349,6 +350,7 @@ fn external_type_admission_failure_releases_partial_names_and_keeps_an_existing_
     let held = control.copy_text("earlier result").unwrap();
     let used = budget.used();
     let ty = ColumnType::Domain {
+        collation_oid: None,
         schema: "app".into(),
         name: "oversized".repeat(128),
         oid: 16384,

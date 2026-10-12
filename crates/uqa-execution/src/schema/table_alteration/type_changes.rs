@@ -27,6 +27,7 @@ use uqa_sql::{
 pub(super) struct PreparedTypeChange {
     pub transform: Option<AnalyzedTypeTransform>,
     pub original_type: ColumnType,
+    pub collation_oid: u32,
 }
 
 mod hierarchy;
@@ -75,7 +76,13 @@ fn prepare_relation<S: Clone + 'static>(
         binding: &binding.context(),
     };
     for (position, action) in actions.iter_mut().enumerate() {
-        let AlterTableAction::AlterColumnType { name, ty, using } = action else {
+        let AlterTableAction::AlterColumnType {
+            name,
+            ty,
+            collation,
+            using,
+        } = action
+        else {
             continue;
         };
         let mut transform = using
@@ -84,24 +91,13 @@ fn prepare_relation<S: Clone + 'static>(
                 analyze_type_transform(&binding, table, qualifier, &columns, expression)
             })
             .transpose()?;
-        // transformAlterTableStmt resolves an identity column's sequence type before ATPrepAlterColumnType checks inheritance and partition keys.
-        if let Some(column) = columns
-            .iter()
-            .find(|column| column.name == *name)
-            .filter(|column| {
-                !hierarchy.is_partition()
-                    && column
-                        .auto_increment
-                        .as_ref()
-                        .is_some_and(uqa_sql::ast::AutoIncrement::is_identity)
-            })
-        {
-            *ty = uqa_sql::type_resolution::resolve_alter_column_type(
-                context.hierarchy.publication.types,
-                ty,
-            )?;
-            identity::validate_identity_type(&context.identities, column, ty)?;
-        }
+        identity::resolve_identity_column_type(
+            context,
+            hierarchy.is_partition(),
+            &columns,
+            name,
+            ty,
+        )?;
         let inherited = !recursing && inherited_column(context, &hierarchy.parents, name)?;
         let column = validate_type_target(
             table,
@@ -114,6 +110,11 @@ fn prepare_relation<S: Clone + 'static>(
         *ty = uqa_sql::type_resolution::resolve_alter_column_type(
             context.hierarchy.publication.types,
             ty,
+        )?;
+        let collation_oid = uqa_sql::catalog::collations::declarations::select(
+            binding.catalog,
+            ty,
+            collation.as_deref(),
         )?;
         binding.catalog.require_type_usage(ty)?;
         uqa_sql::schema::columns::validate_postgres_relation_column_type(name, ty)?;
@@ -138,6 +139,7 @@ fn prepare_relation<S: Clone + 'static>(
             PreparedTypeChange {
                 transform,
                 original_type: column.ty.clone(),
+                collation_oid,
             },
         );
     }

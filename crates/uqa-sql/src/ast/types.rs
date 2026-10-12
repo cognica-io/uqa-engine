@@ -135,6 +135,9 @@ pub enum ColumnType {
         /// The OID of the domain's generated array type, allocated with the domain. Domains created before array OIDs were recorded derive it from the domain OID.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         array_oid: Option<u32>,
+        /// Immutable default collation selected when the domain was declared. Legacy domains inherit the base type's collation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collation_oid: Option<u32>,
         base: Box<ColumnType>,
     },
     /// A user-defined enum type bound by catalog identity.

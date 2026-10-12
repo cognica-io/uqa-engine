@@ -48,7 +48,7 @@ impl DroppedAttribute {
             by_value: type_metadata::pg_type_by_value(&column.ty),
             alignment: type_metadata::pg_type_align(&column.ty).into(),
             storage: type_metadata::pg_type_storage(&column.ty).into(),
-            collation: type_metadata::pg_type_collation_oid(&column.ty),
+            collation: super::collations::declarations::column_oid(column),
             identity: match column.auto_increment.as_ref().map(|value| value.kind) {
                 Some(AutoIncrementKind::IdentityAlways) => "a",
                 Some(AutoIncrementKind::IdentityByDefault | AutoIncrementKind::Legacy) => "d",

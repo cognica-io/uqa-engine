@@ -6,6 +6,7 @@
 
 //! Built-in collation identities shared by declarations and OID alias input/output.
 
+pub mod declarations;
 pub mod expression;
 
 /// The database-default collation's predefined `PostgreSQL` catalog identity.

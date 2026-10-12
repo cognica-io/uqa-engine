@@ -2512,6 +2512,19 @@
       "capability": "Collation operand retention",
       "workload": "Thirty-two nested C collation clauses around a 4096-byte row field, exact and insufficient allowances, and both cancellation owners.",
       "invariant": "Only one operand payload is admitted and retained; 4095 bytes fails with 53200, either cancellation fails with 57014, and all reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_collation_copies_preserve_identity_with_exact_admission",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/collations/declarations/tests.rs",
+      "capability": "Declared domain collation retention",
+      "workload": "Sixteen nested domains with alternating C/POSIX identities inside an array, exact and one-byte-insufficient copy allowances.",
+      "invariant": "Copying retains every selected identity and charges exactly the owned names and boxed types; insufficient admission returns 53200 and releases all partial reservations."
     }
   ]
 }

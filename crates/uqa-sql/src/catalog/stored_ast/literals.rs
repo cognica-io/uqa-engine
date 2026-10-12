@@ -92,6 +92,7 @@ mod tests {
     #[test]
     fn unknown_assignment_reads_base_input_and_keeps_null_default() {
         let domain = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "positive".into(),
             oid: 16384,

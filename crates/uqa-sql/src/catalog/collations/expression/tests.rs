@@ -66,6 +66,7 @@ fn collation_selection_preserves_type_error_order_and_releases_diagnostics() {
     assert_eq!(error.to_string(), "schema \"missing\" does not exist");
     assert_eq!(budget.used(), 0);
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "Hidden".into(),
         name: "number".into(),
         oid: 40000,

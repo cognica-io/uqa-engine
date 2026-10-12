@@ -36,6 +36,7 @@ fn domain(oid: u32, base: ColumnType) -> StoredDomain {
         oid,
         array_oid: Some(oid + 1),
         definition: CreateDomain {
+            collation_oid: None,
             name: identity.qualified_name(),
             base,
             collation: None,

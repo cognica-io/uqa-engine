@@ -476,6 +476,10 @@ pub fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
         | ColumnType::Varchar(_)
         | ColumnType::Bpchar
         | ColumnType::Character(_) => 100,
+        ColumnType::Domain {
+            collation_oid: Some(oid),
+            ..
+        } => i64::from(*oid),
         ColumnType::Domain { oid, base, .. } => match oid {
             13_310 | 13_312 | 13_320 => 950,
             _ => pg_type_collation_oid(base),

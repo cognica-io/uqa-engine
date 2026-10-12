@@ -310,6 +310,7 @@ fn array_common_type_preserves_coercion_origin_through_controlled_binding() {
 #[test]
 fn unknown_common_input_relabels_a_domain_but_identical_domains_survive() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "oid_domain".into(),
         oid: 90_001,

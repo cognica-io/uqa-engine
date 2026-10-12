@@ -237,6 +237,7 @@ pub fn rule_returning_columns(
         .rule_relation_columns(table)?
         .into_iter()
         .map(|(name, ty)| crate::ast::ColumnDef {
+            collation_oid: None,
             name,
             ty,
             object_id: None,

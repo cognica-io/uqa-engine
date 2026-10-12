@@ -41,7 +41,28 @@ pub fn set_column_type(
     column: &str,
     ty: &ColumnType,
 ) -> StorageBackendResult<bool> {
-    set_column_property(context, table, column, ColumnProperty::Type(ty))
+    let collation_oid = uqa_sql::catalog::type_metadata::pg_type_collation_oid(ty);
+    set_column_type_with_collation(
+        context,
+        table,
+        column,
+        ty,
+        u32::try_from(collation_oid).expect("collation identity"),
+    )
+}
+pub fn set_column_type_with_collation(
+    context: &SchemaPublicationContext<'_>,
+    table: &str,
+    column: &str,
+    ty: &ColumnType,
+    collation_oid: u32,
+) -> StorageBackendResult<bool> {
+    set_column_property(
+        context,
+        table,
+        column,
+        ColumnProperty::Type(ty, collation_oid),
+    )
 }
 pub fn set_column_auto_increment(
     context: &SchemaPublicationContext<'_>,

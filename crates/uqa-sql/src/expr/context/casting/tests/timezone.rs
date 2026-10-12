@@ -36,6 +36,7 @@ fn domain() -> StoredDomain {
         identity: RelationIdentity::new("public", "zoned"),
         owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
         definition: crate::ast::CreateDomain {
+            collation_oid: None,
             name: "public.zoned".into(),
             base: ColumnType::TimestampTz,
             collation: None,
