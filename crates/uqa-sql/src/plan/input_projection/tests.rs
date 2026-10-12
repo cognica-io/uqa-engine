@@ -90,6 +90,7 @@ fn substitution_retains_unreached_errors_and_declared_input_types() {
         value: Value::Int(7),
         ty: "smallint".into(),
         bound_type: Some(ColumnType::SmallInteger),
+        collation_oid: None,
         composite_source: None,
         parameter_index: None,
     };

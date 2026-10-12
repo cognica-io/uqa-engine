@@ -65,6 +65,7 @@ impl Lowering<'_> {
                 ty,
                 bound_type,
                 parameter_index,
+                collation_oid,
                 composite_source,
             } => {
                 let bound_type = self.scalar_type_copy(bound_type.as_ref())?;
@@ -75,6 +76,7 @@ impl Lowering<'_> {
                     ty: self.copy_text(ty)?,
                     bound_type,
                     parameter_index: *parameter_index,
+                    collation_oid: *collation_oid,
                 }
             }
             ScalarExpr::Param(index) => ScalarExpr::Param(*index),

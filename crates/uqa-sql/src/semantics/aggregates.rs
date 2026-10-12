@@ -138,6 +138,7 @@ fn typed_literals_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             bound_type: ab,
             parameter_index: ap,
             composite_source: ac,
+            collation_oid: ao,
         },
         ScalarExpr::TypedLiteral {
             value: bv,
@@ -145,12 +146,13 @@ fn typed_literals_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             bound_type: bb,
             parameter_index: bp,
             composite_source: bc,
+            collation_oid: bo,
         },
     ) = (lhs, rhs)
     else {
         return false;
     };
-    at == bt && ab == bb && ap == bp && ac == bc && literals_equal(av, bv)
+    at == bt && ab == bb && ap == bp && ac == bc && ao == bo && literals_equal(av, bv)
 }
 
 pub fn literals_equal(a: &Value, b: &Value) -> bool {

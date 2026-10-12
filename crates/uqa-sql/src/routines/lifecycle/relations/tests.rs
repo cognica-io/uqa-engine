@@ -33,6 +33,7 @@ fn qualified_catalog_regclass_retains_relation_dependencies() {
         crate::catalog::stored_ast::visit_stored_statement_expressions(statement, &mut |node| {
             if matches!(node, Expr::Literal(Value::Str(_))) {
                 *node = Expr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: Value::Int(42),
                     ty: ColumnType::Regclass.catalog_name(),

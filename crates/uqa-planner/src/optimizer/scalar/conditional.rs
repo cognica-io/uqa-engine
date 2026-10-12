@@ -55,6 +55,7 @@ pub(super) fn optimize_boolean(
     }
     if have_null {
         kept.push(ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Null,
             ty: "boolean".into(),

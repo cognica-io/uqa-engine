@@ -259,6 +259,7 @@ fn window_definitions_follow_subquery_remapping_and_source_constants() {
     assert_eq!(
         block.windows[0].spec.order_by[0].expr,
         ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Int(3),
             ty: "integer".into(),

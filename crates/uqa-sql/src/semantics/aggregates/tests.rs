@@ -188,6 +188,7 @@ fn decimal_literal_identity_matches_its_clone_without_erasing_scale() {
 #[test]
 fn typed_literal_identity_retains_the_declared_type_and_datum() {
     let expression = |value, ty: &str| ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: ty.into(),
@@ -209,6 +210,7 @@ fn typed_literal_identity_retains_the_declared_type_and_datum() {
         &ScalarExpr::Literal(Value::Int(1))
     ));
     let first = ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: decimal("1.0"),
         ty: "numeric".into(),
@@ -216,6 +218,7 @@ fn typed_literal_identity_retains_the_declared_type_and_datum() {
         parameter_index: Some(1),
     };
     let second = ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: decimal("1.0"),
         ty: "numeric".into(),
@@ -236,6 +239,7 @@ fn composite_literals_with_equal_current_values_keep_distinct_original_datums() 
         ty: "composite#20001".into(),
         bound_type: None,
         parameter_index: None,
+        collation_oid: None,
         composite_source: Some(Box::new(CompositeConstantSource {
             value: Value::Record(vec![("a".into(), Value::Str(original.into()))].into()),
             descriptors: vec![CompositeTypeDescriptor {
@@ -254,4 +258,18 @@ fn composite_literals_with_equal_current_values_keep_distinct_original_datums() 
     let first = expression("A");
     assert!(exprs_match(&first, &first.clone()));
     assert!(!exprs_match(&first, &expression("B")));
+}
+
+#[test]
+fn typed_literal_identity_preserves_selected_collation() {
+    let literal = |oid| ScalarExpr::TypedLiteral {
+        value: Value::Str("x".into()),
+        ty: "text".into(),
+        bound_type: Some(crate::ColumnType::Text),
+        parameter_index: None,
+        composite_source: None,
+        collation_oid: Some(oid),
+    };
+    assert!(exprs_match(&literal(950), &literal(950)));
+    assert!(!exprs_match(&literal(950), &literal(951)));
 }

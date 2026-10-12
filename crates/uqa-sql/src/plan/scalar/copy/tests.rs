@@ -17,6 +17,7 @@ fn admitted_scalar_copy_preserves_window_frames_bindings_and_typed_payloads() {
     let source = ScalarExpr::Row(vec![
         window,
         ScalarExpr::TypedLiteral {
+            collation_oid: Some(950),
             composite_source: None,
             value: Value::Str("retained scalar payload".repeat(100)),
             ty: "character varying[]".into(),
@@ -101,6 +102,7 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
     let expression = crate::ast::Expr::TypedLiteral {
         value: Value::Record(vec![("a".into(), Value::Bool(true))].into()),
         ty: "composite#20001".into(),
+        collation_oid: None,
         composite_source: Some(Box::new(original)),
     };
     let restored: crate::ast::Expr =

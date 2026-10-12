@@ -219,6 +219,7 @@ fn project_plan(
             parameter_index: None,
             bound_type,
             composite_source,
+            ..
         } = node
         {
             if !values_changed {

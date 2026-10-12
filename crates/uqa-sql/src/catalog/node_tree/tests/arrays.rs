@@ -173,6 +173,7 @@ fn named_array_nodes_retain_physical_identity_across_catalog_changes() {
         **expr = Expr::TypedLiteral {
             value: Value::Null,
             ty: ty.catalog_name(),
+            collation_oid: None,
             composite_source: Some(Box::new(source)),
         };
         let context = expressions::ExpressionContext {

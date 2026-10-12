@@ -90,8 +90,10 @@ impl Lowering<'_> {
             Node::TypedLiteral {
                 value,
                 ty,
+                collation_oid,
                 composite_source,
             } => ScalarExpr::TypedLiteral {
+                collation_oid,
                 composite_source: self.composite_source(composite_source)?,
                 value: self.value(value)?,
                 ty: self.text(ty)?,

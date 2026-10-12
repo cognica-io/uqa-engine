@@ -78,6 +78,7 @@ pub(super) enum Node<'a> {
     TypedLiteral {
         value: Source<'a, Value>,
         ty: Source<'a, String>,
+        collation_oid: Option<u32>,
         composite_source: Option<Source<'a, Box<crate::expr::composites::CompositeConstantSource>>>,
     },
     Param(usize),
@@ -176,10 +177,12 @@ fn owned(expression: Expr) -> Node<'static> {
         Expr::TypedLiteral {
             value,
             ty,
+            collation_oid,
             composite_source,
         } => Node::TypedLiteral {
             value: Source::Owned(value),
             ty: Source::Owned(ty),
+            collation_oid,
             composite_source: composite_source.map(Source::Owned),
         },
         Expr::Param(value) => Node::Param(value),
@@ -284,10 +287,12 @@ fn borrowed(expression: &Expr) -> Node<'_> {
         Expr::TypedLiteral {
             value,
             ty,
+            collation_oid,
             composite_source,
         } => Node::TypedLiteral {
             value: Source::Borrowed(value),
             ty: Source::Borrowed(ty),
+            collation_oid: *collation_oid,
             composite_source: composite_source.as_ref().map(Source::Borrowed),
         },
         Expr::Param(value) => Node::Param(*value),

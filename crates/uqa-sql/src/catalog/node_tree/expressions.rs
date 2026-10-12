@@ -78,7 +78,13 @@ impl ExpressionContext<'_> {
                 value,
                 ty,
                 composite_source,
-            } => self.constant(value, self.resolve_type(ty)?, composite_source.as_deref())?,
+                collation_oid,
+            } => self.retained_constant(
+                value,
+                self.resolve_type(ty)?,
+                composite_source.as_deref(),
+                *collation_oid,
+            )?,
             Expr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs)?,
             Expr::UnaryMinus(argument) => self.unary_minus(argument)?,
             Expr::Array(elements) => self.array(elements, expected)?,
@@ -218,6 +224,30 @@ impl ExpressionContext<'_> {
             )?,
             ty,
         })
+    }
+
+    fn retained_constant(
+        &self,
+        value: &uqa_core::Value,
+        ty: ColumnType,
+        source: Option<&crate::expr::composites::CompositeConstantSource>,
+        collation: Option<u32>,
+    ) -> Result<TypedNode, SQLError> {
+        let mut value = self.constant(value, ty, source)?;
+        if let Some(oid) = collation {
+            crate::catalog::collations::expression::validate_literal_collation(
+                Some(&value.ty),
+                Some(oid),
+            )?;
+            value
+                .node
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "constcollid")
+                .expect("constant collation")
+                .1 = i64::from(oid).into();
+        }
+        Ok(value)
     }
 
     fn resolve_type(&self, name: &str) -> Result<ColumnType, SQLError> {

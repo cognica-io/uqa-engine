@@ -237,6 +237,12 @@ impl Preparation<'_> {
             | ScalarExpr::Default => self.known_type(expression, input, subqueries)?,
         };
         let mut result = ExpressionType::leaf(ty);
+        if let ScalarExpr::TypedLiteral { collation_oid, .. } = expression {
+            crate::catalog::collations::expression::validate_literal_collation(
+                result.ty.as_ref(),
+                *collation_oid,
+            )?;
+        }
         if let Some(oid) = input.input_collation(expression) {
             result.derivation = Derivation::implicit(i64::from(oid));
             result.initial_collation = oid;

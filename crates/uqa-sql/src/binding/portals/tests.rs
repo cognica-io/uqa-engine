@@ -195,7 +195,8 @@ fn typed_graph_constants_preserve_dependencies_without_binding_parameters() {
             ))));
             plan.rewrite_scalar_expressions(&mut |expression| {
                 if matches!(expression, ScalarExpr::Literal(uqa_core::Value::Str(value)) if value == "items") {
-                    *expression = ScalarExpr::TypedLiteral { composite_source: None,
+                    *expression = ScalarExpr::TypedLiteral { collation_oid: None,
+        composite_source: None,
                         value: uqa_core::Value::Str("items".into()),
                         ty: "name".into(),
                         bound_type: Some(ColumnType::Name),

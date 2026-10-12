@@ -41,6 +41,9 @@ pub enum ScalarExpr {
     TypedLiteral {
         value: Value,
         ty: String,
+        /// Selected implicit result collation; absent metadata retains the declared type default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collation_oid: Option<u32>,
         /// Original composite input retained across non-invertible descriptor changes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         composite_source: Option<Box<crate::expr::composites::CompositeConstantSource>>,

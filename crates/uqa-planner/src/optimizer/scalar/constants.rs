@@ -41,6 +41,7 @@ pub(crate) fn retain_computed_integer(
         uqa_sql::expr::IntegerWidth::BigInt => ColumnType::BigInteger,
     };
     ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: Value::Int(value),
         ty: ty.catalog_name(),
@@ -106,7 +107,7 @@ fn is_constant(
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> bool {
-    // A TypedLiteral cannot retain the clause's selected collation; its operand can still fold.
+    // Keep an explicit clause's coercibility; folding its operand must not turn the clause into an implicit constant.
     if uqa_sql::catalog::collations::expression::scalar_clause(expression)
         .is_ok_and(|clause| clause.is_some())
     {
@@ -262,6 +263,7 @@ pub(super) fn fold_authorized_literal(
             if let Some(target) = constant_cast_type(ty, types) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
+                        collation_oid: None,
                         composite_source: None,
                         value: Value::Null,
                         ty: ty.clone(),
@@ -333,6 +335,7 @@ pub(super) fn fold_authorized_literal(
     }
     Ok(match ty {
         Some(ty) => ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value,
             ty: ty.catalog_name(),
@@ -433,6 +436,7 @@ fn composite_constant_field(
         return None;
     }
     Some(Ok(ScalarExpr::TypedLiteral {
+        collation_oid: field.collation_oid,
         composite_source: None,
         value,
         ty: field.result_type.catalog_name(),

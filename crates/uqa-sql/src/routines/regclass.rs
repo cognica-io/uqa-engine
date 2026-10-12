@@ -59,6 +59,7 @@ impl RegclassBinding<'_> {
                 message: format!("relation \"{reference}\" does not exist"),
             })?;
         *expression = Expr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Int(oid),
             ty: ColumnType::Regclass.catalog_name(),

@@ -1,0 +1,92 @@
+[
+  {
+    "query": "SELECT c",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT upper(c)",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT coalesce(c,'fallback')",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c::varchar",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c COLLATE \"POSIX\"",
+    "null": false,
+    "collation": 951
+  },
+  {
+    "query": "SELECT coalesce(c,p)",
+    "null": false,
+    "collation": 0
+  },
+  {
+    "query": "SELECT (ROW(c)).f1",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c || 'z'",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT ARRAY[c]",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT upper(c)",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT coalesce(c,'fallback')",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c::varchar",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c COLLATE \"POSIX\"",
+    "null": true,
+    "collation": 951
+  },
+  {
+    "query": "SELECT coalesce(c,p)",
+    "null": true,
+    "collation": 0
+  },
+  {
+    "query": "SELECT (ROW(c)).f1",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT c || 'z'",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT ARRAY[c]",
+    "null": true,
+    "collation": 950
+  }
+]

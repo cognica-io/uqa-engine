@@ -11,6 +11,7 @@ use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::{ColumnType, FunctionTypeResolver, RowSchema, SQLError, Statement};
 
 mod columns;
+mod literals;
 mod prepared;
 
 struct Catalog;

@@ -213,6 +213,7 @@ fn generic_cache_keeps_source_datums_when_current_type_interpretation_loses_bits
     plan.rewrite_scalar_expressions(&mut |node| {
         if matches!(node, ScalarExpr::Literal(Value::Int(1))) {
             *node = ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: raw.clone(),
                 ty: "pair".into(),
@@ -265,6 +266,7 @@ fn nested_constants_capture_descriptors_and_cached_variants_follow_current_numbe
                 implicit: false,
                 ty: "pair".into(),
                 expr: Box::new(ScalarExpr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: value(),
                     ty: "pair".into(),

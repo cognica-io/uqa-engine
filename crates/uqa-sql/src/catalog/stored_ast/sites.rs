@@ -163,6 +163,7 @@ fn apply_value_site<'a>(
             Some(ValueSite::Literal) => Ok(false),
             Some(ValueSite::Constant { value, ty }) => {
                 *node = Expr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: value.clone(),
                     ty: ty.clone(),
@@ -252,6 +253,7 @@ pub fn fold_assigned_stored_literal(
         return Ok(false);
     };
     *expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: base.catalog_name(),

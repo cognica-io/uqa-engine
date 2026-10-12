@@ -40,6 +40,7 @@ pub(super) fn propagate_source_constants(
             // SELECT targets and one-row VALUES resolve unknown literals to text before an outer query can observe their type. Substitution must preserve that boundary.
             ScalarExpr::Literal(value @ (uqa_core::Value::Null | uqa_core::Value::Str(_))) => {
                 ScalarExpr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: value.clone(),
                     ty: "text".into(),

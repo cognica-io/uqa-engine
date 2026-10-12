@@ -31,6 +31,21 @@ impl<T> Clause<'_, T> {
     }
 }
 
+/// Retained constants may carry an indeterminate collatable result, but cannot attach a collation to a noncollatable or unresolved type.
+pub(crate) fn validate_literal_collation(
+    ty: Option<&ColumnType>,
+    oid: Option<u32>,
+) -> Result<(), SQLError> {
+    if oid.is_some_and(|oid| oid != 0)
+        && ty.is_none_or(|ty| !crate::schema::composites::type_is_collatable(ty))
+    {
+        return Err(SQLError::Internal(
+            "constant collation does not match its declared type".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn scalar_clause(expression: &ScalarExpr) -> Result<Option<Clause<'_, ScalarExpr>>, SQLError> {
     let ScalarExpr::Func {
         binding: Some(binding),

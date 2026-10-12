@@ -24,6 +24,7 @@ fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() 
     **rhs = crate::plan::ExpressionPlan::lower(Expr::TypedLiteral {
         value: Value::Int(7),
         ty: "integer".into(),
+        collation_oid: None,
         composite_source: None,
     })
     .scalar;

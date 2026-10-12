@@ -25,6 +25,7 @@ fn constant(oid: i64, ty: &str) -> Expr {
     Expr::TypedLiteral {
         value: Value::Int(oid),
         ty: ty.into(),
+        collation_oid: None,
         composite_source: None,
     }
 }

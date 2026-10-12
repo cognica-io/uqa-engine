@@ -241,6 +241,7 @@ impl Folding for OperatorCoercions<'_> {
         let ScalarExpr::TypedLiteral {
             value,
             composite_source,
+            collation_oid,
             bound_type: Some(target),
             ..
         } = bound
@@ -261,6 +262,7 @@ impl Folding for OperatorCoercions<'_> {
             return Ok(false);
         }
         *stored = ScalarExpr::TypedLiteral {
+            collation_oid: *collation_oid,
             composite_source: composite_source.clone(),
             value: value.clone(),
             ty: target.catalog_name(),
@@ -656,6 +658,7 @@ fn fold_literal(
 #[must_use]
 pub fn stored_enum_constant(value: Value, target: &ColumnType) -> ScalarExpr {
     ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: target.catalog_name(),

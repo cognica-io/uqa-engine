@@ -206,9 +206,10 @@ impl Collations {
 }
 
 impl RowSchema {
-    /// Observe the selected collation of a direct logical reference, including static bindings and executor attributes without a visible output position.
+    /// Observe a retained literal or direct logical reference, including static bindings and executor attributes without a visible output position.
     pub fn input_collation(&self, expression: &crate::ScalarExpr) -> Option<u32> {
         match expression {
+            crate::ScalarExpr::TypedLiteral { collation_oid, .. } => *collation_oid,
             crate::ScalarExpr::Column(name) => self.collation_of(name),
             crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
                 self.qualified_collation(qualifier, column)

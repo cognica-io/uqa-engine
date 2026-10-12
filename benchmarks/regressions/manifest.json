@@ -2967,6 +2967,84 @@
       "capability": "Native deferred materialized metadata",
       "workload": "A native undeclared column undergoes initial collation recovery and a repeated request using different analyzed metadata.",
       "invariant": "Native deferred types remain unresolved with no collation, and existing recorded selections cannot be overwritten by another analysis."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_constant_fields_retain_postgresql_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "capability": "Folded composite field metadata",
+      "workload": "Four independent PostgreSQL constant-field observations, including NULL inputs.",
+      "invariant": "Field folding retains selected implicit collations, declared types and values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_collations_remain_implicit_across_expression_analysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/literal_collations.rs",
+      "capability": "Retained literal coercibility",
+      "workload": "Eighteen independent PostgreSQL observations across calls, casts, arrays, ROW fields and conflicting selections.",
+      "invariant": "Prepared and ordinary analysis preserve implicit selections through JSON restoration; explicit COLLATE overrides them without a false explicit conflict."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "literal_lowering_and_legacy_codecs_preserve_selected_or_default_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/literal_collations.rs",
+      "capability": "Literal metadata retention",
+      "workload": "Owned/borrowed AST lowering, JSON restoration and admitted copying of legacy, default, indeterminate and selected collations.",
+      "invariant": "Selections survive copying under the fixed 4096-byte allowance and reservations are fully released; absent legacy metadata retains the type default."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "literal_analysis_rejects_collations_on_noncollatable_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/literal_collations.rs",
+      "capability": "Typed literal metadata validation",
+      "workload": "A retained integer literal carries a nonzero text collation.",
+      "invariant": "Analysis rejects inconsistent retained metadata before treating it as an expression selection."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constant_nodes_encode_selected_implicit_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/collations/literals.rs",
+      "capability": "Catalog constant collation",
+      "workload": "Legacy, indeterminate, default, C and POSIX constants and an invalid integer selection.",
+      "invariant": "CONST records retain their selected constcollid without an explicit COLLATEEXPR; invalid type metadata is rejected."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_literal_identity_preserves_selected_collation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/aggregates/tests.rs",
+      "capability": "Typed constant semantic identity",
+      "workload": "The same text datum and type have equal or different selected collations.",
+      "invariant": "Expression matching does not conflate C and POSIX constants."
     }
   ]
 }

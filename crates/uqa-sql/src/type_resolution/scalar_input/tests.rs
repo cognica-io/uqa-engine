@@ -270,6 +270,7 @@ fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators(
         ScalarExpr::Position(0),
         ScalarExpr::Param(1),
         ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Null,
             ty: "ignored_spelling".into(),
@@ -306,6 +307,7 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
         ),
         (
             ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Int(1),
                 ty: "ignored_spelling".into(),

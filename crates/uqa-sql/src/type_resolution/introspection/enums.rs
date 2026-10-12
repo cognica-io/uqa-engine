@@ -29,6 +29,7 @@ impl Binder<'_, '_> {
         };
         match fold_unknown_literal(Some(catalog), value, target) {
             Ok(Some(value)) => Ok(Some(ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value,
                 ty: target.catalog_name(),

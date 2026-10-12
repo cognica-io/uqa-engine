@@ -60,6 +60,7 @@ pub fn read_unknown_stored_literal(
     };
     let ty = if keep_modifier { base } else { &input_type };
     *expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: ty.catalog_name(),

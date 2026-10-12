@@ -25,6 +25,7 @@ impl<'a> Walker<'a> {
                 value,
                 ty,
                 composite_source,
+                ..
             } => {
                 self.value(value)?;
                 self.text(ty)?;
