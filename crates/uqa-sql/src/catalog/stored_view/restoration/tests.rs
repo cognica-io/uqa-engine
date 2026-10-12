@@ -77,9 +77,122 @@ fn view() -> StoredView {
             kind: StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }
+}
+
+#[test]
+fn materialized_collations_survive_codecs_and_reject_missing_or_malformed_metadata() {
+    let mut original = view();
+    original.kind = StoredViewKind::Materialized;
+    original.output_columns = Some(vec!["c".into(), "p".into(), "n".into()]);
+    original.materialized_column_types = vec![
+        Some(crate::ColumnType::Text),
+        Some(crate::ColumnType::Text),
+        Some(crate::ColumnType::Integer),
+    ];
+    original.materialized_column_collations = Some(vec![950, 951, 0]);
+    let encoded = serde_json::to_value(&original).unwrap();
+    let restored: super::super::StoredViewDefinition =
+        serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(
+        restored.materialized_schema().unwrap().column_collation(0),
+        Some(950)
+    );
+    assert_eq!(
+        restored.materialized_schema().unwrap().column_collation(1),
+        Some(951)
+    );
+    for invalid in [
+        serde_json::Value::Null,
+        serde_json::json!([950]),
+        serde_json::json!([0, 951, 0]),
+        serde_json::json!([950, 951, 100]),
+    ] {
+        let mut data = encoded.clone();
+        data["materialized_column_collations"] = invalid;
+        let restored: super::super::StoredViewDefinition = serde_json::from_value(data).unwrap();
+        assert!(restored.materialized_schema().is_err());
+    }
+    let mut legacy = encoded;
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("materialized_column_collations");
+    let mut restored: super::super::StoredViewDefinition = serde_json::from_value(legacy).unwrap();
+    let schema = crate::RowSchema::with_types(
+        vec!["x".into(), "y".into(), "z".into()],
+        original.materialized_column_types.clone(),
+    )
+    .with_column_collations([Some(950), Some(951), Some(0)]);
+    restored.restore_materialized_collations(&schema).unwrap();
+    assert_eq!(
+        restored.materialized_column_collations,
+        original.materialized_column_collations
+    );
+    assert_eq!(restored.output_columns, original.output_columns);
+    let mut malformed = restored.clone();
+    malformed.materialized_column_collations = None;
+    let wrong =
+        crate::RowSchema::with_types(vec!["x".into()], vec![Some(crate::ColumnType::Integer)]);
+    assert!(malformed.restore_materialized_collations(&wrong).is_err());
+    assert!(malformed.materialized_column_collations.is_none());
+}
+
+#[test]
+fn materialized_metadata_preserves_native_deferred_columns_and_existing_selections() {
+    let mut stored = view();
+    stored.kind = StoredViewKind::Materialized;
+    stored.materialized_column_types = vec![None];
+    let schema = crate::RowSchema::with_types(vec!["value".into()], vec![None]);
+    stored.restore_materialized_collations(&schema).unwrap();
+    assert_eq!(stored.materialized_column_collations, Some(vec![0]));
+    assert_eq!(stored.materialized_schema().unwrap().column_type(0), None);
+    let changed =
+        crate::RowSchema::with_types(vec!["value".into()], vec![Some(crate::ColumnType::Text)])
+            .with_column_collations([Some(951)]);
+    stored.restore_materialized_collations(&changed).unwrap();
+    assert_eq!(stored.materialized_column_types, [None]);
+    assert_eq!(stored.materialized_column_collations, Some(vec![0]));
+}
+
+#[test]
+fn metadata_migration_orders_view_dependencies_without_copying_queries() {
+    let definitions = [
+        ("a_dependent", "SELECT value FROM public.middle"),
+        ("middle", "SELECT value FROM public.z_base"),
+        ("z_base", "SELECT 1 AS value"),
+        ("unrelated", "SELECT value FROM public.unrelated"),
+    ]
+    .into_iter()
+    .map(|(name, sql)| {
+        let mut view = view();
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        view.query = *query;
+        (RelationIdentity::new("public", name), view)
+    })
+    .collect::<BTreeMap<_, _>>();
+    let targets = ["a_dependent", "z_base"]
+        .map(|name| RelationIdentity::new("public", name))
+        .into();
+    let ordered = view_metadata_dependency_order(&definitions, &targets).unwrap();
+    assert_eq!(
+        ordered
+            .iter()
+            .map(|relation| relation.name.as_str())
+            .collect::<Vec<_>>(),
+        ["z_base", "a_dependent"]
+    );
+    let cyclic = [RelationIdentity::new("public", "unrelated")].into();
+    assert!(view_metadata_dependency_order(&definitions, &cyclic)
+        .unwrap_err()
+        .to_string()
+        .contains("recursive dependency"));
 }
 
 #[test]

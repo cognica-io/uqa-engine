@@ -60,6 +60,21 @@ fn materialized_rows(
         .collect()
 }
 
+/// REFRESH replaces stored rows and population state while preserving the relation's creation-time type and collation identities.
+fn replace_materialized_rows(
+    view: &mut StoredView,
+    result: Option<&uqa_sql::SQLResult>,
+) -> Result<(), SQLError> {
+    let schema = view.materialized_schema()?;
+    let rows = result.map_or_else(
+        || Ok(Vec::new()),
+        |result| materialized_rows(result, schema.columns()),
+    )?;
+    view.materialized_rows = rows;
+    view.populated = result.is_some();
+    Ok(())
+}
+
 fn skip_existing_materialized_view(
     context: &ViewCreationContext<'_>,
     name: &str,
@@ -125,6 +140,11 @@ pub fn register_materialized_view_plan(
             .namespace
             .relation_target(name, RelationPersistence::Permanent)?;
         validate_create_table_as_columns(context.routines, &columns)?;
+        let materialized_column_collations = Some(
+            (0..query_schema.len())
+                .map(|index| query_schema.column_collation(index).unwrap_or(0))
+                .collect(),
+        );
         let output_columns = columns
             .into_iter()
             .map(|column| column.name)
@@ -163,6 +183,7 @@ pub fn register_materialized_view_plan(
                 kind: StoredViewKind::Materialized,
                 materialized_rows,
                 materialized_column_types,
+                materialized_column_collations,
                 populated: !with_no_data,
                 catalog_oids: Some(catalog_oids),
                 row_type_array_name: Some(crate::schema::types::arrays::reserve_array_name(
@@ -235,8 +256,8 @@ pub fn refresh_materialized_view(
         .ok_or_else(|| SQLError::Internal("materialized view binding disappeared".into()))?;
         let canonical = binding.name;
         let (relation, mut view) = binding.value;
-        view.materialized_rows = if with_no_data {
-            Vec::new()
+        if with_no_data {
+            replace_materialized_rows(&mut view, None)?;
         } else {
             context.bindings.lock_relations(&view.query)?;
             let owner = view
@@ -246,16 +267,8 @@ pub fn refresh_materialized_view(
                 &owner,
                 Box::new(|queries| queries.execute(&view.query, &[])),
             )?;
-            let output_columns = view.output_columns.as_deref().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "loaded materialized view `{canonical}` has no durable public column metadata"
-                ))
-            })?;
-            let rows = materialized_rows(&result, output_columns)?;
-            view.materialized_column_types = result.column_types;
-            rows
-        };
-        view.populated = !with_no_data;
+            replace_materialized_rows(&mut view, Some(&result))?;
+        }
         context.locks.prepare_definition_write()?;
         publication::publish_materialized_view(
             context.publication,

@@ -397,11 +397,12 @@ impl SchemaScope {
                                 view.materialized_column_types.len()
                             )));
                         }
-                        let schema = RowSchema::with_qualified_types(
-                            qualifier,
-                            columns,
-                            view.materialized_column_types,
-                        );
+                        let schema = crate::catalog::view::materialized_view_schema(
+                            &columns,
+                            &view.materialized_column_types,
+                            view.materialized_column_collations.as_deref(),
+                        )?;
+                        let schema = RowSchema::with_relation_qualifier(&schema, qualifier);
                         return alias_table_schema(&schema, qualifier, column_aliases);
                     }
                     let key = name.to_ascii_lowercase();

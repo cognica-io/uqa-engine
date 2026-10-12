@@ -82,6 +82,7 @@ fn temporary_view() -> StoredView {
             kind: StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }

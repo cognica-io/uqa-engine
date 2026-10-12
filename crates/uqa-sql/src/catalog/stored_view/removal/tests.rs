@@ -40,6 +40,7 @@ fn view(sql: &str, persistence: RelationPersistence) -> StoredView {
             kind: StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }

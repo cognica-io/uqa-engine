@@ -198,6 +198,7 @@ fn register_view_plan_inner(
             kind: StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
             catalog_oids,
             row_type_array_name,

@@ -95,6 +95,7 @@ fn view(position: usize) -> StoredView {
             },
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
             catalog_oids: Some(uqa_sql::catalog::relation_oids::RelationCatalogOids {
                 relation: oid,

@@ -7,6 +7,8 @@
 use super::*;
 use crate::{ast::FunctionBinding, RowSchema};
 
+mod collations;
+
 struct Types;
 
 impl FunctionTypeResolver for Types {

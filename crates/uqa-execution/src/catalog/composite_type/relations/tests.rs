@@ -5,7 +5,9 @@
 //
 
 use super::*;
+use crate::PhysicalOperator;
 use std::cell::Cell;
+use uqa_sql::catalog::analysis::AnalysisCatalog;
 
 #[test]
 fn relation_descriptors_preserve_selected_collations_and_attribute_numbers() {
@@ -81,6 +83,84 @@ fn relation_descriptors_preserve_selected_collations_and_attribute_numbers() {
 
 #[test]
 fn view_descriptors_preserve_analyzed_output_collations() {
+    let view = collated_view();
+    for materialized in [false, true] {
+        let mut view = view.clone();
+        if materialized {
+            view.kind = uqa_sql::catalog::view::StoredViewKind::Materialized;
+            view.materialized_column_types = vec![Some(uqa_sql::ColumnType::Text); 2];
+            view.materialized_column_collations = Some(vec![950, 951]);
+            view.definition = serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
+            let scan = crate::TableScan::from_rows_with_schema(
+                view.materialized_schema().unwrap(),
+                Vec::new(),
+            );
+            assert_eq!(scan.row_schema().column_collation(0), Some(950));
+            assert_eq!(scan.row_schema().column_collation(1), Some(951));
+        }
+        let oid = view.relation_oids().row_type.unwrap();
+        let mut snapshot = crate::catalog::test_support::empty_catalog()
+            .snapshot()
+            .clone();
+        Arc::make_mut(&mut snapshot.definitions.views)
+            .insert(RelationIdentity::new("public", "v"), view.clone());
+        let catalog = CatalogReadView::new(snapshot);
+        let services = crate::catalog::test_support::CatalogServices::default();
+        let cache = crate::catalog::cache::RegtypeOutputCache::default();
+        let context = services.context(&catalog, &cache);
+        let descriptor = descriptor(&context, oid).unwrap().unwrap();
+        assert_eq!(
+            descriptor
+                .attributes
+                .iter()
+                .map(|attribute| (attribute.name.as_str(), attribute.collation_oid()))
+                .collect::<Vec<_>>(),
+            [("renamed_c", 950), ("renamed_p", 951)]
+        );
+        let columns = crate::catalog::projection::view_columns_for(
+            &context,
+            &catalog,
+            &services.resolution,
+            &view,
+        )
+        .unwrap();
+        assert_eq!(
+            columns
+                .iter()
+                .map(|column| column.collation_oid)
+                .collect::<Vec<_>>(),
+            [Some(950), Some(951)]
+        );
+        let sql_view = AnalysisCatalog::view_resolved(&catalog, &services.resolution, "public.v")
+            .unwrap()
+            .unwrap();
+        if materialized {
+            assert_eq!(
+                sql_view.materialized_column_collations,
+                Some(vec![950, 951])
+            );
+            let uqa_sql::plan::UnifiedPlan::Query(query) = uqa_sql::plan::UnifiedPlan::lower(
+                uqa_sql::compile("SELECT renamed_c,renamed_p FROM public.v")
+                    .unwrap()
+                    .remove(0),
+            ) else {
+                panic!("query")
+            };
+            let schema = uqa_sql::binding::analyze_query_plan_schema_with_catalog(
+                context.routines,
+                &query,
+                &[],
+                Arc::new(catalog.clone()),
+                services.resolution.clone(),
+            )
+            .unwrap();
+            assert_eq!(schema.column_collation(0), Some(950));
+            assert_eq!(schema.column_collation(1), Some(951));
+        }
+    }
+}
+
+fn collated_view() -> uqa_sql::catalog::stored_view::StoredView {
     let uqa_sql::plan::UnifiedPlan::Query(query) = uqa_sql::plan::UnifiedPlan::lower(
         uqa_sql::compile("SELECT NULL::text COLLATE \"C\" AS c, NULL::text COLLATE \"POSIX\" AS p")
             .unwrap()
@@ -88,7 +168,7 @@ fn view_descriptors_preserve_analyzed_output_collations() {
     ) else {
         panic!("query")
     };
-    let view = uqa_sql::catalog::stored_view::StoredView {
+    uqa_sql::catalog::stored_view::StoredView {
         security: uqa_sql::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         ),
@@ -103,42 +183,10 @@ fn view_descriptors_preserve_analyzed_output_collations() {
             kind: uqa_sql::catalog::view::StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
-    };
-    let oid = view.relation_oids().row_type.unwrap();
-    let mut snapshot = crate::catalog::test_support::empty_catalog()
-        .snapshot()
-        .clone();
-    Arc::make_mut(&mut snapshot.definitions.views)
-        .insert(RelationIdentity::new("public", "v"), view.clone());
-    let catalog = CatalogReadView::new(snapshot);
-    let services = crate::catalog::test_support::CatalogServices::default();
-    let cache = crate::catalog::cache::RegtypeOutputCache::default();
-    let context = services.context(&catalog, &cache);
-    let descriptor = descriptor(&context, oid).unwrap().unwrap();
-    assert_eq!(
-        descriptor
-            .attributes
-            .iter()
-            .map(|attribute| (attribute.name.as_str(), attribute.collation_oid()))
-            .collect::<Vec<_>>(),
-        [("renamed_c", 950), ("renamed_p", 951)]
-    );
-    let columns = crate::catalog::projection::view_columns_for(
-        &context,
-        &catalog,
-        &services.resolution,
-        &view,
-    )
-    .unwrap();
-    assert_eq!(
-        columns
-            .iter()
-            .map(|column| column.collation_oid)
-            .collect::<Vec<_>>(),
-        [Some(950), Some(951)]
-    );
+    }
 }
 
 #[test]

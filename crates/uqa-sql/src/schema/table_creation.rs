@@ -72,12 +72,6 @@ pub fn create_table_as_columns(
     query_schema: &crate::RowSchema,
     column_names: &[String],
 ) -> Result<Vec<ColumnDef>, SQLError> {
-    if column_names.len() > query_schema.len() {
-        return Err(SQLError::Routine {
-            sqlstate: "42601".into(),
-            message: "too many column names were specified".into(),
-        });
-    }
     let names = query_schema
         .columns()
         .iter()
@@ -92,40 +86,64 @@ pub fn create_table_as_columns(
     let columns = names
         .into_iter()
         .enumerate()
-        .map(|(position, name)| ColumnDef {
-            collation_oid: None,
-            name,
-            ty: query_schema
+        .map(|(position, name)| {
+            let ty = query_schema
                 .column_type(position)
                 .cloned()
-                .unwrap_or(ColumnType::Text),
-            object_id: None,
-            attribute_number: None,
-            missing_value: None,
-            primary_key: false,
-            not_null: false,
-            not_null_explicit: false,
-            not_null_name: None,
-            not_null_identity: None,
-            not_null_validated: true,
-            not_null_no_inherit: false,
-            not_null_is_local: true,
-            auto_increment: None,
-            unique: false,
-            default: None,
-            generated: None,
-            check: None,
-            check_name: None,
-            check_enforced: true,
-            check_validated: true,
-            check_no_inherit: false,
-            check_is_local: true,
-            check_object_id: None,
-            check_catalog_oid: None,
-            default_catalog_oid: None,
-            references: None,
+                .unwrap_or(ColumnType::Text);
+            let collation = query_schema.column_collation(position).unwrap_or_else(|| {
+                u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(&ty))
+                    .expect("column collation OID")
+            });
+            if collation == 0 && super::composites::type_is_collatable(&ty) {
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "42P22".into(),
+                    message: format!(
+                        "no collation was derived for column \"{name}\" with collatable type {}",
+                        ty.display_name()
+                    ),
+                    detail: None,
+                    hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
+                });
+            }
+            Ok(ColumnDef {
+                collation_oid: Some(collation),
+                name,
+                ty,
+                object_id: None,
+                attribute_number: None,
+                missing_value: None,
+                primary_key: false,
+                not_null: false,
+                not_null_explicit: false,
+                not_null_name: None,
+                not_null_identity: None,
+                not_null_validated: true,
+                not_null_no_inherit: false,
+                not_null_is_local: true,
+                auto_increment: None,
+                unique: false,
+                default: None,
+                generated: None,
+                check: None,
+                check_name: None,
+                check_enforced: true,
+                check_validated: true,
+                check_no_inherit: false,
+                check_is_local: true,
+                check_object_id: None,
+                check_catalog_oid: None,
+                default_catalog_oid: None,
+                references: None,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    if column_names.len() > query_schema.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "too many column names were specified".into(),
+        });
+    }
     Ok(columns)
 }
 

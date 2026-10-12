@@ -102,6 +102,7 @@ fn restore_view(
                     kind: StoredViewKind::View,
                     materialized_rows: Vec::new(),
                     materialized_column_types: Vec::new(),
+                    materialized_column_collations: None,
                     populated: true,
                     catalog_oids: None,
                     row_type_array_name: None,
@@ -142,6 +143,7 @@ pub fn restore_views_from_catalog(
     let mut routine_binding_migrations = BTreeSet::new();
     let mut missing_output_columns = Vec::new();
     let mut missing_object_ids = Vec::new();
+    let mut missing_collations = BTreeSet::new();
     let mut revised_rows = BTreeSet::new();
     for row in rows {
         let view_name = row.relation.qualified_name();
@@ -158,6 +160,15 @@ pub fn restore_views_from_catalog(
         }
         if view.kind == StoredViewKind::View && view.output_columns.is_none() {
             missing_output_columns.push(row.relation.clone());
+        }
+        if view.kind == StoredViewKind::Materialized {
+            if view.materialized_column_collations.is_none() {
+                missing_collations.insert(row.relation.clone());
+            } else {
+                view.materialized_schema().map_err(|error| {
+                    StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
+                })?;
+            }
         }
         if upgrade_legacy_view_expressions(&mut view.query).map_err(|error| {
             StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
@@ -190,6 +201,7 @@ pub fn restore_views_from_catalog(
         && (!routine_binding_migrations.is_empty()
             || !missing_output_columns.is_empty()
             || !missing_object_ids.is_empty()
+            || !missing_collations.is_empty()
             || !revised_rows.is_empty())
     {
         return Err(StorageBackendError::Other(
@@ -203,11 +215,13 @@ pub fn restore_views_from_catalog(
         &routine_binding_migrations,
         &missing_output_columns,
         &missing_object_ids,
+        &missing_collations,
     )?;
     let migrated_views = routine_binding_migrations
         .iter()
         .chain(&missing_output_columns)
         .chain(&missing_object_ids)
+        .chain(&missing_collations)
         .cloned()
         .collect::<BTreeSet<_>>();
     validate_and_persist_restored_views(context, catalog, &views, &migrated_views, &revised_rows)?;

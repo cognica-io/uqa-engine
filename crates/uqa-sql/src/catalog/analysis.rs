@@ -25,6 +25,7 @@ pub struct ViewDefinition {
     pub output_columns: Option<Vec<String>>,
     pub materialized: bool,
     pub materialized_column_types: Vec<Option<ColumnType>>,
+    pub materialized_column_collations: Option<Vec<u32>>,
 }
 
 /// Immutable namespace-aware lookup for SQL analysis. This contract exposes definitions only; it grants no row access, mutation, locking, or transaction services.

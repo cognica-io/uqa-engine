@@ -218,12 +218,11 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         name,
                         view.populated,
                     )?;
-                    let columns = view.definition.output_columns.unwrap_or_default();
-                    let types = view.definition.materialized_column_types;
+                    let schema = view.definition.materialized_schema()?;
+                    let columns = schema.columns().to_vec();
                     let rows = view.definition.materialized_rows;
-                    let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
-                        crate::TableScan::from_typed_rows(columns.clone(), types, rows),
-                    );
+                    let scan: Box<dyn PhysicalOperator + 'a> =
+                        Box::new(crate::TableScan::from_rows_with_schema(schema, rows));
                     let aliases = table_source_aliases(&columns, &[], column_aliases);
                     let operator = qualify_source_operator_with_columns(
                         scan, &columns, &qualifier, prune, &aliases, false,

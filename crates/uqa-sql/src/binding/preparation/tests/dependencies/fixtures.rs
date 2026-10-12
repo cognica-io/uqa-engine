@@ -99,6 +99,7 @@ impl AnalysisCatalog for Catalog {
             output_columns: Some(vec!["id".into()]),
             materialized,
             materialized_column_types: vec![Some(ColumnType::Integer)],
+            materialized_column_collations: Some(vec![0]),
         }))
     }
 

@@ -111,6 +111,7 @@ fn definition(kind: StoredViewKind, persistence: RelationPersistence) -> StoredV
             kind,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }

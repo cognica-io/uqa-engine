@@ -2876,6 +2876,97 @@
       "capability": "Shared selectable record descriptors",
       "workload": "Record metadata crosses projection, qualification, physical compaction and an outer schema.",
       "invariant": "Field types and selectable descriptors retain their original Arc identities through slot remapping, without copying field arrays."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_defined_column_collations_and_errors_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/table_creation/tests/collations.rs",
+      "capability": "Query-defined relation collations",
+      "workload": "Sixty-eight PostgreSQL CREATE TABLE AS and materialized-view observations cover populated and unpopulated definitions, aliases, domains, record fields and competing errors.",
+      "invariant": "The SQL owner preserves selected column collations and rejects indeterminate collatable columns in PostgreSQL diagnostic order."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_collations_survive_codecs_and_reject_missing_or_malformed_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/stored_view/restoration/tests.rs",
+      "capability": "Durable materialized column identity",
+      "workload": "Selected C/POSIX and noncollatable columns pass the stored-definition codec; legacy, short and type-inconsistent metadata is checked.",
+      "invariant": "Current readers preserve recorded selections, missing selections require migration, and inconsistent metadata cannot silently become a default collation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_migration_orders_view_dependencies_without_copying_queries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/stored_view/restoration/tests.rs",
+      "capability": "View metadata dependency order",
+      "workload": "Reverse-name dependencies connected by an ordinary view and an unrelated cycle.",
+      "invariant": "Only reachable queries are inspected, dependencies precede targets, unrelated definitions remain untouched and a reachable cycle fails."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_collation_migration_orders_dependencies_preserves_rows_and_reopens_without_reanalysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests/collations.rs",
+      "capability": "Materialized metadata restoration",
+      "workload": "Two persisted snapshots require missing collation recovery in reverse lexical dependency order and then load-only reopen.",
+      "invariant": "Each definition is analyzed once after its source is ready; rows and identities remain unchanged and current reopen performs no analysis or catalog writes."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_collation_migration_rejects_load_only_and_restores_registry_on_failure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests/collations.rs",
+      "capability": "Materialized metadata migration failures",
+      "workload": "Load-only restoration, dependent binding failure and catalog persistence failure.",
+      "invariant": "Load-only restore cannot publish a partial migration; binding or persistence failures restore the previous registry and retained snapshots."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_refresh_keeps_created_types_collations_and_atomic_population_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/view_creation/materialized/tests.rs",
+      "capability": "Materialized refresh metadata",
+      "workload": "Populating, invalid-width and WITH NO DATA row replacements for a renamed collated column.",
+      "invariant": "Refresh changes rows and population only; creation-time types and collations survive and a failed replacement leaves the snapshot intact."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_metadata_preserves_native_deferred_columns_and_existing_selections",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/stored_view/restoration/tests.rs",
+      "capability": "Native deferred materialized metadata",
+      "workload": "A native undeclared column undergoes initial collation recovery and a repeated request using different analyzed metadata.",
+      "invariant": "Native deferred types remain unresolved with no collation, and existing recorded selections cannot be overwritten by another analysis."
     }
   ]
 }

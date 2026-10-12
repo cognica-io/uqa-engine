@@ -6,6 +6,9 @@
 
 use crate::{RowSchema, SQLError};
 
+mod materialized;
+pub use materialized::materialized_view_schema;
+
 /// Scanning an unpopulated materialized view fails even if the query would read no rows.
 pub fn require_materialized_view_population(name: &str, populated: bool) -> Result<(), SQLError> {
     if populated {
@@ -113,6 +116,7 @@ pub struct ViewRewriteDefinition {
     pub options: Vec<(String, String)>,
     pub kind: StoredViewKind,
     pub materialized_column_types: Vec<Option<crate::ColumnType>>,
+    pub materialized_column_collations: Option<Vec<u32>>,
 }
 
 impl ViewRewriteDefinition {
@@ -123,18 +127,12 @@ impl ViewRewriteDefinition {
         resolution: super::resolution::RelationNameResolution,
     ) -> Result<crate::RowSchema, crate::SQLError> {
         use crate::catalog::view::{create_view_output_columns, named_view_schema};
-        use crate::SQLError;
         if self.kind == StoredViewKind::Materialized {
-            let output_columns = self.output_columns.clone().unwrap_or_default();
-            if output_columns.len() != self.materialized_column_types.len() {
-                return Err(SQLError::Internal(
-                    "stored materialized view column metadata is inconsistent".into(),
-                ));
-            }
-            return Ok(crate::RowSchema::with_types(
-                output_columns,
-                self.materialized_column_types.clone(),
-            ));
+            return materialized_view_schema(
+                self.output_columns.as_deref().unwrap_or_default(),
+                &self.materialized_column_types,
+                self.materialized_column_collations.as_deref(),
+            );
         }
         let query_schema = crate::binding::analyze_query_plan_schema_with_catalog(
             routines,

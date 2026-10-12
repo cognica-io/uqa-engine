@@ -28,6 +28,8 @@ use uqa_sql::{
     RowSchema, SQLError, SQLParam,
 };
 
+mod collations;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Failure {
     None,
@@ -72,6 +74,7 @@ fn view(object_id: u8, persistence: RelationPersistence) -> StoredView {
             kind: StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }
