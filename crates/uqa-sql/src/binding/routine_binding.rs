@@ -749,6 +749,7 @@ impl SchemaScope {
             binding.as_ref(),
             args,
             &argument_types,
+            params,
             explicit_variadic,
             &resolver,
         )? {

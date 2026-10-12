@@ -59,17 +59,25 @@ pub(crate) fn resolve_array_transform_call(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
+    params: &[SQLParam],
     explicit_variadic: bool,
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ResolvedArrayTransformCall>, SQLError> {
     if !is_function(name) {
         return Ok(None);
     }
+    let effective = argument_types_with_parameters(
+        name,
+        args,
+        argument_types,
+        params,
+        &ProductionControl::uncontrolled(),
+    )?;
     let (overload, positions) = match select_overload(
         name,
         binding,
         args,
-        argument_types,
+        &effective,
         explicit_variadic,
         Some(resolver),
     )? {
@@ -266,8 +274,8 @@ fn argument_names_with_control<'a>(
     Ok(names.finish()?)
 }
 
-/// Runtime scalar values without a declared SQL type still take Boolean context
-/// in option slots. Explicit PREPARE or routine parameter types stay authoritative.
+/// Unknown string and NULL parameters take Boolean context in option slots.
+/// Other scalar values and explicitly declared parameter types stay authoritative.
 pub(super) fn argument_types_with_parameters(
     name: &str,
     args: &[ScalarExpr],
@@ -286,7 +294,7 @@ pub(super) fn argument_types_with_parameters(
             .is_some_and(|positions| positions[index] > 0)
             && matches!(named_argument_value(argument), ScalarExpr::Param(index)
                 if index.checked_sub(1).and_then(|index| params.get(index))
-                    .is_some_and(|parameter| parameter.declared_scalar_type().is_none()));
+                    .is_some_and(|parameter| matches!(parameter, SQLParam::Scalar(Value::Str(_) | Value::Null))));
         let ty = if untyped_option { None } else { ty.as_ref() };
         effective.push_produced(match ty {
             Some(ty) => {
@@ -372,6 +380,13 @@ pub(super) fn bind_call(
         .map(|argument| super::scalar_type_inner(argument.value, schema, params, resolver))
         .collect::<Result<Vec<_>, _>>();
     if let Ok(SelectedOverload::User(resolved)) = argument_types.and_then(|argument_types| {
+        let argument_types = argument_types_with_parameters(
+            &name,
+            args,
+            &argument_types,
+            params,
+            &ProductionControl::uncontrolled(),
+        )?;
         select_overload(
             &name,
             None,

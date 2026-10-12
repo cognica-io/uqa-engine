@@ -16,7 +16,7 @@ mod immutable;
 pub(super) use immutable::{
     eval_postgres_immutable_with_control, eval_postgres_integer_base_with_control,
 };
-mod subscripts;
+pub(super) mod subscripts;
 pub(super) use arrays::{eval_postgres_arrays_with_catalog, eval_postgres_arrays_with_control};
 pub(super) use subscripts::eval_postgres_subscript_with_control;
 use uqa_core::memory::{Produced, ProductionControl};

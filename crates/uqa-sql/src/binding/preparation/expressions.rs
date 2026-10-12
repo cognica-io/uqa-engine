@@ -99,6 +99,21 @@ impl Preparation<'_> {
             ..
         } = expression
         {
+            if let Some(access) = binding.dispatch.and_then(|dispatch| {
+                crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+                    matches!(args[index], ScalarExpr::Literal(Value::Null))
+                })
+            }) {
+                let access = access?;
+                if binding.dispatch == Some(crate::ast::FunctionDispatch::ArraySlices) {
+                    let mut selected = binding.clone();
+                    selected.dispatch = Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(
+                        access.slice_bounds().expect("slice bounds"),
+                    ));
+                    self.parameters.retain_call(expression, &selected);
+                }
+                return self.array_access(access, args, input, subqueries);
+            }
             if let Some(crate::ast::FunctionDispatch::BooleanTest(test)) = binding.dispatch {
                 let [argument] = args.as_slice() else {
                     return Err(SQLError::Internal("Boolean test takes one input".into()));

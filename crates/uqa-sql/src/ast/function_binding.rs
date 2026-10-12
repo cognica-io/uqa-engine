@@ -93,6 +93,8 @@ pub enum FunctionDispatch {
     VariadicArgument,
     ArraySubscripts,
     ArraySlices,
+    /// Slice syntax with independently retained omitted endpoints.
+    ArraySlicesWithBounds(super::ArraySliceBounds),
     Subscript,
     Slice,
     /// `(expression).field`: the field of a composite value, or the key of a document map.
@@ -222,7 +224,7 @@ impl FunctionDispatch {
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",
-            Self::ArraySlices | Self::Slice => "slice",
+            Self::ArraySlices | Self::ArraySlicesWithBounds(_) | Self::Slice => "slice",
             Self::FieldSelect => "field selection",
             Self::AnyOperator => "ANY operator",
             Self::AllOperator => "ALL operator",
@@ -420,6 +422,32 @@ pub enum RoutineVariadicMode {
 }
 
 impl FunctionBinding {
+    /// Preserve the predecessor format's encoded omission before an optimizer can fold supplied expressions to NULL.
+    #[doc(hidden)]
+    pub fn upgrade_legacy_array_slices(
+        binding: &mut Option<Self>,
+        arguments: usize,
+        is_bare_null: impl Fn(usize) -> bool,
+    ) -> bool {
+        let Some(binding) = binding
+            .as_mut()
+            .filter(|binding| binding.dispatch == Some(FunctionDispatch::ArraySlices))
+        else {
+            return false;
+        };
+        let Some(Ok(access)) = super::ArrayAccess::from_dispatch(
+            FunctionDispatch::ArraySlices,
+            arguments,
+            is_bare_null,
+        ) else {
+            return false;
+        };
+        binding.dispatch = Some(FunctionDispatch::ArraySlicesWithBounds(
+            access.slice_bounds().expect("slice bounds"),
+        ));
+        true
+    }
+
     /// Construct the identity marker used when `PostgreSQL` parses a polymorphic syntax expression instead of an ordinary function call.
     #[must_use]
     pub fn polymorphic_builtin_syntax(name: &str) -> Self {

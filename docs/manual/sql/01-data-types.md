@@ -57,7 +57,7 @@ Serial declarations allocate generated integer values through an owned sequence.
 
 ## Array dimensions and input
 
-Array values retain their actual dimensions and lower bounds. Repeated brackets such as `integer[][]` record a declaration's dimensions but do not enforce the value's rank; both `integer[]` and `integer[][]` accept `{{1,2},{3,4}}` and convert each leaf to integer. Explicit bounds such as `[-2:-1][4:5]={{1,2},{3,4}}` survive compatible casts, assignment and reopen. Element modifiers apply to each scalar value, so `{{1.235,NULL}}` cast to `numeric(5,2)[][]` becomes `{{1.24,NULL}}`. Invalid integer leaves report `22P02` with the integer input diagnostic.
+Array values retain their actual dimensions and lower bounds. Repeated brackets such as `integer[][]` record a declaration's dimensions but do not enforce the value's rank; both `integer[]` and `integer[][]` accept `{{1,2},{3,4}}` and convert each leaf to integer. Explicit bounds such as `[-2:-1][4:5]={{1,2},{3,4}}` survive compatible casts, assignment and reopen. Element modifiers apply to each scalar value, so `{{1.235,NULL}}` cast to `numeric(5,2)[][]` becomes `{{1.24,NULL}}`. Invalid integer leaves report `22P02` with the integer input diagnostic. Routine argument identity also ignores declaration rank: `integer[]` and `integer[][]` select the same array overload. This applies to named element types as well, while the element type identity remains distinct and each value retains its own dimensions.
 
 ## Catalog vectors
 
@@ -261,6 +261,13 @@ The array overloads of `||` select a common element type before evaluating eithe
 ```sql
 SELECT array_length(ARRAY[10, 20, 30], 1) AS length;
 SELECT * FROM unnest(ARRAY['sql', 'graph']) AS item(value);
+```
+
+Use `a[index]` for an element and `a[lower:upper]` for a slice. A missing endpoint selects the original dimension boundary, while an explicitly supplied NULL endpoint makes the result NULL. Bounds use integer assignment coercion, including rounding numeric input; incompatible bound types report `42804`, and more than six indexed dimensions report `54000` after bound analysis. If any dimension uses a colon, every indexed dimension is treated as a slice. Result slices use lower bounds of one. At execution the array is evaluated once; a NULL array skips runtime bound evaluation. Otherwise every upper bound is evaluated in dimension order, then every lower bound, including after a bound yields NULL. Static input and constant-expression errors still precede execution.
+
+```sql execute
+SELECT (ARRAY[10, 20, 30])[:2] AS prefix,
+       (ARRAY[10, 20, 30])[NULL:2] AS null_slice;
 ```
 
 Array values are homogeneous under SQL coercion. A SQL `NULL` element remains distinct from an empty array.

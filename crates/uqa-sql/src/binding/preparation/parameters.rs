@@ -161,6 +161,7 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
     results::CollationResults,
+    BTreeMap<NonNull<ScalarExpr>, ColumnType>,
 );
 
 impl InputConstants {
@@ -207,7 +208,16 @@ impl InputConstants {
             *expression = constant;
         }
         self.3.apply(identity, expression)?;
-        self.4.apply(identity, expression)
+        self.4.apply(identity, expression)?;
+        if let Some(target) = self.5.remove(&identity) {
+            let inner = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
+            *expression = ScalarExpr::Cast {
+                expr: Box::new(inner),
+                ty: target.catalog_name(),
+                implicit: true,
+            };
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -243,6 +253,7 @@ impl InputConstants {
             && self.2.is_empty()
             && self.3.is_empty()
             && self.4.is_empty()
+            && self.5.is_empty()
         {
             Ok(())
         } else {
@@ -271,6 +282,7 @@ impl InputConstants {
             && self.2.is_empty()
             && self.3.is_empty()
             && self.4.is_empty()
+            && self.5.is_empty()
         {
             Ok(())
         } else {
@@ -293,6 +305,12 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn retain_input_coercion(&mut self, expression: &ScalarExpr, target: ColumnType) {
+        if let Some(constants) = &mut self.input_constants {
+            constants.5.insert(NonNull::from(expression), target);
+        }
+    }
+
     pub(super) fn retain_result_collations(mut self) -> Self {
         if let Some(constants) = &mut self.input_constants {
             constants.4.enabled = true;
@@ -384,7 +402,13 @@ impl<'a> ParameterTypes<'a> {
         expression: &ScalarExpr,
         selected: &crate::ast::FunctionBinding,
     ) {
-        if !selected.builtin || crate::fixed_builtin_return_type(selected).is_some() {
+        if !selected.builtin
+            || crate::fixed_builtin_return_type(selected).is_some()
+            || matches!(
+                selected.dispatch,
+                Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(_))
+            )
+        {
             if let Some(constants) = &mut self.input_constants {
                 constants
                     .1

@@ -23,11 +23,11 @@ impl Deparser<'_> {
         let Some((array, indices)) = args.split_first() else {
             return Err(SQLError::Internal("array access has no operand".into()));
         };
-        if indices.is_empty()
-            || (dispatch == FunctionDispatch::ArraySlices && !indices.len().is_multiple_of(2))
-        {
-            return Err(SQLError::Internal("invalid array access bounds".into()));
-        }
+        let access = uqa_sql::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+            matches!(args[index], ScalarExpr::Literal(Value::Null))
+        })
+        .ok_or_else(|| SQLError::Internal("not an array access".into()))??;
+        access.validate_dimensions()?;
         let array_sql = self.expression(array, scope, subqueries)?;
         let mut rendered = if matches!(
             array,
@@ -38,30 +38,57 @@ impl Deparser<'_> {
             // Nested accesses need their own parentheses to preserve their dimensional grouping.
             format!("({array_sql})")
         };
-        if dispatch == FunctionDispatch::ArraySlices {
-            for bounds in indices.as_chunks::<2>().0 {
-                let lower = self.slice_bound(&bounds[0], scope, subqueries)?;
-                let upper = self.slice_bound(&bounds[1], scope, subqueries)?;
+        if access.slice_bounds().is_some() {
+            for (dimension, bounds) in indices.as_chunks::<2>().0.iter().enumerate() {
+                let lower = self.array_bound(
+                    &bounds[0],
+                    access.is_omitted(dimension * 2 + 1),
+                    scope,
+                    subqueries,
+                )?;
+                let upper = self.array_bound(
+                    &bounds[1],
+                    access.is_omitted(dimension * 2 + 2),
+                    scope,
+                    subqueries,
+                )?;
                 write!(rendered, "[{lower}:{upper}]").expect("writing to a String cannot fail");
             }
         } else {
             for index in indices {
-                write!(rendered, "[{}]", self.expression(index, scope, subqueries)?)
-                    .expect("writing to a String cannot fail");
+                write!(
+                    rendered,
+                    "[{}]",
+                    self.array_bound(index, false, scope, subqueries)?
+                )
+                .expect("writing to a String cannot fail");
             }
         }
         Ok(rendered)
     }
 
-    fn slice_bound(
+    fn array_bound(
         &self,
         bound: &ScalarExpr,
+        omitted: bool,
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
-        if matches!(bound, ScalarExpr::Literal(Value::Null)) {
+        if omitted {
             Ok(String::new())
         } else {
+            let mut bound = bound;
+            while let ScalarExpr::Cast {
+                expr,
+                implicit: true,
+                ..
+            } = bound
+            {
+                if matches!(expr.as_ref(), ScalarExpr::Literal(Value::Null)) {
+                    break;
+                }
+                bound = expr;
+            }
             self.expression(bound, scope, subqueries)
         }
     }

@@ -420,7 +420,7 @@ impl Expr {
                 filter,
                 ..
             } => {
-                for argument in args {
+                for argument in args.iter_mut() {
                     changed |= argument.upgrade_legacy_serialized_dispatches();
                 }
                 for order in order_by {
@@ -431,6 +431,11 @@ impl Expr {
                 }
                 changed |=
                     super::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+                changed |= super::FunctionBinding::upgrade_legacy_array_slices(
+                    binding,
+                    args.len(),
+                    |index| matches!(args[index], Expr::Literal(Value::Null)),
+                );
             }
             Self::Array(items)
             | Self::Row(items)

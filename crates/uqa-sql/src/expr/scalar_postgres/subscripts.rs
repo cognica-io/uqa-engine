@@ -21,9 +21,20 @@ pub(in crate::expr) fn eval_postgres_subscript_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if let Some(access) = crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+        matches!(args[index], Value::Null)
+    }) {
+        return Some((|| {
+            control.check()?;
+            super::super::array_access::eval_array_access_from_input(
+                access?,
+                &args[0],
+                control,
+                |index| Ok(&args[index]),
+            )
+        })());
+    }
     let evaluate = match dispatch {
-        FunctionDispatch::ArraySubscripts => eval_array_subscripts,
-        FunctionDispatch::ArraySlices => eval_array_slices,
         FunctionDispatch::Subscript => eval_subscript,
         FunctionDispatch::Slice => eval_slice,
         FunctionDispatch::FieldSelect => eval_field_select,
@@ -65,43 +76,31 @@ fn unit_bounds(count: usize, control: &ProductionControl<'_>) -> Result<Produced
     Ok(output.finish()?)
 }
 
-fn eval_array_subscripts(
-    args: &[Value],
+/// Bound absence belongs to the selected syntax, never to the value a supplied expression returns.
+pub(in crate::expr) fn eval_selected_array_access(
+    input: &Value,
+    indices: &[Value],
+    slice: Option<crate::ast::ArraySliceBounds>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    if args.len() < 2 {
-        return Err(SQLError::TypeMismatch(
-            "array subscripting requires at least one index".into(),
-        ));
-    }
-    if args.iter().any(|argument| matches!(argument, Value::Null)) {
+    if matches!(input, Value::Null) {
         return inline(Value::Null, control);
     }
-    let Some(array) = args[0].array_view() else {
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot subscript {:?}",
-            args[0]
-        )));
-    };
-    array_subscripts(array, &args[1..], control)
-}
-
-fn eval_array_slices(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    if args.len() < 3 || args.len().is_multiple_of(2) {
-        return Err(SQLError::TypeMismatch(
-            "array slicing requires lower/upper bound pairs".into(),
-        ));
-    }
-    let Some(array) = args[0].array_view() else {
-        if matches!(args[0], Value::Null) {
+    let array = input
+        .array_view()
+        .ok_or_else(|| SQLError::TypeMismatch(format!("cannot subscript {input:?}")))?;
+    for (position, value) in indices.iter().enumerate() {
+        let omitted =
+            slice.is_some_and(|bounds| bounds.is_omitted(position / 2, position % 2 == 0));
+        if !omitted && matches!(value, Value::Null) {
             return inline(Value::Null, control);
         }
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot slice {:?}",
-            args[0]
-        )));
-    };
-    array_slices(array, &args[1..], control)
+    }
+    if slice.is_some() {
+        array_slices(array, indices, slice, control)
+    } else {
+        array_subscripts(array, indices, control)
+    }
 }
 
 fn eval_subscript(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
@@ -261,6 +260,7 @@ fn array_subscripts(
 fn array_slices(
     array: &ArrayValue,
     bounds: &[Value],
+    omission: Option<crate::ast::ArraySliceBounds>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     let supplied_dimensions = bounds.len() / 2;
@@ -280,10 +280,12 @@ fn array_slices(
             .ok_or_else(|| SQLError::TypeMismatch("invalid array dimensions".into()))?;
         let (requested_lower, requested_upper) = if dimension < supplied_dimensions {
             let lower = match &bounds[dimension * 2] {
+                _ if omission.is_some_and(|bits| bits.is_omitted(dimension, true)) => array_lower,
                 Value::Null => array_lower,
                 value => to_i64_with_control(value, control)?,
             };
             let upper = match &bounds[dimension * 2 + 1] {
+                _ if omission.is_some_and(|bits| bits.is_omitted(dimension, false)) => array_upper,
                 Value::Null => array_upper,
                 value => to_i64_with_control(value, control)?,
             };

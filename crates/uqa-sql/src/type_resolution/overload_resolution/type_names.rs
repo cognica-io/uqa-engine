@@ -35,7 +35,7 @@ pub(in crate::type_resolution) fn canonical_routine_type_name_with_control(
         }
     }
     let compact = compact.finish()?;
-    if let Some(element) = compact.strip_suffix("[]") {
+    if let Some(element) = array_element_spelling(&compact, control)? {
         let element = canonical_routine_type_name_with_control(element, control)?;
         return control.format(format_args!("{}[]", element.as_str()));
     }
@@ -76,6 +76,23 @@ pub(in crate::type_resolution) fn canonical_routine_type_name_with_control(
         Ok(base)
     } else {
         control.copy_text(canonical)
+    }
+}
+
+fn array_element_spelling<'a>(
+    name: &'a str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<&'a str>, ValueRetentionError> {
+    let Some(mut element) = name.strip_suffix("[]") else {
+        return Ok(None);
+    };
+    loop {
+        control.check()?;
+        element = element.trim_end();
+        let Some(inner) = element.strip_suffix("[]") else {
+            return Ok(Some(element));
+        };
+        element = inner;
     }
 }
 
@@ -150,6 +167,9 @@ pub(in crate::type_resolution) fn canonical_column_type_name_with_control(
 ) -> Result<Produced<String>, ValueRetentionError> {
     // User-defined type spellings are neither unique across schemas nor stable across renames, so overload matching identifies them by OID.
     if let Some(identity) = ty.user_type_identity() {
+        if let Some(element) = array_element_spelling(&identity, control)? {
+            return control.format(format_args!("{element}[]"));
+        }
         return control.copy_text(&identity);
     }
     let name = ty.sql_name_with_control(control)?;

@@ -8,9 +8,12 @@
 
 use super::*;
 
+#[path = "array_transforms/bounds.rs"]
+mod bounds;
 #[path = "array_transforms/named_overloads.rs"]
 mod named_overloads;
 use uqa_engine::SQLParam;
+use uqa_sql::ColumnType;
 
 fn assert_query_error(
     engine: &Engine,
@@ -278,6 +281,30 @@ fn pg18_array_transforms_report_exact_overload_errors() {
         "42883",
         "function array_sort(integer[], text) does not exist",
     );
+}
+
+#[test]
+fn pg18_array_transforms_preserve_declared_parameter_types() {
+    let eng = engine();
+    for (parameter, name) in [
+        (
+            SQLParam::typed_scalar(Value::Str("true".into()), ColumnType::Text),
+            "text",
+        ),
+        (
+            SQLParam::typed_scalar(Value::Null, ColumnType::Text),
+            "text",
+        ),
+        (SQLParam::Scalar(Value::Int(1)), "integer"),
+    ] {
+        assert_query_error(
+            &eng,
+            "SELECT array_sort(ARRAY[2,1], $1)",
+            &[parameter],
+            "42883",
+            &format!("function array_sort(integer[], {name}) does not exist"),
+        );
+    }
 }
 
 #[test]

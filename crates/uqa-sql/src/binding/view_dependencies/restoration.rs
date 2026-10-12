@@ -18,10 +18,22 @@ pub fn upgrade_legacy_view_expressions(plan: &mut QueryPlan) -> Result<bool, cra
 pub fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
     let mut changed = false;
     plan.rewrite_scalar_expressions(&mut |expression| {
-        let crate::ScalarExpr::Func { name, binding, .. } = expression else {
+        let crate::ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = expression
+        else {
             return;
         };
         changed |= FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+        changed |= FunctionBinding::upgrade_legacy_array_slices(binding, args.len(), |index| {
+            matches!(
+                args[index],
+                crate::ScalarExpr::Literal(uqa_core::Value::Null)
+            )
+        });
     });
     plan.visit_sources_mut(&mut |source| match source {
         crate::plan::SourcePlan::Function { binding, args, .. } => {

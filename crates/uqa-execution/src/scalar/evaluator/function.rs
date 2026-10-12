@@ -74,6 +74,9 @@ fn evaluate_function(
     }) {
         return super::eval_between_symmetric(args, context, control);
     }
+    if let Some(result) = array_access(binding, args, context, control) {
+        return result;
+    }
     let arguments = eval_call_arguments_with_control(args, context, control)?;
     let arguments = if binding.is_none_or(|binding| binding.builtin) {
         match super::super::call_arguments::expand_variadic_any_arguments(
@@ -138,6 +141,23 @@ fn evaluate_function(
         )
     };
     ordinary_output(value, control)
+}
+
+fn array_access(
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>, SQLError>> {
+    let dispatch = binding.and_then(|binding| binding.dispatch)?;
+    let access = uqa_sql::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+        matches!(args[index], ScalarExpr::Literal(Value::Null))
+    })?;
+    Some(access.and_then(|access| {
+        uqa_sql::expr::eval_array_access_with_control(access, control, |index| {
+            eval_scalar_inner(&args[index], context, control)
+        })
+    }))
 }
 
 fn numeric(

@@ -8,7 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Implement PostgreSQL Boolean tests (`IS [NOT] TRUE`, `IS [NOT] FALSE` and `IS [NOT] UNKNOWN`), preserving NULL results, operand typing, validation order, once-only effects, stored definitions and typed catalog nodes.
+- Distinguish omitted array slice endpoints from supplied NULLs, preserve PostgreSQL integer-bound analysis and upper-before-lower effects, and retain the distinction through stored definitions and reopening. Preserve unknown scalar parameters in array calls while retaining declared argument types and exact input diagnostics.
+
+- Resolve routine array arguments independently of declared rank, including numeric and named element types; preserve PostgreSQL duplicate-signature checks, implicit element conversions and catalog output through reopening.
+
+- Implement PostgreSQL Boolean tests (`IS [NOT] TRUE`, `IS [NOT] FALSE` and `IS [NOT] UNKNOWN`), preserving NULL semantics, operand typing, validation order, once-only effects, stored definitions and typed catalog nodes.
 
 - Match analyzed `ON CONFLICT` expressions to their stored unique-index definitions, including partial indexes, while preserving explicit collations, casts, selected routines and PostgreSQL rejection diagnostics.
 

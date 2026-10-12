@@ -447,7 +447,9 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         if let Some(
-            dispatch @ (FunctionDispatch::ArraySubscripts | FunctionDispatch::ArraySlices),
+            dispatch @ (FunctionDispatch::ArraySubscripts
+            | FunctionDispatch::ArraySlices
+            | FunctionDispatch::ArraySlicesWithBounds(_)),
         ) = binding.and_then(|binding| binding.dispatch)
         {
             return self.array_subscripts(dispatch, args, scope, subqueries);
@@ -972,6 +974,7 @@ pub(super) fn prints_as_call(
         Some(
             FunctionDispatch::ArraySubscripts
                 | FunctionDispatch::ArraySlices
+                | FunctionDispatch::ArraySlicesWithBounds(_)
                 | FunctionDispatch::NumericOperator(_)
                 | FunctionDispatch::Collate { .. }
         )
