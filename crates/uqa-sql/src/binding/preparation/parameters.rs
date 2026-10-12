@@ -6,6 +6,7 @@
 
 //! Ordered parameter occurrences and their independently resolved SQL types.
 
+use crate::catalog::collations::derivation::Derivation;
 use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
 use std::{collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
@@ -15,8 +16,8 @@ mod collations;
 #[derive(Clone)]
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
-    /// Already-selected output metadata for direct bindings and retained clauses; absence uses the result type's default.
-    pub(super) selected_collation: Option<u32>,
+    /// Selected output and deferred collation diagnostics from the same typed children.
+    pub(super) derivation: Derivation,
     pub(super) record_fields: Option<crate::schema::RecordFields>,
     /// An anonymous ROW retains each analyzed input until a named cast selects its field coercions.
     pub(super) row_constructor: Option<Vec<Self>>,
@@ -30,10 +31,43 @@ pub(super) struct ExpressionType {
 }
 
 impl ExpressionType {
+    pub(super) fn default_collation(ty: Option<&ColumnType>) -> Derivation {
+        Derivation::implicit(ty.map_or(0, crate::catalog::type_metadata::pg_type_collation_oid))
+    }
+
+    pub(super) fn combined(ty: Option<ColumnType>, values: &[Self]) -> Self {
+        let selected = values.iter().fold(Derivation::None, |state, value| {
+            state.combine(value.derivation)
+        });
+        let mut result = Self::resolved(ty);
+        result.derivation = selected.result(result.derivation.oid());
+        result
+    }
+
+    pub(super) fn comparison(left: &Self, right: &Self) -> Derivation {
+        if let (Some(left), Some(right)) = (&left.row_constructor, &right.row_constructor) {
+            left.iter()
+                .zip(right)
+                .fold(Derivation::None, |state, (left, right)| {
+                    state.combine(left.derivation.combine(right.derivation).error_only())
+                })
+        } else {
+            left.derivation.combine(right.derivation).error_only()
+        }
+    }
+
+    pub(super) fn independent(ty: Option<ColumnType>, values: &[Self]) -> Self {
+        let mut result = Self::resolved(ty);
+        result.derivation = values.iter().fold(result.derivation, |state, value| {
+            state.combine(value.derivation.error_only())
+        });
+        result
+    }
+
     pub(super) fn resolved(ty: Option<ColumnType>) -> Self {
         Self {
+            derivation: Self::default_collation(ty.as_ref()),
             ty,
-            selected_collation: None,
             record_fields: None,
             row_constructor: None,
             occurrence: None,
@@ -46,7 +80,7 @@ impl ExpressionType {
     pub(super) fn unknown() -> Self {
         Self {
             ty: None,
-            selected_collation: None,
+            derivation: Derivation::None,
             record_fields: None,
             row_constructor: None,
             occurrence: None,
@@ -60,7 +94,7 @@ impl ExpressionType {
     pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
         Self {
             ty: None,
-            selected_collation: None,
+            derivation: Derivation::None,
             record_fields: None,
             row_constructor: None,
             occurrence: None,
@@ -76,6 +110,7 @@ impl ExpressionType {
 }
 
 pub(super) struct ParameterTypes<'a> {
+    pub(super) collations: super::collations::PendingCollations,
     types: Vec<Option<ColumnType>>,
     occurrences: Vec<(usize, Option<ColumnType>)>,
     input_constants: Option<InputConstants>,
@@ -228,7 +263,7 @@ impl<'a> ParameterTypes<'a> {
             constants.3.select(origin, value.collation, oid);
         }
         value.collation = Some(origin);
-        value.selected_collation = Some(oid);
+        value.derivation = value.derivation.explicit(i64::from(oid));
     }
 
     pub(super) fn retain_membership(
@@ -246,6 +281,7 @@ impl<'a> ParameterTypes<'a> {
             types: types.to_vec(),
             occurrences: Vec::new(),
             input_constants: None,
+            collations: super::collations::PendingCollations::default(),
             aliases: None,
             enum_labels: None,
             catalog_inputs: None,
@@ -296,8 +332,8 @@ impl<'a> ParameterTypes<'a> {
         let occurrence = self.occurrences.len();
         self.occurrences.push((index, ty.clone()));
         Ok(ExpressionType {
+            derivation: ExpressionType::default_collation(ty.as_ref()),
             ty,
-            selected_collation: None,
             record_fields: None,
             row_constructor: None,
             occurrence: Some(occurrence),
@@ -333,9 +369,12 @@ impl<'a> ParameterTypes<'a> {
             self.types[*index] = Some(target.clone());
             *observed = Some(target.clone());
         }
-        if !crate::schema::composites::type_is_collatable(&target) {
-            expression.selected_collation = None;
-        }
+        expression.derivation =
+            expression
+                .derivation
+                .result(crate::catalog::type_metadata::pg_type_collation_oid(
+                    &target,
+                ));
         expression.ty = Some(target);
         Ok(())
     }

@@ -10,6 +10,7 @@ use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
 use crate::ast::{BinaryOp, FunctionBinding};
+use crate::catalog::collations::derivation::Derivation;
 use uqa_core::Value;
 
 impl Preparation<'_> {
@@ -63,11 +64,24 @@ impl Preparation<'_> {
         Ok(selected)
     }
 
+    pub(super) fn expression(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<ExpressionType, SQLError> {
+        let value = self.expression_inner(expression, input, subqueries)?;
+        self.parameters
+            .collations
+            .record(expression, value.derivation);
+        Ok(value)
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one ordered dispatch covers every scalar expression"
     )]
-    pub(super) fn expression(
+    fn expression_inner(
         &mut self,
         expression: &ScalarExpr,
         input: &RowSchema,
@@ -108,7 +122,9 @@ impl Preparation<'_> {
                 })?;
                 let schema = self.query(query, Some(input))?;
                 let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
-                result.selected_collation = schema.column_collation(0);
+                if let Some(oid) = schema.column_collation(0) {
+                    result.derivation = Derivation::implicit(i64::from(oid));
+                }
                 result.record_fields = schema.record_fields(0).cloned();
                 return Ok(result);
             }
@@ -128,14 +144,19 @@ impl Preparation<'_> {
                     (ScalarExpr::Row(_), ScalarExpr::Row(_))
                 ) {
                     self.coerce_row_comparison(*op, &mut left, &mut right, false)?;
-                    Some(ColumnType::Boolean)
-                } else {
-                    Some(self.binary(*op, &mut left, &mut right)?)
+                    let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
+                    result.derivation = ExpressionType::comparison(&left, &right);
+                    return Ok(result);
                 }
+                let ty = self.binary(*op, &mut left, &mut right)?;
+                return Ok(ExpressionType::combined(Some(ty), &[left, right]));
             }
             ScalarExpr::Not(inner) => {
-                self.require_boolean(inner, input, subqueries, "NOT")?;
-                Some(ColumnType::Boolean)
+                let value = self.boolean_expression(inner, input, subqueries, "NOT")?;
+                return Ok(ExpressionType::independent(
+                    Some(ColumnType::Boolean),
+                    &[value],
+                ));
             }
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
                 let context = if matches!(expression, ScalarExpr::And(_)) {
@@ -143,14 +164,21 @@ impl Preparation<'_> {
                 } else {
                     "OR"
                 };
+                let mut selected = Derivation::None;
                 for item in items {
-                    self.require_boolean(item, input, subqueries, context)?;
+                    let value = self.boolean_expression(item, input, subqueries, context)?;
+                    selected = selected.combine(value.derivation.error_only());
                 }
-                Some(ColumnType::Boolean)
+                let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
+                result.derivation = selected;
+                return Ok(result);
             }
             ScalarExpr::IsNull { expr, .. } => {
-                self.expression(expr, input, subqueries)?;
-                Some(ColumnType::Boolean)
+                let value = self.expression(expr, input, subqueries)?;
+                return Ok(ExpressionType::independent(
+                    Some(ColumnType::Boolean),
+                    &[value],
+                ));
             }
             ScalarExpr::UnaryMinus(inner) => {
                 let inner = self.expression(inner, input, subqueries)?;
@@ -159,21 +187,31 @@ impl Preparation<'_> {
                         "-", "unknown",
                     ));
                 }
-                self.known_type(expression, input, subqueries)?
+                let ty = self.known_type(expression, input, subqueries)?;
+                return Ok(ExpressionType::independent(ty, &[inner]));
             }
             ScalarExpr::Array(items) => {
                 let mut items = items
                     .iter()
                     .map(|item| self.expression(item, input, subqueries))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.common(crate::type_resolution::CommonTypeContext::Array, &mut items)?
-                    .map(|element| ColumnType::Array(Box::new(element)))
+                let ty = self
+                    .common(crate::type_resolution::CommonTypeContext::Array, &mut items)?
+                    .map(|element| ColumnType::Array(Box::new(element)));
+                return Ok(ExpressionType::combined(ty, &items));
             }
             ScalarExpr::CompositeRow { items, binding, .. } => {
+                let mut selected = Derivation::None;
                 for item in items {
-                    self.expression(item, input, subqueries)?;
+                    selected = selected.combine(
+                        self.expression(item, input, subqueries)?
+                            .derivation
+                            .error_only(),
+                    );
                 }
-                Some(self.type_name(&binding.ty)?)
+                let mut result = ExpressionType::resolved(Some(self.type_name(&binding.ty)?));
+                result.derivation = selected;
+                return Ok(result);
             }
             ScalarExpr::Row(items) => return self.row_expression(items, input, subqueries),
             ScalarExpr::Between { .. }
@@ -183,7 +221,9 @@ impl Preparation<'_> {
             | ScalarExpr::InSubquery { .. }
             | ScalarExpr::Func { .. }
             | ScalarExpr::WindowCall { .. } => {
-                self.compound_expression(expression, input, subqueries)?
+                let mut result = self.compound_expression(expression, input, subqueries)?;
+                self.expression_record_fields(&mut result, expression, input, subqueries)?;
+                return Ok(result);
             }
             ScalarExpr::Column(_)
             | ScalarExpr::QualifiedColumn { .. }
@@ -196,7 +236,20 @@ impl Preparation<'_> {
             | ScalarExpr::Default => self.known_type(expression, input, subqueries)?,
         };
         let mut result = ExpressionType::resolved(ty);
-        result.selected_collation = input.input_collation(expression);
+        if let Some(oid) = input.input_collation(expression) {
+            result.derivation = Derivation::implicit(i64::from(oid));
+        }
+        self.expression_record_fields(&mut result, expression, input, subqueries)?;
+        Ok(result)
+    }
+
+    fn expression_record_fields(
+        &mut self,
+        result: &mut ExpressionType,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<(), SQLError> {
         if matches!(result.ty, Some(ColumnType::Record)) {
             result.record_fields = self.scope.bind_record_fields(
                 self.routines,
@@ -206,7 +259,7 @@ impl Preparation<'_> {
                 &self.parameters.values(),
             )?;
         }
-        Ok(result)
+        Ok(())
     }
 
     fn row_expression(
@@ -219,7 +272,7 @@ impl Preparation<'_> {
             .iter()
             .map(|item| self.expression(item, input, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
-        let mut value = ExpressionType::resolved(Some(ColumnType::Record));
+        let mut value = ExpressionType::independent(Some(ColumnType::Record), &fields);
         value.record_fields = Some(fields.iter().map(|field| field.ty.clone()).collect());
         value.row_constructor = Some(fields);
         Ok(value)
@@ -230,20 +283,21 @@ impl Preparation<'_> {
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<ColumnType>, SQLError> {
+    ) -> Result<ExpressionType, SQLError> {
         Ok(match expression {
             ScalarExpr::Between { expr, low, high } => {
                 let mut value = self.expression(expr, input, subqueries)?;
                 let mut low = self.expression(low, input, subqueries)?;
                 let mut high = self.expression(high, input, subqueries)?;
                 self.binary(BinaryOp::GreaterEqual, &mut value, &mut low)?;
+                let first = value.derivation.combine(low.derivation).error_only();
                 self.binary(BinaryOp::LessEqual, &mut value, &mut high)?;
-                Some(ColumnType::Boolean)
+                let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
+                result.derivation =
+                    first.combine(value.derivation.combine(high.derivation).error_only());
+                result
             }
-            ScalarExpr::InList { .. } => {
-                self.in_list(expression, input, subqueries)?;
-                Some(ColumnType::Boolean)
-            }
+            ScalarExpr::InList { .. } => self.in_list(expression, input, subqueries)?,
             ScalarExpr::Case {
                 base,
                 when,
@@ -262,7 +316,7 @@ impl Preparation<'_> {
                     error("XX000", "scalar subquery slot is outside its plan".into())
                 })?;
                 self.query(query, Some(input))?;
-                Some(ColumnType::Boolean)
+                ExpressionType::resolved(Some(ColumnType::Boolean))
             }
             ScalarExpr::InSubquery { expr, subquery, .. } => {
                 let mut value = self.expression(expr, input, subqueries)?;
@@ -271,8 +325,11 @@ impl Preparation<'_> {
                 })?;
                 let schema = self.query(query, Some(input))?;
                 let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
+                if let Some(oid) = schema.column_collation(0) {
+                    result.derivation = Derivation::implicit(i64::from(oid));
+                }
                 self.binary(BinaryOp::Equal, &mut value, &mut result)?;
-                Some(ColumnType::Boolean)
+                ExpressionType::combined(Some(ColumnType::Boolean), &[value, result])
             }
             ScalarExpr::Func { .. } => self.function_expression(expression, input, subqueries)?,
             ScalarExpr::WindowCall {
@@ -290,9 +347,9 @@ impl Preparation<'_> {
                 if self.schema_expression.is_some() {
                     self.window_specification(spec, input, subqueries)?;
                 }
-                self.known_type(expression, input, subqueries)?
+                ExpressionType::resolved(self.known_type(expression, input, subqueries)?)
             }
-            _ => self.known_type(expression, input, subqueries)?,
+            _ => ExpressionType::resolved(self.known_type(expression, input, subqueries)?),
         })
     }
 
@@ -301,7 +358,7 @@ impl Preparation<'_> {
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<ColumnType>, SQLError> {
+    ) -> Result<ExpressionType, SQLError> {
         let ScalarExpr::Func {
             order_syntax,
             name,
@@ -328,14 +385,12 @@ impl Preparation<'_> {
         };
         let mut arguments =
             self.observe_function_arguments(name, args, ordered, input, subqueries)?;
-        if !within_group {
-            for order in order_by {
-                self.expression(&order.expr, input, subqueries)?;
-            }
-        }
-        if let Some(filter) = filter {
-            self.require_boolean(filter, input, subqueries, "FILTER")?;
-        }
+        let additional = self.function_modifier_collations(
+            if within_group { &[] } else { order_by },
+            filter.as_deref(),
+            input,
+            subqueries,
+        )?;
         let selected = if within_group || super::super::ordered_calls::is_ordered_set(name) {
             self.select_ordered_function_arguments(name, binding, args, ordered, &arguments)?
         } else {
@@ -401,7 +456,12 @@ impl Preparation<'_> {
                 .or(binding),
             input,
         )?;
-        Ok(ty)
+        Ok(super::function_calls::collated_result(
+            ty,
+            &arguments.values,
+            binding,
+            additional,
+        ))
     }
 
     fn check_selected_scalar_modifiers(

@@ -24,7 +24,9 @@ impl Preparation<'_> {
             let previous = self.ctes(command.ctes(), outer)?;
             let result = self.command_inner(command);
             self.scope.restore_cte_schemas(previous);
-            result
+            let result = result?;
+            self.parameters.collations.validate_command(command)?;
+            Ok(result)
         })();
         self.scope.resolution.set_lookup_mode(lookup);
         result

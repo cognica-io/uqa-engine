@@ -7,7 +7,7 @@
 //! Assign input and result collations after expression typing and coercion.
 
 use super::{ColumnType, Expr, ExpressionContext, Field, Node, SQLError, TypedNode};
-use crate::catalog::collations::{builtin_collation_name, DEFAULT_COLLATION_OID};
+use crate::catalog::collations::{derivation::Derivation, DEFAULT_COLLATION_OID};
 use crate::catalog::type_metadata::{pg_type_modifier, pg_type_oid};
 
 impl ExpressionContext<'_> {
@@ -38,72 +38,6 @@ impl ExpressionContext<'_> {
             value.node = collate(value.node, i64::from(oid));
         }
         Ok(value)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Derivation {
-    None,
-    Implicit(i64),
-    Conflict(i64, i64),
-    Explicit(i64),
-}
-
-impl Derivation {
-    fn implicit(oid: i64) -> Self {
-        if oid == 0 {
-            Self::None
-        } else {
-            Self::Implicit(oid)
-        }
-    }
-
-    fn oid(self) -> i64 {
-        match self {
-            Self::None | Self::Conflict(..) => 0,
-            Self::Implicit(oid) | Self::Explicit(oid) => oid,
-        }
-    }
-
-    fn merge(self, next: Self) -> Result<Self, SQLError> {
-        Ok(match (self, next) {
-            (Self::Explicit(left), Self::Explicit(right)) if left != right => {
-                let name = |oid| {
-                    builtin_collation_name(oid)
-                        .ok_or_else(|| super::super::invalid("unknown collation identity"))
-                };
-                return Err(SQLError::Routine {
-                    sqlstate: "42P21".into(),
-                    message: format!(
-                        "collation mismatch between explicit collations \"{}\" and \"{}\"",
-                        name(left)?,
-                        name(right)?
-                    ),
-                });
-            }
-            (value @ Self::Explicit(_), _) | (_, value @ Self::Explicit(_)) => value,
-            (value @ Self::Conflict(..), _) | (_, value @ Self::Conflict(..)) => value,
-            (Self::None, value) | (value, Self::None) => value,
-            (Self::Implicit(left), Self::Implicit(right)) => {
-                if left == right || right == DEFAULT_COLLATION_OID {
-                    Self::Implicit(left)
-                } else if left == DEFAULT_COLLATION_OID {
-                    Self::Implicit(right)
-                } else {
-                    Self::Conflict(left, right)
-                }
-            }
-        })
-    }
-
-    fn result(self, declared: i64) -> Self {
-        if declared == 0 {
-            Self::None
-        } else if self == Self::None {
-            Self::Implicit(declared)
-        } else {
-            self
-        }
     }
 }
 

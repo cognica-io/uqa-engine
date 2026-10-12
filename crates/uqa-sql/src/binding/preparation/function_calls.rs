@@ -8,6 +8,7 @@
 
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionBinding};
+use crate::catalog::collations::derivation::Derivation;
 use crate::type_resolution::ResolvedFunctionOverload;
 
 pub(super) struct ObservedFunctionArguments {
@@ -356,4 +357,51 @@ fn ordered_result_type(
     matched.substitute_type(result).map(Some).ok_or_else(|| {
         SQLError::Internal("selected ordered-set result type remains polymorphic".into())
     })
+}
+
+/// Ordered and FILTER expressions are visited independently of a call's result collation.
+impl Preparation<'_> {
+    pub(super) fn function_modifier_collations(
+        &mut self,
+        orders: &[crate::ScalarOrder],
+        filter: Option<&ScalarExpr>,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<Derivation, SQLError> {
+        let mut selected = Derivation::None;
+        for order in orders {
+            selected = selected.combine(
+                self.expression(&order.expr, input, subqueries)?
+                    .derivation
+                    .error_only(),
+            );
+        }
+        if let Some(filter) = filter {
+            selected = selected.combine(
+                self.boolean_expression(filter, input, subqueries, "FILTER")?
+                    .derivation
+                    .error_only(),
+            );
+        }
+        Ok(selected)
+    }
+}
+
+pub(super) fn collated_result(
+    ty: Option<ColumnType>,
+    values: &[ExpressionType],
+    binding: Option<&FunctionBinding>,
+    additional: Derivation,
+) -> ExpressionType {
+    let mut value = ExpressionType::combined(ty, values);
+    if matches!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(crate::ast::FunctionDispatch::IsDistinct)
+    ) {
+        if let [left, right] = values {
+            value.derivation = ExpressionType::comparison(left, right);
+        }
+    }
+    value.derivation = value.derivation.combine(additional);
+    value
 }

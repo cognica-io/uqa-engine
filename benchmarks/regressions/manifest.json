@@ -2577,6 +2577,19 @@
       "capability": "Declared scan metadata without document reads",
       "workload": "An empty scored source with selected C/POSIX, a default text field and noncollatable system columns.",
       "invariant": "Schema construction preserves declared collation identities and never opens the document store; the fixture rejects any value read."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "computed_collations_and_deferred_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Prepared collation outputs and diagnostics",
+      "workload": "Thirty-eight PostgreSQL references for computed output selections, independent ROW fields, NULL/unknown coercion and type-versus-collation diagnostic ordering.",
+      "invariant": "Preparation preserves each selected output identity and the PostgreSQL SQLSTATE, message, detail and hint of every rejected query."
     }
   ]
 }

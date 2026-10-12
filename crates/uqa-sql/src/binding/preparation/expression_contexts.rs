@@ -10,6 +10,7 @@ use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
 use crate::ast::BinaryOp;
+use crate::catalog::collations::derivation::Derivation;
 use uqa_core::Value;
 
 impl Preparation<'_> {
@@ -57,7 +58,7 @@ impl Preparation<'_> {
                         }
                     }
                 }
-                ExpressionType::resolved(Some(target.clone()))
+                ExpressionType::combined(Some(target.clone()), &items)
             } else {
                 self.expression(expr, input, subqueries)?
             };
@@ -83,6 +84,7 @@ impl Preparation<'_> {
             return Ok(source);
         }
         let mut result = ExpressionType::resolved(Some(target.clone()));
+        result.derivation = source.derivation.result(result.derivation.oid());
         if target == ColumnType::Record {
             result.record_fields = source.record_fields;
             result.row_constructor = source.row_constructor;
@@ -97,27 +99,55 @@ impl Preparation<'_> {
         else_branch: Option<&ScalarExpr>,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<ColumnType>, SQLError> {
+    ) -> Result<ExpressionType, SQLError> {
         let mut base = base
             .map(|base| self.expression(base, input, subqueries))
             .transpose()?;
         if let Some(base) = &mut base {
             self.parameters.coerce_unknown(base, &ColumnType::Text)?;
         }
+        let base_error = base
+            .as_ref()
+            .map_or(Derivation::None, |value| value.derivation.error_only());
+        let mut conditions = Vec::new();
         let mut values = Vec::new();
-        for (condition, value) in when {
-            if let Some(base) = &mut base {
+        for (index, (condition, value)) in when.iter().enumerate() {
+            let selected = if let Some(base) = &mut base {
                 let mut condition = self.expression(condition, input, subqueries)?;
                 self.binary(BinaryOp::Equal, base, &mut condition)?;
+                base.derivation.combine(condition.derivation).error_only()
             } else {
-                self.require_boolean(condition, input, subqueries, "CASE/WHEN")?;
+                self.boolean_expression(condition, input, subqueries, "CASE/WHEN")?
+                    .derivation
+                    .error_only()
+            };
+            if matches!(selected, Derivation::InvalidExplicit(..)) {
+                conditions.push((index, selected));
             }
             values.push(self.expression(value, input, subqueries)?);
         }
         if let Some(other) = else_branch {
             values.insert(0, self.expression(other, input, subqueries)?);
         }
-        self.common(crate::type_resolution::CommonTypeContext::Case, &mut values)
+        let ty = self.common(crate::type_resolution::CommonTypeContext::Case, &mut values)?;
+        // ELSE participates first in common-type selection but last in collation assignment.
+        if else_branch.is_some() {
+            values.rotate_left(1);
+        }
+        let mut conditions = conditions.into_iter().peekable();
+        let mut selected = base_error;
+        for (index, value) in values.iter().enumerate() {
+            if conditions
+                .peek()
+                .is_some_and(|(position, _)| *position == index)
+            {
+                selected = selected.combine(conditions.next().unwrap().1);
+            }
+            selected = selected.combine(value.derivation);
+        }
+        let mut result = ExpressionType::resolved(ty);
+        result.derivation = selected.result(result.derivation.oid());
+        Ok(result)
     }
 
     pub(super) fn window_specification(

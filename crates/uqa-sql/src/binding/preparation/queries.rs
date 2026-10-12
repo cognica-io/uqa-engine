@@ -39,7 +39,12 @@ impl Preparation<'_> {
             let previous = self.ctes(&plan.ctes, outer)?;
             let result = self.root(&plan.root, outer, preserve_unknown);
             self.scope.restore_cte_schemas(previous);
-            result
+            let output = result?;
+            self.parameters.collations.validate_query(plan)?;
+            for value in &output.types {
+                value.derivation.validate()?;
+            }
+            Ok(output)
         })();
         self.scope.resolution.set_lookup_mode(lookup);
         result
@@ -305,7 +310,12 @@ impl Preparation<'_> {
                 for ((column, ty, collation), fields) in columns.into_iter().zip(fields) {
                     output.columns.push(column);
                     let mut value = ExpressionType::resolved(ty);
-                    value.selected_collation = collation;
+                    if let Some(oid) = collation {
+                        value.derivation =
+                            crate::catalog::collations::derivation::Derivation::implicit(
+                                i64::from(oid),
+                            );
+                    }
                     value.record_fields = fields;
                     output.types.push(value);
                 }

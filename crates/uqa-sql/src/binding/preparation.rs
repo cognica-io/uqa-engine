@@ -6,6 +6,7 @@
 
 //! Preparation-time semantic analysis with ordered parameter coercion.
 
+mod collations;
 mod commands;
 mod ctes;
 mod expression_contexts;
@@ -288,6 +289,10 @@ fn analyze_expression_inputs<'a>(
         .ty;
     analysis
         .parameters
+        .collations
+        .validate_expression(&expression.scalar)?;
+    analysis
+        .parameters
         .take_input_constants()
         .apply_expression_with_subqueries(&mut expression.scalar, &mut expression.subqueries)?;
     Ok(ty)
@@ -319,7 +324,9 @@ impl QueryOutput {
                     .ty
                     .as_ref()
                     .filter(|ty| crate::schema::composites::type_is_collatable(ty))
-                    .and(value.selected_collation)
+                    .map(|_| {
+                        u32::try_from(value.derivation.oid()).expect("selected collation is an OID")
+                    })
             }))
             .with_record_fields(self.types.iter().enumerate().filter_map(|(index, value)| {
                 value.record_fields.clone().map(|fields| (index, fields))
@@ -395,11 +402,22 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         context: &str,
     ) -> Result<(), SQLError> {
+        self.boolean_expression(expression, input, subqueries, context)
+            .map(|_| ())
+    }
+
+    fn boolean_expression(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        context: &str,
+    ) -> Result<ExpressionType, SQLError> {
         let mut observed = self.expression(expression, input, subqueries)?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
         let Some(mut ty) = observed.ty.as_ref() else {
-            return Ok(());
+            return Ok(observed);
         };
         while let ColumnType::Domain { base, .. } = ty {
             ty = base;
@@ -416,6 +434,6 @@ impl Preparation<'_> {
         if let ScalarExpr::Literal(value @ uqa_core::Value::Str(_)) = expression {
             crate::expr::cast_value(value, "boolean")?;
         }
-        Ok(())
+        Ok(observed)
     }
 }
