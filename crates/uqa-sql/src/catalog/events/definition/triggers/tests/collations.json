@@ -1,0 +1,119 @@
+[
+  {
+    "event": "INSERT",
+    "kind": "trigger",
+    "sql": "CREATE TRIGGER trigger_insert BEFORE INSERT ON items FOR EACH ROW WHEN (NEW.c IS NULL AND NEW.p IS NULL AND NEW.plain IS NULL AND NEW.n IS NULL) EXECUTE FUNCTION fired()",
+    "variables": [
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "kind": "trigger",
+    "sql": "CREATE TRIGGER trigger_update BEFORE UPDATE ON items FOR EACH ROW WHEN (OLD.c IS NULL AND OLD.p IS NULL AND OLD.plain IS NULL AND OLD.n IS NULL AND NEW.c IS NULL AND NEW.p IS NULL AND NEW.plain IS NULL AND NEW.n IS NULL) EXECUTE FUNCTION fired()",
+    "variables": [
+      {
+        "relation": 1,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 1,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 1,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 1,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "DELETE",
+    "kind": "trigger",
+    "sql": "CREATE TRIGGER trigger_delete BEFORE DELETE ON items FOR EACH ROW WHEN (OLD.c IS NULL AND OLD.p IS NULL AND OLD.plain IS NULL AND OLD.n IS NULL) EXECUTE FUNCTION fired()",
+    "variables": [
+      {
+        "relation": 1,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 1,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 1,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 1,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  }
+]

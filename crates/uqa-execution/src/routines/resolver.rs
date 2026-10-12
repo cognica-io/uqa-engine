@@ -72,6 +72,7 @@ impl DatumResolver<'_> {
             _ => self.values[index].clone(),
         };
         ResolvedVariable {
+            collation_oid: None,
             value,
             declared_type: self.datum_type(index).map(|ty| ty.catalog_name()),
         }
@@ -86,12 +87,14 @@ impl VariableResolver for DatumResolver<'_> {
         if let Some((state, message)) = self.error {
             if name.eq_ignore_ascii_case("sqlstate") {
                 return Ok(Some(ResolvedVariable {
+                    collation_oid: None,
                     value: Value::Str(state.clone()),
                     declared_type: Some("text".into()),
                 }));
             }
             if name.eq_ignore_ascii_case("sqlerrm") {
                 return Ok(Some(ResolvedVariable {
+                    collation_oid: None,
                     value: Value::Str(message.clone()),
                     declared_type: Some("text".into()),
                 }));
@@ -117,6 +120,7 @@ impl VariableResolver for DatumResolver<'_> {
                         .map(|(_, value)| value.clone());
                     match value {
                         Some(value) => Ok(Some(ResolvedVariable {
+                            collation_oid: None,
                             value,
                             declared_type: self
                                 .record_field_type(idx, column)

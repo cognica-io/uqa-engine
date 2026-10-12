@@ -70,13 +70,8 @@ impl RuntimeRuleResolver<'_> {
         doc_id: Option<DocId>,
         column: &str,
     ) -> Result<Expr, SQLError> {
-        let (metadata, value) = self.field(record, doc_id, column)?;
-        Ok(Expr::TypedLiteral {
-            value,
-            ty: metadata.ty.catalog_name(),
-            collation_oid: metadata.collation_oid,
-            composite_source: None,
-        })
+        self.record_field(record, doc_id, column)
+            .map(ResolvedVariable::into_expression)
     }
 
     pub(super) fn record_field(
@@ -87,6 +82,7 @@ impl RuntimeRuleResolver<'_> {
     ) -> Result<ResolvedVariable, SQLError> {
         let (metadata, value) = self.field(record, doc_id, column)?;
         Ok(ResolvedVariable {
+            collation_oid: metadata.collation_oid,
             value,
             declared_type: Some(metadata.ty.catalog_name()),
         })
@@ -138,24 +134,6 @@ impl RuntimeRuleResolver<'_> {
 }
 
 impl VariableResolver for RuntimeRuleResolver<'_> {
-    fn rewrite_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Expr>, SQLError> {
-        if qualifier.eq_ignore_ascii_case("old") {
-            return self
-                .field_expression(self.old, self.old_doc_id, column)
-                .map(Some);
-        }
-        if qualifier.eq_ignore_ascii_case("new") {
-            return self
-                .field_expression(self.new, self.new_doc_id, column)
-                .map(Some);
-        }
-        Ok(None)
-    }
-
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         if name.eq_ignore_ascii_case("old") {
             return self.record(self.old, self.old_doc_id).map(Some);

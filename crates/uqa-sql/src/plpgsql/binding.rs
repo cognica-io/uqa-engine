@@ -14,6 +14,8 @@ use crate::ast::InternalColumnRef;
 pub struct ResolvedVariable {
     pub value: Value,
     pub declared_type: Option<String>,
+    /// Selected implicit collation of a declared variable or event field. Absence preserves the declared type's default.
+    pub collation_oid: Option<u32>,
 }
 
 impl ResolvedVariable {
@@ -22,13 +24,14 @@ impl ResolvedVariable {
         Self {
             value,
             declared_type: None,
+            collation_oid: None,
         }
     }
 
     pub(crate) fn into_expression(self) -> Expr {
         match self.declared_type {
             Some(ty) => Expr::TypedLiteral {
-                collation_oid: None,
+                collation_oid: self.collation_oid,
                 composite_source: None,
                 value: self.value,
                 ty,

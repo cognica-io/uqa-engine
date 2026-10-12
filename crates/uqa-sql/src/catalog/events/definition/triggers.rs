@@ -25,7 +25,16 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::{RelationIdentity, Value};
 
+#[cfg(test)]
+mod tests;
+
 impl EventAnalysisContext<'_> {
+    pub fn trigger_relation_definitions(&self, name: &str) -> Result<Vec<ColumnDef>, SQLError> {
+        let (relation, kind) =
+            self.resolve_trigger_relation_kind(name, RelationLookupMode::Bound)?;
+        self.trigger_relation_columns(&relation, kind)
+    }
+
     pub fn resolve_trigger_table(&self, name: &str) -> Result<RelationIdentity, SQLError> {
         let RelationResolution::Found(canonical, kind) =
             self.relations.resolve_bound_relation_kind(name)?
@@ -63,10 +72,7 @@ impl EventAnalysisContext<'_> {
                 .catalog
                 .foreign_columns(relation)
                 .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
-            return Ok(columns
-                .into_iter()
-                .map(|column| trigger_column(column.name, column.ty))
-                .collect());
+            return Ok(columns);
         }
         let view = self
             .catalog
@@ -78,13 +84,15 @@ impl EventAnalysisContext<'_> {
             .iter()
             .enumerate()
             .map(|(position, name)| {
-                trigger_column(
+                let mut column = ColumnDef::nullable(
                     schema.public_name(position).unwrap_or(name).to_string(),
                     schema
                         .column_type(position)
                         .cloned()
                         .unwrap_or(ColumnType::Text),
-                )
+                );
+                column.collation_oid = schema.column_collation(position);
+                column
             })
             .collect())
     }
@@ -527,38 +535,5 @@ impl EventAnalysisContext<'_> {
             None,
         )?;
         Ok(changed)
-    }
-}
-
-fn trigger_column(name: String, ty: ColumnType) -> ColumnDef {
-    ColumnDef {
-        collation_oid: None,
-        name,
-        ty,
-        object_id: None,
-        attribute_number: None,
-        missing_value: None,
-        primary_key: false,
-        not_null: false,
-        not_null_explicit: false,
-        not_null_name: None,
-        not_null_identity: None,
-        not_null_validated: true,
-        not_null_no_inherit: false,
-        not_null_is_local: true,
-        auto_increment: None,
-        unique: false,
-        default: None,
-        generated: None,
-        check: None,
-        check_name: None,
-        check_enforced: true,
-        check_validated: true,
-        check_no_inherit: false,
-        check_is_local: true,
-        check_object_id: None,
-        check_catalog_oid: None,
-        default_catalog_oid: None,
-        references: None,
     }
 }

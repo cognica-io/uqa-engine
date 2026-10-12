@@ -149,7 +149,8 @@ impl EventRelationCatalog for Catalog {
         panic!("unexpected view entry read")
     }
     fn foreign_columns(&self, _: &RelationIdentity) -> Option<Vec<ColumnDef>> {
-        panic!("unexpected foreign entry read")
+        assert_eq!(self.kind, "foreign table", "unexpected foreign entry read");
+        Some(self.columns.clone().expect("unexpected foreign entry read"))
     }
     fn restored_catalog_view_definition(&self, _: &str) -> Result<Option<StoredView>, SQLError> {
         panic!("unexpected restored view read")

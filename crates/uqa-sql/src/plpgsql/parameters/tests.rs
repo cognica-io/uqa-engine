@@ -10,6 +10,7 @@ struct Variables(i64);
 impl VariableResolver for Variables {
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok((name == "v").then(|| ResolvedVariable {
+            collation_oid: None,
             value: Value::Int(self.0),
             declared_type: Some("integer".into()),
         }))

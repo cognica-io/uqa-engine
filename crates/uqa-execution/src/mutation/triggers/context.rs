@@ -14,7 +14,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{
-    ast::{ColumnType, TriggerEvent, TriggerTiming},
+    ast::{ColumnDef, ColumnType, TriggerEvent, TriggerTiming},
     catalog::events::StoredTrigger,
     routines::SQLUserFunction,
     semantics::{partition::PartitionCatalog, referential::ReferentialCatalog},
@@ -24,7 +24,14 @@ use uqa_sql::{
 /// Trigger definitions and relation row types observed by the active command.
 pub trait TriggerCatalog {
     fn has_row_triggers(&self, table: &str, event: TriggerEvent) -> Result<bool, SQLError>;
-    fn rule_relation_columns(&self, table: &str) -> Result<Vec<(String, ColumnType)>, SQLError>;
+    fn trigger_relation_definitions(&self, table: &str) -> Result<Vec<ColumnDef>, SQLError>;
+    fn rule_relation_columns(&self, table: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
+        Ok(self
+            .trigger_relation_definitions(table)?
+            .into_iter()
+            .map(|column| (column.name, column.ty))
+            .collect())
+    }
     fn triggers_for(
         &self,
         table: &str,

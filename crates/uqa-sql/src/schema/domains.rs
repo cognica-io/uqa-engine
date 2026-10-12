@@ -141,6 +141,7 @@ impl VariableResolver for DomainValueResolver<'_> {
             return Err(SQLError::UnknownColumn(name.into()));
         }
         Ok(Some(ResolvedVariable {
+            collation_oid: None,
             value: Value::Null,
             declared_type: Some(self.0.catalog_name()),
         }))

@@ -13,7 +13,12 @@ use super::{
 pub(super) struct TriggerVariableResolver<'a> {
     pub(super) old: &'a Value,
     pub(super) new: &'a Value,
-    pub(super) types: &'a BTreeMap<String, String>,
+    pub(super) columns: &'a BTreeMap<String, TriggerColumnMetadata>,
+}
+
+pub(super) struct TriggerColumnMetadata {
+    type_name: String,
+    collation_oid: Option<u32>,
 }
 
 impl TriggerVariableResolver<'_> {
@@ -32,9 +37,11 @@ impl TriggerVariableResolver<'_> {
                 })
             }
         };
+        let metadata = self.columns.get(column);
         Ok(ResolvedVariable {
+            collation_oid: metadata.and_then(|column| column.collation_oid),
             value,
-            declared_type: self.types.get(column).cloned(),
+            declared_type: metadata.map(|column| column.type_name.clone()),
         })
     }
 }
@@ -63,15 +70,21 @@ impl VariableResolver for TriggerVariableResolver<'_> {
     }
 }
 
-pub(super) fn trigger_column_types(
-    context: &TriggerContext<'_>,
-    table: &str,
-) -> Result<BTreeMap<String, String>> {
-    let columns = context.catalog.rule_relation_columns(table)?;
-    Ok(columns
+pub(super) fn trigger_column_metadata(
+    columns: Vec<uqa_sql::ast::ColumnDef>,
+) -> BTreeMap<String, TriggerColumnMetadata> {
+    columns
         .into_iter()
-        .map(|(name, ty)| (name, ty.sql_name()))
-        .collect())
+        .map(|column| {
+            (
+                column.name,
+                TriggerColumnMetadata {
+                    type_name: column.ty.catalog_name(),
+                    collation_oid: column.collation_oid,
+                },
+            )
+        })
+        .collect()
 }
 
 pub(super) fn trigger_record(

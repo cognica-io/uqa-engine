@@ -143,22 +143,6 @@ impl<'a> RuleRowTypeResolver<'a> {
 }
 
 impl VariableResolver for RuleRowTypeResolver<'_> {
-    fn rewrite_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Expr>, SQLError> {
-        let Some(definition) = self.record_definition(qualifier, column)? else {
-            return Ok(None);
-        };
-        Ok(Some(Expr::TypedLiteral {
-            value: Value::Null,
-            ty: definition.ty.catalog_name(),
-            collation_oid: definition.collation_oid,
-            composite_source: None,
-        }))
-    }
-
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         if self.condition && unavailable_rule_row(self.event, name) {
             return Err(SQLError::UnknownColumn(name.into()));
@@ -176,6 +160,7 @@ impl VariableResolver for RuleRowTypeResolver<'_> {
         Ok(self
             .record_definition(qualifier, column)?
             .map(|definition| ResolvedVariable {
+                collation_oid: definition.collation_oid,
                 value: Value::Null,
                 declared_type: Some(definition.ty.catalog_name()),
             }))
@@ -219,6 +204,7 @@ impl VariableResolver for TriggerConditionTypeResolver<'_> {
             .iter()
             .find(|definition| definition.name == column)
             .map(|definition| ResolvedVariable {
+                collation_oid: definition.collation_oid,
                 value: Value::Null,
                 declared_type: Some(definition.ty.catalog_name()),
             }))

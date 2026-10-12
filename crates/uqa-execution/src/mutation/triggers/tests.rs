@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod collations;
+
 #[test]
 fn validated_trigger_fields_preserve_every_admitted_byte() {
     let columns = [("c".into(), uqa_sql::ColumnType::InternalChar)];
