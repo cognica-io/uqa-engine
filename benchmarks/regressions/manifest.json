@@ -4049,6 +4049,21 @@
       "capability": "JSON binding diagnostics",
       "workload": "Bind a JSON path call with a declared Boolean path argument through the infallible scalar-binding adapter.",
       "invariant": "The call retains PostgreSQL 42883 metadata instead of panicking or silently becoming an executable unbound builtin."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "legacy_json_path_views_restore_selected_arrays_once",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_operators.rs",
+      "capability": "Stored JSON call restoration",
+      "workload": "Restore a predecessor scalar-path view on each persistent provider and reopen the result twice.",
+      "invariant": "The atomic metadata migration retains the selected native array and matches both PostgreSQL SQL forms and result values; the second open leaves persisted bytes unchanged."
     }
   ]
 }

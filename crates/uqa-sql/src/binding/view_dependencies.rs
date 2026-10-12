@@ -397,6 +397,7 @@ pub fn query_plan_has_legacy_routine_identity(plan: &QueryPlan) -> bool {
             legacy |= binding
                 .as_ref()
                 .is_some_and(function_binding_needs_object_identity);
+            legacy |= crate::type_resolution::json_path::requires_binding(name, binding.as_ref());
             // Legacy ordered-set nodes lack the selected combined signature and
             // written syntax; restore both in the existing initial-open transaction.
             legacy |= *order_syntax == crate::ast::FunctionOrderSyntax::Legacy

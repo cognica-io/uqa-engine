@@ -666,6 +666,14 @@ impl SchemaScope {
                 engine, name, binding, args, schema, subqueries, params,
             ) {
                 failure = Some(error);
+                return;
+            }
+            if !self.preserve_syntax_shape {
+                if let Err(error) =
+                    crate::type_resolution::json_path::normalize_retained(expression)
+                {
+                    failure = Some(error);
+                }
             }
         });
         failure.map_or(Ok(()), Err)?;
@@ -744,6 +752,23 @@ impl SchemaScope {
                 Some(&resolver),
             )?
             .map(|resolved| resolved.selected)
+        } else if crate::catalog::json_path::JsonPathFunction::lookup(name).is_some() {
+            crate::type_resolution::json_path::resolve_call(
+                name,
+                binding.as_ref(),
+                crate::type_resolution::RoutineCallDescriptor {
+                    argument_names: &argument_names,
+                    argument_types: &argument_types,
+                    explicit_variadic,
+                },
+                Some(&resolver),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .map(|selected| {
+                selected
+                    .into_uncontrolled()
+                    .expect("ordinary stored binding")
+            })
         } else if let Some(array) = crate::type_resolution::resolve_array_transform_call(
             name,
             binding.as_ref(),
