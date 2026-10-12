@@ -3825,6 +3825,19 @@
       "capability": "Host array parameter semantics",
       "workload": "The public Engine API binds explicitly typed text, typed NULL text and ordinary integer parameters in array option slots.",
       "invariant": "Declared scalar identity is preserved and incompatible options retain exact PostgreSQL resolution errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "pre_evaluated_array_bounds_coerce_without_copying_unselected_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/array_access/tests.rs",
+      "capability": "Borrowed array dispatch coercion",
+      "workload": "Already evaluated element/slice bounds use numeric rounding, omitted and supplied NULL bounds, invalid strings and integer overflow over a 4096-element input with a 512-byte result allowance.",
+      "invariant": "Direct dispatch shares PostgreSQL integer conversion without copying the unselected input; exact values and diagnostics are retained and every output/error releases its memory."
     }
   ]
 }

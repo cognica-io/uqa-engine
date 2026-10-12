@@ -21,18 +21,20 @@ pub(in crate::expr) fn eval_postgres_subscript_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    if let FunctionDispatch::ArraySlicesWithBounds(bounds) = dispatch {
+    if let Some(access) = crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+        matches!(args[index], Value::Null)
+    }) {
         return Some((|| {
             control.check()?;
-            let access = crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |_| false)
-                .expect("array slice dispatch")?;
-            access.validate_dimensions()?;
-            eval_selected_array_access(&args[0], &args[1..], Some(bounds), control)
+            super::super::array_access::eval_array_access_from_input(
+                access?,
+                &args[0],
+                control,
+                |index| Ok(&args[index]),
+            )
         })());
     }
     let evaluate = match dispatch {
-        FunctionDispatch::ArraySubscripts => eval_array_subscripts,
-        FunctionDispatch::ArraySlices => eval_array_slices,
         FunctionDispatch::Subscript => eval_subscript,
         FunctionDispatch::Slice => eval_slice,
         FunctionDispatch::FieldSelect => eval_field_select,
@@ -72,45 +74,6 @@ fn unit_bounds(count: usize, control: &ProductionControl<'_>) -> Result<Produced
         output.push_copy(1)?;
     }
     Ok(output.finish()?)
-}
-
-fn eval_array_subscripts(
-    args: &[Value],
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>> {
-    if args.len() < 2 {
-        return Err(SQLError::TypeMismatch(
-            "array subscripting requires at least one index".into(),
-        ));
-    }
-    if args.iter().any(|argument| matches!(argument, Value::Null)) {
-        return inline(Value::Null, control);
-    }
-    let Some(array) = args[0].array_view() else {
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot subscript {:?}",
-            args[0]
-        )));
-    };
-    array_subscripts(array, &args[1..], control)
-}
-
-fn eval_array_slices(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
-    if args.len() < 3 || args.len().is_multiple_of(2) {
-        return Err(SQLError::TypeMismatch(
-            "array slicing requires lower/upper bound pairs".into(),
-        ));
-    }
-    let Some(array) = args[0].array_view() else {
-        if matches!(args[0], Value::Null) {
-            return inline(Value::Null, control);
-        }
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot slice {:?}",
-            args[0]
-        )));
-    };
-    array_slices(array, &args[1..], None, control)
 }
 
 /// Bound absence belongs to the selected syntax, never to the value a supplied expression returns.

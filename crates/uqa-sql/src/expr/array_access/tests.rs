@@ -136,6 +136,75 @@ fn slice_values_match_null_absence_and_integer_rounding_references() {
 }
 
 #[test]
+fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
+    let input = Value::Array(ArrayValue::try_new((1..=4096).map(Value::Int).collect()).unwrap());
+    let budget = MemoryBudget::new(512);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (sql, bounds, expected) in [
+        ("SELECT a[2.8]", vec![Value::Float(2.8)], Value::Int(3)),
+        (
+            "SELECT a[:2.8]",
+            vec![Value::Null, Value::Float(2.8)],
+            values(),
+        ),
+        (
+            "SELECT a[NULL:2.8]",
+            vec![Value::Null, Value::Float(2.8)],
+            Value::Null,
+        ),
+    ] {
+        let (
+            Expr::Func {
+                binding: Some(binding),
+                ..
+            },
+            _,
+        ) = syntax(sql)
+        else {
+            unreachable!()
+        };
+        let mut arguments = vec![input.clone()];
+        arguments.extend(bounds);
+        let result = crate::expr::scalar_postgres::eval_dispatched_postgres_function_with_control(
+            binding.dispatch.unwrap(),
+            &arguments,
+            &control,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(*result, expected, "{sql}");
+        assert_eq!(budget.used(), result.reserved_bytes());
+        drop(result);
+        assert_eq!(budget.used(), 0);
+    }
+    let (
+        Expr::Func {
+            binding: Some(binding),
+            ..
+        },
+        _,
+    ) = syntax("SELECT a[:1]")
+    else {
+        unreachable!()
+    };
+    for (upper, state) in [
+        (Value::Str("invalid".into()), "22P02"),
+        (Value::Int(i64::MAX), "22003"),
+    ] {
+        let error = crate::expr::scalar_postgres::eval_dispatched_postgres_function_with_control(
+            binding.dispatch.unwrap(),
+            &[input.clone(), Value::Null, upper],
+            &control,
+        )
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn array_access_preserves_null_array_prefix_and_upper_before_lower_effects() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();
