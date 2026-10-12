@@ -3838,6 +3838,58 @@
       "capability": "Borrowed array dispatch coercion",
       "workload": "Already evaluated element/slice bounds use numeric rounding, omitted and supplied NULL bounds, invalid strings and integer overflow over a 4096-element input with a 512-byte result allowance.",
       "invariant": "Direct dispatch shares PostgreSQL integer conversion without copying the unselected input; exact values and diagnostics are retained and every output/error releases its memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_array_access_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/subscripts.rs",
+      "capability": "Typed array catalog nodes",
+      "workload": "Thirty-five independently captured array reads and slices cover omission, NULL, assignment casts, all six dimensions, vectors, named element types, modifiers and collations.",
+      "invariant": "Exact typed nodes and both SQL renderings preserve container, element and result identity and do not collapse omitted endpoints into NULL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_array_access_preserves_postgresql_analysis_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/subscripts.rs",
+      "capability": "Array catalog analysis order",
+      "workload": "Five independent PostgreSQL diagnostics cover invalid endpoint values/types, non-array input and excessive dimensionality.",
+      "invariant": "Written endpoint analysis precedes the six-dimension error and retains exact SQLSTATE and primary messages."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_array_reconstruction_rejects_ambiguous_bounds_and_result_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/subscripts.rs",
+      "capability": "Array catalog node validation",
+      "workload": "Malformed read nodes carry empty/missing endpoints, mismatched lower dimensions, invalid or inconsistent OIDs and an assignment payload.",
+      "invariant": "Both render modes reject ambiguous or inconsistent array nodes rather than silently changing their meaning."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "subscripted_attribute_nodes_and_sql_match_postgresql_after_column_drop",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/collations/columns.rs",
+      "capability": "Array column identity and collation",
+      "workload": "Eight independent table checks use a dropped attribute slot, numeric endpoints, nested reads, inherited and explicit collations and casts of subscript results.",
+      "invariant": "Both typed nodes and reconstructed SQL preserve original attribute numbers, integer assignment context, selected collations and cast grouping."
     }
   ]
 }

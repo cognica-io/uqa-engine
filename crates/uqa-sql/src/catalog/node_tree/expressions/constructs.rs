@@ -22,6 +22,9 @@ impl ExpressionContext<'_> {
         binding: Option<&FunctionBinding>,
         args: &[Expr],
     ) -> Result<Option<TypedNode>, SQLError> {
+        if let Some(value) = self.array_construct(binding, args)? {
+            return Ok(Some(value));
+        }
         match binding.and_then(|binding| binding.dispatch) {
             Some(FunctionDispatch::BooleanTest(test)) => {
                 return self.boolean_test(args, test).map(Some);
@@ -32,34 +35,9 @@ impl ExpressionContext<'_> {
             Some(FunctionDispatch::NumericOperator(operator)) => {
                 return self.numeric_operator(operator, args).map(Some);
             }
-            Some(FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator) => {
-                let [lhs, rhs, Expr::Literal(Value::Str(operator))] = args else {
-                    return Err(SQLError::Internal(
-                        "invalid quantified operator arguments".into(),
-                    ));
-                };
-                let op = match operator.as_str() {
-                    "=" => BinaryOp::Equal,
-                    "<>" | "!=" => BinaryOp::NotEqual,
-                    "<" => BinaryOp::Less,
-                    "<=" => BinaryOp::LessEqual,
-                    ">" => BinaryOp::Greater,
-                    ">=" => BinaryOp::GreaterEqual,
-                    _ => {
-                        return Err(SQLError::Unsupported(format!(
-                            "quantified operator {operator}"
-                        )))
-                    }
-                };
+            Some(dispatch @ (FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator)) => {
                 return self
-                    .scalar_array(
-                        op,
-                        lhs,
-                        rhs,
-                        binding.is_some_and(|binding| {
-                            binding.dispatch == Some(FunctionDispatch::AnyOperator)
-                        }),
-                    )
+                    .quantified_operator(args, dispatch == FunctionDispatch::AnyOperator)
                     .map(Some);
             }
             Some(FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct) => {
@@ -120,6 +98,28 @@ impl ExpressionContext<'_> {
             )
         };
         Ok(Some(TypedNode { node, ty }))
+    }
+
+    fn quantified_operator(&self, args: &[Expr], any: bool) -> Result<TypedNode, SQLError> {
+        let [lhs, rhs, Expr::Literal(Value::Str(operator))] = args else {
+            return Err(SQLError::Internal(
+                "invalid quantified operator arguments".into(),
+            ));
+        };
+        let op = match operator.as_str() {
+            "=" => BinaryOp::Equal,
+            "<>" | "!=" => BinaryOp::NotEqual,
+            "<" => BinaryOp::Less,
+            "<=" => BinaryOp::LessEqual,
+            ">" => BinaryOp::Greater,
+            ">=" => BinaryOp::GreaterEqual,
+            _ => {
+                return Err(SQLError::Unsupported(format!(
+                    "quantified operator {operator}"
+                )))
+            }
+        };
+        self.scalar_array(op, lhs, rhs, any)
     }
 
     fn boolean_test(

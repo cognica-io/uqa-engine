@@ -13,6 +13,7 @@ mod bodies;
 mod control;
 mod operators;
 mod rows;
+mod subscripts;
 
 pub use bodies::return_body;
 
@@ -91,6 +92,7 @@ impl Renderer<'_> {
                     .map(|name| crate::expr::quote_ident(&name))
             }
             "PARAM" => self.parameter(node),
+            "SUBSCRIPTINGREF" => self.array_access(node),
             "CONST" => self.constant(node),
             "COLLATEEXPR" => self.collate(node, outer),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
@@ -141,6 +143,12 @@ impl Renderer<'_> {
                     .iter()
                     .map(|arg| self.field(arg, self.pretty))
                     .collect::<Result<Vec<_>, _>>()?;
+                if elements.is_empty() {
+                    return Ok(format!(
+                        "ARRAY[]::{}",
+                        self.names.type_name(node.integer("array_typeid")?, -1)?
+                    ));
+                }
                 Ok(format!("ARRAY[{}]", elements.join(", ")))
             }
             "CASEEXPR" => self.case(node),
@@ -210,7 +218,7 @@ impl Renderer<'_> {
             node.kind.as_str(),
             "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"
                 | "NULLIFEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ARRAYEXPR" | "CASEEXPR"
-                | "ROWEXPR"
+                | "ROWEXPR" | "SUBSCRIPTINGREF"
         ));
         Ok(format!(
             "{}::{}",

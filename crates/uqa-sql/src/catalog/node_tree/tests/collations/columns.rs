@@ -57,8 +57,16 @@ impl deparse::ExpressionNames for Names<'_> {
 
 #[test]
 fn declared_attribute_nodes_and_sql_match_postgresql_after_column_drop() {
-    let reference: Reference =
-        serde_json::from_str(include_str!("../declared_column_nodes.json")).unwrap();
+    assert_declared_column_nodes(include_str!("../declared_column_nodes.json"));
+}
+
+#[test]
+fn subscripted_attribute_nodes_and_sql_match_postgresql_after_column_drop() {
+    assert_declared_column_nodes(include_str!("../subscript_column_nodes.json"));
+}
+
+fn assert_declared_column_nodes(fixture: &str) {
+    let reference: Reference = serde_json::from_str(fixture).unwrap();
     let Statement::CreateTable(mut table) = crate::compile(&reference.create).unwrap().remove(0)
     else {
         panic!("table declaration");

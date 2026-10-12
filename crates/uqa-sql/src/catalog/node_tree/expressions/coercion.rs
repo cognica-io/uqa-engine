@@ -15,6 +15,7 @@ use uqa_core::Value;
 struct Coercion {
     format: i64,
     explicit: bool,
+    assignment: bool,
 }
 
 impl ExpressionContext<'_> {
@@ -50,6 +51,7 @@ impl ExpressionContext<'_> {
             Coercion {
                 format,
                 explicit: format == 1,
+                assignment: false,
             },
         )
     }
@@ -64,6 +66,22 @@ impl ExpressionContext<'_> {
             Coercion {
                 format: 2,
                 explicit: true,
+                assignment: false,
+            },
+        )
+    }
+
+    pub(super) fn coerce_assignment(
+        value: TypedNode,
+        target: &ColumnType,
+    ) -> Result<TypedNode, SQLError> {
+        Self::coerce_selected(
+            value,
+            target,
+            Coercion {
+                format: 2,
+                explicit: false,
+                assignment: true,
             },
         )
     }
@@ -127,7 +145,10 @@ impl ExpressionContext<'_> {
         let method = if pg_type_oid(source) == pg_type_oid(target) {
             CastMethod::Binary
         } else if let Some(entry) = cast_catalog_entry(source, target) {
-            if !coercion.explicit && entry.context != b'i' {
+            if !coercion.explicit
+                && entry.context != b'i'
+                && !(coercion.assignment && entry.context == b'a')
+            {
                 return Err(coercion_error(&value.ty, target));
             }
             entry.method

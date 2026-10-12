@@ -95,6 +95,15 @@ fn visit(node: &mut Node, case_value: Option<i64>) -> Result<Derivation, SQLErro
             Ok(Derivation::None)
         }
         "ROWCOMPAREEXPR" => row_comparison(node, case_value),
+        "SUBSCRIPTINGREF" => {
+            for name in ["refupperindexpr", "reflowerindexpr"] {
+                visit_field(field_mut(node, name)?, case_value)?;
+            }
+            let input = visit_field(field_mut(node, "refexpr")?, case_value)?;
+            let result = input.result(node.integer("refcollid")?);
+            *field_mut(node, "refcollid")? = result.oid().into();
+            Ok(result)
+        }
         "COLLATEEXPR" => {
             visit_field(field_mut(node, "arg")?, case_value)?;
             Ok(Derivation::Explicit(node.integer("collOid")?))
