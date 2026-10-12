@@ -143,27 +143,24 @@ pub(crate) fn bind_stored_row(
     let domain = matches!(target, ColumnType::Domain { .. });
     let descriptor =
         crate::expr::composites::descriptor(resolver.composite_types(), reference.oid)?;
-    validate_width(
-        &ColumnType::Composite(reference.clone()),
-        items.len(),
-        descriptor.attributes.len(),
-    )?;
     let mut converted = Vec::with_capacity(items.len());
-    for (item, attribute) in items.iter().zip(&descriptor.attributes) {
+    for (index, attribute) in descriptor.attributes.iter().enumerate() {
+        let Some(item) = items.get(index) else {
+            return Err(row_cast_error(
+                &target,
+                "Input has too few columns.".into(),
+                Some(resolver),
+            ));
+        };
         let source = super::scalar_type_with_resolver(item, schema, params, resolver)?;
-        if source
-            .as_ref()
-            .is_some_and(|source| !super::explicit_type_compatible(source, &attribute.ty))
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42846".into(),
-                message: format!(
-                    "cannot cast type {} to {}",
-                    source.as_ref().unwrap().display_name(),
-                    attribute.ty.display_name()
-                ),
-            });
-        }
+        validate_field_cast(
+            &target,
+            source.as_ref(),
+            &attribute.ty,
+            index + 1,
+            Some(resolver),
+        )?;
+        super::common::read_unknown_literals(std::iter::once(item), &attribute.ty)?;
         let converted_item = if source.as_ref() == Some(&attribute.ty) {
             item.clone()
         } else {
@@ -181,6 +178,12 @@ pub(crate) fn bind_stored_row(
         bind_stored_row(&mut converted_item, schema, params, resolver)?;
         converted.push(converted_item);
     }
+    validate_width(
+        &target,
+        items.len(),
+        descriptor.attributes.len(),
+        Some(resolver),
+    )?;
     let row = ScalarExpr::CompositeRow {
         items: converted,
         bound_type: Some(ColumnType::Composite(reference.clone())),
@@ -238,24 +241,69 @@ pub(crate) fn validate_width(
     target: &ColumnType,
     width: usize,
     expected: usize,
+    resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<(), SQLError> {
     if width != expected {
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42846".into(),
-            message: format!(
-                "cannot cast type record to {}",
-                target.clone().display_name()
-            ),
-            detail: Some(
-                if width < expected {
-                    "Input has too few columns."
-                } else {
-                    "Input has too many columns."
-                }
-                .into(),
-            ),
-            hint: None,
-        });
+        return Err(row_cast_error(
+            target,
+            if width < expected {
+                "Input has too few columns."
+            } else {
+                "Input has too many columns."
+            }
+            .into(),
+            resolver,
+        ));
     }
     Ok(())
+}
+
+pub(crate) fn validate_field_cast(
+    row_type: &ColumnType,
+    source: Option<&ColumnType>,
+    target: &ColumnType,
+    position: usize,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<(), SQLError> {
+    if let Some(source) = source {
+        if !super::explicit_type_compatible(source, target) {
+            return Err(row_cast_error(
+                row_type,
+                format!(
+                    "Cannot cast type {} to {} in column {position}.",
+                    format_type(source, resolver)?,
+                    format_type(target, resolver)?
+                ),
+                resolver,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn format_type(
+    ty: &ColumnType,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<String, SQLError> {
+    resolver.map_or_else(
+        || Ok(ty.without_type_modifiers().sql_name()),
+        |resolver| resolver.format_type_name(&ty.without_type_modifiers()),
+    )
+}
+
+pub(crate) fn row_cast_error(
+    target: &ColumnType,
+    detail: String,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> SQLError {
+    let target = match format_type(target, resolver) {
+        Ok(target) => target,
+        Err(error) => return error,
+    };
+    SQLError::Diagnostic {
+        sqlstate: "42846".into(),
+        message: format!("cannot cast type record to {target}"),
+        detail: Some(detail),
+        hint: None,
+    }
 }

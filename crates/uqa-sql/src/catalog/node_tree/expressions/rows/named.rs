@@ -14,6 +14,8 @@ use crate::expr::composites;
 use crate::FunctionTypeResolver;
 use uqa_core::Value;
 
+use super::inputs::{anonymous_row, RowInput};
+
 impl ExpressionContext<'_> {
     pub(in super::super) fn row_cast(
         &self,
@@ -32,6 +34,15 @@ impl ExpressionContext<'_> {
             return Ok(None);
         };
         let fields = self.named_row_fields(elements, target, reference.oid)?;
+        Self::named_row(fields, base, target, format).map(Some)
+    }
+
+    fn named_row(
+        fields: Vec<TypedNode>,
+        base: &ColumnType,
+        target: &ColumnType,
+        format: i64,
+    ) -> Result<TypedNode, SQLError> {
         let row = TypedNode {
             node: Node::new(
                 "ROWEXPR",
@@ -56,13 +67,13 @@ impl ExpressionContext<'_> {
             ty: base.clone(),
         };
         if target == base {
-            Ok(Some(row))
+            Ok(row)
         } else {
-            Self::coerce(row, target, format).map(Some)
+            Self::coerce(row, target, format)
         }
     }
 
-    fn anonymous_row_elements<'a>(
+    pub(super) fn anonymous_row_elements<'a>(
         &self,
         expression: &'a Expr,
     ) -> Result<Option<&'a [Expr]>, SQLError> {
@@ -81,17 +92,22 @@ impl ExpressionContext<'_> {
         target: &ColumnType,
         oid: u32,
     ) -> Result<Vec<TypedNode>, SQLError> {
+        self.coerce_row_inputs(self.row_inputs(elements)?, target, oid)
+    }
+
+    fn coerce_row_inputs(
+        &self,
+        inputs: Vec<RowInput<'_>>,
+        target: &ColumnType,
+        oid: u32,
+    ) -> Result<Vec<TypedNode>, SQLError> {
         let descriptor = composites::descriptor(
             self.types.and_then(FunctionTypeResolver::composite_types),
             oid,
         )?;
-        crate::type_resolution::composite_rows::validate_width(
-            target,
-            elements.len(),
-            descriptor.attributes.len(),
-        )?;
         let mut fields = Vec::new();
-        let mut arguments = elements.iter();
+        let input_width = inputs.len();
+        let mut arguments = inputs.into_iter().enumerate();
         let width = descriptor.physical_width();
         for position in 1..=width {
             let Some(attribute) = descriptor
@@ -105,9 +121,28 @@ impl ExpressionContext<'_> {
                 });
                 continue;
             };
-            let expression = arguments.next().expect("validated ROW width");
-            fields.push(self.row_field(expression, &attribute.ty)?);
+            let Some((index, input)) = arguments.next() else {
+                return Err(crate::type_resolution::composite_rows::row_cast_error(
+                    target,
+                    "Input has too few columns.".into(),
+                    self.types,
+                ));
+            };
+            crate::type_resolution::composite_rows::validate_field_cast(
+                target,
+                input.ty(),
+                &attribute.ty,
+                index + 1,
+                self.types,
+            )?;
+            fields.push(self.coerce_row_input(input, &attribute.ty)?);
         }
+        crate::type_resolution::composite_rows::validate_width(
+            target,
+            input_width,
+            descriptor.attributes.len(),
+            self.types,
+        )?;
         Ok(fields)
     }
 
@@ -116,16 +151,31 @@ impl ExpressionContext<'_> {
         expression: &Expr,
         target: &ColumnType,
     ) -> Result<TypedNode, SQLError> {
-        if let Some(row) = self.row_cast(expression, target, 2)? {
-            return Ok(row);
+        self.coerce_row_input(self.row_input(expression)?, target)
+    }
+
+    fn coerce_row_input(
+        &self,
+        input: RowInput<'_>,
+        target: &ColumnType,
+    ) -> Result<TypedNode, SQLError> {
+        let mut base = target;
+        while let ColumnType::Domain { base: nested, .. } = base {
+            base = nested;
         }
-        let mut input = target;
-        while let ColumnType::Domain { base, .. } = input {
-            input = base;
-        }
-        let input = input.without_type_modifiers();
-        let unknown = self.expression_type(expression)?.is_none();
-        let value = self.encode(expression, unknown.then_some(&input))?;
+        let value = match input {
+            RowInput::Unknown(expression) => {
+                self.encode(expression, Some(&base.without_type_modifiers()))?
+            }
+            RowInput::Row(inputs) => {
+                if let ColumnType::Composite(reference) = base {
+                    let fields = self.coerce_row_inputs(inputs, target, reference.oid)?;
+                    return Self::named_row(fields, base, target, 2);
+                }
+                anonymous_row(inputs)?
+            }
+            RowInput::Value(value) => value,
+        };
         Self::coerce_row_field(value, target)
     }
 }

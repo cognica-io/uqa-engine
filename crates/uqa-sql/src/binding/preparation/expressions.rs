@@ -86,7 +86,7 @@ impl Preparation<'_> {
                 return Ok(ExpressionType::unknown_literal(expression, text.clone()));
             }
             ScalarExpr::Cast { expr, ty, .. } => {
-                Some(self.cast_expression(expr, ty, input, subqueries)?)
+                return self.cast_expression(expr, ty, input, subqueries);
             }
             ScalarExpr::Binary { op, lhs, rhs } => {
                 let mut left = self.expression(lhs, input, subqueries)?;
@@ -177,13 +177,11 @@ impl Preparation<'_> {
     ) -> Result<ExpressionType, SQLError> {
         let fields = items
             .iter()
-            .map(|item| {
-                self.expression(item, input, subqueries)
-                    .map(|value| value.ty)
-            })
+            .map(|item| self.expression(item, input, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
         let mut value = ExpressionType::resolved(Some(ColumnType::Record));
-        value.record_fields = Some(fields.into());
+        value.record_fields = Some(fields.iter().map(|field| field.ty.clone()).collect());
+        value.row_constructor = Some(fields);
         Ok(value)
     }
 

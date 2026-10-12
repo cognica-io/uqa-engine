@@ -14,37 +14,13 @@ use crate::type_resolution::binary_operator_by_oid;
 use uqa_core::Value;
 
 mod distinct;
+mod inputs;
 mod named;
 mod stored;
 
 impl ExpressionContext<'_> {
     pub(super) fn row(&self, elements: &[Expr]) -> Result<TypedNode, SQLError> {
-        let arguments = elements
-            .iter()
-            .map(|element| {
-                if let Expr::Literal(value @ (Value::Null | Value::Str(_))) = element {
-                    values::unknown_constant(value).map(Field::Node)
-                } else {
-                    self.encode(element, None).map(|value| value.node.into())
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let names = (1..=elements.len())
-            .map(|position| Field::StringValue(format!("f{position}")))
-            .collect();
-        Ok(TypedNode {
-            node: Node::new(
-                "ROWEXPR",
-                [
-                    ("args", node_list(arguments)),
-                    ("row_typeid", pg_type_oid(&ColumnType::Record).into()),
-                    ("row_format", 2.into()),
-                    ("colnames", node_list(names)),
-                    ("location", (-1).into()),
-                ],
-            ),
-            ty: ColumnType::Record,
-        })
+        inputs::anonymous_row(self.row_inputs(elements)?)
     }
 
     pub(super) fn row_comparison(

@@ -1,0 +1,59 @@
+[
+  {
+    "sql": "SELECT ROW($1, $2)::node_pair",
+    "parameters": [
+      "smallint",
+      "text"
+    ]
+  },
+  {
+    "sql": "SELECT ROW(ROW($1, $2), $3)::node_outer",
+    "parameters": [
+      "smallint",
+      "text",
+      "boolean"
+    ]
+  },
+  {
+    "sql": "SELECT ROW($1, $2)::record::node_pair",
+    "parameters": [
+      "smallint",
+      "text"
+    ]
+  },
+  {
+    "sql": "SELECT ROW(ROW($1, $2)::record, $3)::record::node_outer",
+    "parameters": [
+      "smallint",
+      "text",
+      "boolean"
+    ]
+  },
+  {
+    "sql": "SELECT ROW($1)::node_holes",
+    "parameters": [
+      "integer"
+    ]
+  },
+  {
+    "sql": "SELECT ROW($1, $2)::node_domain",
+    "parameters": [
+      "smallint",
+      "text"
+    ]
+  },
+  {
+    "sql": "SELECT ROW($1::text, $2)::node_pair",
+    "parameters": [
+      "text",
+      "text"
+    ]
+  },
+  {
+    "sql": "SELECT ROW($1, $2)::node_mod",
+    "parameters": [
+      "numeric",
+      "character varying"
+    ]
+  }
+]

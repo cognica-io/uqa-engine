@@ -264,7 +264,16 @@ impl CatalogInputFunctions for Catalog<'_> {
     }
 }
 
+impl crate::routines::RoutineResolution for Catalog<'_> {}
+
 impl FunctionTypeResolver for Catalog<'_> {
+    fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
+        deparse::ExpressionNames::type_name(
+            self,
+            crate::catalog::type_metadata::pg_type_oid(ty),
+            crate::catalog::type_metadata::pg_type_modifier(ty),
+        )
+    }
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         Ok(self.named(name))
     }

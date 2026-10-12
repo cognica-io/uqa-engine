@@ -1,0 +1,210 @@
+[
+  {
+    "base": "integer",
+    "check": "ROW(VALUE)::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Input has too few columns.",
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 'x', 0)::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Input has too many columns.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE)::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Cannot cast type json to smallint in column 1.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE, 'x')::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Cannot cast type json to smallint in column 1.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE, 'x', 0)::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Cannot cast type json to smallint in column 1.",
+    "hint": null
+  },
+  {
+    "base": "boolean",
+    "check": "ROW(VALUE, 'x')::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Cannot cast type boolean to smallint in column 1.",
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW('bad')::node_pair IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type smallint: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW('bad', 'x', 0)::node_pair IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type smallint: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW()::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Input has too few columns.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE)::node_domain IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_domain",
+    "detail": "Cannot cast type json to smallint in column 1.",
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE)::node_domain IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_domain",
+    "detail": "Input has too few columns.",
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, true)::node_outer IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_outer",
+    "detail": "Cannot cast type integer to node_pair in column 1.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(ROW(VALUE, 'x'), true)::node_outer IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Cannot cast type json to smallint in column 1.",
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(ROW('bad', 'x'), true)::node_outer IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type smallint: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, false)::node_holes IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_holes",
+    "detail": "Input has too many columns.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE, false)::node_holes IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_holes",
+    "detail": "Cannot cast type json to integer in column 1.",
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW('bad', false)::node_holes IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type integer: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE)::record::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_pair",
+    "detail": "Input has too few columns.",
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE, 'bad'::integer)::node_pair IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type integer: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW('bad', 'bad'::integer)::node_pair IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type integer: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW('bad', 'x', true::date)::node_pair IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type boolean to date",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 'x', 'bad'::integer)::node_pair IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type integer: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE, 'x', 'bad'::integer)::node_pair IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type integer: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(ROW(VALUE, 'x'), 'bad'::boolean)::node_outer IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type boolean: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(ROW('bad', 'x'), 'bad'::boolean)::node_outer IS NULL",
+    "sqlstate": "22P02",
+    "message": "invalid input syntax for type boolean: \"bad\"",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "json",
+    "check": "ROW(VALUE, 'x')::node_mod IS NULL",
+    "sqlstate": "42846",
+    "message": "cannot cast type record to node_mod",
+    "detail": "Cannot cast type json to numeric in column 1.",
+    "hint": null
+  }
+]

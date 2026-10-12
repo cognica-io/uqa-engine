@@ -217,15 +217,12 @@ impl Binder<'_, '_> {
         self.install_cast(expression, ty)
     }
 
-    /// An explicit cast of an unknown literal reads its base input now. Keep the written cast outside the constant so its modifier still applies at the original boundary.
+    /// Validate a stored cast before its parent selects additional coercions. An unknown literal reads its base input now; its written cast keeps the modifier at the original boundary.
     pub(super) fn read_explicit_literal_input(
         &mut self,
         expression: &mut ScalarExpr,
         ty: &str,
     ) -> Result<(), SQLError> {
-        if !matches!(expression, ScalarExpr::Literal(Value::Str(_))) {
-            return Ok(());
-        }
         let target = match ColumnType::from_sql_name_with_control(ty, &self.control) {
             Ok(target) => target,
             Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
@@ -236,6 +233,15 @@ impl Binder<'_, '_> {
                 target.clone_with_control(&self.control)?
             }
         };
+        let source = self.infer(expression)?;
+        crate::type_resolution::cast_compatibility::validate_explicit_cast_with_control(
+            source.as_deref(),
+            &target,
+            &self.control,
+        )?;
+        if !matches!(expression, ScalarExpr::Literal(Value::Str(_))) {
+            return Ok(());
+        }
         let input =
             crate::type_resolution::literal_input_type_with_control(&target, &self.control)?;
         if let Some(constant) = self.read_unknown_literal(expression, &input)? {
@@ -259,7 +265,7 @@ impl Binder<'_, '_> {
         {
             return Ok(None);
         }
-        // Binding reports no semantic errors: a literal the type rejects keeps its cast, which analysis and evaluation report.
+        // Ordinary binding leaves invalid inputs to analysis/evaluation. Stored syntax must report them before a surrounding coercion selects a different error.
         let converted = if self.literal_binding == LiteralBinding::Stored
             && crate::expr::requires_catalog_constant_input(target)
         {
@@ -282,7 +288,7 @@ impl Binder<'_, '_> {
         let value = match converted {
             Ok(value) => value,
             Err(error)
-                if self.literal_binding == LiteralBinding::Validate
+                if self.literal_binding != LiteralBinding::Ordinary
                     || matches!(error.sqlstate(), Some("53200" | "57014")) =>
             {
                 return Err(error);

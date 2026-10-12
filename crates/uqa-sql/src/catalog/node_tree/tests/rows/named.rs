@@ -13,6 +13,7 @@ use super::super::{
 use crate::{ColumnType, RowSchema, Statement};
 use serde::Deserialize;
 
+mod errors;
 mod stored;
 
 #[derive(Deserialize)]

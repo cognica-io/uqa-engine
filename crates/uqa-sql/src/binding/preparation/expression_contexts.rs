@@ -19,25 +19,8 @@ impl Preparation<'_> {
         ty: &str,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<ColumnType, SQLError> {
+    ) -> Result<ExpressionType, SQLError> {
         let target = self.type_name(ty)?;
-        if let ScalarExpr::Row(items) = expr {
-            let mut base = &target;
-            while let ColumnType::Domain { base: nested, .. } = base {
-                base = nested;
-            }
-            if let ColumnType::Composite(reference) = base {
-                let descriptor = crate::expr::composites::descriptor(
-                    self.routines.composite_types(),
-                    reference.oid,
-                )?;
-                crate::type_resolution::composite_rows::validate_width(
-                    base,
-                    items.len(),
-                    descriptor.attributes.len(),
-                )?;
-            }
-        }
         // Parse analysis converts an untyped literal with the enum's input function before any assignment checks.
         if let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expr {
             crate::expr::enums::fold_unknown_literal(self.routines.enum_labels(), value, &target)?;
@@ -49,7 +32,6 @@ impl Preparation<'_> {
                     .map(|item| {
                         if matches!(item, ScalarExpr::Array(_)) {
                             self.cast_expression(item, ty, input, subqueries)
-                                .map(|ty| ExpressionType::resolved(Some(ty)))
                         } else {
                             self.expression(item, input, subqueries)
                         }
@@ -79,6 +61,9 @@ impl Preparation<'_> {
             } else {
                 self.expression(expr, input, subqueries)?
             };
+        if let Some(fields) = &mut source.row_constructor {
+            self.coerce_row_constructor(fields, &target)?;
+        }
         self.parameters.coerce_unknown(&mut source, &target)?;
         if source.ty.as_ref().is_some_and(|source| {
             !crate::type_resolution::explicit_type_compatible(source, &target)
@@ -95,9 +80,14 @@ impl Preparation<'_> {
         if source.ty.as_ref().is_some_and(|source| {
             crate::type_resolution::preserves_record_identity(source, &target)
         }) {
-            return Ok(source.ty.expect("known composite source"));
+            return Ok(source);
         }
-        Ok(target)
+        let mut result = ExpressionType::resolved(Some(target.clone()));
+        if target == ColumnType::Record {
+            result.record_fields = source.record_fields;
+            result.row_constructor = source.row_constructor;
+        }
+        Ok(result)
     }
 
     pub(super) fn case_expression(

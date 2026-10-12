@@ -13,7 +13,7 @@ use super::{
 use crate::ast::Expr;
 use crate::FunctionTypeResolver;
 
-fn retain(
+pub(super) fn retain(
     expression: &mut Expr,
     schema: &RowSchema,
     catalog: &Catalog<'_>,

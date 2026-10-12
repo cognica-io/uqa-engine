@@ -36,7 +36,7 @@ impl Binder<'_, '_> {
                 parameter_index: None,
             })),
             Ok(None) => Ok(None),
-            Err(error) if self.literal_binding == super::LiteralBinding::Validate => Err(error),
+            Err(error) if self.literal_binding != super::LiteralBinding::Ordinary => Err(error),
             Err(_) => Ok(None),
         }
     }

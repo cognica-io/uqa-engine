@@ -217,6 +217,10 @@ fn stored_domain_inputs_are_read_once_without_invoking_checks_during_introspecti
             Ok(match name.replace('"', "").as_str() {
                 "day" => Some(day),
                 "day[]" => Some(ColumnType::Array(Box::new(day))),
+                name if name == day.catalog_name() => Some(day),
+                name if name == ColumnType::Array(Box::new(day.clone())).catalog_name() => {
+                    Some(ColumnType::Array(Box::new(day)))
+                }
                 _ => None,
             })
         }

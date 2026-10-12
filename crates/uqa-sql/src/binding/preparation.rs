@@ -15,6 +15,7 @@ mod membership;
 mod parameters;
 mod queries;
 mod routines;
+mod rows;
 pub(crate) use routines::{
     analyze_routine_body_argument, analyze_routine_body_inputs, prepare_procedure_call,
     prepare_routine_body_inputs,

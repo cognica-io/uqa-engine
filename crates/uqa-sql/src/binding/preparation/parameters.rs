@@ -14,6 +14,8 @@ use uqa_core::Value;
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
     pub(super) record_fields: Option<crate::schema::RecordFields>,
+    /// An anonymous ROW retains each analyzed input until a named cast selects its field coercions.
+    pub(super) row_constructor: Option<Vec<Self>>,
     occurrence: Option<usize>,
     // SQL unknown literals and parameters accept context coercion. Native
     // callbacks with no declared result type stay unresolved until execution.
@@ -27,6 +29,7 @@ impl ExpressionType {
         Self {
             ty,
             record_fields: None,
+            row_constructor: None,
             occurrence: None,
             coercible_unknown: false,
             literal: None,
@@ -37,6 +40,7 @@ impl ExpressionType {
         Self {
             ty: None,
             record_fields: None,
+            row_constructor: None,
             occurrence: None,
             coercible_unknown: true,
             literal: None,
@@ -48,6 +52,7 @@ impl ExpressionType {
         Self {
             ty: None,
             record_fields: None,
+            row_constructor: None,
             occurrence: None,
             coercible_unknown: true,
             literal: Some((NonNull::from(expression), text)),
@@ -252,6 +257,7 @@ impl<'a> ParameterTypes<'a> {
         Ok(ExpressionType {
             ty,
             record_fields: None,
+            row_constructor: None,
             occurrence: Some(occurrence),
             coercible_unknown: true,
             literal: None,
