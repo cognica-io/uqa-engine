@@ -480,7 +480,7 @@ impl Deparser<'_> {
             _ => {}
         }
         if let [left, right] = args {
-            if let Some((operator, precedence)) = binary_function_operator(name) {
+            if let Some((operator, precedence)) = binary_function_operator(name, binding) {
                 return Ok(self.parenthesize(format!(
                     "{} {operator} {}",
                     self.operand(left, precedence, false, scope, subqueries)?,
@@ -887,9 +887,13 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         {
             0
         }
-        ScalarExpr::Func { name, args, .. } if args.len() == 2 => {
-            binary_function_operator(name).map_or(100, |(_, precedence)| precedence)
-        }
+        ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } if args.len() == 2 => binary_function_operator(name, binding.as_ref())
+            .map_or(100, |(_, precedence)| precedence),
         ScalarExpr::InList { list, .. } if list.len() > 1 => 0,
         ScalarExpr::Or(_) => 10,
         ScalarExpr::And(_) | ScalarExpr::Between { .. } => 20,
@@ -937,13 +941,24 @@ fn operator(op: BinaryOp) -> &'static str {
 }
 
 /// The operator and its precedence that a function of two arguments prints as.
-fn binary_function_operator(name: &str) -> Option<(&'static str, u8)> {
+fn binary_function_operator(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+) -> Option<(&'static str, u8)> {
+    if binding
+        .and_then(|binding| binding.dispatch)
+        .is_some_and(FunctionDispatch::is_concatenation)
+    {
+        return Some(("||", 45));
+    }
+    if binding.is_some_and(|binding| !binding.builtin) {
+        return None;
+    }
     match name {
         "like" => Some(("~~", 40)),
         "ilike" => Some(("~~*", 40)),
         "regex_match_op" => Some(("~", 40)),
         "regex_imatch_op" => Some(("~*", 40)),
-        "concat_op" => Some(("||", 45)),
         _ => None,
     }
 }
@@ -964,6 +979,7 @@ pub(super) fn prints_as_call(
                 | FunctionDispatch::JsonExtract { .. }
                 | FunctionDispatch::Collate { .. }
         )
-    ) || (args.len() == 2 && binary_function_operator(name).is_some());
+    ) || (args.len() == 2
+        && binary_function_operator(name, binding).is_some());
     !printed_otherwise
 }

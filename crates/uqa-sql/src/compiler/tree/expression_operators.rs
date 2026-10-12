@@ -96,21 +96,11 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 "-" => BinaryOp::Subtract,
                 "*" => BinaryOp::Multiply,
                 "/" => BinaryOp::Divide,
-                // String concatenation: rewrite `a || b` into a
-                // concat_op() call. concat_op propagates NULL the way
-                // the SQL `||` operator must (`'x' || NULL == NULL`),
-                // which is distinct from PostgreSQL's `CONCAT()` that
-                // skips NULL arguments.
                 "||" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "concat_op".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
+                    return Ok(dispatched_call(
+                        FunctionDispatch::Concat { oid: None },
+                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    ));
                 }
                 "@@" => {
                     return Ok(Expr::Func {

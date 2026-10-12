@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve native concatenation identity independently of ordinary routines and host callbacks. Retain selected scalar/array inputs, typed enum/composite and session-aware text output, exact catalog nodes and executable view definitions across reopening, including atomic restoration of predecessor native views.
+
 - Preserve PostgreSQL JSON extraction syntax, result names, operand typing and original textual JSON bytes. Retain typed variadic path functions, empty and multidimensional paths, selected routine identities and executable view definitions through reopening; include implicit `pg_catalog` in routine candidate lookup.
 
 - Distinguish omitted array slice endpoints from supplied NULLs, preserve PostgreSQL integer-bound analysis and upper-before-lower effects, and retain the distinction through stored definitions and reopening. Preserve unknown scalar parameters in array calls while retaining declared argument types and exact input diagnostics.

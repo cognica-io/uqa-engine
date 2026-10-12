@@ -16,6 +16,34 @@ use crate::type_resolution::{
 };
 
 impl ExpressionContext<'_> {
+    pub(super) fn concatenation(&self, arguments: &[Expr]) -> Result<TypedNode, SQLError> {
+        let [left, right] = arguments else {
+            return Err(SQLError::Internal("invalid concatenation operands".into()));
+        };
+        let types = [self.expression_type(left)?, self.expression_type(right)?];
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let selected = crate::type_resolution::concatenation::select(
+            types[0].as_ref(),
+            types[1].as_ref(),
+            &control,
+        )?;
+        let identity = selected.operator();
+        let arguments = [
+            self.encode(left, Some(selected.argument(0)))?,
+            self.encode(right, Some(selected.argument(1)))?,
+        ];
+        let result = selected
+            .into_result(&control)?
+            .into_uncontrolled()
+            .expect("ordinary catalog operator selection");
+        Ok(operator_node(
+            identity.oid,
+            identity.function_oid,
+            arguments,
+            result,
+        ))
+    }
+
     pub(super) fn numeric_operator(
         &self,
         operator: crate::ast::NumericOperator,

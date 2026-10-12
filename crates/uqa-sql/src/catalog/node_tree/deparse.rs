@@ -221,7 +221,8 @@ impl Renderer<'_> {
             node.kind.as_str(),
             "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"
                 | "NULLIFEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ARRAYEXPR" | "CASEEXPR"
-                | "ROWEXPR" | "SUBSCRIPTINGREF" | "FIELDSELECT"
+                | "ROWEXPR" | "SUBSCRIPTINGREF" | "FIELDSELECT" | "RELABELTYPE" | "COERCEVIAIO"
+                | "COERCETODOMAIN" | "ARRAYCOERCEEXPR"
         ));
         Ok(format!(
             "{}::{}",

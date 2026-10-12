@@ -54,6 +54,20 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             filter,
             ..
         } => {
+            if binding
+                .as_ref()
+                .and_then(|binding| binding.dispatch)
+                .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
+            {
+                let [left, right] = args.as_slice() else {
+                    return Err(SQLError::Internal("invalid concatenation operands".into()));
+                };
+                return Ok(format!(
+                    "({} || {})",
+                    schema_expr_text(left)?,
+                    schema_expr_text(right)?
+                ));
+            }
             if *order_syntax == crate::ast::FunctionCallSyntax::Extract {
                 let (field, source) = crate::render::function_syntax::extract_fields(args)?;
                 return Ok(format!(

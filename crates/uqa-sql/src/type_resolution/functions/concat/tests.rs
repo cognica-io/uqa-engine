@@ -8,6 +8,32 @@ use super::*;
 use crate::{plan::ExpressionPlan, RowSchema, ScalarExpr};
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
+#[test]
+fn concatenation_syntax_retains_identity_separate_from_named_routines() {
+    let crate::Statement::Select(query) = crate::compile("SELECT 'a' || 'b', concat_op('a', 'b')")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("SELECT")
+    };
+    let crate::ast::Expr::Func {
+        binding: operator, ..
+    } = &query.projections[0].expr
+    else {
+        panic!("concatenation expression")
+    };
+    let crate::ast::Expr::Func {
+        binding: routine, ..
+    } = &query.projections[1].expr
+    else {
+        panic!("ordinary routine")
+    };
+    assert!(operator
+        .as_ref()
+        .is_some_and(|binding| binding.dispatch.is_some()));
+    assert!(routine.is_none());
+}
+
 fn expression(sql: &str) -> ScalarExpr {
     let crate::Statement::Select(mut query) =
         crate::compile(&format!("SELECT {sql}")).unwrap().remove(0)

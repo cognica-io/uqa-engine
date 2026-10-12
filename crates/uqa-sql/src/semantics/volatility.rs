@@ -58,17 +58,20 @@ pub fn function_binding_is_volatile(
 }
 
 fn is_intrinsic_scalar_syntax(binding: Option<&FunctionBinding>) -> bool {
-    matches!(
-        binding.and_then(|binding| binding.dispatch),
-        Some(
-            crate::ast::FunctionDispatch::NumericOperator(_)
-                | crate::ast::FunctionDispatch::Collate { .. }
-                | crate::ast::FunctionDispatch::BooleanTest(_)
-                | crate::ast::FunctionDispatch::ArraySubscripts
-                | crate::ast::FunctionDispatch::ArraySlices
-                | crate::ast::FunctionDispatch::ArraySlicesWithBounds(_)
+    binding
+        .and_then(|binding| binding.dispatch)
+        .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
+        || matches!(
+            binding.and_then(|binding| binding.dispatch),
+            Some(
+                crate::ast::FunctionDispatch::NumericOperator(_)
+                    | crate::ast::FunctionDispatch::Collate { .. }
+                    | crate::ast::FunctionDispatch::BooleanTest(_)
+                    | crate::ast::FunctionDispatch::ArraySubscripts
+                    | crate::ast::FunctionDispatch::ArraySlices
+                    | crate::ast::FunctionDispatch::ArraySlicesWithBounds(_)
+            )
         )
-    )
 }
 
 pub fn function_volatility_with_binding(
@@ -102,6 +105,14 @@ pub fn builtin_function_volatility(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
+    if let Some(crate::ast::FunctionDispatch::Concat { oid }) =
+        binding.and_then(|binding| binding.dispatch)
+    {
+        return oid
+            .and_then(|oid| crate::type_resolution::binary_operator_by_oid(i64::from(oid)))
+            .filter(|operator| operator.name == "||")
+            .map_or(FunctionVolatility::Stable, |operator| operator.volatility());
+    }
     if is_intrinsic_scalar_syntax(binding) {
         return FunctionVolatility::Immutable;
     }

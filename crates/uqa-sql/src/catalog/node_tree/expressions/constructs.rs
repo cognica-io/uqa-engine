@@ -25,6 +25,12 @@ impl ExpressionContext<'_> {
         if let Some(value) = self.array_construct(binding, args)? {
             return Ok(Some(value));
         }
+        if binding
+            .and_then(|binding| binding.dispatch)
+            .is_some_and(FunctionDispatch::is_concatenation)
+        {
+            return self.concatenation(args).map(Some);
+        }
         match binding.and_then(|binding| binding.dispatch) {
             Some(FunctionDispatch::FieldSelect) => {
                 return self

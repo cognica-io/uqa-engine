@@ -512,6 +512,18 @@ impl Binder<'_, '_> {
         let mut infer = |expression: &ScalarExpr| {
             super::scalar_type_inner_with_control(expression, schema, params, resolver, &control)
         };
+        if matches!(
+            call.binding.as_ref().and_then(|binding| binding.dispatch),
+            Some(
+                crate::ast::FunctionDispatch::Concat { .. }
+                    | crate::ast::FunctionDispatch::ArrayConcat
+                    | crate::ast::FunctionDispatch::ArrayAppend
+                    | crate::ast::FunctionDispatch::ArrayPrepend
+            )
+        ) {
+            self.coerce_concat_call(&mut call)?;
+            return Ok(call.into_expression());
+        }
         if let Some((binding, crate::ast::FunctionDispatch::NumericOperator(operator))) = call
             .binding
             .as_mut()

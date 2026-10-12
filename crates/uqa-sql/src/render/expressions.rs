@@ -34,6 +34,26 @@ pub(super) fn render_expr_in(
             clause.executable_name()?
         ));
     }
+    if let Expr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = expression
+    {
+        if binding
+            .dispatch
+            .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
+        {
+            let [left, right] = args.as_slice() else {
+                return Err(SQLError::Internal("invalid concatenation operands".into()));
+            };
+            return Ok(format!(
+                "({} || {})",
+                render_expr(left)?,
+                render_expr(right)?
+            ));
+        }
+    }
     Ok(match expression {
         Expr::Star => "*".into(),
         Expr::QualifiedStar(qualifier) => format!("{}.*", ident(qualifier)),

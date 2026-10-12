@@ -2,6 +2,12 @@
 
 This page describes upgrade requirements for UQA Engine 0.5.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/10-upgrading.md) when installing the 0.5.3 packages.
 
+## Unreleased native expression bindings
+
+New retained native JSON path calls and concatenation expressions carry structural dispatch identities. Use compatible binaries for every owner before creating or restoring these definitions; older readers cannot deserialize the new identities. Preserve a pre-upgrade backup if an older binary must remain usable. Initial open binds predecessor native views inside the existing atomic catalog restoration transaction, without rewriting user rows; a second open preserves the stored definition. Ordinary selected user routines and registered callbacks keep their own call identity.
+
+Rust expression adapters that match `FunctionDispatch` must preserve `Concat { oid }` and the existing array cat/append/prepend variants. Mixed text/non-array concatenation also retains the original argument type identities used by typed output. Copy expressions through their existing owned or controlled copy interfaces so the binding and its retained allowance move together.
+
 ## 0.5.3
 
 SQLite native mapping 17 stores canonical scalar and composite equality keys in an ordinary indexed provider table. Mapping 16's expression index is removed; read-only integrity checks, VACUUM, REINDEX, backups and SQLCipher exports use the stored keys without registering UQA functions on maintenance connections. The engine owns key generation and keeps the derived rows synchronized with source postings inside the same guarded physical transaction. Initial open builds the projection once inside the format upgrade transaction; it does not rebuild document embeddings or rewrite retained MVCC records. Failed upgrades roll back the projection and marker together. All native SQLite owners must use the new mapping, and an older binary requires a pre-upgrade backup. Main record, standalone physical catalog and redb formats are unchanged by this index change. Legacy SQLite retains its existing index and recovery path. Custom storage backends may implement the optional `probe_btree_index_equal` capability or keep its default decline behavior.

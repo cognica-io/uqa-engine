@@ -6,21 +6,24 @@
 
 //! Retain `||` input conversions and its selected array operation before runtime values erase their declared types.
 
-use super::{Binder, BindingCall, ColumnType, FunctionBinding, SQLError};
-use crate::type_resolution::{
-    common::local_routine_name,
-    functions::{array_concat_argument, array_concat_types, concat_argument_type},
-    is_unknown_literal,
-};
+use super::{Binder, BindingCall, FunctionBinding, SQLError};
+use crate::ast::FunctionDispatch;
+use crate::type_resolution::concatenation;
 
 impl Binder<'_, '_> {
     pub(super) fn coerce_concat_call(&mut self, call: &mut BindingCall) -> Result<(), SQLError> {
-        if call
-            .binding
-            .as_ref()
-            .is_some_and(|binding| !binding.builtin)
-            || local_routine_name(&call.name) != "concat_op"
-        {
+        let structural = matches!(
+            call.binding.as_ref().and_then(|binding| binding.dispatch),
+            Some(
+                FunctionDispatch::Concat { .. }
+                    | FunctionDispatch::ArrayConcat
+                    | FunctionDispatch::ArrayAppend
+                    | FunctionDispatch::ArrayPrepend
+            )
+        );
+        let legacy =
+            concatenation::requires_binding(&call.name, call.binding.as_ref(), self.resolver);
+        if !structural && !legacy {
             return Ok(());
         }
         let [left, right] = call.arguments.as_mut_slice() else {
@@ -34,38 +37,37 @@ impl Binder<'_, '_> {
         {
             return Ok(());
         }
-        if let Some((dispatch, array)) = self
-            .semantic(array_concat_types(
-                left_type.as_deref(),
-                right_type.as_deref(),
-                &self.control,
-            ))?
-            .flatten()
-        {
-            let ColumnType::Array(element) = &*array else {
-                unreachable!("array concatenation result");
-            };
-            for (position, operand) in [left, right].into_iter().enumerate() {
-                let target = if array_concat_argument(dispatch, position) {
-                    &*array
-                } else {
-                    element
-                };
-                self.operand_cast(operand, target)?;
-            }
-            let binding = FunctionBinding::dispatched_with_control(dispatch, &self.control)?;
-            call.binding = Some(self.retain(binding));
+        let Some(selected) = self.semantic(concatenation::select(
+            left_type.as_deref(),
+            right_type.as_deref(),
+            &self.control,
+        ))?
+        else {
             return Ok(());
+        };
+        for (position, operand) in [left, right].into_iter().enumerate() {
+            self.operand_cast(operand, selected.argument(position))?;
         }
-        let (unknown, typed) = match (is_unknown_literal(left), is_unknown_literal(right)) {
-            (true, false) => (left, right),
-            (false, true) => (right, left),
-            // Two `unknown` operands select `text || text`, which the deparser and evaluation read as text; two typed operands select by their own types.
-            _ => return Ok(()),
-        };
-        let Some(other) = self.semantic(self.common_context(typed))?.flatten() else {
-            return Ok(());
-        };
-        self.operand_cast(unknown, &concat_argument_type(Some(&other)))
+        let binding = FunctionBinding::dispatched_with_control(selected.dispatch(), &self.control)?;
+        let mut binding = self.retain(binding);
+        if matches!(
+            binding.dispatch,
+            Some(FunctionDispatch::Concat {
+                oid: Some(2779 | 2780)
+            })
+        ) {
+            let mut names = uqa_core::memory::ProductionVec::new(self.control);
+            names.reserve(2)?;
+            for position in 0..2 {
+                names.push_produced(
+                    selected
+                        .argument(position)
+                        .catalog_name_with_control(&self.control)?,
+                )?;
+            }
+            binding.argument_types = self.retain(names.finish()?);
+        }
+        call.binding = Some(binding);
+        Ok(())
     }
 }

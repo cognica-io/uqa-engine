@@ -133,6 +133,11 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
         ) => value.to_le_bytes().to_vec(),
         (Value::Float(value), ColumnType::Real) => (*value as f32).to_le_bytes().to_vec(),
         (Value::Float(value), ColumnType::DoublePrecision) => value.to_le_bytes().to_vec(),
+        (Value::Enum(value), ColumnType::Enum(_)) => value
+            .label_oid()
+            .ok_or_else(|| invalid("enum constant has no retained label identity"))?
+            .to_le_bytes()
+            .to_vec(),
         (Value::Str(_), ColumnType::InternalChar) => {
             vec![crate::expr::internal_char::value_byte(value)
                 .ok_or_else(|| SQLError::Internal("invalid internal char carrier".into()))?]

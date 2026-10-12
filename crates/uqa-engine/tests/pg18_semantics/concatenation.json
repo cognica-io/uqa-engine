@@ -1,0 +1,567 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE FUNCTION concat_op(a text, b text) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT ''named''::text'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' || 'b' AS operator_value, concat_op('a', 'b') AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "operator_value",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ab",
+              "named"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' || 'b', concat_op('a', 'b'), 1 || 'x'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "concat_op",
+            "?column?"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ab",
+              "named",
+              "1x"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'x' || 1 AS a, 1 || 'x' AS b, 'x' || true AS c, 'x' || 1.5::real AS d, 'x'::char(4) || 'y' AS e",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "x1",
+              "1x",
+              "xtrue",
+              "x1.5",
+              "xy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a'::bytea || 'b'::bytea AS a, '{}'::jsonb || '{\"x\":1}'::jsonb AS b, ARRAY[1] || 2 AS c, 0 || ARRAY[1] AS d, NULL::integer[] || NULL::integer AS e, NULL::integer[] || NULL AS f",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ],
+          "type_oids": [
+            17,
+            3802,
+            1007,
+            1007,
+            1007,
+            1007
+          ],
+          "rows": [
+            [
+              "\\x6162",
+              "{\"x\": 1}",
+              "{1,2}",
+              "{0,1}",
+              "{NULL}",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::integer || NULL::integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer || integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE concat_mood AS ENUM ('calm')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN concat_number AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE concat_row AS (flag boolean, mood concat_mood)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'x' || 'calm'::concat_mood AS a, 'calm'::concat_mood || 'x' AS b, 'x' || 1::concat_number AS c, 'x' || ROW(true, 'calm'::concat_mood)::concat_row AS d",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "xcalm",
+              "calmx",
+              "x1",
+              "x(t,calm)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE concatenation_source(t text, n integer, mood concat_mood)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO concatenation_source VALUES ('row', 2, 'calm')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW concatenation_view AS SELECT t || ':suffix' AS text_value, t || n AS mixed_value, t || mood AS enum_value, concat_op(t, 's') AS routine_value FROM concatenation_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM concatenation_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "mixed_value",
+            "enum_value",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "row:suffix",
+              "row2",
+              "rowcalm",
+              "named"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('concatenation_view'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (t || ':suffix'::text) AS text_value,\n    (t || n) AS mixed_value,\n    (t || mood) AS enum_value,\n    concat_op(t, 's'::text) AS routine_value\n   FROM concatenation_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('concatenation_view'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT t || ':suffix'::text AS text_value,\n    t || n AS mixed_value,\n    t || mood AS enum_value,\n    concat_op(t, 's'::text) AS routine_value\n   FROM concatenation_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE concat_mood RENAME VALUE 'calm' TO 'bright'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM concatenation_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "mixed_value",
+            "enum_value",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "row:suffix",
+              "row2",
+              "rowbright",
+              "named"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE concatenation_parameters(text, integer) AS SELECT $1 || $2 AS joined",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE concatenation_parameters('x', 8)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "joined"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "x8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE concatenation_parameters",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET IntervalStyle='iso_8601'",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'x' || INTERVAL '1 day 2 hours' AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "xP1DT2H"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET IntervalStyle",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM concatenation_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "mixed_value",
+            "enum_value",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "row:suffix",
+              "row2",
+              "rowbright",
+              "named"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('concatenation_view'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (t || ':suffix'::text) AS text_value,\n    (t || n) AS mixed_value,\n    (t || mood) AS enum_value,\n    concat_op(t, 's'::text) AS routine_value\n   FROM concatenation_source;"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('concatenation_view'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT t || ':suffix'::text AS text_value,\n    t || n AS mixed_value,\n    t || mood AS enum_value,\n    concat_op(t, 's'::text) AS routine_value\n   FROM concatenation_source;"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    }
+  ]
+}

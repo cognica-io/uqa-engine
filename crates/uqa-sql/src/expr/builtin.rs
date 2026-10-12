@@ -229,6 +229,11 @@ pub fn bound_scalar_function_strictness(
     };
     if let Some(dispatch) = binding.dispatch {
         return match dispatch {
+            FunctionDispatch::Concat { oid } => oid.map_or(Some(false), |oid| {
+                crate::type_resolution::binary_operator_by_oid(i64::from(oid))
+                    .filter(|operator| operator.name == "||")
+                    .map(|operator| !matches!(operator.oid, 349 | 374 | 375))
+            }),
             FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::Collate { .. } => None,
             FunctionDispatch::Subscript
@@ -390,6 +395,9 @@ pub(super) fn eval_dispatched_builtin_with_control(
         }
         FunctionDispatch::JsonPath { as_text, jsonb } => {
             super::json::json_path_function_with_control(evaluated, as_text, jsonb, control)
+        }
+        FunctionDispatch::Concat { oid } => {
+            super::concatenation::evaluate(binding, oid, evaluated, control, context)
         }
         FunctionDispatch::JsonExtract { as_text, path } => {
             super::json::json_extract_operator_with_control(evaluated, as_text, path, control)

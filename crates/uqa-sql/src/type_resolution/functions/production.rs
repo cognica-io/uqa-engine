@@ -280,40 +280,9 @@ fn concat_type(
     right: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    if let Some((_, array)) = super::array_concat_types(left, right, control)? {
-        return Ok(Some(array));
-    }
-    match (left, right) {
-        // `jsonb || jsonb` and `bytea || bytea` match a typed operand exactly where `anynonarray || text` does not, so an `unknown` operand is read as the typed operand's type.
-        (Some(ColumnType::JsonB), Some(ColumnType::JsonB) | None)
-        | (None, Some(ColumnType::JsonB)) => inline(ColumnType::JsonB, control),
-        (Some(ColumnType::Bytea), Some(ColumnType::Bytea) | None)
-        | (None, Some(ColumnType::Bytea)) => inline(ColumnType::Bytea, control),
-        // `text || anynonarray` and `anynonarray || text`: one operand must be text or coerce to it implicitly, as an operator exists for no other pair, `integer || integer` included.
-        (Some(left), Some(right))
-            if !text_coercible(base_type(left)) && !text_coercible(base_type(right)) =>
-        {
-            Err(super::super::undefined_binary_operator(
-                Some(left),
-                "||",
-                Some(right),
-            ))
-        }
-        _ => inline(ColumnType::Text, control),
-    }
-}
-
-/// The types with an implicit cast to `text`, which the `||` operator accepts on either side.
-fn text_coercible(ty: &ColumnType) -> bool {
-    matches!(
-        ty,
-        ColumnType::Text
-            | ColumnType::Varchar(_)
-            | ColumnType::Character(_)
-            | ColumnType::Bpchar
-            | ColumnType::Name
-            | ColumnType::InternalChar
-    )
+    super::super::concatenation::select(left, right, control)?
+        .into_result(control)
+        .map(Some)
 }
 
 fn aggregate_sum_type(ty: &ColumnType) -> Option<ColumnType> {
@@ -552,7 +521,8 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 )?;
                 return copy(first(), control);
             }
-            FunctionDispatch::ArrayConcat
+            FunctionDispatch::Concat { .. }
+            | FunctionDispatch::ArrayConcat
             | FunctionDispatch::ArrayAppend
             | FunctionDispatch::ArrayPrepend => {
                 return concat_type(effective(0), effective(1), control);

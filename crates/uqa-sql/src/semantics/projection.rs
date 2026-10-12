@@ -100,6 +100,7 @@ pub fn function_projection_label(
         binding.and_then(|binding| binding.dispatch),
         Some(
             crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::Concat { .. }
                 | crate::ast::FunctionDispatch::ArrayConcat
                 | crate::ast::FunctionDispatch::ArrayAppend
                 | crate::ast::FunctionDispatch::ArrayPrepend
@@ -128,8 +129,7 @@ pub fn function_projection_label(
 fn operator_call(name: &str) -> bool {
     matches!(
         name,
-        "concat_op"
-            | "fts_match"
+        "fts_match"
             | "jsonpath_exists"
             | "contains_op"
             | "contained_by_op"
