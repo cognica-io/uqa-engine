@@ -6,25 +6,82 @@
 
 //! Preserve cast function identities and modifiers without running routines.
 
-use super::{values, ColumnType, ExpressionContext, Field, Node, SQLError, TypedNode};
+use super::{values, ColumnType, Expr, ExpressionContext, Field, Node, SQLError, TypedNode};
 use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
 use crate::type_resolution::{cast_catalog_entry, explicit_type_compatible, CastMethod};
 use uqa_core::Value;
 
+#[derive(Clone, Copy)]
+struct Coercion {
+    format: i64,
+    explicit: bool,
+}
+
 impl ExpressionContext<'_> {
+    pub(super) fn cast_expression(
+        &self,
+        expression: &Expr,
+        ty: &str,
+        implicit: bool,
+    ) -> Result<TypedNode, SQLError> {
+        let ty = self.resolve_type(ty)?;
+        let format = if implicit { 2 } else { 1 };
+        if let Some(row) = self.row_cast(expression, &ty, format)? {
+            return Ok(row);
+        }
+        let unknown = self.expression_type(expression)?.is_none();
+        let mut input_type = &ty;
+        while let ColumnType::Domain { base, .. } = input_type {
+            input_type = base;
+        }
+        let input_type = input_type.without_type_modifiers();
+        let inner = self.encode(expression, unknown.then_some(&input_type))?;
+        Self::coerce(inner, &ty, format)
+    }
+
     pub(super) fn coerce(
         value: TypedNode,
         target: &ColumnType,
         format: i64,
     ) -> Result<TypedNode, SQLError> {
+        Self::coerce_selected(
+            value,
+            target,
+            Coercion {
+                format,
+                explicit: format == 1,
+            },
+        )
+    }
+
+    pub(super) fn coerce_row_field(
+        value: TypedNode,
+        target: &ColumnType,
+    ) -> Result<TypedNode, SQLError> {
+        Self::coerce_selected(
+            value,
+            target,
+            Coercion {
+                format: 2,
+                explicit: true,
+            },
+        )
+    }
+
+    fn coerce_selected(
+        value: TypedNode,
+        target: &ColumnType,
+        coercion: Coercion,
+    ) -> Result<TypedNode, SQLError> {
+        let format = coercion.format;
         if pg_type_oid(&value.ty) == pg_type_oid(target) {
-            if format == 2 && pg_type_modifier(target) < 0 {
+            if !coercion.explicit && pg_type_modifier(target) < 0 {
                 return Ok(value);
             }
-            return Self::modify_type(value, target, format, false);
+            return Self::modify_type(value, target, coercion, false);
         }
         if let ColumnType::Domain { base, .. } = target {
-            let value = Self::coerce(value, base, format)?;
+            let value = Self::coerce_selected(value, base, coercion)?;
             return Ok(TypedNode {
                 node: Node::new(
                     "COERCETODOMAIN",
@@ -44,22 +101,25 @@ impl ExpressionContext<'_> {
         while let ColumnType::Domain { base, .. } = source {
             source = base;
         }
+        if *target == ColumnType::Record && matches!(source, ColumnType::Composite(_)) {
+            return Ok(value);
+        }
         if matches!(
             (source, target),
             (ColumnType::Array(_), ColumnType::Array(_))
         ) && pg_type_oid(source) != pg_type_oid(target)
         {
-            return Self::array_coercion(value, target, format);
+            return Self::array_coercion(value, target, coercion);
         }
         let base_target = target.without_type_modifiers();
         let method = if pg_type_oid(source) == pg_type_oid(target) {
             CastMethod::Binary
         } else if let Some(entry) = cast_catalog_entry(source, target) {
-            if format == 2 && entry.context != b'i' {
+            if !coercion.explicit && entry.context != b'i' {
                 return Err(coercion_error(&value.ty, target));
             }
             entry.method
-        } else if format == 1
+        } else if coercion.explicit
             && explicit_type_compatible(source, target)
             && (is_string(source) || is_string(target))
         {
@@ -70,7 +130,7 @@ impl ExpressionContext<'_> {
         let value = match method {
             CastMethod::Binary => relabel(value, &base_target, format),
             CastMethod::Function { oid, arguments } => {
-                cast_function(value, &base_target, oid, arguments, format)?
+                cast_function(value, &base_target, oid, arguments, coercion)?
             }
             CastMethod::InputOutput => TypedNode {
                 node: Node::new(
@@ -86,14 +146,15 @@ impl ExpressionContext<'_> {
                 ty: base_target,
             },
         };
-        Self::modify_type(value, target, format, true)
+        Self::modify_type(value, target, coercion, true)
     }
 
     fn array_coercion(
         value: TypedNode,
         target: &ColumnType,
-        format: i64,
+        coercion: Coercion,
     ) -> Result<TypedNode, SQLError> {
+        let format = coercion.format;
         let mut source = &value.ty;
         while let ColumnType::Domain { base, .. } = source {
             source = base;
@@ -116,7 +177,7 @@ impl ExpressionContext<'_> {
             ),
             ty: source_element.clone(),
         };
-        let element = Self::coerce(element, target_element, format)?;
+        let element = Self::coerce_selected(element, target_element, coercion)?;
         Ok(TypedNode {
             node: Node::new(
                 "ARRAYCOERCEEXPR",
@@ -137,9 +198,10 @@ impl ExpressionContext<'_> {
     fn modify_type(
         mut value: TypedNode,
         target: &ColumnType,
-        format: i64,
+        coercion: Coercion,
         hide_input: bool,
     ) -> Result<TypedNode, SQLError> {
+        let format = coercion.format;
         let modifier = pg_type_modifier(target);
         if modifier == pg_type_modifier(&value.ty) {
             return Ok(value);
@@ -166,11 +228,11 @@ impl ExpressionContext<'_> {
             (&value.ty, target),
             (ColumnType::Array(_), ColumnType::Array(_))
         ) {
-            return Self::array_coercion(value, target, format);
+            return Self::array_coercion(value, target, coercion);
         }
         if let Some(entry) = cast_catalog_entry(target, target) {
             if let CastMethod::Function { oid, arguments } = entry.method {
-                return cast_function(value, target, oid, arguments, format);
+                return cast_function(value, target, oid, arguments, coercion);
             }
         }
         Err(coercion_error(&value.ty, target))
@@ -206,8 +268,9 @@ fn cast_function(
     target: &ColumnType,
     oid: i64,
     arity: usize,
-    format: i64,
+    coercion: Coercion,
 ) -> Result<TypedNode, SQLError> {
+    let format = coercion.format;
     if !(1..=3).contains(&arity) {
         return Err(SQLError::Internal("invalid catalog cast arity".into()));
     }
@@ -223,7 +286,8 @@ fn cast_function(
         );
     }
     if arity > 2 {
-        arguments.push(values::constant(&Value::Bool(format == 1), &ColumnType::Boolean)?.into());
+        arguments
+            .push(values::constant(&Value::Bool(coercion.explicit), &ColumnType::Boolean)?.into());
     }
     Ok(TypedNode {
         node: Node::new(

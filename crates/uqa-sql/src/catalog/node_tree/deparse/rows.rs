@@ -64,24 +64,61 @@ impl Renderer<'_> {
         let arguments = list(node, "args")?;
         let names = list(node, "colnames")?;
         let record = crate::catalog::type_metadata::pg_type_oid(&crate::ColumnType::Record);
-        if node.integer("row_typeid")? != record {
-            return Err(SQLError::Unsupported(
-                "named row catalog reconstruction".into(),
-            ));
-        }
-        if names.len() != arguments.len()
-            || names
+        let oid = node.integer("row_typeid")?;
+        let fields = if oid == record {
+            if names.len() != arguments.len()
+                || names
+                    .iter()
+                    .any(|name| !matches!(name, Field::StringValue(_)))
+            {
+                return Err(invalid("invalid ROW column names"));
+            }
+            self.row_fields(arguments)?
+        } else {
+            if !names.is_empty() {
+                return Err(invalid("named ROW has anonymous column names"));
+            }
+            let type_oid = u32::try_from(oid).map_err(|_| invalid("invalid ROW type OID"))?;
+            let descriptor = self
+                .names
+                .value_catalog()
+                .ok_or_else(|| invalid("composite type catalog is unavailable"))?
+                .value_composite_type(type_oid)?
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("type with OID {type_oid} does not exist"),
+                })?;
+            let width = descriptor
+                .attributes
                 .iter()
-                .any(|name| !matches!(name, Field::StringValue(_)))
-        {
-            return Err(invalid("invalid ROW column names"));
-        }
-        let mut output = format!("ROW({})", self.row_fields(arguments)?);
+                .map(|attribute| attribute.number)
+                .chain(descriptor.dropped.iter().map(|attribute| attribute.number))
+                .max()
+                .unwrap_or(0);
+            if arguments.len()
+                > usize::try_from(width).map_err(|_| invalid("invalid ROW descriptor width"))?
+            {
+                return Err(invalid("ROW has more fields than its descriptor"));
+            }
+            descriptor
+                .attributes
+                .iter()
+                .map(|attribute| {
+                    let position = usize::try_from(attribute.number - 1)
+                        .map_err(|_| invalid("invalid ROW attribute number"))?;
+                    arguments
+                        .get(position)
+                        .map_or_else(|| Ok("NULL".into()), |value| self.field(value, self.pretty))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ")
+        };
+        let mut output = format!("ROW({fields})");
         match node.integer("row_format")? {
             0 | 2 => {}
             1 => {
                 output.push_str("::");
-                output.push_str(&self.names.type_name(record, -1)?);
+                output.push_str(&self.names.type_name(oid, -1)?);
             }
             _ => return Err(invalid("invalid ROW coercion format")),
         }

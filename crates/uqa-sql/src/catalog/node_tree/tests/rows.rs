@@ -10,6 +10,8 @@ use super::{deparse, expressions, parse, values, Field, Node, Routines};
 use crate::{ColumnType, RowSchema, Statement};
 use uqa_core::Value;
 
+mod named;
+
 #[test]
 fn row_selection_errors_match_postgresql() {
     let cases: Vec<serde_json::Value> =

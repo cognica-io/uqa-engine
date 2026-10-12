@@ -7,6 +7,7 @@
 use super::*;
 
 mod arrays;
+mod catalog;
 mod rows;
 mod scalar;
 

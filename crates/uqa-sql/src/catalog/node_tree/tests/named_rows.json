@@ -1,0 +1,1291 @@
+{
+  "cases": [
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair IS NULL",
+      "name": "probe_0"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair IS DISTINCT FROM NULL",
+      "name": "probe_1"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair = ROW(2, 'y')::node_pair",
+      "name": "probe_2"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair < ROW(2, 'y')::node_pair",
+      "name": "probe_3"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair IS DISTINCT FROM ROW(2, 'y')::node_pair",
+      "name": "probe_4"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_domain IS DISTINCT FROM ROW(2, 'y')::node_domain",
+      "name": "probe_5"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(ROW(VALUE, 'x')::node_pair, true)::node_outer IS NULL",
+      "name": "probe_6"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'ab'::varchar(2))::node_mod IS NOT NULL",
+      "name": "probe_7"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE)::node_holes IS NULL",
+      "name": "probe_8"
+    },
+    {
+      "base": "integer",
+      "check": "COALESCE(ROW(VALUE, 'x')::node_pair, ROW(2, 'y')::node_pair) IS NULL",
+      "name": "probe_9"
+    },
+    {
+      "base": "integer",
+      "check": "NULLIF(ROW(VALUE, 'x')::node_pair, ROW(2, 'y')::node_pair) IS NULL",
+      "name": "probe_10"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(ROW(VALUE, 'x')::node_pair, 1) < ROW(ROW(2, 'y')::node_pair, 2)",
+      "name": "probe_11"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair::record IS NULL",
+      "name": "probe_12"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE)::node_holes::text IS NOT NULL",
+      "name": "probe_13"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair IS NOT DISTINCT FROM ROW(2, 'y')::node_pair",
+      "name": "probe_14"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair IS DISTINCT FROM ROW(2, 'y')",
+      "name": "probe_15"
+    },
+    {
+      "base": "integer",
+      "check": "ROW('1', 'x') IS DISTINCT FROM ROW(VALUE, 'y')::node_pair",
+      "name": "probe_16"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair::record IS DISTINCT FROM ROW(2, 'y')::node_pair::record",
+      "name": "probe_17"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_pair::node_pair IS DISTINCT FROM ROW(2, 'y')::node_pair",
+      "name": "probe_18"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE)::node_holes IS DISTINCT FROM ROW(2)::node_holes",
+      "name": "probe_19"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_domain::record IS NULL",
+      "name": "probe_20"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::node_domain::record IS DISTINCT FROM ROW(2, 'y')::node_domain::record",
+      "name": "probe_21"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::record IS DISTINCT FROM ROW(2, 'y')::record",
+      "name": "probe_22"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(VALUE, 'x')::record::node_pair IS NULL",
+      "name": "probe_23"
+    },
+    {
+      "base": "integer",
+      "check": "ROW(ROW(VALUE, 'x'), true)::node_outer IS NULL",
+      "name": "probe_24"
+    }
+  ],
+  "states": [
+    {
+      "name": "initial",
+      "catalog": [
+        {
+          "oid": 26061,
+          "name": "node_pair",
+          "array_oid": 26060,
+          "relation_oid": 26059,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "n",
+              "type": "smallint",
+              "dropped": false,
+              "length": 2,
+              "alignment": "s"
+            },
+            {
+              "number": 2,
+              "name": "t",
+              "type": "text",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26064,
+          "name": "node_outer",
+          "array_oid": 26063,
+          "relation_oid": 26062,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "p",
+              "type": "node_pair",
+              "dropped": false,
+              "length": -1,
+              "alignment": "d"
+            },
+            {
+              "number": 2,
+              "name": "flag",
+              "type": "boolean",
+              "dropped": false,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        },
+        {
+          "oid": 26067,
+          "name": "node_mod",
+          "array_oid": 26066,
+          "relation_oid": 26065,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "n",
+              "type": "numeric(5,2)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "t",
+              "type": "character varying(3)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26069,
+          "name": "node_domain",
+          "array_oid": 26068,
+          "relation_oid": 0,
+          "kind": "d",
+          "base": "node_pair",
+          "attributes": null
+        },
+        {
+          "oid": 26072,
+          "name": "node_holes",
+          "array_oid": 26071,
+          "relation_oid": 26070,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "first",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "........pg.dropped.2........",
+              "type": "-",
+              "dropped": true,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "........pg.dropped.3........",
+              "type": "-",
+              "dropped": true,
+              "length": 4,
+              "alignment": "i"
+            }
+          ]
+        }
+      ],
+      "observations": [
+        {
+          "name": "probe_0",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_1",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text)::node_pair IS DISTINCT FROM NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_pair IS DISTINCT FROM NULL"
+        },
+        {
+          "name": "probe_10",
+          "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 2988 :opfuncid 2981 :opresulttype 26061 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(NULLIF(ROW((VALUE)::smallint, 'x'::text)::node_pair, ROW((2)::smallint, 'y'::text)::node_pair) IS NULL)",
+          "pretty": "NULLIF(ROW(VALUE::smallint, 'x'::text)::node_pair, ROW(2::smallint, 'y'::text)::node_pair) IS NULL"
+        },
+        {
+          "name": "probe_11",
+          "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 2990 97) :opfamilies (o 2994 1976) :inputcollids (o 0 0) :largs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :rargs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]})}",
+          "sql": "(ROW(ROW((VALUE)::smallint, 'x'::text)::node_pair, 1) < ROW(ROW((2)::smallint, 'y'::text)::node_pair, 2))",
+          "pretty": "(ROW(ROW(VALUE::smallint, 'x'::text)::node_pair, 1) < ROW(ROW(2::smallint, 'y'::text)::node_pair, 2))"
+        },
+        {
+          "name": "probe_12",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_13",
+          "conbin": "{NULLTEST :arg {COERCEVIAIO :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "((ROW(VALUE)::node_holes)::text IS NOT NULL)",
+          "pretty": "ROW(VALUE)::node_holes::text IS NOT NULL"
+        },
+        {
+          "name": "probe_14",
+          "conbin": "{BOOLEXPR :boolop not :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}) :location -1}",
+          "sql": "(NOT (((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text)))",
+          "pretty": "NOT (VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text)"
+        },
+        {
+          "name": "probe_15",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 532 :opfuncid 158 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_16",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 21 :consttypmod -1 :constcollid 0 :constlen 2 :constbyval true :constisnull false :location -1 :constvalue 2 [ 1 0 0 0 0 0 0 0 ]} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(('1'::smallint IS DISTINCT FROM (VALUE)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "'1'::smallint IS DISTINCT FROM VALUE::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_17",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_18",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_19",
+          "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+          "sql": "(((VALUE IS DISTINCT FROM 2) OR (NULL::integer IS DISTINCT FROM NULL::integer)) OR (NULL::integer IS DISTINCT FROM NULL::integer))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR NULL::integer IS DISTINCT FROM NULL::integer OR NULL::integer IS DISTINCT FROM NULL::integer"
+        },
+        {
+          "name": "probe_2",
+          "conbin": "{OPEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text)::node_pair = ROW((2)::smallint, 'y'::text)::node_pair)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_pair = ROW(2::smallint, 'y'::text)::node_pair"
+        },
+        {
+          "name": "probe_20",
+          "conbin": "{NULLTEST :arg {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "((ROW((VALUE)::smallint, 'x'::text))::node_domain IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_domain IS NULL"
+        },
+        {
+          "name": "probe_21",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, 'x'::text))::node_domain IS DISTINCT FROM (ROW((2)::smallint, 'y'::text))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_domain IS DISTINCT FROM ROW(2::smallint, 'y'::text)::node_domain"
+        },
+        {
+          "name": "probe_22",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "((VALUE IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_23",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_24",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, 'x'::text), true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, 'x'::text), true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_3",
+          "conbin": "{OPEXPR :opno 2990 :opfuncid 2983 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text)::node_pair < ROW((2)::smallint, 'y'::text)::node_pair)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_pair < ROW(2::smallint, 'y'::text)::node_pair"
+        },
+        {
+          "name": "probe_4",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_5",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, 'x'::text))::node_domain IS DISTINCT FROM (ROW((2)::smallint, 'y'::text))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text)::node_domain IS DISTINCT FROM ROW(2::smallint, 'y'::text)::node_domain"
+        },
+        {
+          "name": "probe_6",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, 'x'::text)::node_pair, true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, 'x'::text)::node_pair, true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_7",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :row_typeid 26067 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::numeric(5,2), ('ab'::character varying(2))::character varying(3))::node_mod IS NOT NULL)",
+          "pretty": "ROW(VALUE::numeric(5,2), 'ab'::character varying(2)::character varying(3))::node_mod IS NOT NULL"
+        },
+        {
+          "name": "probe_8",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(VALUE)::node_holes IS NULL)",
+          "pretty": "ROW(VALUE)::node_holes IS NULL"
+        },
+        {
+          "name": "probe_9",
+          "conbin": "{NULLTEST :arg {COALESCEEXPR :coalescetype 26061 :coalescecollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(COALESCE(ROW((VALUE)::smallint, 'x'::text)::node_pair, ROW((2)::smallint, 'y'::text)::node_pair) IS NULL)",
+          "pretty": "COALESCE(ROW(VALUE::smallint, 'x'::text)::node_pair, ROW(2::smallint, 'y'::text)::node_pair) IS NULL"
+        }
+      ]
+    },
+    {
+      "name": "added",
+      "catalog": [
+        {
+          "oid": 26061,
+          "name": "node_pair",
+          "array_oid": 26060,
+          "relation_oid": 26059,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "number",
+              "type": "smallint",
+              "dropped": false,
+              "length": 2,
+              "alignment": "s"
+            },
+            {
+              "number": 2,
+              "name": "label",
+              "type": "text",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "more",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26064,
+          "name": "node_outer",
+          "array_oid": 26063,
+          "relation_oid": 26062,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "p",
+              "type": "node_pair",
+              "dropped": false,
+              "length": -1,
+              "alignment": "d"
+            },
+            {
+              "number": 2,
+              "name": "flag",
+              "type": "boolean",
+              "dropped": false,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        },
+        {
+          "oid": 26067,
+          "name": "node_mod",
+          "array_oid": 26066,
+          "relation_oid": 26065,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "n",
+              "type": "numeric(5,2)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "t",
+              "type": "character varying(3)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26069,
+          "name": "node_domain",
+          "array_oid": 26068,
+          "relation_oid": 0,
+          "kind": "d",
+          "base": "node_pair",
+          "attributes": null
+        },
+        {
+          "oid": 26072,
+          "name": "node_holes",
+          "array_oid": 26071,
+          "relation_oid": 26070,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "first",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "........pg.dropped.2........",
+              "type": "-",
+              "dropped": true,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "........pg.dropped.3........",
+              "type": "-",
+              "dropped": true,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 4,
+              "name": "added",
+              "type": "boolean",
+              "dropped": false,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        }
+      ],
+      "observations": [
+        {
+          "name": "probe_0",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_1",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair IS DISTINCT FROM NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_pair IS DISTINCT FROM NULL"
+        },
+        {
+          "name": "probe_10",
+          "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 2988 :opfuncid 2981 :opresulttype 26061 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(NULLIF(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair, ROW((2)::smallint, 'y'::text, NULL)::node_pair) IS NULL)",
+          "pretty": "NULLIF(ROW(VALUE::smallint, 'x'::text, NULL)::node_pair, ROW(2::smallint, 'y'::text, NULL)::node_pair) IS NULL"
+        },
+        {
+          "name": "probe_11",
+          "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 2990 97) :opfamilies (o 2994 1976) :inputcollids (o 0 0) :largs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :rargs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]})}",
+          "sql": "(ROW(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair, 1) < ROW(ROW((2)::smallint, 'y'::text, NULL)::node_pair, 2))",
+          "pretty": "(ROW(ROW(VALUE::smallint, 'x'::text, NULL)::node_pair, 1) < ROW(ROW(2::smallint, 'y'::text, NULL)::node_pair, 2))"
+        },
+        {
+          "name": "probe_12",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_13",
+          "conbin": "{NULLTEST :arg {COERCEVIAIO :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "((ROW(VALUE, NULL)::node_holes)::text IS NOT NULL)",
+          "pretty": "ROW(VALUE, NULL)::node_holes::text IS NOT NULL"
+        },
+        {
+          "name": "probe_14",
+          "conbin": "{BOOLEXPR :boolop not :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}) :location -1}",
+          "sql": "(NOT (((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text)))",
+          "pretty": "NOT (VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text)"
+        },
+        {
+          "name": "probe_15",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 532 :opfuncid 158 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_16",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 21 :consttypmod -1 :constcollid 0 :constlen 2 :constbyval true :constisnull false :location -1 :constvalue 2 [ 1 0 0 0 0 0 0 0 ]} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(('1'::smallint IS DISTINCT FROM (VALUE)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "'1'::smallint IS DISTINCT FROM VALUE::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_17",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_18",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_19",
+          "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+          "sql": "(((VALUE IS DISTINCT FROM 2) OR (NULL::integer IS DISTINCT FROM NULL::integer)) OR (NULL::integer IS DISTINCT FROM NULL::integer))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR NULL::integer IS DISTINCT FROM NULL::integer OR NULL::integer IS DISTINCT FROM NULL::integer"
+        },
+        {
+          "name": "probe_2",
+          "conbin": "{OPEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair = ROW((2)::smallint, 'y'::text, NULL)::node_pair)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_pair = ROW(2::smallint, 'y'::text, NULL)::node_pair"
+        },
+        {
+          "name": "probe_20",
+          "conbin": "{NULLTEST :arg {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "((ROW((VALUE)::smallint, 'x'::text, NULL))::node_domain IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_domain IS NULL"
+        },
+        {
+          "name": "probe_21",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, 'x'::text, NULL))::node_domain IS DISTINCT FROM (ROW((2)::smallint, 'y'::text, NULL))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_domain IS DISTINCT FROM ROW(2::smallint, 'y'::text, NULL)::node_domain"
+        },
+        {
+          "name": "probe_22",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "((VALUE IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_23",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_24",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, 'x'::text, NULL), true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, 'x'::text, NULL), true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_3",
+          "conbin": "{OPEXPR :opno 2990 :opfuncid 2983 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair < ROW((2)::smallint, 'y'::text, NULL)::node_pair)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_pair < ROW(2::smallint, 'y'::text, NULL)::node_pair"
+        },
+        {
+          "name": "probe_4",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_5",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, 'x'::text, NULL))::node_domain IS DISTINCT FROM (ROW((2)::smallint, 'y'::text, NULL))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, 'x'::text, NULL)::node_domain IS DISTINCT FROM ROW(2::smallint, 'y'::text, NULL)::node_domain"
+        },
+        {
+          "name": "probe_6",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair, true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, 'x'::text, NULL)::node_pair, true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_7",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :row_typeid 26067 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::numeric(5,2), ('ab'::character varying(2))::character varying(3))::node_mod IS NOT NULL)",
+          "pretty": "ROW(VALUE::numeric(5,2), 'ab'::character varying(2)::character varying(3))::node_mod IS NOT NULL"
+        },
+        {
+          "name": "probe_8",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(VALUE, NULL)::node_holes IS NULL)",
+          "pretty": "ROW(VALUE, NULL)::node_holes IS NULL"
+        },
+        {
+          "name": "probe_9",
+          "conbin": "{NULLTEST :arg {COALESCEEXPR :coalescetype 26061 :coalescecollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(COALESCE(ROW((VALUE)::smallint, 'x'::text, NULL)::node_pair, ROW((2)::smallint, 'y'::text, NULL)::node_pair) IS NULL)",
+          "pretty": "COALESCE(ROW(VALUE::smallint, 'x'::text, NULL)::node_pair, ROW(2::smallint, 'y'::text, NULL)::node_pair) IS NULL"
+        }
+      ]
+    },
+    {
+      "name": "changed",
+      "catalog": [
+        {
+          "oid": 26061,
+          "name": "node_pair",
+          "array_oid": 26060,
+          "relation_oid": 26059,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "number",
+              "type": "real",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "........pg.dropped.2........",
+              "type": "-",
+              "dropped": true,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "more",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26064,
+          "name": "node_outer",
+          "array_oid": 26063,
+          "relation_oid": 26062,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "p",
+              "type": "node_pair",
+              "dropped": false,
+              "length": -1,
+              "alignment": "d"
+            },
+            {
+              "number": 2,
+              "name": "flag",
+              "type": "boolean",
+              "dropped": false,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        },
+        {
+          "oid": 26067,
+          "name": "node_mod",
+          "array_oid": 26066,
+          "relation_oid": 26065,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "n",
+              "type": "numeric(5,2)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "t",
+              "type": "character varying(3)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26069,
+          "name": "node_domain",
+          "array_oid": 26068,
+          "relation_oid": 0,
+          "kind": "d",
+          "base": "node_pair",
+          "attributes": null
+        },
+        {
+          "oid": 26072,
+          "name": "node_holes",
+          "array_oid": 26071,
+          "relation_oid": 26070,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "first",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "........pg.dropped.2........",
+              "type": "-",
+              "dropped": true,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "........pg.dropped.3........",
+              "type": "-",
+              "dropped": true,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 4,
+              "name": "........pg.dropped.4........",
+              "type": "-",
+              "dropped": true,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        }
+      ],
+      "observations": [
+        {
+          "name": "probe_0",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_1",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::node_pair IS DISTINCT FROM NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_pair IS DISTINCT FROM NULL"
+        },
+        {
+          "name": "probe_10",
+          "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 2988 :opfuncid 2981 :opresulttype 26061 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(NULLIF(ROW((VALUE)::smallint, NULL)::node_pair, ROW((2)::smallint, NULL)::node_pair) IS NULL)",
+          "pretty": "NULLIF(ROW(VALUE::smallint, NULL)::node_pair, ROW(2::smallint, NULL)::node_pair) IS NULL"
+        },
+        {
+          "name": "probe_11",
+          "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 2990 97) :opfamilies (o 2994 1976) :inputcollids (o 0 0) :largs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :rargs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]})}",
+          "sql": "(ROW(ROW((VALUE)::smallint, NULL)::node_pair, 1) < ROW(ROW((2)::smallint, NULL)::node_pair, 2))",
+          "pretty": "(ROW(ROW(VALUE::smallint, NULL)::node_pair, 1) < ROW(ROW(2::smallint, NULL)::node_pair, 2))"
+        },
+        {
+          "name": "probe_12",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_13",
+          "conbin": "{NULLTEST :arg {COERCEVIAIO :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "((ROW(VALUE)::node_holes)::text IS NOT NULL)",
+          "pretty": "ROW(VALUE)::node_holes::text IS NOT NULL"
+        },
+        {
+          "name": "probe_14",
+          "conbin": "{BOOLEXPR :boolop not :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}) :location -1}",
+          "sql": "(NOT (((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text)))",
+          "pretty": "NOT (VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text)"
+        },
+        {
+          "name": "probe_15",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 532 :opfuncid 158 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_16",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 21 :consttypmod -1 :constcollid 0 :constlen 2 :constbyval true :constisnull false :location -1 :constvalue 2 [ 1 0 0 0 0 0 0 0 ]} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(('1'::smallint IS DISTINCT FROM (VALUE)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "'1'::smallint IS DISTINCT FROM VALUE::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_17",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_18",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_19",
+          "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+          "sql": "(((VALUE IS DISTINCT FROM 2) OR (NULL::integer IS DISTINCT FROM NULL::integer)) OR (NULL::integer IS DISTINCT FROM NULL::integer))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR NULL::integer IS DISTINCT FROM NULL::integer OR NULL::integer IS DISTINCT FROM NULL::integer"
+        },
+        {
+          "name": "probe_2",
+          "conbin": "{OPEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::node_pair = ROW((2)::smallint, NULL)::node_pair)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_pair = ROW(2::smallint, NULL)::node_pair"
+        },
+        {
+          "name": "probe_20",
+          "conbin": "{NULLTEST :arg {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "((ROW((VALUE)::smallint, NULL))::node_domain IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_domain IS NULL"
+        },
+        {
+          "name": "probe_21",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, NULL))::node_domain IS DISTINCT FROM (ROW((2)::smallint, NULL))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_domain IS DISTINCT FROM ROW(2::smallint, NULL)::node_domain"
+        },
+        {
+          "name": "probe_22",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "((VALUE IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_23",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::node_pair IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_pair IS NULL"
+        },
+        {
+          "name": "probe_24",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, NULL), true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, NULL), true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_3",
+          "conbin": "{OPEXPR :opno 2990 :opfuncid 2983 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::node_pair < ROW((2)::smallint, NULL)::node_pair)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_pair < ROW(2::smallint, NULL)::node_pair"
+        },
+        {
+          "name": "probe_4",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_5",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, NULL))::node_domain IS DISTINCT FROM (ROW((2)::smallint, NULL))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_domain IS DISTINCT FROM ROW(2::smallint, NULL)::node_domain"
+        },
+        {
+          "name": "probe_6",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, NULL)::node_pair, true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, NULL)::node_pair, true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_7",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :row_typeid 26067 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::numeric(5,2), ('ab'::character varying(2))::character varying(3))::node_mod IS NOT NULL)",
+          "pretty": "ROW(VALUE::numeric(5,2), 'ab'::character varying(2)::character varying(3))::node_mod IS NOT NULL"
+        },
+        {
+          "name": "probe_8",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(VALUE)::node_holes IS NULL)",
+          "pretty": "ROW(VALUE)::node_holes IS NULL"
+        },
+        {
+          "name": "probe_9",
+          "conbin": "{NULLTEST :arg {COALESCEEXPR :coalescetype 26061 :coalescecollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(COALESCE(ROW((VALUE)::smallint, NULL)::node_pair, ROW((2)::smallint, NULL)::node_pair) IS NULL)",
+          "pretty": "COALESCE(ROW(VALUE::smallint, NULL)::node_pair, ROW(2::smallint, NULL)::node_pair) IS NULL"
+        }
+      ]
+    },
+    {
+      "name": "renamed",
+      "catalog": [
+        {
+          "oid": 26061,
+          "name": "row pair renamed",
+          "array_oid": 26060,
+          "relation_oid": 26059,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "number",
+              "type": "real",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "........pg.dropped.2........",
+              "type": "-",
+              "dropped": true,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "more",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26064,
+          "name": "node_outer",
+          "array_oid": 26063,
+          "relation_oid": 26062,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "p",
+              "type": "\"row pair renamed\"",
+              "dropped": false,
+              "length": -1,
+              "alignment": "d"
+            },
+            {
+              "number": 2,
+              "name": "flag",
+              "type": "boolean",
+              "dropped": false,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        },
+        {
+          "oid": 26067,
+          "name": "node_mod",
+          "array_oid": 26066,
+          "relation_oid": 26065,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "n",
+              "type": "numeric(5,2)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "t",
+              "type": "character varying(3)",
+              "dropped": false,
+              "length": -1,
+              "alignment": "i"
+            }
+          ]
+        },
+        {
+          "oid": 26069,
+          "name": "node_domain",
+          "array_oid": 26068,
+          "relation_oid": 0,
+          "kind": "d",
+          "base": "\"row pair renamed\"",
+          "attributes": null
+        },
+        {
+          "oid": 26072,
+          "name": "row holes renamed",
+          "array_oid": 26071,
+          "relation_oid": 26070,
+          "kind": "c",
+          "base": null,
+          "attributes": [
+            {
+              "number": 1,
+              "name": "first",
+              "type": "integer",
+              "dropped": false,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 2,
+              "name": "........pg.dropped.2........",
+              "type": "-",
+              "dropped": true,
+              "length": -1,
+              "alignment": "i"
+            },
+            {
+              "number": 3,
+              "name": "........pg.dropped.3........",
+              "type": "-",
+              "dropped": true,
+              "length": 4,
+              "alignment": "i"
+            },
+            {
+              "number": 4,
+              "name": "........pg.dropped.4........",
+              "type": "-",
+              "dropped": true,
+              "length": 1,
+              "alignment": "c"
+            }
+          ]
+        }
+      ],
+      "observations": [
+        {
+          "name": "probe_0",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::\"row pair renamed\" IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::\"row pair renamed\" IS NULL"
+        },
+        {
+          "name": "probe_1",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::\"row pair renamed\" IS DISTINCT FROM NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::\"row pair renamed\" IS DISTINCT FROM NULL"
+        },
+        {
+          "name": "probe_10",
+          "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 2988 :opfuncid 2981 :opresulttype 26061 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(NULLIF(ROW((VALUE)::smallint, NULL)::\"row pair renamed\", ROW((2)::smallint, NULL)::\"row pair renamed\") IS NULL)",
+          "pretty": "NULLIF(ROW(VALUE::smallint, NULL)::\"row pair renamed\", ROW(2::smallint, NULL)::\"row pair renamed\") IS NULL"
+        },
+        {
+          "name": "probe_11",
+          "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 2990 97) :opfamilies (o 2994 1976) :inputcollids (o 0 0) :largs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :rargs ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]})}",
+          "sql": "(ROW(ROW((VALUE)::smallint, NULL)::\"row pair renamed\", 1) < ROW(ROW((2)::smallint, NULL)::\"row pair renamed\", 2))",
+          "pretty": "(ROW(ROW(VALUE::smallint, NULL)::\"row pair renamed\", 1) < ROW(ROW(2::smallint, NULL)::\"row pair renamed\", 2))"
+        },
+        {
+          "name": "probe_12",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::\"row pair renamed\" IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::\"row pair renamed\" IS NULL"
+        },
+        {
+          "name": "probe_13",
+          "conbin": "{NULLTEST :arg {COERCEVIAIO :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+          "sql": "((ROW(VALUE)::\"row holes renamed\")::text IS NOT NULL)",
+          "pretty": "ROW(VALUE)::\"row holes renamed\"::text IS NOT NULL"
+        },
+        {
+          "name": "probe_14",
+          "conbin": "{BOOLEXPR :boolop not :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}) :location -1}",
+          "sql": "(NOT (((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text)))",
+          "pretty": "NOT (VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text)"
+        },
+        {
+          "name": "probe_15",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 532 :opfuncid 158 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_16",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 21 :consttypmod -1 :constcollid 0 :constlen 2 :constbyval true :constisnull false :location -1 :constvalue 2 [ 1 0 0 0 0 0 0 0 ]} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(('1'::smallint IS DISTINCT FROM (VALUE)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "'1'::smallint IS DISTINCT FROM VALUE::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_17",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_18",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_19",
+          "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1} {DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+          "sql": "(((VALUE IS DISTINCT FROM 2) OR (NULL::integer IS DISTINCT FROM NULL::integer)) OR (NULL::integer IS DISTINCT FROM NULL::integer))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR NULL::integer IS DISTINCT FROM NULL::integer OR NULL::integer IS DISTINCT FROM NULL::integer"
+        },
+        {
+          "name": "probe_2",
+          "conbin": "{OPEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::\"row pair renamed\" = ROW((2)::smallint, NULL)::\"row pair renamed\")",
+          "pretty": "ROW(VALUE::smallint, NULL)::\"row pair renamed\" = ROW(2::smallint, NULL)::\"row pair renamed\""
+        },
+        {
+          "name": "probe_20",
+          "conbin": "{NULLTEST :arg {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "((ROW((VALUE)::smallint, NULL))::node_domain IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_domain IS NULL"
+        },
+        {
+          "name": "probe_21",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, NULL))::node_domain IS DISTINCT FROM (ROW((2)::smallint, NULL))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_domain IS DISTINCT FROM ROW(2::smallint, NULL)::node_domain"
+        },
+        {
+          "name": "probe_22",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "((VALUE IS DISTINCT FROM 2) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE IS DISTINCT FROM 2 OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_23",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::\"row pair renamed\" IS NULL)",
+          "pretty": "ROW(VALUE::smallint, NULL)::\"row pair renamed\" IS NULL"
+        },
+        {
+          "name": "probe_24",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, NULL), true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, NULL), true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_3",
+          "conbin": "{OPEXPR :opno 2990 :opfuncid 2983 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1}",
+          "sql": "(ROW((VALUE)::smallint, NULL)::\"row pair renamed\" < ROW((2)::smallint, NULL)::\"row pair renamed\")",
+          "pretty": "ROW(VALUE::smallint, NULL)::\"row pair renamed\" < ROW(2::smallint, NULL)::\"row pair renamed\""
+        },
+        {
+          "name": "probe_4",
+          "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 94 :opfuncid 63 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+          "sql": "(((VALUE)::smallint IS DISTINCT FROM (2)::smallint) OR ('x'::text IS DISTINCT FROM 'y'::text))",
+          "pretty": "VALUE::smallint IS DISTINCT FROM 2::smallint OR 'x'::text IS DISTINCT FROM 'y'::text"
+        },
+        {
+          "name": "probe_5",
+          "conbin": "{DISTINCTEXPR :opno 2988 :opfuncid 2981 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {COERCETODOMAIN :arg {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 2 :colnames <> :location -1} :resulttype 26069 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1}",
+          "sql": "((ROW((VALUE)::smallint, NULL))::node_domain IS DISTINCT FROM (ROW((2)::smallint, NULL))::node_domain)",
+          "pretty": "ROW(VALUE::smallint, NULL)::node_domain IS DISTINCT FROM ROW(2::smallint, NULL)::node_domain"
+        },
+        {
+          "name": "probe_6",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 26064 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(ROW((VALUE)::smallint, NULL)::\"row pair renamed\", true)::node_outer IS NULL)",
+          "pretty": "ROW(ROW(VALUE::smallint, NULL)::\"row pair renamed\", true)::node_outer IS NULL"
+        },
+        {
+          "name": "probe_7",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :row_typeid 26067 :row_format 1 :colnames <> :location -1} :nulltesttype 1 :argisrow true :location -1}",
+          "sql": "(ROW((VALUE)::numeric(5,2), ('ab'::character varying(2))::character varying(3))::node_mod IS NOT NULL)",
+          "pretty": "ROW(VALUE::numeric(5,2), 'ab'::character varying(2)::character varying(3))::node_mod IS NOT NULL"
+        },
+        {
+          "name": "probe_8",
+          "conbin": "{NULLTEST :arg {ROWEXPR :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :row_typeid 26072 :row_format 1 :colnames <> :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(ROW(VALUE)::\"row holes renamed\" IS NULL)",
+          "pretty": "ROW(VALUE)::\"row holes renamed\" IS NULL"
+        },
+        {
+          "name": "probe_9",
+          "conbin": "{NULLTEST :arg {COALESCEEXPR :coalescetype 26061 :coalescecollid 0 :args ({ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1} {ROWEXPR :args ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :row_typeid 26061 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow true :location -1}",
+          "sql": "(COALESCE(ROW((VALUE)::smallint, NULL)::\"row pair renamed\", ROW((2)::smallint, NULL)::\"row pair renamed\") IS NULL)",
+          "pretty": "COALESCE(ROW(VALUE::smallint, NULL)::\"row pair renamed\", ROW(2::smallint, NULL)::\"row pair renamed\") IS NULL"
+        }
+      ]
+    }
+  ]
+}

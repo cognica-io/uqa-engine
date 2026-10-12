@@ -13,6 +13,9 @@ use crate::catalog::type_metadata::pg_type_oid;
 use crate::type_resolution::binary_operator_by_oid;
 use uqa_core::Value;
 
+mod distinct;
+mod named;
+
 impl ExpressionContext<'_> {
     pub(super) fn row(&self, elements: &[Expr]) -> Result<TypedNode, SQLError> {
         let arguments = elements
@@ -116,27 +119,6 @@ impl ExpressionContext<'_> {
         }
         row_ordering_node(comparison, operators, interpretations)
     }
-
-    pub(super) fn row_distinct(
-        &self,
-        left: &[Expr],
-        right: &[Expr],
-    ) -> Result<TypedNode, SQLError> {
-        require_equal_width(left, right)?;
-        let mut result = None;
-        for (left, right) in left.iter().zip(right) {
-            let mut selected = self.scalar_binary(BinaryOp::Equal, left, right)?.node;
-            selected.kind = "DISTINCTEXPR".into();
-            result = Some(match result {
-                None => selected,
-                Some(previous) => boolean("or", vec![previous, selected]),
-            });
-        }
-        Ok(boolean_node(match result {
-            Some(node) => node,
-            None => values::constant(&Value::Bool(false), &ColumnType::Boolean)?,
-        }))
-    }
 }
 
 fn row_ordering_node(
@@ -185,7 +167,7 @@ fn row_ordering_node(
     )))
 }
 
-fn require_equal_width(left: &[Expr], right: &[Expr]) -> Result<(), SQLError> {
+fn require_equal_width<T, U>(left: &[T], right: &[U]) -> Result<(), SQLError> {
     if left.len() != right.len() {
         return Err(SQLError::Routine {
             sqlstate: "42601".into(),

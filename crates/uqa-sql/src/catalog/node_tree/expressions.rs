@@ -139,17 +139,7 @@ impl ExpressionContext<'_> {
                     self.function(name, binding.as_ref(), args, *order_syntax)?
                 }
             }
-            Expr::Cast { expr, ty, .. } => {
-                let ty = self.resolve_type(ty)?;
-                let unknown = self.expression_type(expr)?.is_none();
-                let mut input_type = &ty;
-                while let ColumnType::Domain { base, .. } = input_type {
-                    input_type = base;
-                }
-                let input_type = input_type.without_type_modifiers();
-                let inner = self.encode(expr, unknown.then_some(&input_type))?;
-                Self::coerce(inner, &ty, 1)?
-            }
+            Expr::Cast { expr, ty, implicit } => self.cast_expression(expr, ty, *implicit)?,
             _ => {
                 return Err(SQLError::Unsupported(
                     "catalog expression node encoding for this expression".into(),

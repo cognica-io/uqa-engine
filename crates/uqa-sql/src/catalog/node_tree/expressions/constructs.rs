@@ -66,8 +66,8 @@ impl ExpressionContext<'_> {
                 if binding
                     .is_some_and(|binding| binding.dispatch == Some(FunctionDispatch::IsDistinct))
                 {
-                    if let (Expr::Row(left), Expr::Row(right)) = (lhs, rhs) {
-                        return self.row_distinct(left, right).map(Some);
+                    if let Some(value) = self.row_distinct(lhs, rhs)? {
+                        return Ok(Some(value));
                     }
                 }
                 let mut value = self.scalar_binary(BinaryOp::Equal, lhs, rhs)?;
