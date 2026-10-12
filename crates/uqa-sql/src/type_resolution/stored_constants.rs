@@ -318,12 +318,18 @@ fn split_added_casts<'a>(
     mut bound: &'a ScalarExpr,
 ) -> (&'a ScalarExpr, Vec<&'a str>) {
     let mut added = Vec::new();
-    while let ScalarExpr::Cast { expr, ty, .. } = bound {
-        if matches!(stored, ScalarExpr::Cast { ty: written, .. } if written == ty) {
-            break;
+    loop {
+        match bound {
+            ScalarExpr::Collated { expr, .. } => bound = expr,
+            ScalarExpr::Cast { expr, ty, .. } => {
+                if matches!(stored, ScalarExpr::Cast { ty: written, .. } if written == ty) {
+                    break;
+                }
+                added.push(ty.as_str());
+                bound = expr;
+            }
+            _ => break,
         }
-        added.push(ty.as_str());
-        bound = expr;
     }
     (bound, added)
 }
@@ -333,6 +339,13 @@ fn transfer(
     bound: &ScalarExpr,
     folding: &mut dyn Folding,
 ) -> Result<bool, SQLError> {
+    // Result annotations retain the original analysis; storage transfers selected coercions through their operands without replacing that metadata.
+    if let ScalarExpr::Collated { expr, .. } = stored {
+        return transfer(expr, bound, folding);
+    }
+    if let ScalarExpr::Collated { expr, .. } = bound {
+        return transfer(stored, expr, folding);
+    }
     let reshaped = if let Some(shape) = super::membership::stored_shape(stored, bound) {
         let ScalarExpr::InList {
             expr,

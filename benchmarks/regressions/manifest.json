@@ -3363,6 +3363,35 @@
       "capability": "Trigger record descriptor persistence",
       "workload": "Eleven independent PostgreSQL observations cover OLD/NEW, whole-record copies, NULLs, repeated invocations and persistent reopening on four providers.",
       "invariant": "Declared field types and collations survive invocation, copying, field lookup and reopen without changing tuple values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_view_coercions_preserve_prepared_result_collations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Stored view coercions",
+      "workload": "Ordinary preparation followed by stored binding and serialization for three independently observed cast/COLLATE expressions.",
+      "invariant": "Retain the original result type and collation selection while storing only the analyzed coercion and selected outer COLLATE.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "collation_values_survive_preparation_generation_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/regcollation/values.rs",
+      "capability": "Persistent collation values and view definitions",
+      "workload": "49 original PostgreSQL messages and six fresh-connection observations on four providers.",
+      "invariant": "Preserve values, effects, errors and exact regular/pretty view definitions through preparation, stored coercion normalization and persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
