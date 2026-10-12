@@ -102,7 +102,16 @@ impl Reader<'_> {
                 self.offset += 1;
                 return Ok(values);
             }
-            values.push(self.value(depth)?);
+            if self.peek() == Some(b'"') {
+                let (token, _) = self.token()?;
+                let value = token
+                    .strip_prefix('"')
+                    .and_then(|token| token.strip_suffix('"'))
+                    .ok_or_else(|| invalid("unfinished String value in node list"))?;
+                values.push(Field::StringValue(value.into()));
+            } else {
+                values.push(self.value(depth)?);
+            }
         }
     }
 

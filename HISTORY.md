@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve anonymous ROW constructors and their selected field operators in the typed catalog expression codec, including nested rows, DISTINCT, NULL tests, exact PostgreSQL diagnostics and both SQL reconstruction forms.
+
 - Preserve PostgreSQL infinite date, timestamp and interval values through input/output, casts, arithmetic, comparisons, ranges, window frames, aggregates and persistent storage. Keep finite interval overflow and mixed-infinity diagnostics, validate range bounds before canonicalization, and preserve empty containment.
 
 - Preserve physical array constants in the typed catalog expression codec, including dimensions, lower bounds, NULLs, element modifiers and domain/enum/composite identities across catalog changes. Share typed output through borrowed metadata while retaining live interval formatting.

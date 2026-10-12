@@ -2434,6 +2434,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_expression_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests.rs",
+      "capability": "Anonymous ROW catalog representation",
+      "workload": "Forty independent PostgreSQL anonymous ROW node trees and both SQL reconstruction forms.",
+      "invariant": "Selected operators, families, datums, nested record identities, DISTINCT expansion and NULL semantics match the reference exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_selection_errors_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/rows.rs",
+      "capability": "Anonymous ROW catalog representation",
+      "workload": "Seven independent PostgreSQL ROW width, result-type and operator-family failures.",
+      "invariant": "SQLSTATE, primary message, DETAIL and HINT match the selected PostgreSQL diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "string_values_keep_postgresql_list_quoting_separate_from_field_tokens",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/rows.rs",
+      "capability": "Anonymous ROW catalog representation",
+      "workload": "Empty, escaped, Unicode and marker-like ROW field names.",
+      "invariant": "List String values round-trip exactly and unfinished quoting rejects.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unknown_row_fields_validate_cstring_bounds_without_reading_null_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/rows.rs",
+      "capability": "Anonymous ROW catalog representation",
+      "workload": "Truncated, unterminated, embedded-NUL and invalid-UTF8 unknown Datums.",
+      "invariant": "Both SQL output forms reject malformed non-NULL storage while NULL output never reads the payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_comparison_reconstruction_rejects_inconsistent_lists",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/rows.rs",
+      "capability": "Anonymous ROW catalog representation",
+      "workload": "Malformed strategy, operand, operator-family and collation lists.",
+      "invariant": "Reconstruction rejects inconsistent ROW metadata without reading beyond the owned node lists.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

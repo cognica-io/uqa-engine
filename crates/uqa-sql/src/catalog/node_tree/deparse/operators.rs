@@ -131,7 +131,15 @@ impl Renderer<'_> {
         let value = match operator {
             "not" if args.len() == 1 => {
                 let grouping = matches!(&args[0], Field::Node(node) if node.kind == "BOOLEXPR");
-                format!("NOT {}", self.field(&args[0], self.pretty && !grouping)?)
+                let row_comparison = self.pretty
+                    && matches!(&args[0], Field::Node(node) if node.kind == "ROWCOMPAREEXPR");
+                format!(
+                    "NOT {}",
+                    parentheses(
+                        self.field(&args[0], self.pretty && !grouping)?,
+                        row_comparison
+                    )
+                )
             }
             "and" | "or" => {
                 let join = if operator == "and" { " AND " } else { " OR " };
