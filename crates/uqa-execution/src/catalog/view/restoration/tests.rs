@@ -423,3 +423,50 @@ fn failed_retained_range_persistence_keeps_the_previous_registry() {
     assert_eq!(fixture.writes.get(), 0);
     assert_eq!(fixture.snapshot(), before);
 }
+
+#[test]
+fn registered_json_path_views_restore_without_rebinding_or_catalog_writes() {
+    struct Callbacks;
+    impl uqa_sql::FunctionTypeResolver for Callbacks {
+        fn has_untyped_function(&self, name: &str) -> bool {
+            matches!(name, "json_extract_path" | "jsonb_extract_path_text")
+        }
+
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&uqa_sql::ast::FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+    }
+    let mut fixture = Fixture::new(Failure::None);
+    for ((identity, row), name) in (1..)
+        .zip(&mut fixture.rows)
+        .zip(["json_extract_path", "jsonb_extract_path_text"])
+    {
+        let mut stored = view(identity, RelationPersistence::Permanent);
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(
+            uqa_sql::compile(&format!("SELECT {name}(1) AS value"))
+                .unwrap()
+                .remove(0),
+        ) else {
+            panic!("callback query");
+        };
+        stored.query = *query;
+        row.security = stored.security.row().into();
+        row.definition_json = serde_json::to_string(&stored.definition).unwrap();
+    }
+    let mut context = fixture.context();
+    context.types = &Callbacks;
+    for allows_migration in [false, true, false] {
+        restore_views_from_catalog(&context, &fixture, allows_migration).unwrap();
+        assert_eq!(fixture.identities.get(), 0);
+        assert_eq!(fixture.bindings.get(), 0);
+        assert_eq!(fixture.schemas.get(), 0);
+        assert!(fixture.saved.borrow().is_empty());
+    }
+}

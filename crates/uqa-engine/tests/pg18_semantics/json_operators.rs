@@ -179,3 +179,61 @@ fn legacy_json_path_views_restore_selected_arrays_once(#[case] provider: usize) 
         previous = Some(definition);
     }
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn registered_json_path_views_keep_callback_dispatch_across_sessions(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("json-callbacks.db"));
+    for name in [
+        "json_extract_path",
+        "json_extract_path_text",
+        "jsonb_extract_path",
+        "jsonb_extract_path_text",
+    ] {
+        engine
+            .register_scalar_function(name, |args: &[uqa_core::Value]| {
+                assert_eq!(args, [uqa_core::Value::Int(7)]);
+                Ok(uqa_core::Value::Str("callback".into()))
+            })
+            .unwrap();
+        engine
+            .sql(
+                &format!("CREATE VIEW callback_{name} AS SELECT {name}(7) AS value"),
+                &[],
+            )
+            .unwrap();
+    }
+    let session = (provider != 0).then(|| engine.new_session().unwrap());
+    for name in [
+        "json_extract_path",
+        "json_extract_path_text",
+        "jsonb_extract_path",
+        "jsonb_extract_path_text",
+    ] {
+        for reader in std::iter::once(&engine).chain(session.as_ref()) {
+            let result = reader
+                .sql(&format!("SELECT * FROM callback_{name}"), &[])
+                .unwrap();
+            assert_eq!(
+                result.value_at(0, 0),
+                Some(&uqa_core::Value::Str("callback".into()))
+            );
+        }
+    }
+    let result = session
+        .as_ref()
+        .unwrap_or(&engine)
+        .sql(
+            "SELECT pg_catalog.json_extract_path_text('{\"a\":1}', 'a')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        result.value_at(0, 0),
+        Some(&uqa_core::Value::Str("1".into()))
+    );
+}

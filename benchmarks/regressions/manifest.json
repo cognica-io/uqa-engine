@@ -4064,6 +4064,48 @@
       "capability": "Stored JSON call restoration",
       "workload": "Restore a predecessor scalar-path view on each persistent provider and reopen the result twice.",
       "invariant": "The atomic metadata migration retains the selected native array and matches both PostgreSQL SQL forms and result values; the second open leaves persisted bytes unchanged."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_path_migration_respects_callback_precedence_without_losing_native_bindings",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/tests.rs",
+      "capability": "Stored JSON call identity",
+      "workload": "Unbound registered callbacks, qualified built-ins, predecessor bound native calls and selected native array dispatch.",
+      "invariant": "Only genuine unresolved native declarations require binding; callback precedence never replaces an already selected native identity."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "registered_json_path_views_restore_without_rebinding_or_catalog_writes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests.rs",
+      "capability": "Callback view restoration",
+      "workload": "Repeated read-only and migration-capable catalog restoration with same-name registered scalar callbacks.",
+      "invariant": "No routine rebindings, schema recomputations, identity allocations or catalog writes occur for current unbound callbacks."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "registered_json_path_views_keep_callback_dispatch_across_sessions",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_operators.rs",
+      "capability": "Registered JSON callback views",
+      "workload": "Four same-name host callbacks with non-native arguments and retained views on four providers, including independent sessions on persistent providers.",
+      "invariant": "Host callbacks retain original arguments and results without false migration; a qualified native JSON call keeps its selected implementation."
     }
   ]
 }

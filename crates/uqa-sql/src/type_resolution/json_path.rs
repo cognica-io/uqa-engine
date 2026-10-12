@@ -36,8 +36,14 @@ static DECLARATIONS: std::sync::LazyLock<[BuiltinFunctionOverload; 4]> =
     });
 
 /// Stored native calls from before typed path selection must enter the existing atomic routine-binding migration.
-pub(crate) fn requires_binding(name: &str, binding: Option<&FunctionBinding>) -> bool {
+pub(crate) fn requires_binding(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> bool {
     JsonPathFunction::lookup(name).is_some()
+        && !(binding.is_none()
+            && resolver.is_some_and(|resolver| resolver.has_untyped_function(name)))
         && binding.is_none_or(|binding| {
             binding.builtin && binding.dispatch.is_none() && binding.resolution_error.is_none()
         })

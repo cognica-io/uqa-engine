@@ -127,3 +127,55 @@ fn json_path_binding_observes_both_cancellation_owners() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn json_path_migration_respects_callback_precedence_without_losing_native_bindings() {
+    struct Callbacks;
+    impl crate::FunctionTypeResolver for Callbacks {
+        fn has_untyped_function(&self, name: &str) -> bool {
+            name == "json_extract_path"
+        }
+
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&crate::ast::FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<crate::ColumnType>],
+            _: bool,
+        ) -> Result<Option<crate::ColumnType>, crate::SQLError> {
+            Ok(None)
+        }
+    }
+    let selected = crate::type_resolution::bind_type_introspection(
+        ExpressionPlan::lower(source()).scalar,
+        &RowSchema::default(),
+        &[],
+    );
+    let ScalarExpr::Func {
+        binding: Some(mut binding),
+        ..
+    } = selected
+    else {
+        panic!("selected native call")
+    };
+    let name = "json_extract_path";
+    assert!(super::requires_binding(name, None, None));
+    assert!(!super::requires_binding(name, None, Some(&Callbacks)));
+    assert!(super::requires_binding(
+        "pg_catalog.json_extract_path",
+        None,
+        Some(&Callbacks)
+    ));
+    assert!(!super::requires_binding(
+        name,
+        Some(&binding),
+        Some(&Callbacks)
+    ));
+    binding.dispatch = None;
+    assert!(super::requires_binding(
+        name,
+        Some(&binding),
+        Some(&Callbacks)
+    ));
+}
