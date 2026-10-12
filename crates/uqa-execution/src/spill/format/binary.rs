@@ -6,6 +6,7 @@
 
 //! Exact typed binary batch codec.
 
+mod collations;
 mod decode;
 mod encode;
 

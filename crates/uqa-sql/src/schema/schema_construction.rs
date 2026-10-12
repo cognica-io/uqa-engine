@@ -198,6 +198,7 @@ impl RowSchema {
         metadata: SchemaBuildMetadata,
     ) -> Self {
         let SchemaBuildMetadata {
+            mut collations,
             record_fields,
             aliases,
             alias_types,
@@ -212,6 +213,7 @@ impl RowSchema {
             extra_ambiguous_qualified,
             local_width,
         } = metadata;
+        collations.retain(&types, &alias_types, &internal_types, &binding_only);
         debug_assert_eq!(columns.len(), slots.len());
         debug_assert_eq!(columns.len(), identities.len());
         debug_assert_eq!(columns.len(), types.len());
@@ -279,6 +281,7 @@ impl RowSchema {
                 ambiguous_unqualified,
                 ambiguous_qualified,
                 cold: Box::new(SchemaColdMetadata {
+                    collations,
                     record_fields,
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,

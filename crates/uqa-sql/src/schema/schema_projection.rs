@@ -40,6 +40,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -57,6 +58,14 @@ impl RowSchema {
     /// Select and optionally rename logical columns while retaining the
     /// child's physical fragments.
     pub fn select(input: &Self, columns: &[(String, String)]) -> Self {
+        let mut collations = input.index.cold.collations.clone();
+        collations.clear_columns();
+        for (position, (_, source)) in columns.iter().enumerate() {
+            let oid = input
+                .position(source)
+                .and_then(|position| input.inherited_column_collation(position));
+            collations.column(position, oid, input.exact_type(source));
+        }
         let output_names = columns
             .iter()
             .map(|(output, _)| output.clone())
@@ -81,6 +90,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),
@@ -105,14 +115,23 @@ impl RowSchema {
         computed_count: usize,
         pass_through: bool,
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let resolve_slot = |source: ProjectedSlot| match source {
-            ProjectedSlot::Input(slot) => slot.unwrap_or(NULL_SLOT),
+            ProjectedSlot::Input(slot) | ProjectedSlot::BoundInput { physical: slot, .. } => {
+                slot.unwrap_or(NULL_SLOT)
+            }
             ProjectedSlot::Computed(position) => input.physical_width() + position,
+        };
+        let source_collation = |source: ProjectedSlot| match source {
+            ProjectedSlot::Input(Some(slot)) => input.inherited_physical_collation(slot),
+            ProjectedSlot::BoundInput { collation, .. } => collation,
+            ProjectedSlot::Input(None) | ProjectedSlot::Computed(_) => None,
         };
         let physical_width = input.physical_width() + computed_count;
         let mut internal = input.index.executor_attributes.clone();
         let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (column, ty, source) in projected_internal {
+            collations.internal(column, source_collation(source), ty.as_ref());
             internal.insert(column, resolve_slot(source));
             internal_types.insert(column, ty);
         }
@@ -128,11 +147,13 @@ impl RowSchema {
                 if let Some(position) = columns.iter().position(|column| column == &name) {
                     slots[position] = slot;
                     identities[position] = ColumnIdentity::unqualified(name);
+                    collations.column(position, source_collation(source), ty.as_ref());
                     types[position] = ty;
                     wildcard_hidden.remove(&position);
                 } else {
                     identities.push(ColumnIdentity::unqualified(name.clone()));
                     columns.push(name);
+                    collations.column(types.len(), source_collation(source), ty.as_ref());
                     types.push(ty);
                     slots.push(slot);
                 }
@@ -144,6 +165,7 @@ impl RowSchema {
                 slots,
                 physical_width,
                 SchemaBuildMetadata {
+                    collations,
                     record_fields: input.index.cold.record_fields.clone(),
                     aliases: input.index.aliases.clone(),
                     alias_types: input.index.cold.aliases.clone(),
@@ -158,6 +180,7 @@ impl RowSchema {
             );
         }
 
+        collations.clear_columns();
         let mut columns = Vec::with_capacity(projected.len());
         let mut identities = Vec::with_capacity(projected.len());
         let mut types = Vec::with_capacity(projected.len());
@@ -166,6 +189,7 @@ impl RowSchema {
             slots.push(resolve_slot(source));
             identities.push(ColumnIdentity::unqualified(name.clone()));
             columns.push(name);
+            collations.column(types.len(), source_collation(source), ty.as_ref());
             types.push(ty);
         }
         Self::from_typed_parts_with_aliases_and_exact_precedence(
@@ -175,6 +199,7 @@ impl RowSchema {
             slots,
             physical_width,
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),
@@ -247,6 +272,7 @@ impl RowSchema {
                 slots,
                 source_slots.len(),
                 SchemaBuildMetadata {
+                    collations: self.index.cold.collations.clone(),
                     record_fields: self
                         .index
                         .cold
@@ -492,6 +518,15 @@ impl RowSchema {
         columns: &[(String, usize, Option<ColumnType>)],
         aliases: &[(ColumnIdentity, usize)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
+        collations.clear_columns();
+        for (position, (_, source, ty)) in columns.iter().enumerate() {
+            collations.column(
+                position,
+                input.inherited_column_collation(*source),
+                ty.as_ref(),
+            );
+        }
         let output_names = columns
             .iter()
             .map(|(output, _, _)| output.clone())
@@ -521,6 +556,11 @@ impl RowSchema {
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, logical) in aliases {
+            collations.alias(
+                identity,
+                input.inherited_column_collation(*logical),
+                input.column_type(*logical),
+            );
             lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
             alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
         }
@@ -531,6 +571,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,

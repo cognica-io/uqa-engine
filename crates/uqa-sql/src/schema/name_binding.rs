@@ -36,6 +36,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 internal: input.index.executor_attributes.clone(),
                 internal_types: input.index.cold.executor_attribute_types.clone(),
@@ -171,9 +172,15 @@ impl RowSchema {
 
     /// Add hidden structured lookup identities for existing logical positions.
     pub fn with_identity_aliases(input: &Self, aliases: &[(ColumnIdentity, usize)]) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, logical) in aliases {
+            collations.alias(
+                identity,
+                input.inherited_column_collation(*logical),
+                input.column_type(*logical),
+            );
             lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
             alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
         }
@@ -184,6 +191,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,
@@ -207,12 +215,18 @@ impl RowSchema {
         input: &Self,
         aliases: &[(ColumnIdentity, usize, Option<ColumnType>)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, slot, ty) in aliases {
             assert!(
                 *slot < input.physical_width(),
                 "physical identity alias is outside row width"
+            );
+            collations.alias(
+                identity,
+                input.inherited_physical_collation(*slot),
+                ty.as_ref(),
             );
             lookup_aliases.insert(identity.clone(), *slot);
             alias_types.insert(identity.clone(), ty.clone());
@@ -224,6 +238,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,
@@ -243,12 +258,18 @@ impl RowSchema {
         input: &Self,
         aliases: &[(InternalColumnRef, usize, Option<ColumnType>)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let mut internal = input.index.executor_attributes.clone();
         let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (column, slot, ty) in aliases {
             assert!(
                 *slot < input.physical_width(),
                 "physical internal alias is outside row width"
+            );
+            collations.internal(
+                *column,
+                input.inherited_physical_collation(*slot),
+                ty.as_ref(),
             );
             internal.insert(*column, *slot);
             internal_types.insert(*column, ty.clone());
@@ -260,6 +281,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -278,6 +300,7 @@ impl RowSchema {
 
     /// Restore structural identities from a row scope that occupies the trailing physical slots of this schema.
     pub fn with_trailing_internal_aliases(input: &Self, trailing: &Self) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let offset = input
             .physical_width()
             .checked_sub(trailing.physical_width())
@@ -298,6 +321,7 @@ impl RowSchema {
             }
         }
         for (column, ty) in &trailing.index.cold.executor_attribute_types {
+            collations.internal(*column, trailing.internal_collation(*column), ty.as_ref());
             if let Some(previous) = internal_types.insert(*column, ty.clone()) {
                 assert_eq!(
                     previous, *ty,
@@ -312,6 +336,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -343,6 +368,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -410,6 +436,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -443,6 +470,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -518,6 +546,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -587,6 +616,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),

@@ -13,6 +13,8 @@ use crate::scan::{RowSource, TableScan};
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, InternalRelationId};
 
+mod collations;
+
 fn row<const N: usize>(pairs: [(&str, Value); N]) -> ResultRow {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }

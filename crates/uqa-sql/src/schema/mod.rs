@@ -10,6 +10,7 @@ use crate::ast::{ColumnType, InternalColumnRef};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+mod collations;
 mod name_binding;
 mod open_columns;
 mod outer_scope;
@@ -19,6 +20,8 @@ mod schema_construction;
 mod schema_layout;
 mod schema_projection;
 mod schema_remap;
+pub use collations::CollationBinding;
+use collations::Collations;
 pub use record_fields::RecordFields;
 
 const NULL_SLOT: usize = usize::MAX;
@@ -102,6 +105,7 @@ struct SchemaIndex {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SchemaColdMetadata {
+    collations: Collations,
     record_fields: HashMap<usize, RecordFields>,
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
@@ -124,6 +128,7 @@ struct SchemaColdMetadata {
 
 #[derive(Default)]
 struct SchemaBuildMetadata {
+    collations: Collations,
     record_fields: HashMap<usize, RecordFields>,
     aliases: HashMap<ColumnIdentity, usize>,
     alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
@@ -165,6 +170,11 @@ pub struct RowSchema {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectedSlot {
     Input(Option<usize>),
+    /// A SQL binding supplies its own collation even when another logical column shares this physical slot or the slot is NULL.
+    BoundInput {
+        physical: Option<usize>,
+        collation: Option<u32>,
+    },
     Computed(usize),
 }
 

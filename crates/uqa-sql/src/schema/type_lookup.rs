@@ -22,11 +22,42 @@ pub trait ScalarTypeSchema {
     fn qualified_type(&self, qualifier: &str, name: &str) -> Option<&ColumnType>;
     fn columns_are_open(&self, qualifier: Option<&str>) -> bool;
 
+    fn column_collation(&self, position: usize) -> Option<u32> {
+        self.column_type(position).map(default_collation)
+    }
+    fn collation_of(&self, name: &str) -> Option<u32> {
+        self.type_of(name).map(default_collation)
+    }
+    fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
+        self.qualified_type(qualifier, name).map(default_collation)
+    }
+    fn internal_collation(&self, column: InternalColumnRef) -> Option<u32> {
+        self.internal_type(column).map(default_collation)
+    }
+
     /// Preserve the physical outer-row interface used by existing custom scalar-subquery resolvers. Declared column views have no query arena or physical outer row.
     fn physical_schema(&self) -> Option<&RowSchema>;
 }
 
+fn default_collation(ty: &ColumnType) -> u32 {
+    u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(ty))
+        .expect("type collation identity")
+}
+
 impl ScalarTypeSchema for RowSchema {
+    fn column_collation(&self, position: usize) -> Option<u32> {
+        Self::column_collation(self, position)
+    }
+    fn collation_of(&self, name: &str) -> Option<u32> {
+        Self::collation_of(self, name)
+    }
+    fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
+        Self::qualified_collation(self, qualifier, name)
+    }
+    fn internal_collation(&self, column: InternalColumnRef) -> Option<u32> {
+        Self::internal_collation(self, column)
+    }
+
     fn has_unqualified_column(&self, name: &str) -> bool {
         Self::has_unqualified_column(self, name)
     }
@@ -80,6 +111,27 @@ impl<'a> ColumnTypeSchema<'a> {
 }
 
 impl ScalarTypeSchema for ColumnTypeSchema<'_> {
+    fn column_collation(&self, position: usize) -> Option<u32> {
+        self.columns.get(position).map(|column| {
+            column
+                .collation_oid
+                .unwrap_or_else(|| default_collation(&column.ty))
+        })
+    }
+    fn collation_of(&self, name: &str) -> Option<u32> {
+        let mut matching = self
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| column.name == name);
+        let (position, _) = matching.next()?;
+        matching
+            .next()
+            .is_none()
+            .then(|| self.column_collation(position))
+            .flatten()
+    }
+
     fn has_unqualified_column(&self, name: &str) -> bool {
         self.columns.iter().any(|column| column.name == name)
     }

@@ -2525,6 +2525,45 @@
       "capability": "Declared domain collation retention",
       "workload": "Sixteen nested domains with alternating C/POSIX identities inside an array, exact and one-byte-insufficient copy allowances.",
       "invariant": "Copying retains every selected identity and charges exactly the owned names and boxed types; insufficient admission returns 53200 and releases all partial reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_defaults_need_no_collation_payload_and_replacement_discards_old_selection",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/collations/tests.rs",
+      "capability": "Row schema collation retention",
+      "workload": "Default and explicitly collated schemas, resetting selections, and remapping between collatable and noncollatable types.",
+      "invariant": "Type-default schemas allocate no selected-collation payload; replacing the last selection releases it, and type remapping preserves only applicable identities."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_collations_survive_spill_with_exact_record_accounting",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/collations.rs",
+      "capability": "Spilled collation metadata",
+      "workload": "A zero-buffer spill with selected C/POSIX and indeterminate collations, hidden aliases and an internal attribute, plus every truncated record prefix.",
+      "invariant": "The exact encoded size equals spill accounting; selected identities and original values survive decoding, and truncated records fail."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "collation_projection_shares_payloads_and_preserves_each_bound_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/collations.rs",
+      "capability": "Collated projection payload sharing",
+      "workload": "Two SQL identities with different collations share one 4096-byte physical value, projected through direct columns, stars and hidden aliases.",
+      "invariant": "Every selected collation survives projection while the original physical value and fragment remain shared; no computed payload slot is added."
     }
   ]
 }

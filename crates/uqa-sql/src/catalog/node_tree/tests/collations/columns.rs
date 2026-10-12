@@ -143,3 +143,67 @@ fn declared_references_borrow_the_original_catalog_generation() {
         .column_reference("v", None)
         .is_err());
 }
+
+#[test]
+fn composed_row_schema_collations_match_postgresql_nodes_and_sql() {
+    use crate::{ColumnType, RowSchema};
+    let left = RowSchema::with_types(
+        vec!["c".into(), "n".into()],
+        vec![Some(ColumnType::Text), Some(ColumnType::Integer)],
+    )
+    .with_column_collations([Some(950), Some(0)]);
+    let right = RowSchema::with_types(vec!["p".into()], vec![Some(ColumnType::Text)])
+        .with_column_collations([Some(951)]);
+    let joined = RowSchema::join(&left, &right, []);
+    let projected = RowSchema::select(
+        &joined,
+        &[
+            ("p".into(), "p".into()),
+            ("c".into(), "c".into()),
+            ("n".into(), "n".into()),
+        ],
+    );
+    let (schema, _) =
+        RowSchema::with_relation_qualifier(&projected, "mapped").canonical_projection();
+    let Statement::CreateTable(mut table) =
+        crate::compile("CREATE TABLE mapped (p text, c text, n integer)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("table declaration");
+    };
+    for (position, column) in table.columns.iter_mut().enumerate() {
+        column.attribute_number = Some(i16::try_from(position + 1).unwrap());
+    }
+    let context = expressions::ExpressionContext {
+        schema: &schema,
+        domain_value: None,
+        types: Some(&Catalog),
+        routines: &Routines,
+    };
+    let cases: Vec<Case> =
+        serde_json::from_str(include_str!("../row_schema_collations.json")).unwrap();
+    for case in cases {
+        let Statement::CreateDomain(domain) =
+            crate::compile(&format!("CREATE DOMAIN d AS integer CHECK({})", case.check))
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("check declaration");
+        };
+        let actual = context
+            .check(&domain.checks[0].expression)
+            .unwrap()
+            .to_string();
+        assert_eq!(actual, case.conbin, "{}", case.check);
+        let tree = parse(&actual).unwrap();
+        for (pretty, expected) in [(false, case.sql), (true, case.pretty)] {
+            assert_eq!(
+                deparse::expression(&tree, &Names(&table.columns), pretty).unwrap(),
+                expected,
+                "{}",
+                case.check
+            );
+        }
+    }
+}

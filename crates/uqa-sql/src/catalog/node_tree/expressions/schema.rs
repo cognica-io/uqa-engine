@@ -44,7 +44,10 @@ impl ExpressionSchema for RowSchema {
             attribute_number: i64::try_from(position + 1)
                 .map_err(|_| SQLError::Internal("column ordinal overflow".into()))?,
             ty,
-            collation_oid: crate::catalog::type_metadata::pg_type_collation_oid(ty),
+            collation_oid: i64::from(
+                self.column_collation(position)
+                    .expect("typed catalog column collation"),
+            ),
         })
     }
 }
