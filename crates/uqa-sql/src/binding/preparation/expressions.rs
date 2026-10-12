@@ -121,9 +121,10 @@ impl Preparation<'_> {
                     error("XX000", "scalar subquery slot is outside its plan".into())
                 })?;
                 let schema = self.query(query, Some(input))?;
-                let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
+                let mut result = ExpressionType::leaf(schema.column_type(0).cloned());
                 if let Some(oid) = schema.column_collation(0) {
                     result.derivation = Derivation::implicit(i64::from(oid));
+                    result.initial_collation = oid;
                 }
                 result.record_fields = schema.record_fields(0).cloned();
                 return Ok(result);
@@ -235,9 +236,10 @@ impl Preparation<'_> {
             | ScalarExpr::QualifiedStar(_)
             | ScalarExpr::Default => self.known_type(expression, input, subqueries)?,
         };
-        let mut result = ExpressionType::resolved(ty);
+        let mut result = ExpressionType::leaf(ty);
         if let Some(oid) = input.input_collation(expression) {
             result.derivation = Derivation::implicit(i64::from(oid));
+            result.initial_collation = oid;
         }
         self.expression_record_fields(&mut result, expression, input, subqueries)?;
         Ok(result)
@@ -251,13 +253,26 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         if matches!(result.ty, Some(ColumnType::Record)) {
-            result.record_fields = self.scope.bind_record_fields(
-                self.routines,
-                expression,
-                input,
-                subqueries,
-                &self.parameters.values(),
-            )?;
+            result.record_variable =
+                crate::type_resolution::field_selection::is_column_reference(expression);
+            if let Some(metadata) = input.input_record_metadata(expression) {
+                result.record_fields.clone_from(&metadata.types);
+                result.record_descriptor.clone_from(&metadata.descriptor);
+            } else if let Some(qualifier) =
+                crate::type_resolution::field_selection::whole_row_qualifier(expression, input)
+            {
+                let descriptor = super::fields::whole_row_descriptor(input, qualifier);
+                result.record_fields = Some(descriptor.types.clone());
+                result.record_descriptor = Some(descriptor);
+            } else if result.record_fields.is_none() {
+                result.record_fields = self.scope.bind_record_fields(
+                    self.routines,
+                    expression,
+                    input,
+                    subqueries,
+                    &self.parameters.values(),
+                )?;
+            }
         }
         Ok(())
     }
@@ -274,6 +289,18 @@ impl Preparation<'_> {
             .collect::<Result<Vec<_>, _>>()?;
         let mut value = ExpressionType::independent(Some(ColumnType::Record), &fields);
         value.record_fields = Some(fields.iter().map(|field| field.ty.clone()).collect());
+        value.record_descriptor = Some(std::sync::Arc::new(crate::schema::RecordDescriptor {
+            types: value.record_fields.clone().expect("ROW fields"),
+            names: None,
+            fields: fields
+                .iter()
+                .map(|field| crate::schema::RecordFieldMetadata {
+                    collation_oid: u32::try_from(field.derivation.oid())
+                        .expect("ROW field collation OID"),
+                    sql_unknown: field.is_sql_unknown(),
+                })
+                .collect(),
+        }));
         value.row_constructor = Some(fields);
         Ok(value)
     }

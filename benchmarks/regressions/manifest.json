@@ -2750,6 +2750,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "anonymous_field_collations_and_descriptor_errors_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Anonymous record field selection",
+      "workload": "Sixty-five independent PostgreSQL observations cover direct ROW fields, query and RETURNING boundaries, computed inputs, casts, set operands, unregistered descriptors and unknown fields.",
+      "invariant": "Parse-time fields and derived columns retain their distinct collation selections; prepared and ordinary analysis agree with PostgreSQL, including complete errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "declared_field_collations_and_diagnostic_order_match_postgresql",
       "cases": 1,
       "case_names": [
@@ -2824,6 +2837,45 @@
       "capability": "Named view output metadata",
       "workload": "Renamed outputs with a selected collation, an indeterminate collation and a named composite descriptor.",
       "invariant": "Publishing fixed view column names preserves selected and indeterminate collations and shares the original field descriptor without copying values or widening the row."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_fields_distinguish_parameter_assignment_from_casts",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Anonymous parameter field collation",
+      "workload": "Four PostgreSQL PREPARE observations distinguish inferred text/domain parameters, typmod conversion and a declared text parameter cast to a domain.",
+      "invariant": "Direct ROW fields preserve the parse-time collation of typed parameters independently of later cast collation assignment."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_field_metadata_observes_each_call_once_per_analysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Bounded anonymous record field analysis",
+      "workload": "One and seventeen nested calls selected from ROW, repeated record casts or a derived column, with an ORDER BY output alias.",
+      "invariant": "Each call is resolved once in pure inference or binding and twice in strict analysis; fields retain distinct direct and derived collations without reanalyzing the ROW inputs."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_alias_join_and_compaction_preserve_record_field_slots",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/record_fields.rs",
+      "capability": "Shared selectable record descriptors",
+      "workload": "Record metadata crosses projection, qualification, physical compaction and an outer schema.",
+      "invariant": "Field types and selectable descriptors retain their original Arc identities through slot remapping, without copying field arrays."
     }
   ]
 }

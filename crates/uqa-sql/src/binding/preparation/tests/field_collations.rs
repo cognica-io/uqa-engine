@@ -111,6 +111,118 @@ fn declared_field_collations_and_diagnostic_order_match_postgresql() {
 }
 
 #[test]
+fn anonymous_field_collations_and_descriptor_errors_match_postgresql() {
+    super::column_collations::assert_collation_references(
+        &Types,
+        &[
+            (include_str!("anonymous_field_collations.json"), 50),
+            (include_str!("anonymous_field_boundaries.json"), 15),
+        ],
+    );
+}
+
+#[test]
+fn anonymous_fields_distinguish_parameter_assignment_from_casts() {
+    for (expression, declared, collation) in [
+        ("$1::text", None, 100),
+        ("$1::d_posix", None, 951),
+        ("$1::varchar(2)", None, 0),
+        ("$1::d_posix", Some(ColumnType::Text), 0),
+    ] {
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(
+            crate::compile(&format!("SELECT (ROW({expression})).f1"))
+                .unwrap()
+                .remove(0),
+        ) else {
+            panic!("query")
+        };
+        let binding = crate::binding::fixture::empty_binding_context();
+        let mut preparation = Preparation {
+            routines: &Types,
+            scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
+            parameters: ParameterTypes::new(&[declared]),
+            schema_expression: None,
+        };
+        let output = preparation.query(&query, None).unwrap();
+        assert_eq!(output.column_collation(0), Some(collation), "{expression}");
+    }
+}
+
+#[test]
+fn anonymous_field_metadata_observes_each_call_once_per_analysis() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Calls(AtomicUsize);
+    impl FunctionTypeResolver for Calls {
+        fn resolve_function_type(
+            &self,
+            name: &str,
+            _: Option<&FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok((name == "application.identity").then(|| {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                ColumnType::Text
+            }))
+        }
+    }
+    impl RoutineResolution for Calls {}
+    for depth in [1, 17] {
+        let mut expression = "NULL::text COLLATE \"C\"".to_owned();
+        for _ in 0..depth {
+            expression = format!("application.identity({expression})");
+        }
+        for (sql, collation) in [
+            (
+                format!("SELECT (ROW({expression})).f1 AS value ORDER BY value"),
+                0,
+            ),
+            (
+                format!("SELECT (((ROW({expression})::record)::record)::record).f1 AS value ORDER BY value"),
+                0,
+            ),
+            (
+                format!(
+                    "SELECT (r).f1 AS value FROM (SELECT ROW({expression}) AS r) q ORDER BY value"
+                ),
+                950,
+            ),
+        ] {
+            let UnifiedPlan::Query(query) =
+                UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+            else {
+                panic!("query")
+            };
+            let calls = Calls(AtomicUsize::new(0));
+            let binding = crate::binding::fixture::empty_binding_context();
+            if let crate::plan::RelationalPlan::QueryBlock(block) = &query.root {
+                if block.from.is_none() {
+                    let ty = crate::scalar_type_with_resolver(&block.projections[0].expr, &RowSchema::default(), &[], &calls).unwrap();
+                    assert_eq!(ty, Some(ColumnType::Text));
+                    assert_eq!(calls.0.load(Ordering::Relaxed), depth, "pure type inference: {sql}");
+                }
+            }
+            for strict in [false, true] {
+                calls.0.store(0, Ordering::Relaxed);
+                let output = if strict {
+                    crate::binding::analyze_query_plan_schema(&calls, &query, &[], &binding, None)
+                } else {
+                    crate::binding::bind_query_plan_schema(&calls, &query, &[], &binding, None)
+                }
+                .unwrap();
+                assert_eq!(output.column_collation(0), Some(collation), "{sql}");
+                assert_eq!(
+                    calls.0.load(Ordering::Relaxed),
+                    depth * if strict { 2 } else { 1 },
+                    "{sql}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn named_field_metadata_reuses_each_observed_call_argument() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Calls(AtomicUsize);

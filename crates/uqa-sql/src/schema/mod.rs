@@ -23,6 +23,7 @@ mod schema_remap;
 pub use collations::CollationBinding;
 use collations::Collations;
 pub use record_fields::RecordFields;
+pub(crate) use record_fields::{RecordDescriptor, RecordFieldMetadata, RecordMetadata};
 
 const NULL_SLOT: usize = usize::MAX;
 
@@ -106,7 +107,7 @@ struct SchemaIndex {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SchemaColdMetadata {
     collations: Collations,
-    record_fields: HashMap<usize, RecordFields>,
+    record_fields: HashMap<usize, RecordMetadata>,
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
@@ -129,7 +130,7 @@ struct SchemaColdMetadata {
 #[derive(Default)]
 struct SchemaBuildMetadata {
     collations: Collations,
-    record_fields: HashMap<usize, RecordFields>,
+    record_fields: HashMap<usize, RecordMetadata>,
     aliases: HashMap<ColumnIdentity, usize>,
     alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
     internal: HashMap<InternalColumnRef, usize>,

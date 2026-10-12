@@ -317,7 +317,7 @@ impl SchemaScope {
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
-    ) -> Result<(Option<ColumnType>, Option<u32>), SQLError> {
+    ) -> Result<projection::ProjectionMetadata, SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
         preparation::projection_metadata(self, routines, expression, &schema, subqueries, params)
     }

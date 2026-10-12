@@ -40,11 +40,28 @@ pub fn missing_relation_column(qualifier: &str, field: &str) -> SQLError {
     }
 }
 
-fn undefined_record_field(field: &str) -> SQLError {
+pub(crate) fn undefined_record_field(field: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42703".into(),
         message: format!("could not identify column \"{field}\" in record data type"),
     }
+}
+
+pub(crate) fn unregistered_record() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42809".into(),
+        message: "record type has not been registered".into(),
+    }
+}
+
+pub(crate) fn is_column_reference(expression: &crate::ScalarExpr) -> bool {
+    matches!(
+        expression,
+        crate::ScalarExpr::Column(_)
+            | crate::ScalarExpr::QualifiedColumn { .. }
+            | crate::ScalarExpr::InternalColumn(_)
+            | crate::ScalarExpr::Position(_)
+    )
 }
 
 /// The zero-based position of an anonymous row's `fN` field.

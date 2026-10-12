@@ -323,7 +323,7 @@ pub(super) fn projection_metadata(
     input: &RowSchema,
     subqueries: &[QueryPlan],
     params: &[crate::SQLParam],
-) -> Result<(Option<ColumnType>, Option<u32>), SQLError> {
+) -> Result<super::projection::ProjectionMetadata, SQLError> {
     let mut analysis = Preparation {
         routines,
         scope,
@@ -334,6 +334,11 @@ pub(super) fn projection_metadata(
     analysis
         .parameters
         .coerce_unknown(&mut value, &ColumnType::Text)?;
+    if matches!(value.ty, Some(ColumnType::Composite(_))) {
+        value.record_fields = analysis
+            .scope
+            .bind_record_fields(routines, expression, input, subqueries, params)?;
+    }
     analysis
         .scope
         .collations
@@ -343,7 +348,12 @@ pub(super) fn projection_metadata(
         .as_ref()
         .filter(|ty| crate::schema::composites::type_is_collatable(ty))
         .map(|_| u32::try_from(value.derivation.oid()).expect("selected collation is an OID"));
-    Ok((value.ty, collation))
+    let record = value.record_metadata();
+    Ok(super::projection::ProjectionMetadata {
+        ty: value.ty,
+        collation,
+        record,
+    })
 }
 
 pub(super) fn condition_metadata(
@@ -451,24 +461,26 @@ impl QueryOutput {
     }
 
     fn schema(&self) -> RowSchema {
-        let schema =
-            RowSchema::with_types(
-                self.columns.clone(),
-                self.types.iter().map(|value| value.ty.clone()).collect(),
-            )
-            // Unknown target entries retain their selection in ExpressionType until coercion determines a collatable output type; clause binding also uses this provisional schema before that coercion.
-            .with_column_collations(self.types.iter().map(|value| {
-                value
-                    .ty
-                    .as_ref()
-                    .filter(|ty| crate::schema::composites::type_is_collatable(ty))
-                    .map(|_| {
-                        u32::try_from(value.derivation.oid()).expect("selected collation is an OID")
-                    })
-            }))
-            .with_record_fields(self.types.iter().enumerate().filter_map(|(index, value)| {
-                value.record_fields.clone().map(|fields| (index, fields))
-            }));
+        let schema = RowSchema::with_types(
+            self.columns.clone(),
+            self.types.iter().map(|value| value.ty.clone()).collect(),
+        )
+        // Unknown target entries retain their selection in ExpressionType until coercion determines a collatable output type; clause binding also uses this provisional schema before that coercion.
+        .with_column_collations(self.types.iter().map(|value| {
+            value
+                .ty
+                .as_ref()
+                .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+                .map(|_| {
+                    u32::try_from(value.derivation.oid()).expect("selected collation is an OID")
+                })
+        }))
+        .with_record_metadata(
+            self.types
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| value.record_metadata().map(|fields| (index, fields))),
+        );
         if self.open {
             RowSchema::with_open_columns(&schema, None)
         } else {

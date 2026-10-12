@@ -18,16 +18,29 @@ pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
     /// Selected output and deferred collation diagnostics from the same typed children.
     pub(super) derivation: Derivation,
+    /// Field selection observes a ROW input before the enclosing expression's collation assignment.
+    pub(super) initial_collation: u32,
     pub(super) record_fields: Option<crate::schema::RecordFields>,
+    pub(super) record_descriptor: Option<std::sync::Arc<crate::schema::RecordDescriptor>>,
+    /// A record variable without a registered descriptor has a different field diagnostic from a computed record.
+    pub(super) record_variable: bool,
     /// An anonymous ROW retains each analyzed input until a named cast selects its field coercions.
     pub(super) row_constructor: Option<Vec<Self>>,
     occurrence: Option<usize>,
     // SQL unknown literals and parameters accept context coercion. Native
     // callbacks with no declared result type stay unresolved until execution.
-    coercible_unknown: bool,
+    unknown: UnknownOrigin,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
     literal: Option<(NonNull<ScalarExpr>, String)>,
     collation: Option<NonNull<ScalarExpr>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UnknownOrigin {
+    Deferred,
+    Literal,
+    Parameter,
+    Field,
 }
 
 impl ExpressionType {
@@ -67,11 +80,14 @@ impl ExpressionType {
     pub(super) fn resolved(ty: Option<ColumnType>) -> Self {
         Self {
             derivation: Self::default_collation(ty.as_ref()),
+            initial_collation: 0,
             ty,
             record_fields: None,
+            record_descriptor: None,
+            record_variable: false,
             row_constructor: None,
             occurrence: None,
-            coercible_unknown: false,
+            unknown: UnknownOrigin::Deferred,
             literal: None,
             collation: None,
         }
@@ -79,33 +95,49 @@ impl ExpressionType {
 
     pub(super) fn unknown() -> Self {
         Self {
-            ty: None,
-            derivation: Derivation::None,
-            record_fields: None,
-            row_constructor: None,
-            occurrence: None,
-            coercible_unknown: true,
-            literal: None,
-            collation: None,
+            unknown: UnknownOrigin::Literal,
+            ..Self::resolved(None)
         }
     }
 
     /// A bare string literal, `unknown` until its context selects a type that reads it.
     pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
         Self {
-            ty: None,
-            derivation: Derivation::None,
-            record_fields: None,
-            row_constructor: None,
-            occurrence: None,
-            coercible_unknown: true,
             literal: Some((NonNull::from(expression), text)),
-            collation: None,
+            ..Self::unknown()
         }
     }
 
     pub(super) fn is_deferred(&self) -> bool {
-        self.ty.is_none() && !self.coercible_unknown
+        self.ty.is_none() && self.unknown == UnknownOrigin::Deferred
+    }
+
+    pub(super) fn is_sql_unknown(&self) -> bool {
+        self.ty.is_none() && self.unknown != UnknownOrigin::Deferred
+    }
+
+    pub(super) fn is_unknown_parameter(&self) -> bool {
+        self.ty.is_none() && self.unknown == UnknownOrigin::Parameter
+    }
+
+    pub(super) fn mark_unknown_field(&mut self) {
+        self.unknown = UnknownOrigin::Field;
+    }
+
+    pub(super) fn leaf(ty: Option<ColumnType>) -> Self {
+        let mut value = Self::resolved(ty);
+        value.initial_collation =
+            u32::try_from(value.derivation.oid()).expect("type collation OID");
+        value
+    }
+
+    pub(super) fn record_metadata(&self) -> Option<crate::schema::RecordMetadata> {
+        (self.record_fields.is_some() || self.record_descriptor.is_some()).then(|| {
+            crate::schema::RecordMetadata {
+                types: self.record_fields.clone(),
+                descriptor: self.record_descriptor.clone(),
+            }
+        })
     }
 }
 
@@ -265,6 +297,7 @@ impl<'a> ParameterTypes<'a> {
         }
         value.collation = Some(origin);
         value.derivation = value.derivation.explicit(i64::from(oid));
+        value.initial_collation = oid;
     }
 
     pub(super) fn retain_membership(
@@ -340,10 +373,13 @@ impl<'a> ParameterTypes<'a> {
                 &crate::RowSchema::default(),
                 values,
             )?;
-            let mut value = ExpressionType::resolved(ty);
-            value.coercible_unknown = number
+            let mut value = ExpressionType::leaf(ty);
+            if number
                 .checked_sub(1)
-                .is_some_and(|index| index < values.len());
+                .is_some_and(|index| index < values.len())
+            {
+                value.unknown = UnknownOrigin::Parameter;
+            }
             return Ok(value);
         }
         let index = number
@@ -354,14 +390,9 @@ impl<'a> ParameterTypes<'a> {
         let occurrence = self.occurrences.len();
         self.occurrences.push((index, ty.clone()));
         Ok(ExpressionType {
-            derivation: ExpressionType::default_collation(ty.as_ref()),
-            ty,
-            record_fields: None,
-            row_constructor: None,
             occurrence: Some(occurrence),
-            coercible_unknown: true,
-            literal: None,
-            collation: None,
+            unknown: UnknownOrigin::Parameter,
+            ..ExpressionType::leaf(ty)
         })
     }
 
@@ -370,8 +401,17 @@ impl<'a> ParameterTypes<'a> {
         expression: &mut ExpressionType,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
-        if expression.ty.is_some() || !expression.coercible_unknown {
+        if !expression.is_sql_unknown() {
             return Ok(());
+        }
+        if expression.unknown == UnknownOrigin::Field {
+            return Err(error(
+                "XX000",
+                format!(
+                    "failed to find conversion function from unknown to {}",
+                    crate::type_resolution::base_type(target).display_name()
+                ),
+            ));
         }
         if let Some((origin, text)) = &expression.literal {
             self.read_literal(*origin, text, target)?;
@@ -398,6 +438,8 @@ impl<'a> ParameterTypes<'a> {
                     &target,
                 ));
         expression.ty = Some(target);
+        expression.initial_collation =
+            u32::try_from(expression.derivation.oid()).expect("coerced collation OID");
         Ok(())
     }
 

@@ -225,6 +225,7 @@ impl SchemaScope {
             let labels = projection_columns(&returning);
             let mut columns = Vec::new();
             let mut types: Vec<Option<ColumnType>> = Vec::new();
+            let mut records = Vec::new();
             let mut collations = super::projection::OutputCollations::default();
             for (position, projection) in returning.iter().enumerate() {
                 let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
@@ -233,6 +234,10 @@ impl SchemaScope {
                     &target
                 };
                 if let Some(star) = projection_star_columns(&projection.expr, expansion)? {
+                    records.extend(
+                        super::record_fields::star_metadata(&projection.expr, expansion)
+                            .unwrap_or_default(),
+                    );
                     for (column, ty, collation) in star {
                         collations.push(types.len(), ty.as_ref(), collation);
                         columns.push(column);
@@ -240,15 +245,16 @@ impl SchemaScope {
                     }
                 } else {
                     columns.push(labels[position].clone());
-                    let (ty, collation) = self.bind_projection_metadata(
+                    let metadata = self.bind_projection_metadata(
                         routines,
                         &projection.expr,
                         &expression,
                         command.scalar_subqueries(),
                         params,
                     )?;
-                    collations.push(types.len(), ty.as_ref(), collation);
-                    types.push(ty);
+                    collations.push(types.len(), metadata.ty.as_ref(), metadata.collation);
+                    types.push(metadata.ty);
+                    records.push(metadata.record);
                 }
             }
             if let Some(error) = crate::semantics::virtual_relation_mutation_error(
@@ -261,7 +267,14 @@ impl SchemaScope {
             for projection in returning.iter() {
                 self.collations.validate_expression(&projection.expr)?;
             }
-            Ok(collations.apply(RowSchema::with_types(columns, types)))
+            Ok(collations
+                .apply(RowSchema::with_types(columns, types))
+                .with_record_metadata(
+                    records
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(index, record)| record.map(|record| (index, record))),
+                ))
         })();
         self.restore_cte_schemas(previous);
         result

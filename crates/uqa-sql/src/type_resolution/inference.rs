@@ -419,14 +419,36 @@ pub(super) fn field_selection_type(
         }
         return copy_type(schema.qualified_type(qualifier, field), control);
     }
-    if let ScalarExpr::Row(items) = base {
-        let items = items
+    let mut origin = base;
+    while let ScalarExpr::Cast { expr, .. } = origin {
+        origin = expr;
+    }
+    if let ScalarExpr::Row(expressions) = origin {
+        let items = expressions
             .iter()
             .map(|item| {
                 scalar_type_inner_with_control(item, schema, params, resolver, control)
                     .map(|ty| ty.map(|ty| (*ty).clone()))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if !std::ptr::eq(origin, base) {
+            let observed = super::function_inputs::CallInputTypes::new(
+                schema,
+                expressions
+                    .iter()
+                    .zip(&items)
+                    .map(|(item, ty)| (item, ty.as_ref()))
+                    .collect(),
+            );
+            // Validate casts in their original inner-to-outer order using the field types already observed above.
+            let ty = scalar_type_inner_with_control(base, &observed, params, resolver, control)?;
+            if ty.as_deref() != Some(&ColumnType::Record) {
+                return copy_type(
+                    field_selection::value_field_type(ty.as_deref(), field, resolver)?.as_ref(),
+                    control,
+                );
+            }
+        }
         return copy_type(
             field_selection::row_field_type(&items, field)?.as_ref(),
             control,
@@ -437,9 +459,33 @@ pub(super) fn field_selection_type(
             return copy_type(field_type?.as_ref(), control);
         }
     }
-    let base = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
+    let ty = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
+    let record = ty.as_deref() == Some(&ColumnType::Record);
+    let reference = if record
+        && !std::ptr::eq(origin, base)
+        && field_selection::is_column_reference(origin)
+        && scalar_type_inner_with_control(origin, schema, params, resolver, control)?.as_deref()
+            == Some(&ColumnType::Record)
+    {
+        origin
+    } else {
+        base
+    };
+    if let Some(descriptor) = schema
+        .physical_schema()
+        .and_then(|schema| schema.input_record_metadata(reference))
+        .and_then(|metadata| metadata.descriptor.as_ref())
+    {
+        let position = descriptor
+            .position(field)
+            .ok_or_else(|| field_selection::undefined_record_field(field))?;
+        return copy_type(descriptor.types[position].as_ref(), control);
+    }
+    if record && field_selection::is_column_reference(reference) {
+        return Err(field_selection::unregistered_record());
+    }
     copy_type(
-        field_selection::value_field_type(base.as_deref(), field, resolver)?.as_ref(),
+        field_selection::value_field_type(ty.as_deref(), field, resolver)?.as_ref(),
         control,
     )
 }

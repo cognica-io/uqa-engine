@@ -19,6 +19,12 @@ use crate::routines::RoutineResolution;
 
 type ProjectionStarColumn = (String, Option<ColumnType>, Option<u32>);
 
+pub(super) struct ProjectionMetadata {
+    pub ty: Option<ColumnType>,
+    pub collation: Option<u32>,
+    pub record: Option<crate::schema::RecordMetadata>,
+}
+
 /// Keep only selections that differ from their output type's default while the output schema is being assembled.
 #[derive(Default)]
 pub(super) struct OutputCollations(Vec<(usize, u32)>);
@@ -107,7 +113,7 @@ fn projection_output_schema(
         };
         if let Some(star_columns) = projection_star_columns(&projection.expr, expansion_schema)? {
             records.extend(
-                super::record_fields::star_fields(&projection.expr, expansion_schema)
+                super::record_fields::star_metadata(&projection.expr, expansion_schema)
                     .unwrap_or_default(),
             );
             for (column, ty, collation) in star_columns {
@@ -118,38 +124,23 @@ fn projection_output_schema(
             continue;
         }
         columns.push(labels[position].clone());
-        let (ty, collation) = scope.bind_projection_metadata(
+        let metadata = scope.bind_projection_metadata(
             routines,
             &projection.expr,
             expression_schema,
             subqueries,
             params,
         )?;
-        collations.push(types.len(), ty.as_ref(), collation);
-        types.push(ty);
-        records.push(
-            if types
-                .last()
-                .is_some_and(|ty| matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_))))
-            {
-                scope.bind_record_fields(
-                    routines,
-                    &projection.expr,
-                    expression_schema,
-                    subqueries,
-                    params,
-                )?
-            } else {
-                None
-            },
-        );
+        collations.push(types.len(), metadata.ty.as_ref(), metadata.collation);
+        types.push(metadata.ty);
+        records.push(metadata.record);
     }
     for projection in projections {
         scope.collations.validate_expression(&projection.expr)?;
     }
     Ok(collations
         .apply(RowSchema::with_types(columns, types))
-        .with_record_fields(
+        .with_record_metadata(
             records
                 .into_iter()
                 .enumerate()

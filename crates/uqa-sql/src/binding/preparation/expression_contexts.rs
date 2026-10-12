@@ -78,6 +78,7 @@ impl Preparation<'_> {
         if let Some(fields) = &mut source.row_constructor {
             self.coerce_row_constructor(fields, target)?;
         }
+        let initial_collation = cast_initial_collation(expr, &source, target)?;
         self.parameters.coerce_unknown(&mut source, target)?;
         if source
             .ty
@@ -102,9 +103,12 @@ impl Preparation<'_> {
         }
         let mut result = ExpressionType::resolved(Some(target.clone()));
         result.derivation = cast_collation(expr, &source, target)?;
+        result.initial_collation = initial_collation;
         if *target == ColumnType::Record {
             result.record_fields = source.record_fields;
             result.row_constructor = source.row_constructor;
+            result.record_descriptor = source.record_descriptor;
+            result.record_variable = source.record_variable;
         }
         Ok(result)
     }
@@ -243,6 +247,36 @@ impl Preparation<'_> {
         }
         Ok((order_count, order_type))
     }
+}
+
+/// Parse-time tuple descriptors see leaf constants/parameters and identity casts before enclosing cast expressions receive their collations.
+fn cast_initial_collation(
+    expression: &ScalarExpr,
+    source: &ExpressionType,
+    target: &ColumnType,
+) -> Result<u32, SQLError> {
+    use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
+    let default = u32::try_from(pg_type_collation_oid(target)).expect("cast target collation OID");
+    if default == 0 {
+        return Ok(0);
+    }
+    if crate::catalog::collations::expression::scalar_clause(expression)?.is_some() {
+        return Ok(source.initial_collation);
+    }
+    let modifier = pg_type_modifier(target);
+    if source.ty.as_ref().is_some_and(|source| {
+        pg_type_oid(source) == pg_type_oid(target)
+            && (modifier < 0 || pg_type_modifier(source) == modifier)
+    }) {
+        return Ok(source.initial_collation);
+    }
+    if source.is_sql_unknown()
+        && modifier < 0
+        && (!matches!(target, ColumnType::Domain { .. }) || source.is_unknown_parameter())
+    {
+        return Ok(default);
+    }
+    Ok(0)
 }
 
 fn cast_collation(

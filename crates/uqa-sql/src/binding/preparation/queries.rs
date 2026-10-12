@@ -146,6 +146,9 @@ impl Preparation<'_> {
             result.record_fields = super::super::record_fields::common_fields(
                 values.iter().map(|value| value.record_fields.as_ref()),
             );
+            result
+                .record_descriptor
+                .clone_from(&values[0].record_descriptor);
             *left = result;
         }
         left.key_origins.clear();
@@ -343,8 +346,9 @@ impl Preparation<'_> {
                     }
                     _ => expansion.columns_are_open(None),
                 };
-                let fields = super::super::record_fields::star_fields(&projection.expr, expansion)
-                    .unwrap_or_default();
+                let fields =
+                    super::super::record_fields::star_metadata(&projection.expr, expansion)
+                        .unwrap_or_default();
                 for ((column, ty, collation), fields) in columns.into_iter().zip(fields) {
                     output.columns.push(column);
                     let mut value = ExpressionType::resolved(ty);
@@ -354,7 +358,10 @@ impl Preparation<'_> {
                                 i64::from(oid),
                             );
                     }
-                    value.record_fields = fields;
+                    if let Some(fields) = fields {
+                        value.record_fields = fields.types;
+                        value.record_descriptor = fields.descriptor;
+                    }
                     output.types.push(value);
                 }
             } else {

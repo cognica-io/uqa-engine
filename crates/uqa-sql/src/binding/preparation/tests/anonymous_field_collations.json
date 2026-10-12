@@ -1,0 +1,350 @@
+[
+  {
+    "sql": "SELECT (ROW(c,p)).f1 FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c,p)).f2 FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c,p)).f1 COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW(c,p) AS r FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "WITH q AS (SELECT ROW(c,p) AS r FROM t) SELECT (r).f2 FROM q",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT ((SELECT ROW(c,p))).f1 FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "could not identify column \"f1\" in record data type",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW(coalesce(c,p),c)).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c,p)).f1 FROM t ORDER BY 1",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(coalesce(c COLLATE \"C\",p COLLATE \"POSIX\"),c)).f2 FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW(NULL::d_posix)).f1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(lower(c))).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(coalesce(c,c))).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c::varchar)).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c COLLATE \"POSIX\")).f1 FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW('x')).f1",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW('x'::text)).f1",
+    "collations": [
+      100
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(NULL::text)).f1",
+    "collations": [
+      100
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW(lower(c)) AS r FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "WITH q AS (SELECT ROW(NULL::d_posix) AS r) SELECT (r).f1 FROM q",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW((ROW(c)).f1)).f1 FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW((SELECT c FROM t LIMIT 1))).f1",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c || c)).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(CASE WHEN true THEN c ELSE c END)).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c::text)).f1 FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW((c COLLATE \"POSIX\")::text)).f1 FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(NULL)).f1",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW('x' COLLATE \"C\")).f1",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW('x') AS r) q",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT coalesce((ROW('x')).f1,'y')",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW(c)::record).f1 FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW(c)::record AS r FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (VALUES(ROW('x'::text COLLATE \"C\")),(ROW('y'::text COLLATE \"POSIX\"))) q(r)",
+    "error": {
+      "sqlstate": "42809",
+      "message": "record type has not been registered",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (VALUES(ROW(1)),(ROW('x'::text))) q(r)",
+    "error": {
+      "sqlstate": "42809",
+      "message": "record type has not been registered",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW(c) AS r FROM t UNION ALL SELECT ROW(p) FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW(c) AS r FROM t UNION SELECT ROW(p) FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT CASE WHEN n=1 THEN ROW(c) ELSE ROW(c) END AS r FROM t) q",
+    "error": {
+      "sqlstate": "42809",
+      "message": "record type has not been registered",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT coalesce(ROW(c),ROW(c)) AS r FROM t) q",
+    "error": {
+      "sqlstate": "42809",
+      "message": "record type has not been registered",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (v).x FROM (SELECT q AS v FROM (SELECT c AS x FROM t) q) z",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT (SELECT ROW(c)) AS r FROM t) q",
+    "error": {
+      "sqlstate": "42809",
+      "message": "record type has not been registered",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT ((ROW(ROW(c))).f1).f1 FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "could not identify column \"f1\" in record data type",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW((NULL::pair).a)).f1",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW((SELECT lower(c) FROM t LIMIT 1))).f1",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(lower(c) COLLATE \"POSIX\")).f1 FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c::varchar(2))).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW('abc'::varchar(2))).f1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c::d_posix)).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW('abc'::d_posix)).f1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (r).missing FROM (SELECT ROW(c) AS r FROM t) q",
+    "error": {
+      "sqlstate": "42703",
+      "message": "could not identify column \"missing\" in record data type",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW(c,p)).f01 FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "could not identify column \"f01\" in record data type",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW(c,p)).f3 FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "could not identify column \"f3\" in record data type",
+      "detail": null,
+      "hint": null
+    }
+  }
+]
