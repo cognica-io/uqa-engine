@@ -14,6 +14,7 @@ mod column_collations;
 mod comparison_capabilities;
 mod defaults;
 mod dependencies;
+mod domain_collations;
 mod operator_joins;
 mod ordered_calls;
 mod stored_inputs;

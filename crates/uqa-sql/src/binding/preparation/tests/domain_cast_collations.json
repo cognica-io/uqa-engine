@@ -1,0 +1,185 @@
+[
+  {
+    "sql": "SELECT c::d_posix AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (c COLLATE \"C\")::d_posix AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c COLLATE \"C\",c)::d_posix AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (c::d_posix)::text AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (c||p)::d_posix AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT ((c COLLATE \"C\")||(p COLLATE \"POSIX\"))::d_posix AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c::d_plain AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c]::d_posix[] AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c COLLATE \"C\"]::d_posix[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[coalesce(c COLLATE \"C\",c)]::d_posix[] AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT a::d_posix[] AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (a COLLATE \"C\")::d_posix[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT d::text[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT e::d_posix AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT e::d_plain AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT e::text AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[e]::d_posix[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT d::d_posix[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[ARRAY[c]]::d_posix[] AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[ARRAY[e]]::d_posix[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[a]::d_posix[] AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[d]::text[] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[]::d_posix[] AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT 'x'::d_posix AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT NULL::d_posix AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c]::d_array AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[]::d_array AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT a::d_array AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (a COLLATE \"C\")::d_array AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(a COLLATE \"C\",a)::d_array AS output FROM t",
+    "collations": [
+      951
+    ]
+  }
+]

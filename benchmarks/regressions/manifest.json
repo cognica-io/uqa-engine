@@ -2590,6 +2590,19 @@
       "capability": "Prepared collation outputs and diagnostics",
       "workload": "Thirty-eight PostgreSQL references for computed output selections, independent ROW fields, NULL/unknown coercion and type-versus-collation diagnostic ordering.",
       "invariant": "Preparation preserves each selected output identity and the PostgreSQL SQLSTATE, message, detail and hint of every rejected query."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_cast_collations_match_postgresql_for_literals_columns_and_identity_casts",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/domain_collations.rs",
+      "capability": "Domain and array coercion collations",
+      "workload": "Thirty PostgreSQL references for direct and inherited COLLATE clauses, domain identity casts, array literals and columns, nested and empty arrays, and domains over arrays.",
+      "invariant": "Preparation preserves the selected output OID of every valid coercion and the complete explicit-conflict diagnostic without changing existing limits."
     }
   ]
 }

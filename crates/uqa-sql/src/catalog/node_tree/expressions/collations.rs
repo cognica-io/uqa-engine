@@ -7,7 +7,7 @@
 //! Assign input and result collations after expression typing and coercion.
 
 use super::{ColumnType, Expr, ExpressionContext, Field, Node, SQLError, TypedNode};
-use crate::catalog::collations::{derivation::Derivation, DEFAULT_COLLATION_OID};
+use crate::catalog::collations::derivation::Derivation;
 use crate::catalog::type_metadata::{pg_type_modifier, pg_type_oid};
 
 impl ExpressionContext<'_> {
@@ -126,8 +126,8 @@ fn ordinary(node: &mut Node, case_value: Option<i64>) -> Result<Derivation, SQLE
             input = input.merge(visit_field(field, scope)?)?;
         }
     }
-    let result = if node.kind == "COERCETODOMAIN" && declared != DEFAULT_COLLATION_OID {
-        Derivation::implicit(declared)
+    let result = if node.kind == "COERCETODOMAIN" {
+        input.domain(declared)
     } else {
         input.result(declared)
     };

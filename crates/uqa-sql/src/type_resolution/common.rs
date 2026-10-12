@@ -73,7 +73,7 @@ pub(super) fn numeric_type() -> ColumnType {
     }
 }
 
-pub(super) fn base_type(mut ty: &ColumnType) -> &ColumnType {
+pub(crate) fn base_type(mut ty: &ColumnType) -> &ColumnType {
     while let ColumnType::Domain { base, .. } = ty {
         ty = base;
     }

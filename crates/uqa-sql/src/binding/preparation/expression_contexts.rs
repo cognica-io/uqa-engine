@@ -22,53 +22,68 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
         let target = self.type_name(ty)?;
+        self.cast_to_type(expr, &target, input, subqueries)
+    }
+
+    fn cast_to_type(
+        &mut self,
+        expr: &ScalarExpr,
+        target: &ColumnType,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<ExpressionType, SQLError> {
         // Parse analysis converts an untyped literal with the enum's input function before any assignment checks.
         if let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expr {
-            crate::expr::enums::fold_unknown_literal(self.routines.enum_labels(), value, &target)?;
+            crate::expr::enums::fold_unknown_literal(self.routines.enum_labels(), value, target)?;
         }
-        let mut source =
-            if let (ScalarExpr::Array(items), ColumnType::Array(element)) = (expr, &target) {
-                let mut items = items
-                    .iter()
-                    .map(|item| {
-                        if matches!(item, ScalarExpr::Array(_)) {
-                            self.cast_expression(item, ty, input, subqueries)
-                        } else {
-                            self.expression(item, input, subqueries)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                for item in &mut items {
-                    let element = if matches!(item.ty, Some(ColumnType::Array(_))) {
-                        &target
+        let array_type = crate::type_resolution::base_type(target);
+        let mut source = if let (ScalarExpr::Array(expressions), ColumnType::Array(element)) =
+            (expr, array_type)
+        {
+            let mut items = expressions
+                .iter()
+                .map(|item| {
+                    if matches!(item, ScalarExpr::Array(_)) {
+                        self.cast_to_type(item, array_type, input, subqueries)
                     } else {
-                        element.as_ref()
-                    };
-                    self.parameters.coerce_unknown(item, element)?;
-                    if let Some(source) = &item.ty {
-                        if !crate::type_resolution::explicit_type_compatible(source, element) {
-                            return Err(error(
-                                "42846",
-                                format!(
-                                    "cannot cast type {} to {}",
-                                    source.display_name(),
-                                    element.display_name()
-                                ),
-                            ));
-                        }
+                        self.expression(item, input, subqueries)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for (expression, item) in expressions.iter().zip(&mut items) {
+                let element = if matches!(item.ty, Some(ColumnType::Array(_))) {
+                    array_type
+                } else {
+                    element.as_ref()
+                };
+                self.parameters.coerce_unknown(item, element)?;
+                if let Some(source) = &item.ty {
+                    if !crate::type_resolution::explicit_type_compatible(source, element) {
+                        return Err(error(
+                            "42846",
+                            format!(
+                                "cannot cast type {} to {}",
+                                source.display_name(),
+                                element.display_name()
+                            ),
+                        ));
                     }
                 }
-                ExpressionType::combined(Some(target.clone()), &items)
-            } else {
-                self.expression(expr, input, subqueries)?
-            };
+                item.derivation = cast_collation(expression, item, element)?;
+            }
+            ExpressionType::combined(Some(array_type.clone()), &items)
+        } else {
+            self.expression(expr, input, subqueries)?
+        };
         if let Some(fields) = &mut source.row_constructor {
-            self.coerce_row_constructor(fields, &target)?;
+            self.coerce_row_constructor(fields, target)?;
         }
-        self.parameters.coerce_unknown(&mut source, &target)?;
-        if source.ty.as_ref().is_some_and(|source| {
-            !crate::type_resolution::explicit_type_compatible(source, &target)
-        }) {
+        self.parameters.coerce_unknown(&mut source, target)?;
+        if source
+            .ty
+            .as_ref()
+            .is_some_and(|source| !crate::type_resolution::explicit_type_compatible(source, target))
+        {
             return Err(error(
                 "42846",
                 format!(
@@ -78,14 +93,16 @@ impl Preparation<'_> {
                 ),
             ));
         }
-        if source.ty.as_ref().is_some_and(|source| {
-            crate::type_resolution::preserves_record_identity(source, &target)
-        }) {
+        if source
+            .ty
+            .as_ref()
+            .is_some_and(|source| crate::type_resolution::preserves_record_identity(source, target))
+        {
             return Ok(source);
         }
         let mut result = ExpressionType::resolved(Some(target.clone()));
-        result.derivation = source.derivation.result(result.derivation.oid());
-        if target == ColumnType::Record {
+        result.derivation = cast_collation(expr, &source, target)?;
+        if *target == ColumnType::Record {
             result.record_fields = source.record_fields;
             result.row_constructor = source.row_constructor;
         }
@@ -218,4 +235,21 @@ impl Preparation<'_> {
         }
         Ok((order_count, order_type))
     }
+}
+
+fn cast_collation(
+    expression: &ScalarExpr,
+    source: &ExpressionType,
+    target: &ColumnType,
+) -> Result<Derivation, SQLError> {
+    let selected = source.derivation.coerce(source.ty.as_ref(), target);
+    // Coercion peels a direct COLLATE clause and reapplies it outside the converted value.
+    if crate::catalog::type_metadata::pg_type_collation_oid(target) != 0
+        && crate::catalog::collations::expression::scalar_clause(expression)?.is_some()
+    {
+        if let Derivation::Explicit(oid) = source.derivation {
+            return Ok(selected.explicit(oid));
+        }
+    }
+    Ok(selected)
 }

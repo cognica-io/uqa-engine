@@ -7,7 +7,8 @@
 //! Collation selection shared by typed expressions and `PostgreSQL` catalog encoding.
 
 use super::{builtin_collation_name, DEFAULT_COLLATION_OID};
-use crate::SQLError;
+use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
+use crate::{ColumnType, SQLError};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Derivation {
@@ -110,5 +111,41 @@ impl Derivation {
         } else {
             self
         }
+    }
+
+    /// A domain coercion selects its declaration only after visiting its input.
+    pub(crate) fn domain(self, declared: i64) -> Self {
+        if declared == DEFAULT_COLLATION_OID {
+            self.result(declared)
+        } else {
+            self.error_only().combine(Self::implicit(declared))
+        }
+    }
+
+    /// Derive metadata from the coercion of already analyzed types, without reanalyzing their expressions.
+    pub(crate) fn coerce(self, source: Option<&ColumnType>, target: &ColumnType) -> Self {
+        let declared = pg_type_collation_oid(target);
+        let Some(source) = source else {
+            return self.result(declared);
+        };
+        if pg_type_oid(source) == pg_type_oid(target)
+            && pg_type_modifier(source) == pg_type_modifier(target)
+        {
+            return self;
+        }
+        if let ColumnType::Domain { base, .. } = target {
+            return self.coerce(Some(source), base).domain(declared);
+        }
+        if let (ColumnType::Array(_), ColumnType::Array(_)) =
+            (crate::type_resolution::base_type(source), target)
+        {
+            // ArrayCoerceExpr visits both the array and an independently coerced element placeholder.
+            let element = Self::None.coerce(
+                crate::type_resolution::array_element_type(source),
+                crate::type_resolution::array_element_type(target).expect("array element"),
+            );
+            return self.combine(element).result(declared);
+        }
+        self.result(declared)
     }
 }
