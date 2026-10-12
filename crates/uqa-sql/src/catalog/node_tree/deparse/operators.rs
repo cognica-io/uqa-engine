@@ -98,7 +98,7 @@ impl Renderer<'_> {
             .join(".");
         let arguments = args
             .iter()
-            .map(|arg| self.field(arg, false))
+            .map(|arg| self.field(arg, self.pretty))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(format!("{name}({})", arguments.join(", ")))
     }

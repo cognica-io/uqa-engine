@@ -74,10 +74,22 @@ impl ExpressionContext<'_> {
         coercion: Coercion,
     ) -> Result<TypedNode, SQLError> {
         let format = coercion.format;
-        if pg_type_oid(&value.ty) == pg_type_oid(target) {
-            if !coercion.explicit && pg_type_modifier(target) < 0 {
-                return Ok(value);
+        let same_type = pg_type_oid(&value.ty) == pg_type_oid(target);
+        if same_type && !coercion.explicit && pg_type_modifier(target) < 0 {
+            return Ok(value);
+        }
+        if value.node.kind == "COLLATEEXPR" {
+            let (node, collation) = super::collations::peel(value.node)?;
+            let mut value =
+                Self::coerce_selected(TypedNode { node, ty: value.ty }, target, coercion)?;
+            if let Some(oid) =
+                collation.filter(|_| crate::schema::composites::type_is_collatable(target))
+            {
+                value.node = super::collations::collate(value.node, oid);
             }
+            return Ok(value);
+        }
+        if same_type {
             return Self::modify_type(value, target, coercion, false);
         }
         if let ColumnType::Domain { base, .. } = target {

@@ -1,0 +1,222 @@
+[
+  {
+    "sql": "SELECT $1 COLLATE \"C\"",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "text"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" = 1",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT ($1 COLLATE \"C\")::integer",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT COALESCE($1 COLLATE \"C\", 1)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" IS NULL",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\")",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" = 'x'",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "text"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" = 1",
+    "declared": [
+      "integer"
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT $1 COLLATE missing = 1",
+    "declared": [
+      "integer"
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT $1 COLLATE missing = 1",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"missing\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\"",
+    "declared": [
+      "text"
+    ],
+    "parameter_types": [
+      "text"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT ($1 COLLATE \"C\") = 1, $1",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT COALESCE($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT GREATEST($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT NULLIF($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT abs($1 COLLATE \"C\")",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "double precision"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT round($1 COLLATE \"C\", $2::integer)",
+    "declared": [
+      null,
+      null
+    ],
+    "parameter_types": [
+      "numeric",
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT mod($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT COALESCE($1 COLLATE \"C\", $1 COLLATE \"POSIX\", 1)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null
+  },
+  {
+    "sql": "SELECT COALESCE(($1 COLLATE \"C\")::integer, $1 COLLATE \"C\")",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

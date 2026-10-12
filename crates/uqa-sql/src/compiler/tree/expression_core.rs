@@ -93,6 +93,21 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
             Ok(Expr::Array(elements))
         }
         NodeEnum::TypeCast(tc) => compile_type_cast(tc),
+        NodeEnum::CollateClause(clause) => {
+            let argument = clause
+                .arg
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("COLLATE without an argument".into()))?;
+            let name = extract_strings(&clause.collname)?
+                .iter()
+                .map(|part| crate::expr::quote_ident(part))
+                .collect::<Vec<_>>()
+                .join(".");
+            Ok(dispatched_call(
+                FunctionDispatch::Collate { oid: None },
+                vec![compile_expr(argument)?, Expr::Literal(Value::Str(name))],
+            ))
+        }
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
         NodeEnum::MergeSupportFunc(_) => Ok(Expr::Func {

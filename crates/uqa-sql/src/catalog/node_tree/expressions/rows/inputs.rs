@@ -13,6 +13,7 @@ use super::{
 
 pub(super) enum RowInput<'a> {
     Unknown(&'a Expr),
+    Collated { argument: Box<Self>, oid: u32 },
     Row(Vec<Self>),
     Value(TypedNode),
 }
@@ -21,6 +22,7 @@ impl RowInput<'_> {
     pub(super) fn ty(&self) -> Option<&ColumnType> {
         match self {
             Self::Unknown(_) => None,
+            Self::Collated { argument, .. } => argument.ty(),
             Self::Row(_) => Some(&ColumnType::Record),
             Self::Value(value) => Some(&value.ty),
         }
@@ -30,6 +32,10 @@ impl RowInput<'_> {
         match self {
             Self::Unknown(Expr::Literal(value)) => values::unknown_constant(value),
             Self::Unknown(_) => unreachable!("unknown ROW literal"),
+            Self::Collated { argument, oid } => Ok(super::super::collations::collate(
+                argument.into_node()?,
+                i64::from(oid),
+            )),
             Self::Row(fields) => anonymous_row(fields).map(|value| value.node),
             Self::Value(value) => Ok(value.node),
         }
@@ -37,6 +43,20 @@ impl RowInput<'_> {
 }
 
 impl ExpressionContext<'_> {
+    /// NULL tests, like ROW fields, do not select a type for unknown literals.
+    pub(in super::super) fn uncoerced_input(
+        &self,
+        expression: &Expr,
+    ) -> Result<(Node, bool), SQLError> {
+        let input = self.row_input(expression)?;
+        let mut ty = input.ty();
+        while let Some(ColumnType::Domain { base, .. }) = ty {
+            ty = Some(base);
+        }
+        let is_row = matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_)));
+        Ok((input.into_node()?, is_row))
+    }
+
     pub(super) fn row_inputs<'a>(
         &self,
         elements: &'a [Expr],
@@ -48,6 +68,19 @@ impl ExpressionContext<'_> {
     }
 
     pub(super) fn row_input<'a>(&self, expression: &'a Expr) -> Result<RowInput<'a>, SQLError> {
+        if let Some(clause) = crate::catalog::collations::expression::ast_clause(expression)? {
+            let argument = self.row_input(clause.argument)?;
+            let oid = crate::catalog::collations::expression::select(
+                clause.name,
+                clause.oid,
+                argument.ty(),
+                self.types,
+            )?;
+            return Ok(RowInput::Collated {
+                argument: Box::new(argument),
+                oid,
+            });
+        }
         if let Some(elements) = self.anonymous_row_elements(expression)? {
             return self.row_inputs(elements).map(RowInput::Row);
         }

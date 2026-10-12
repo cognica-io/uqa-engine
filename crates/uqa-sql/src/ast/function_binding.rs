@@ -75,6 +75,10 @@ impl FunctionResolutionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionDispatch {
     NumericOperator(NumericOperator),
+    /// A collation clause, retaining its selected identity independently of its written name.
+    Collate {
+        oid: Option<u32>,
+    },
     NamedArgument,
     VariadicArgument,
     ArraySubscripts,
@@ -151,6 +155,7 @@ impl FunctionDispatch {
     pub const fn label(self) -> &'static str {
         match self {
             Self::NumericOperator(operator) => operator.symbol(),
+            Self::Collate { .. } => "COLLATE",
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",

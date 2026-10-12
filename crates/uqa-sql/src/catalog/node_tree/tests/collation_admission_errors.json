@@ -1,0 +1,152 @@
+[
+  {
+    "base": "text",
+    "check": "VALUE COLLATE missing < 'z'",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"missing\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE COLLATE missing_schema.\"C\" < 'z'",
+    "error": {
+      "sqlstate": "3F000",
+      "message": "schema \"missing_schema\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE COLLATE public.\"C\" < 'z'",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"public.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE COLLATE pg_catalog.c < 'z'",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"pg_catalog.c\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE COLLATE other_db.pg_catalog.\"C\" < 'z'",
+    "error": {
+      "sqlstate": "0A000",
+      "message": "cross-database references are not implemented: other_db.pg_catalog.C",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE COLLATE a.b.c.d < 'z'",
+    "error": {
+      "sqlstate": "42601",
+      "message": "improper qualified name (too many dotted names): a.b.c.d",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "1 COLLATE missing IS NULL",
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "true COLLATE \"C\" IS NULL",
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type boolean",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "ROW(1) COLLATE \"C\" IS NULL",
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type record",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "ARRAY[1] COLLATE \"C\" IS NULL",
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer[]",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE COLLATE \"C\" = VALUE COLLATE \"POSIX\"",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "ROW(VALUE COLLATE \"C\", VALUE) = ROW(VALUE COLLATE \"POSIX\", VALUE)",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "'bad' COLLATE missing = VALUE",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"missing\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "'bad' COLLATE \"C\" = VALUE",
+    "error": {
+      "sqlstate": "22P02",
+      "message": "invalid input syntax for type integer: \"bad\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "text",
+    "check": "(1::numeric(3,1)) COLLATE \"C\" IS NULL",
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type numeric",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

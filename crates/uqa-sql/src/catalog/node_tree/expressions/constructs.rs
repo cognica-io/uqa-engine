@@ -123,12 +123,12 @@ impl ExpressionContext<'_> {
         let [argument] = args else {
             return Err(SQLError::Internal("invalid outer NULL test".into()));
         };
-        let argument = self.encode(argument, None)?;
+        let (argument, _) = self.uncoerced_input(argument)?;
         Ok(TypedNode {
             node: Node::new(
                 "NULLTEST",
                 [
-                    ("arg", argument.node.into()),
+                    ("arg", argument.into()),
                     ("nulltesttype", i64::from(negated).into()),
                     ("argisrow", false.into()),
                     ("location", (-1).into()),

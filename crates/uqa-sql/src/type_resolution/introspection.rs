@@ -15,6 +15,7 @@ use uqa_core::{
     Value,
 };
 mod arrays;
+mod collations;
 mod comparison;
 mod concat;
 mod enums;
@@ -483,6 +484,9 @@ impl Binder<'_, '_> {
 
     fn bind_call(&mut self, mut call: BindingCall) -> Result<ScalarExpr, SQLError> {
         self.items(&mut call.arguments)?;
+        if self.bind_collation(&mut call)? {
+            return Ok(call.into_expression());
+        }
         for order in &mut call.order_by {
             self.in_place(&mut order.expr)?;
         }

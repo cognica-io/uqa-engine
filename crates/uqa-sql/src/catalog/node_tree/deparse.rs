@@ -24,6 +24,13 @@ pub trait ExpressionNames {
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
 
+    /// Current SQL-visible name of a selected collation identity.
+    fn collation(&self, oid: i64) -> Result<Vec<String>, SQLError> {
+        crate::catalog::collations::builtin_collation_name(oid)
+            .map(|name| vec![name.into()])
+            .ok_or_else(|| invalid("unknown collation identity"))
+    }
+
     /// Type identities and current output metadata for admitted physical constants.
     fn value_catalog(&self) -> Option<&dyn crate::expr::SQLValueCatalog> {
         None
@@ -85,6 +92,7 @@ impl Renderer<'_> {
             }
             "PARAM" => self.parameter(node),
             "CONST" => self.constant(node),
+            "COLLATEEXPR" => self.collate(node, outer),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
             "ROWEXPR" => self.row(node),
             "ROWCOMPAREEXPR" => self.row_comparison(node),
@@ -137,7 +145,7 @@ impl Renderer<'_> {
                 };
                 let arguments = list(node, "args")?
                     .iter()
-                    .map(|arg| self.field(arg, false))
+                    .map(|arg| self.field(arg, self.pretty))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!("{name}({})", arguments.join(", ")))
             }
@@ -180,6 +188,20 @@ impl Renderer<'_> {
             return Err(invalid("invalid external parameter in stored expression"));
         }
         self.names.parameter(number)
+    }
+
+    fn collate(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
+        let name = self
+            .names
+            .collation(node.integer("collOid")?)?
+            .iter()
+            .map(|name| crate::expr::quote_ident(name))
+            .collect::<Vec<_>>()
+            .join(".");
+        Ok(parentheses(
+            format!("{} COLLATE {name}", self.field(node.field("arg")?, false)?),
+            !outer,
+        ))
     }
 
     fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {

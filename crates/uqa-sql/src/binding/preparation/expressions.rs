@@ -46,11 +46,21 @@ impl Preparation<'_> {
         left: &mut ExpressionType,
         right: &mut ExpressionType,
     ) -> Result<ColumnType, SQLError> {
-        let [left_target, right_target, result] =
-            crate::type_resolution::binary_operator_types(op, left.ty.as_ref(), right.ty.as_ref())?;
-        self.parameters.coerce_unknown(left, &left_target)?;
-        self.parameters.coerce_unknown(right, &right_target)?;
+        let [_, _, result] = self.binary_types(op, left, right)?;
         Ok(result)
+    }
+
+    pub(super) fn binary_types(
+        &mut self,
+        op: BinaryOp,
+        left: &mut ExpressionType,
+        right: &mut ExpressionType,
+    ) -> Result<[ColumnType; 3], SQLError> {
+        let selected =
+            crate::type_resolution::binary_operator_types(op, left.ty.as_ref(), right.ty.as_ref())?;
+        self.parameters.coerce_unknown(left, &selected[0])?;
+        self.parameters.coerce_unknown(right, &selected[1])?;
+        Ok(selected)
     }
 
     #[expect(
@@ -67,6 +77,16 @@ impl Preparation<'_> {
             return self.parameters.reference(index);
         }
         self.check_schema_subquery(expression)?;
+        if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)? {
+            let value = self.expression(clause.argument, input, subqueries)?;
+            crate::catalog::collations::expression::select(
+                clause.name,
+                clause.oid,
+                value.ty.as_ref(),
+                Some(self.routines),
+            )?;
+            return Ok(value);
+        }
         if self.schema_expression.is_some() {
             if let ScalarExpr::QualifiedColumn { qualifier, .. }
             | ScalarExpr::QualifiedStar(qualifier) = expression
@@ -344,14 +364,17 @@ impl Preparation<'_> {
                 filter.is_some(),
             )?;
         }
-        self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
+        let result = self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
         let selected = selected.overload;
-        let ty = match selected
-            .as_ref()
-            .filter(|selected| !selected.binding.builtin)
-        {
-            Some(selected) => Some(selected.return_type.clone()),
-            None => self.known_type(expression, input, subqueries)?,
+        // Keep the result selected from the observed occurrences. A later
+        // sibling can determine a parameter's type after an earlier COLLATE
+        // operand was admitted as unknown; retyping that syntax loses its state.
+        let ty = match (result, &selected) {
+            (super::function_calls::FunctionResult::Selected(ty), _) => ty,
+            (_, Some(selected)) => Some(selected.return_type.clone()),
+            (super::function_calls::FunctionResult::Unselected, None) => {
+                self.known_type(expression, input, subqueries)?
+            }
         };
         if let Some(selected) = &selected {
             self.parameters.retain_call(expression, &selected.binding);

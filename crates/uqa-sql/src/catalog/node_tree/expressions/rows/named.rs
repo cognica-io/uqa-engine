@@ -164,6 +164,19 @@ impl ExpressionContext<'_> {
             base = nested;
         }
         let value = match input {
+            RowInput::Collated { mut argument, oid } => {
+                while let RowInput::Collated {
+                    argument: inner, ..
+                } = *argument
+                {
+                    argument = inner;
+                }
+                let mut value = self.coerce_row_input(*argument, target)?;
+                if crate::schema::composites::type_is_collatable(target) {
+                    value.node = super::super::collations::collate(value.node, i64::from(oid));
+                }
+                return Ok(value);
+            }
             RowInput::Unknown(expression) => {
                 self.encode(expression, Some(&base.without_type_modifiers()))?
             }

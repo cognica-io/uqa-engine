@@ -159,6 +159,11 @@ pub trait FunctionTypeResolver: Send + Sync {
         Ok(None)
     }
 
+    /// Resolve an explicit collation name with the binding catalog's namespace visibility and privileges.
+    fn resolve_collation_name(&self, _name: &str) -> Result<Option<u32>, SQLError> {
+        Ok(None)
+    }
+
     /// Enum labels of the binding catalog. Binding converts `unknown` literals coerced to an enum type with them, as `PostgreSQL` parse analysis calls the type's input function.
     fn enum_labels(&self) -> Option<&dyn crate::expr::enums::EnumLabelCatalog> {
         None

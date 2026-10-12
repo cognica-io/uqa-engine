@@ -8,6 +8,7 @@ use super::*;
 
 mod arrays;
 mod catalog;
+mod collations;
 mod rows;
 mod scalar;
 
@@ -194,6 +195,11 @@ fn row_expression_nodes_and_sql_match_postgresql() {
 #[test]
 fn implicit_collation_nodes_and_sql_match_postgresql() {
     check_typed_nodes(include_str!("tests/implicit_collations.json"));
+}
+
+#[test]
+fn explicit_collation_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/explicit_collations.json"));
 }
 
 fn check_typed_nodes(fixtures: &str) {

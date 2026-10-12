@@ -174,6 +174,22 @@ pub(super) fn common_context_expression_type_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
+    if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)? {
+        let ty = common_context_expression_type_with_control(
+            clause.argument,
+            schema,
+            params,
+            resolver,
+            control,
+        )?;
+        crate::catalog::collations::expression::select(
+            clause.name,
+            clause.oid,
+            ty.as_deref(),
+            resolver,
+        )?;
+        return Ok(ty);
+    }
     if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
         return Ok(None);
     }

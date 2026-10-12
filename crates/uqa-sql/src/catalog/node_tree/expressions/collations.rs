@@ -6,8 +6,40 @@
 
 //! Assign input and result collations after expression typing and coercion.
 
-use super::{Field, Node, SQLError};
+use super::{ColumnType, Expr, ExpressionContext, Field, Node, SQLError, TypedNode};
 use crate::catalog::collations::{builtin_collation_name, DEFAULT_COLLATION_OID};
+use crate::catalog::type_metadata::{pg_type_modifier, pg_type_oid};
+
+impl ExpressionContext<'_> {
+    pub(super) fn collated_expression(
+        &self,
+        clause: crate::catalog::collations::expression::Clause<'_, Expr>,
+        expected: Option<&ColumnType>,
+    ) -> Result<TypedNode, SQLError> {
+        let source = self.expression_type(clause.argument)?;
+        let oid = crate::catalog::collations::expression::select(
+            clause.name,
+            clause.oid,
+            source.as_ref(),
+            self.types,
+        )?;
+        let mut argument = clause.argument;
+        if expected.is_some_and(|target| {
+            source.as_ref().is_none_or(|source| {
+                pg_type_oid(source) != pg_type_oid(target) || pg_type_modifier(target) >= 0
+            })
+        }) {
+            while let Some(nested) = crate::catalog::collations::expression::ast_clause(argument)? {
+                argument = nested.argument;
+            }
+        }
+        let mut value = self.encode(argument, expected)?;
+        if expected.is_none_or(crate::schema::composites::type_is_collatable) {
+            value.node = collate(value.node, i64::from(oid));
+        }
+        Ok(value)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Derivation {
@@ -78,6 +110,30 @@ impl Derivation {
 /// Fresh encoder nodes hold their declared type's collation in result fields. This pass consumes those defaults once, after all type/coercion errors have been resolved; serialized nodes already contain selected collations and must not be reassigned.
 pub(super) fn assign(node: &mut Node) -> Result<(), SQLError> {
     visit(node, None).map(|_| ())
+}
+
+pub(super) fn collate(argument: Node, oid: i64) -> Node {
+    Node::new(
+        "COLLATEEXPR",
+        [
+            ("arg", argument.into()),
+            ("collOid", oid.into()),
+            ("location", (-1).into()),
+        ],
+    )
+}
+
+/// A type coercion keeps only the outer explicit collation, outside the converted value.
+pub(super) fn peel(mut node: Node) -> Result<(Node, Option<i64>), SQLError> {
+    let mut selected = None;
+    while node.kind == "COLLATEEXPR" {
+        selected.get_or_insert(node.integer("collOid")?);
+        node = match node.fields.into_iter().find(|(name, _)| name == "arg") {
+            Some((_, Field::Node(argument))) => argument,
+            _ => return Err(super::super::invalid("invalid collation argument")),
+        };
+    }
+    Ok((node, selected))
 }
 
 fn visit(node: &mut Node, case_value: Option<i64>) -> Result<Derivation, SQLError> {

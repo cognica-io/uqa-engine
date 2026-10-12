@@ -28,6 +28,12 @@ pub(super) struct SelectedFunctionArguments {
     pub(super) kind: Option<super::super::ordered_calls::Kind>,
 }
 
+pub(super) enum FunctionResult {
+    /// The original argument analysis selected a result, including a deferred UQA result.
+    Selected(Option<ColumnType>),
+    Unselected,
+}
+
 impl Preparation<'_> {
     /// Borrow the original direct and ordered children: their input leaf identities
     /// must survive until the retained constants are applied to the original plan.
@@ -173,9 +179,9 @@ impl Preparation<'_> {
         binding: Option<&FunctionBinding>,
         arguments: &mut ObservedFunctionArguments,
         selection: &SelectedFunctionArguments,
-    ) -> Result<(), SQLError> {
+    ) -> Result<FunctionResult, SQLError> {
         if binding.is_none() && self.routines.has_untyped_function(name) {
-            return Ok(());
+            return Ok(FunctionResult::Selected(None));
         }
         let types = arguments.types();
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
@@ -185,21 +191,31 @@ impl Preparation<'_> {
             for (value, target) in arguments.values.iter_mut().zip(&selected.arguments) {
                 self.parameters.coerce_unknown(value, target)?;
             }
-            return Ok(());
+            return Ok(FunctionResult::Selected(Some(selected.result)));
         }
         if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
             if name == "nullif" {
                 if let [left, right] = arguments.values.as_mut_slice() {
-                    self.binary(BinaryOp::Equal, left, right)?;
+                    let original = left.ty.clone();
+                    let deferred = left.is_deferred() || right.is_deferred();
+                    let [selected, _, _] = self.binary_types(BinaryOp::Equal, left, right)?;
+                    let result = if deferred || selected == ColumnType::Record && original.is_some()
+                    {
+                        original
+                    } else {
+                        Some(selected)
+                    };
+                    return Ok(FunctionResult::Selected(result));
                 }
             } else {
-                self.common(
+                let result = self.common(
                     crate::type_resolution::CommonTypeContext::function(name)
                         .unwrap_or(crate::type_resolution::CommonTypeContext::Coalesce),
                     &mut arguments.values,
                 )?;
+                return Ok(FunctionResult::Selected(result));
             }
-            return Ok(());
+            return Ok(FunctionResult::Unselected);
         }
         let targets = if let Some(selected) = &selection.overload {
             let types = selected
@@ -250,6 +266,6 @@ impl Preparation<'_> {
                 self.parameters.coerce_unknown(value, target)?;
             }
         }
-        Ok(())
+        Ok(FunctionResult::Unselected)
     }
 }

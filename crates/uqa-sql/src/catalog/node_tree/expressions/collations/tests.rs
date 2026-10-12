@@ -72,7 +72,7 @@ fn selected_collations_match_independent_postgresql_nodes() {
             observed += 1;
         }
     }
-    assert_eq!(observed, 37);
+    assert_eq!(observed, 50);
 }
 
 #[test]

@@ -65,6 +65,9 @@ impl ExpressionContext<'_> {
         expression: &Expr,
         expected: Option<&ColumnType>,
     ) -> Result<TypedNode, SQLError> {
+        if let Some(clause) = crate::catalog::collations::expression::ast_clause(expression)? {
+            return self.collated_expression(clause, expected);
+        }
         let value = match expression {
             Expr::Column(column) => self.column(column, None)?,
             Expr::QualifiedColumn { qualifier, column } => self.column(column, Some(qualifier))?,
@@ -93,17 +96,12 @@ impl ExpressionContext<'_> {
             Expr::Or(items) => self.boolean("or", items)?,
             Expr::Not(item) => self.boolean("not", std::slice::from_ref(item.as_ref()))?,
             Expr::IsNull { expr, negated } => {
-                let arg = self.encode(expr, None)?;
-                let mut ty = &arg.ty;
-                while let ColumnType::Domain { base, .. } = ty {
-                    ty = base;
-                }
-                let is_row = matches!(ty, ColumnType::Record | ColumnType::Composite(_));
+                let (arg, is_row) = self.uncoerced_input(expr)?;
                 TypedNode {
                     node: Node::new(
                         "NULLTEST",
                         [
-                            ("arg", arg.node.into()),
+                            ("arg", arg.into()),
                             ("nulltesttype", i64::from(*negated).into()),
                             ("argisrow", is_row.into()),
                             ("location", (-1).into()),
