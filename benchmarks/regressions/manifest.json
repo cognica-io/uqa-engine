@@ -3227,6 +3227,32 @@
       "capability": "Expanded event-field identity and scope",
       "workload": "Eighty independent PostgreSQL VAR observations cover parenthesized event fields, whole-row star expansion and a locally shadowing NEW relation with different collations.",
       "invariant": "Scope-aware binding retains declared field types and implicit collations through actual and empty rule inputs and AST/plan restoration without replacing local bindings."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_delivery_keeps_postgresql_collations_and_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/relational/values/tests.rs",
+      "capability": "VALUES physical output metadata",
+      "workload": "Twelve independent PostgreSQL VALUES references run through normal statement analysis followed by forward row delivery, directional delivery or spill-backed output with a one-byte work_mem allowance.",
+      "invariant": "Selected collations, exact scalar/NULL/array values and full diagnostics survive physical delivery; rejected statements publish no schema or rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_from_sources_preserve_postgresql_collations_through_qualification",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "VALUES source qualification",
+      "workload": "Four independently captured valid VALUES selections build actual source operators with and without a relation and column alias.",
+      "invariant": "Physical source binding and qualification retain declared implicit collations and exact values without reconstructing metadata from types alone."
     }
   ]
 }

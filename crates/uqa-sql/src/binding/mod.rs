@@ -62,7 +62,7 @@ pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
     analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
 };
-pub use scope::{overlay_outer_schema, values_types_in_scope};
+pub use scope::{overlay_outer_schema, values_schema_in_scope, values_types_in_scope};
 pub use sources::{
     analyze_source_plan_schema, bind_source_plan_schema, bind_source_plan_schema_for_execution,
     with_query_table_pseudo_columns,

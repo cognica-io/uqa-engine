@@ -11,6 +11,10 @@ use super::{
     PlanSubqueryArena, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SourceContext,
     SourcePlan,
 };
+use std::sync::Arc;
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
@@ -19,6 +23,26 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
     ctes: &CteScope<S>,
     prune: Option<&ColumnPrune>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    build_values_source(
+        context.ctes.routines,
+        context.types,
+        from,
+        params,
+        ctes,
+        || context.relational.expression_scope(ctes.clone()),
+        prune,
+    )
+}
+
+fn build_values_source<'a, S: Clone + 'static>(
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    types: &dyn crate::FunctionTypeResolver,
+    from: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    expression_scope: impl FnOnce() -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    prune: Option<&ColumnPrune>,
+) -> Result<Box<dyn PhysicalOperator>, SQLError> {
     match from {
         SourcePlan::Values {
             rows,
@@ -29,8 +53,8 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
             ..
         } => {
             let internal_schema = from.internal_values_schema()?;
-            let inferred_types = crate::query::binding::values_types_in_scope(
-                context.ctes.routines,
+            let schema = crate::query::binding::values_schema_in_scope(
+                routines,
                 rows,
                 &ctes.scalar_subqueries,
                 None,
@@ -55,35 +79,23 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
                 }
                 internal_column_types.as_slice()
             } else {
-                inferred_types.as_slice()
+                schema.column_types()
             };
-            let source_columns = if column_aliases.is_empty() {
-                (0..rows.first().map_or(0, Vec::len))
-                    .map(|index| format!("column{}", index + 1))
-                    .collect::<Vec<_>>()
-            } else {
-                column_aliases.clone()
-            };
-            let hook = context.relational.expression_scope(ctes.clone());
-            let rows = build_values_physical_rows(
-                context.types,
-                hook.as_ref(),
-                params,
-                rows,
-                column_types,
-            )?;
+            let source_columns = schema.columns().to_vec();
+            let hook = expression_scope();
+            let rows =
+                build_values_physical_rows(types, hook.as_ref(), params, rows, column_types)?;
             if let Some(schema) = internal_schema {
                 return Ok(Box::new(crate::TableScan::from_physical_rows(schema, rows)));
             }
-            let schema = crate::RowSchema::with_types(source_columns.clone(), inferred_types);
-            let operator: Box<dyn crate::PhysicalOperator + 'a> =
+            let operator: Box<dyn crate::PhysicalOperator> =
                 Box::new(crate::TableScan::from_physical_rows(schema, rows));
             Ok(qualify_source_operator_with_columns(
                 operator,
                 &source_columns,
                 alias.as_deref().unwrap_or_default(),
                 prune,
-                &[],
+                column_aliases,
                 ctes.lock_identities.emit,
             ))
         }

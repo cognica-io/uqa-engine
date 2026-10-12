@@ -95,3 +95,15 @@ pub fn values_types_in_scope(
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
     SchemaScope::from_context(ctes)?.bind_values_types(routines, rows, subqueries, schema, params)
 }
+
+/// Preserve the complete analyzed VALUES output metadata for physical execution.
+pub fn values_schema_in_scope(
+    routines: &dyn RoutineResolution,
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
+    schema: Option<&RowSchema>,
+    params: &[SQLParam],
+    ctes: &BindingContext,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::from_context(ctes)?.bind_values_schema(routines, rows, subqueries, schema, params)
+}

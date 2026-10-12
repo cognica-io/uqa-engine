@@ -9,7 +9,7 @@
 use super::RelationalContext;
 use crate::{
     query::{
-        binding::values_types_in_scope,
+        binding::values_schema_in_scope,
         collection::collect_query_operator,
         consumer::{QueryConsumerControl, QueryOutputMode},
         output::{QueryOutput, QueryRows},
@@ -22,6 +22,12 @@ use uqa_sql::{
     plan::QueryPlan, type_resolution::coerce_common_context_value, ColumnType, SQLError, SQLParam,
     ScalarExpr,
 };
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub fn execute_plan_values_output<S: Clone + 'static>(
     context: RelationalContext<'_, S>,
@@ -50,11 +56,8 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
             output_mode,
         );
     }
-    let columns: Vec<String> = (0..rows[0].len())
-        .map(|index| format!("column{}", index + 1))
-        .collect();
     let outer = ctes.row_lock_outer_row();
-    let column_types = values_types_in_scope(
+    let schema = values_schema_in_scope(
         context.catalog,
         rows,
         subqueries,
@@ -62,6 +65,7 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
         params,
         ctes,
     )?;
+    let columns = schema.columns().to_vec();
     let empty_schema = crate::RowSchema::default();
     let input_schema = outer.map_or(&empty_schema, |row| &row.schema);
     let hook = context.expression_scope(ctes.clone());
@@ -75,7 +79,6 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
         )
         .with_function_hook(hook.as_ref())
         .with_subquery_runner(hook.as_ref());
-    let schema = crate::RowSchema::with_types(columns.clone(), column_types.clone());
     let consumer = match &output_mode {
         QueryOutputMode::RowConsumer(consumer) => {
             consumer.begin(&columns, &schema)?;
@@ -106,7 +109,7 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
             values.push(coerce_common_context_value(
                 value,
                 source_type.as_ref(),
-                column_types[index].as_ref(),
+                schema.column_type(index),
             )?);
         }
         let row = crate::PhysicalRow::from_values(values);
@@ -138,11 +141,8 @@ fn execute_directional_values_output<S: Clone + 'static>(
     ctes: &CteScope<S>,
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
-    let columns: Vec<String> = (0..rows[0].len())
-        .map(|index| format!("column{}", index + 1))
-        .collect();
-    let column_types =
-        values_types_in_scope(context.catalog, rows, subqueries, None, params, ctes)?;
+    let schema = values_schema_in_scope(context.catalog, rows, subqueries, None, params, ctes)?;
+    let columns = schema.columns().to_vec();
     let empty_schema = crate::RowSchema::default();
     let source_types = rows
         .iter()
@@ -172,7 +172,7 @@ fn execute_directional_values_output<S: Clone + 'static>(
     let operator: Box<dyn crate::PhysicalOperator + '_> = Box::new(DirectionalValuesScan::new(
         rows,
         source_types,
-        crate::RowSchema::with_types(columns.clone(), column_types),
+        schema,
         context.evaluator(params, &values_ctes),
     ));
     collect_query_operator(context.runtime, columns, operator, output_mode)

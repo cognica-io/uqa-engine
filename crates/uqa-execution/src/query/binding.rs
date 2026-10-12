@@ -222,7 +222,19 @@ pub fn values_types_in_scope<S: Clone>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    uqa_sql::binding::values_types_in_scope(
+    values_schema_in_scope(routines, rows, subqueries, schema, params, ctes)
+        .map(|schema| schema.column_types().to_vec())
+}
+
+pub fn values_schema_in_scope<S: Clone>(
+    routines: &dyn RoutineResolution,
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
+    schema: Option<&RowSchema>,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<RowSchema, SQLError> {
+    uqa_sql::binding::values_schema_in_scope(
         routines,
         rows,
         subqueries,
