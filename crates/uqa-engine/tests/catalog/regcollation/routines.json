@@ -1,0 +1,281 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE TABLE fields(c text COLLATE \"C\", p text COLLATE \"POSIX\", plain text, n integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE observations(event text, c oid, p oid, plain oid, copied oid, old_c oid, value text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_fields() RETURNS trigger LANGUAGE plpgsql AS $$DECLARE r record; old_coll oid; BEGIN IF TG_OP = 'UPDATE' THEN old_coll := pg_collation_for(OLD.c)::regcollation::oid; END IF; r := NEW; INSERT INTO observations VALUES (TG_OP, pg_collation_for(NEW.c)::regcollation::oid, pg_collation_for(NEW.p)::regcollation::oid, pg_collation_for(NEW.plain)::regcollation::oid, pg_collation_for(r.c)::regcollation::oid, old_coll, r.c); RETURN NEW; END$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER field_input BEFORE INSERT OR UPDATE ON fields FOR EACH ROW EXECUTE FUNCTION record_fields()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fields VALUES ('first','one','normal',1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fields VALUES (NULL,NULL,NULL,2)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE fields SET c='second', p='two' WHERE n=1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT event,c,p,plain,copied,old_c,value FROM observations ORDER BY event, value NULLS LAST",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "event",
+            "c",
+            "p",
+            "plain",
+            "copied",
+            "old_c",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            26,
+            26,
+            26,
+            26,
+            26,
+            25
+          ],
+          "rows": [
+            [
+              "INSERT",
+              "950",
+              "951",
+              "100",
+              "950",
+              null,
+              "first"
+            ],
+            [
+              "INSERT",
+              "950",
+              "951",
+              "100",
+              "950",
+              null,
+              null
+            ],
+            [
+              "UPDATE",
+              "950",
+              "951",
+              "100",
+              "950",
+              "950",
+              "second"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c,p,plain,n FROM fields ORDER BY n",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c",
+            "p",
+            "plain",
+            "n"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "second",
+              "two",
+              "normal",
+              "1"
+            ],
+            [
+              null,
+              null,
+              null,
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fields VALUES ('reopened','three','later',3)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT event,c,p,plain,copied,old_c,value FROM observations ORDER BY event, value NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "event",
+            "c",
+            "p",
+            "plain",
+            "copied",
+            "old_c",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            26,
+            26,
+            26,
+            26,
+            26,
+            25
+          ],
+          "rows": [
+            [
+              "INSERT",
+              "950",
+              "951",
+              "100",
+              "950",
+              null,
+              "first"
+            ],
+            [
+              "INSERT",
+              "950",
+              "951",
+              "100",
+              "950",
+              null,
+              "reopened"
+            ],
+            [
+              "INSERT",
+              "950",
+              "951",
+              "100",
+              "950",
+              null,
+              null
+            ],
+            [
+              "UPDATE",
+              "950",
+              "951",
+              "100",
+              "950",
+              "950",
+              "second"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    }
+  ]
+}

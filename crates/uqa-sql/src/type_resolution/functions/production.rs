@@ -524,6 +524,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         match dispatch {
             FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
+            FunctionDispatch::CollationFor { .. } => return inline(ColumnType::Text, control),
             FunctionDispatch::Collate { oid } => {
                 let [_, ScalarExpr::Literal(Value::Str(name))] = args else {
                     return Err(SQLError::Internal("invalid COLLATE expression".into()));

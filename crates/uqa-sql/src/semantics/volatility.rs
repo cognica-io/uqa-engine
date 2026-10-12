@@ -120,6 +120,7 @@ pub fn builtin_function_volatility(
                 | "concat_ws"
                 | "format"
                 | "pg_typeof"
+                | "pg_collation_for"
                 | "typeof"
                 | "row_to_json"
                 | "to_json"

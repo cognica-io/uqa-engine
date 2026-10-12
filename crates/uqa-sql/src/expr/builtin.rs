@@ -40,7 +40,9 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "concat" | "format" | "json_build_array" | "jsonb_build_array" | "json_build_object"
         | "jsonb_build_object" | "num_nulls" | "num_nonnulls" => Some(false),
         "concat_ws" if argument_count >= 1 => Some(false),
-        "quote_nullable" | "pg_typeof" | "typeof" if argument_count == 1 => Some(false),
+        "quote_nullable" | "pg_typeof" | "typeof" | "pg_collation_for" if argument_count == 1 => {
+            Some(false)
+        }
         "array_cat" | "array_append" | "array_prepend" | "array_remove" | "array_positions"
             if argument_count == 2 =>
         {
@@ -246,6 +248,7 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::JsonExtract { .. }
             | FunctionDispatch::Range { .. } => Some(true),
             FunctionDispatch::ArraySlices
+            | FunctionDispatch::CollationFor { .. }
             | FunctionDispatch::ArrayConcat
             | FunctionDispatch::ArrayAppend
             | FunctionDispatch::ArrayPrepend
@@ -368,6 +371,15 @@ pub(super) fn eval_dispatched_builtin_with_control(
         return result;
     }
     match dispatch {
+        FunctionDispatch::CollationFor {
+            collation_oid,
+            noncollatable_type_oid,
+        } => super::collation_for::evaluate(
+            collation_oid,
+            noncollatable_type_oid,
+            context.engine,
+            control,
+        ),
         FunctionDispatch::NumericOperator(operator) => {
             super::numeric_operator::eval_bound_operator_with_control(
                 operator, binding, evaluated, control,

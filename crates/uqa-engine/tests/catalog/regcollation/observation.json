@@ -1,0 +1,671 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT oid,proname,prorettype,proargtypes,proisstrict,provolatile,proargnames FROM pg_proc WHERE proname='pg_collation_for'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prorettype",
+            "proargtypes",
+            "proisstrict",
+            "provolatile",
+            "proargnames"
+          ],
+          "type_oids": [
+            26,
+            19,
+            26,
+            30,
+            16,
+            18,
+            1009
+          ],
+          "rows": [
+            [
+              "3162",
+              "pg_collation_for",
+              "25",
+              "2276",
+              "f",
+              "s",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(1),pg_collation_for(NULL),pg_collation_for('x'),pg_collation_for('x'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for(NULL::text COLLATE \"C\"), pg_catalog.pg_collation_for('x'::text COLLATE \"POSIX\"), COLLATION FOR ('x'::text COLLATE \"C\")",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for",
+            "pg_collation_for",
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"C\"",
+              "\"POSIX\"",
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(1/0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE SEQUENCE counter",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(nextval('counter')::text COLLATE \"C\")",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT currval('counter')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "currval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(('a'::text COLLATE \"C\") || ('b'::text COLLATE \"POSIX\"))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P21",
+        "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_collation_for() does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for('a'::text, 'b'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_collation_for(text, text) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for(value => 'x'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_collation_for(value => text) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for(VARIADIC ARRAY['x'])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"default\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for('x')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for('x'::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"default\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(NULL::integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for(ARRAY['x'])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"default\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(ARRAY[1])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type integer[]",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for(ROW(1))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type record",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_collation_for(1) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE selected(c text COLLATE \"C\",p text COLLATE \"POSIX\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO selected VALUES('a','b')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(c || p) FROM selected",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(lower(c)),pg_collation_for(coalesce(c,p)) FROM selected",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for",
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"C\"",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN d AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(1::d)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type d",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE field_collation(text) AS SELECT pg_collation_for($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE field_collation('x')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"default\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE field_collation(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"default\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inferred_collation AS SELECT pg_collation_for($1), $1::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE inferred_collation('x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"inferred_collation\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION pg_collation_for(integer) RETURNS text LANGUAGE SQL IMMUTABLE AS $$ SELECT 'user'::text $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_collation_for"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "user"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.pg_collation_for(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "collations are not supported by type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION pg_collation_for(integer)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW collation_observation AS SELECT pg_collation_for(NULL::text COLLATE \"C\") AS c",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c FROM collation_observation",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_collation_for(NULL::text COLLATE \"C\") AS declared_collation",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "declared_collation"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"C\""
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}
