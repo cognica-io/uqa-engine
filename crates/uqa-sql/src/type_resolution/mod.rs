@@ -338,6 +338,22 @@ pub fn catalog_input_type(ty: &ColumnType) -> bool {
     }
 }
 
+/// Whether value operations can require live catalog metadata: enum identities, record fields and their array/domain containers cannot be evaluated by a catalog-free scalar implementation. OID aliases have already decoded their names and operate on ordinary integer values.
+#[must_use]
+pub fn catalog_value_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Named(_)
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_)
+        | ColumnType::Record
+        | ColumnType::AnyArray => true,
+        ColumnType::Array(inner) | ColumnType::Domain { base: inner, .. } => {
+            catalog_value_type(inner)
+        }
+        _ => false,
+    }
+}
+
 /// The type of an assignment's source before coercion to its destination. A bare string or NULL literal has none: `transformAssignedExpr` and `transformAssignmentIndirection` convert it with the destination type's input function instead of checking a source type, so `'7'` assigns to an integer array element and `'abc'` fails as integer input.
 pub fn assignment_source_type(
     expression: &ScalarExpr,
