@@ -8,8 +8,7 @@
 
 use super::super::{SQLError, SQLParam, ScalarExpr};
 use super::functions::{
-    validate_ordered_function, validate_qualified_column, validate_scalar_function,
-    validate_unqualified_column, validate_window_function, ScalarFunctionValidation,
+    validate_qualified_column, validate_unqualified_column, validate_window_function,
 };
 use crate::routines::RoutineResolution;
 use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
@@ -59,13 +58,11 @@ pub(super) fn validate_expression(
             }
         }
         ScalarExpr::Func {
-            order_syntax,
             name,
-            binding,
             args,
-            distinct,
             order_by,
             filter,
+            ..
         } => {
             for (argument_index, argument) in args.iter().enumerate() {
                 if crate::semantics::is_semantic_field_argument(name, args, argument_index)? {
@@ -80,66 +77,7 @@ pub(super) fn validate_expression(
                 validate_expression(routines, filter, schema, None, params, resolver)?;
                 require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
             }
-            let within_group = super::super::ordered_calls::uses_ordered_arguments(
-                *order_syntax,
-                name,
-                binding.as_ref(),
-                order_by.len(),
-            );
-            if within_group || super::super::ordered_calls::is_ordered_set(name) {
-                return validate_ordered_function(
-                    routines,
-                    ScalarFunctionValidation {
-                        name,
-                        binding: binding.as_ref(),
-                        args,
-                        order_by,
-                        expression,
-                        schema,
-                        params,
-                        resolver,
-                    },
-                    within_group,
-                    *distinct,
-                    filter.is_some(),
-                );
-            }
-            validate_scalar_function(
-                routines,
-                ScalarFunctionValidation {
-                    name,
-                    binding: binding.as_ref(),
-                    args,
-                    order_by,
-                    expression,
-                    schema,
-                    params,
-                    resolver,
-                },
-            )?;
-            if crate::semantics::is_builtin_aggregate(expression)
-                || routines.has_registered_aggregate_function(name)
-            {
-                return Ok(());
-            }
-            // `ParseFuncOrColumn` names the first aggregate modifier an ordinary function cannot take.
-            let modifier = if *distinct {
-                Some("DISTINCT")
-            } else if !order_by.is_empty() {
-                Some("ORDER BY")
-            } else if filter.is_some() {
-                Some("FILTER")
-            } else {
-                None
-            };
-            modifier.map_or(Ok(()), |modifier| {
-                Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!(
-                        "{modifier} specified, but {name} is not an aggregate function"
-                    ),
-                })
-            })
+            super::validate_call(routines, expression, schema, params, resolver)
         }
         ScalarExpr::WindowCall {
             name,

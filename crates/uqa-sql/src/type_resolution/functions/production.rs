@@ -524,6 +524,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         })
         .collect::<Vec<_>>();
     let effective = |position: usize| effective_types.get(position).copied().flatten();
+    super::signatures::validate_variadic_prefix(original_name, args, &effective_types)?;
     // An explicit VARIADIC argument of a `VARIADIC "any"` built-in must be an array.
     if explicit_variadic && crate::expr::variadic_any::is_variadic_any(name) {
         if let Some(last) = effective_types.len().checked_sub(1).and_then(effective) {

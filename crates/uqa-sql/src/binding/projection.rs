@@ -144,6 +144,9 @@ fn projection_output_schema(
             },
         );
     }
+    for projection in projections {
+        scope.collations.validate_expression(&projection.expr)?;
+    }
     Ok(collations
         .apply(RowSchema::with_types(columns, types))
         .with_record_fields(

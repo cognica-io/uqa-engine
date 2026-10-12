@@ -350,10 +350,16 @@ impl Preparation<'_> {
                     self.window_specification(spec, input, subqueries)?;
                 }
                 super::function_calls::collated_result(
-                    self.known_type(expression, input, subqueries)?,
+                    self.observed_call_type(
+                        expression,
+                        &arguments,
+                        &additional,
+                        input,
+                        subqueries,
+                    )?,
                     &arguments.values,
                     None,
-                    additional,
+                    additional.diagnostics,
                 )
             }
             _ => ExpressionType::resolved(self.known_type(expression, input, subqueries)?),
@@ -449,7 +455,7 @@ impl Preparation<'_> {
             (super::function_calls::FunctionResult::Selected(ty), _) => ty,
             (_, Some(selected)) => Some(selected.return_type.clone()),
             (super::function_calls::FunctionResult::Unselected, None) => {
-                self.known_type(expression, input, subqueries)?
+                self.observed_call_type(expression, &arguments, &additional, input, subqueries)?
             }
         };
         if let Some(selected) = &selected {
@@ -467,7 +473,7 @@ impl Preparation<'_> {
             ty,
             &arguments.values,
             binding,
-            additional,
+            additional.diagnostics,
         ))
     }
 

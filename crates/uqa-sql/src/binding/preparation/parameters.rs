@@ -8,7 +8,7 @@
 
 use crate::catalog::collations::derivation::Derivation;
 use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
-use std::{collections::BTreeMap, ptr::NonNull};
+use std::{borrow::Cow, collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
 
 mod collations;
@@ -112,6 +112,7 @@ impl ExpressionType {
 pub(super) struct ParameterTypes<'a> {
     pub(super) collations: super::collations::PendingCollations,
     types: Vec<Option<ColumnType>>,
+    fixed_values: Option<&'a [SQLParam]>,
     occurrences: Vec<(usize, Option<ColumnType>)>,
     input_constants: Option<InputConstants>,
     aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
@@ -279,12 +280,21 @@ impl<'a> ParameterTypes<'a> {
     pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
         Self {
             types: types.to_vec(),
+            fixed_values: None,
             occurrences: Vec::new(),
             input_constants: None,
             collations: super::collations::PendingCollations::default(),
             aliases: None,
             enum_labels: None,
             catalog_inputs: None,
+        }
+    }
+
+    /// Output binding borrows values whose input types have already been selected.
+    pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
+        Self {
+            fixed_values: Some(values),
+            ..Self::new(&[])
         }
     }
 
@@ -324,6 +334,18 @@ impl<'a> ParameterTypes<'a> {
     }
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {
+        if let Some(values) = self.fixed_values {
+            let ty = crate::scalar_type(
+                &ScalarExpr::Param(number),
+                &crate::RowSchema::default(),
+                values,
+            )?;
+            let mut value = ExpressionType::resolved(ty);
+            value.coercible_unknown = number
+                .checked_sub(1)
+                .is_some_and(|index| index < values.len());
+            return Ok(value);
+        }
         let index = number
             .checked_sub(1)
             .filter(|index| *index < self.types.len())
@@ -446,14 +468,19 @@ impl<'a> ParameterTypes<'a> {
             .map(Some)
     }
 
-    pub(super) fn values(&self) -> Vec<SQLParam> {
-        self.types
-            .iter()
-            .map(|ty| match ty {
-                Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
-                None => SQLParam::Scalar(Value::Null),
-            })
-            .collect()
+    pub(super) fn values(&self) -> Cow<'_, [SQLParam]> {
+        if let Some(values) = self.fixed_values {
+            return Cow::Borrowed(values);
+        }
+        Cow::Owned(
+            self.types
+                .iter()
+                .map(|ty| match ty {
+                    Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
+                    None => SQLParam::Scalar(Value::Null),
+                })
+                .collect(),
+        )
     }
 
     pub(super) fn finish(self) -> Result<Vec<Option<ColumnType>>, SQLError> {

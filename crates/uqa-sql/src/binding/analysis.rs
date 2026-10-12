@@ -6,11 +6,13 @@
 
 //! Catalog and name analysis for execution-free query schema binding.
 
+mod calls;
 mod functions;
 mod query_sources;
 mod references;
 mod windows;
 
+pub(super) use calls::validate_call;
 pub(super) use functions::validate_window_function;
 pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
 pub(super) use windows::references_local_column;
@@ -309,9 +311,9 @@ impl SchemaScope {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
-        let resolver =
-            self.query_function_type_resolver(engine, condition, &schema, subqueries, params)?;
-        references::require_boolean_condition(condition, construct, &schema, params, &resolver)
+        super::preparation::condition_metadata(
+            self, engine, condition, construct, &schema, subqueries, params,
+        )
     }
 
     pub(super) fn validate_expression_references_with_resolver(

@@ -258,6 +258,9 @@ impl SchemaScope {
             )? {
                 return Err(error);
             }
+            for projection in returning.iter() {
+                self.collations.validate_expression(&projection.expr)?;
+            }
             Ok(collations.apply(RowSchema::with_types(columns, types)))
         })();
         self.restore_cte_schemas(previous);

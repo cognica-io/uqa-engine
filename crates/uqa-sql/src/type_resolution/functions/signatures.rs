@@ -4,9 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Signature checks for polymorphic array calls before their result type is inferred.
+//! Signature checks for polymorphic array and variadic calls before result inference.
 
 use crate::{ColumnType, SQLError, ScalarExpr};
+
+pub(super) fn validate_variadic_prefix(
+    name: &str,
+    arguments: &[ScalarExpr],
+    types: &[Option<&ColumnType>],
+) -> Result<(), SQLError> {
+    if crate::expr::variadic_any::minimum_arguments(name)
+        .is_some_and(|minimum| arguments.len() < minimum)
+    {
+        return Err(crate::type_resolution::function_resolution_error(
+            "42883",
+            name,
+            &crate::scalar_call_arguments(arguments)?
+                .iter()
+                .map(|argument| argument.name.map(str::to_string))
+                .collect::<Vec<_>>(),
+            &types.iter().map(|ty| ty.cloned()).collect::<Vec<_>>(),
+            "does not exist",
+        ));
+    }
+    Ok(())
+}
 
 pub(super) fn validate_array_call(
     name: &str,

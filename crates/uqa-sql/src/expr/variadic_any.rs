@@ -34,6 +34,16 @@ fn fixed_parameters(name: &str) -> Option<usize> {
     })
 }
 
+/// Minimum arity across the variadic and nonvariadic overloads. A variadic `"any"` signature requires an argument; JSON builders have zero-argument overloads and `format(text)` omits the variadic tail.
+pub(crate) fn minimum_arguments(name: &str) -> Option<usize> {
+    let fixed = fixed_parameters(name)?;
+    Some(match local_name(name).as_str() {
+        "json_build_object" | "json_build_array" | "jsonb_build_object" | "jsonb_build_array" => 0,
+        "format" => 1,
+        _ => fixed + 1,
+    })
+}
+
 /// Whether a built-in declares a `VARIADIC "any"` parameter.
 #[must_use]
 pub fn is_variadic_any(name: &str) -> bool {

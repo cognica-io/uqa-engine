@@ -1,0 +1,48 @@
+{
+  "commands": [
+    {
+      "sql": "INSERT INTO t(c,p,n) VALUES(NULL,'new',2) RETURNING c || 'x',coalesce(p,c)",
+      "collations": [
+        950,
+        0
+      ]
+    },
+    {
+      "sql": "UPDATE t SET p=NULL WHERE n=1 RETURNING CASE WHEN n=1 THEN c ELSE p END,coalesce(old.c,new.c)",
+      "collations": [
+        0,
+        950
+      ]
+    },
+    {
+      "sql": "DELETE FROM t WHERE n=1 RETURNING upper(old.c),coalesce(new.p,'x')",
+      "collations": [
+        950,
+        951
+      ]
+    },
+    {
+      "sql": "MERGE INTO t USING (VALUES (1,'updated')) s(n,v) ON t.n=s.n WHEN MATCHED THEN UPDATE SET p=s.v RETURNING coalesce(old.c,new.c),coalesce(old.p,new.c)",
+      "collations": [
+        950,
+        0
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "sql": "WITH changed AS (UPDATE t SET p=NULL RETURNING old.c AS c,new.p AS p) SELECT coalesce(p,'x'),upper(c) FROM changed",
+      "collations": [
+        951,
+        950
+      ]
+    },
+    {
+      "sql": "WITH removed AS (DELETE FROM t RETURNING new.c AS c,old.p AS p) SELECT coalesce(c,p),lower(p) FROM removed",
+      "collations": [
+        0,
+        951
+      ]
+    }
+  ]
+}

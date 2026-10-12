@@ -11,6 +11,11 @@ use crate::ast::{ColumnDef, ColumnType, InternalColumnRef};
 
 /// Borrowed schema operations used by scalar type propagation and binding. Physical schemas retain their complete alias, ambiguity, open-column and executor-attribute behavior; declared column slices supply an unqualified positional namespace without allocating another schema generation.
 pub trait ScalarTypeSchema {
+    /// Reuse an already analyzed expression occurrence in this scope. `Some(None)` preserves an observed unknown type; `None` asks the caller to infer the expression normally. Borrowed observations must not outlive their original expressions or parameter environment.
+    fn observed_expression_type(&self, _: &crate::ScalarExpr) -> Option<Option<&ColumnType>> {
+        None
+    }
+
     fn has_unqualified_column(&self, name: &str) -> bool;
     fn column_is_ambiguous(&self, name: &str) -> bool;
     fn type_of(&self, name: &str) -> Option<&ColumnType>;

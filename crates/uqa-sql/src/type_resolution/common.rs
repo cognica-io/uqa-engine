@@ -177,6 +177,9 @@ pub(super) fn common_context_expression_type_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
+    if let Some(ty) = schema.observed_expression_type(expression) {
+        return super::inference::copy_type(ty, control);
+    }
     if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)? {
         let ty = common_context_expression_type_with_control(
             clause.argument,

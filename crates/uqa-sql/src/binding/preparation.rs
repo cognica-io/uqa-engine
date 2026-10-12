@@ -7,6 +7,7 @@
 //! Preparation-time semantic analysis with ordered parameter coercion.
 
 mod collations;
+pub(super) use collations::PendingCollations;
 mod commands;
 mod ctes;
 mod expression_contexts;
@@ -54,7 +55,7 @@ pub(crate) fn read_prepared_inputs(
         Some(crate::prepared::dependencies::PreparedAnalysisDependencies::default());
     let mut analysis = Preparation {
         routines,
-        scope,
+        scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(
             declared,
             aliases,
@@ -70,7 +71,11 @@ pub(crate) fn read_prepared_inputs(
     let params = crate::prepared::analysis_parameters(&parameters);
     super::composite_inputs::retain_composite_inputs(routines, plan, &params, ctes)?;
     plan.normalize_window_definitions()?;
-    let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
+    let mut dependencies = analysis
+        .scope
+        .prepared_dependencies
+        .take()
+        .unwrap_or_default();
     plan.visit_scalar_expressions(&mut |expression| dependencies.include_expression(expression));
     Ok(PreparedInputAnalysis {
         parameter_types: parameters,
@@ -121,7 +126,7 @@ fn read_executable_inputs_inner(
     scope.prepared_dependencies = track_dependencies.then(Default::default);
     let mut analysis = Preparation {
         routines,
-        scope,
+        scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(
             &declared,
             Some(aliases),
@@ -157,7 +162,11 @@ fn read_executable_inputs_inner(
     constants.apply(plan)?;
     super::composite_inputs::retain_composite_inputs(routines, plan, params, binding)?;
     plan.normalize_window_definitions()?;
-    let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
+    let mut dependencies = analysis
+        .scope
+        .prepared_dependencies
+        .take()
+        .unwrap_or_default();
     if track_dependencies {
         plan.visit_scalar_expressions(&mut |expression| {
             dependencies.include_expression(expression);
@@ -174,7 +183,7 @@ pub fn infer_prepared_parameter_types(
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
     let mut analysis = Preparation {
         routines,
-        scope: SchemaScope::for_analysis(ctes)?,
+        scope: &mut SchemaScope::for_analysis(ctes)?,
         parameters: ParameterTypes::new(declared),
         schema_expression: None,
     };
@@ -275,7 +284,7 @@ fn analyze_expression_inputs<'a>(
 ) -> Result<Option<ColumnType>, SQLError> {
     let mut analysis = Preparation {
         routines,
-        scope: SchemaScope::for_analysis(binding)?,
+        scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::with_input_constants(
             &[],
             Some(aliases),
@@ -300,9 +309,63 @@ fn analyze_expression_inputs<'a>(
 
 struct Preparation<'a> {
     routines: &'a dyn RoutineResolution,
-    scope: SchemaScope,
+    scope: &'a mut SchemaScope,
     parameters: ParameterTypes<'a>,
     schema_expression: Option<SchemaExpressionContext<'a>>,
+}
+
+/// Share expression analysis with ordinary output binding while borrowing its lexical scope and fixed parameters.
+pub(super) fn projection_metadata(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    input: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[crate::SQLParam],
+) -> Result<(Option<ColumnType>, Option<u32>), SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    let mut value = analysis.expression(expression, input, subqueries)?;
+    analysis
+        .parameters
+        .coerce_unknown(&mut value, &ColumnType::Text)?;
+    analysis
+        .scope
+        .collations
+        .append(analysis.parameters.collations);
+    let collation = value
+        .ty
+        .as_ref()
+        .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+        .map(|_| u32::try_from(value.derivation.oid()).expect("selected collation is an OID"));
+    Ok((value.ty, collation))
+}
+
+pub(super) fn condition_metadata(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    construct: &str,
+    input: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[crate::SQLParam],
+) -> Result<(), SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    analysis.boolean_expression(expression, input, subqueries, construct)?;
+    analysis
+        .scope
+        .collations
+        .append(analysis.parameters.collations);
+    Ok(())
 }
 
 struct QueryOutput {

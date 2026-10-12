@@ -6,9 +6,7 @@
 
 //! Ordinary and retained callers share scalar inference while every synthesized type keeps its constructor lease.
 
-use super::{
-    cast_compatibility, common, functions, operators, qualified_column, FunctionTypeResolver,
-};
+use super::{cast_compatibility, common, operators, qualified_column, FunctionTypeResolver};
 use crate::{ast::ColumnType, schema::ScalarTypeSchema, SQLError, SQLParam, ScalarExpr};
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::Value;
@@ -29,6 +27,9 @@ pub(super) fn scalar_type_inner_with_control(
         "controlled type inference cannot invoke an unowned catalog resolver"
     );
     control.check()?;
+    if let Some(ty) = schema.observed_expression_type(expression) {
+        return copy_type(ty, control);
+    }
     if matches!(
         expression,
         ScalarExpr::Func { binding, .. }
@@ -348,129 +349,17 @@ pub(super) fn scalar_type_inner_with_control(
                 result => Ok(result),
             }
         }
-        ScalarExpr::Func {
-            order_syntax: _,
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => {
-            if let Some(error) = binding
-                .as_ref()
-                .and_then(|binding| binding.resolution_error.as_ref())
-            {
-                return Err(error.sql_error());
-            }
-            if binding.as_ref().and_then(|binding| binding.dispatch)
-                == Some(crate::ast::FunctionDispatch::FieldSelect)
-            {
-                if let Some(field) = binding
-                    .as_ref()
-                    .and_then(|binding| binding.composite_field.as_ref())
-                {
-                    return copy_type(Some(&field.result_type), control);
-                }
-                return field_selection_type(args, schema, params, resolver, control);
-            }
-            if let Some(filter) = filter {
-                scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
-            }
-            if *distinct {
-                for argument in args {
-                    if let Some(ty) =
-                        scalar_type_inner_with_control(argument, schema, params, resolver, control)?
-                    {
-                        super::ComparisonSupport::Equality.require(&ty, resolver, control)?;
-                    }
-                }
-            }
-            for order in order_by {
-                if let Some(ty) =
-                    scalar_type_inner_with_control(&order.expr, schema, params, resolver, control)?
-                {
-                    super::ComparisonSupport::Ordering.require(&ty, resolver, control)?;
-                }
-            }
-            if *distinct {
-                for argument in args {
-                    if let Some(ty) =
-                        scalar_type_inner_with_control(argument, schema, params, resolver, control)?
-                    {
-                        super::ComparisonSupport::require_aggregate_ordering(
-                            &ty, resolver, control,
-                        )?;
-                    }
-                }
-            }
-            functions::builtin_function_type_with_control(
-                functions::FunctionTypeCall {
-                    name,
-                    binding: binding.as_ref(),
-                    args,
-                },
-                order_by,
+        ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. } => {
+            super::function_inputs::call_type_with_control(
+                expression,
+                schema,
                 params,
                 resolver,
                 &mut |expression| {
                     scalar_type_inner_with_control(expression, schema, params, resolver, control)
                 },
                 control,
-            )
-        }
-        ScalarExpr::WindowCall {
-            name,
-            args,
-            spec,
-            filter,
-            ..
-        } => {
-            if let Some(filter) = filter {
-                scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
-            }
-            for expression in &spec.partition_by {
-                if let Some(ty) =
-                    scalar_type_inner_with_control(expression, schema, params, resolver, control)?
-                {
-                    super::ComparisonSupport::Equality.require(&ty, resolver, control)?;
-                }
-            }
-            for order in &spec.order_by {
-                if let Some(ty) =
-                    scalar_type_inner_with_control(&order.expr, schema, params, resolver, control)?
-                {
-                    super::ComparisonSupport::Ordering.require(&ty, resolver, control)?;
-                }
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    match bound {
-                        crate::ScalarFrameBound::Preceding(expression)
-                        | crate::ScalarFrameBound::Following(expression) => {
-                            scalar_type_inner_with_control(
-                                expression, schema, params, resolver, control,
-                            )?;
-                        }
-                        crate::ScalarFrameBound::UnboundedPreceding
-                        | crate::ScalarFrameBound::UnboundedFollowing
-                        | crate::ScalarFrameBound::CurrentRow => {}
-                    }
-                }
-            }
-            functions::builtin_function_type_with_control(
-                functions::FunctionTypeCall {
-                    name,
-                    binding: None,
-                    args,
-                },
-                &[],
-                params,
-                resolver,
-                &mut |expression| {
-                    scalar_type_inner_with_control(expression, schema, params, resolver, control)
-                },
-                control,
+                true,
             )
         }
         ScalarExpr::ScalarSubquery(subquery) => {
@@ -587,7 +476,7 @@ pub(super) fn resolved_type_name(
     ColumnType::from_sql_name_with_control(name, control).map(Some)
 }
 
-fn copy_type(
+pub(super) fn copy_type(
     ty: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {

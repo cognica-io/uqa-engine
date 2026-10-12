@@ -105,6 +105,7 @@ enum ScalarBindingMode {
 }
 
 struct SchemaScope {
+    collations: preparation::PendingCollations,
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
     ctes: BTreeMap<String, RowSchema>,
@@ -135,6 +136,7 @@ fn non_returning_cte_error(name: &str) -> SQLError {
 impl SchemaScope {
     fn from_context(ctes: &BindingContext) -> Result<Self, SQLError> {
         Ok(Self {
+            collations: preparation::PendingCollations::default(),
             catalog: ctes.catalog.clone(),
             resolution: ctes.resolution.clone(),
             ctes: ctes.ctes.clone(),
@@ -161,6 +163,7 @@ impl SchemaScope {
 
     fn for_catalog_analysis(catalog: CatalogReadView, resolution: RelationNameResolution) -> Self {
         Self {
+            collations: preparation::PendingCollations::default(),
             catalog,
             resolution,
             ctes: BTreeMap::new(),
@@ -237,7 +240,9 @@ impl SchemaScope {
             preserve_top_level_unknown,
         );
         self.restore_cte_schemas(previous);
-        result
+        let output = result?;
+        self.collations.validate_query(plan)?;
+        Ok(output)
     }
 
     fn bind_recursive_seed(
@@ -415,18 +420,6 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
-        self.bind_projection_metadata(routines, expression, schema, subqueries, params)
-            .map(|(ty, _)| ty)
-    }
-
-    fn bind_projection_metadata(
-        &mut self,
-        routines: &dyn RoutineResolution,
-        expression: &ScalarExpr,
-        schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-    ) -> Result<(Option<ColumnType>, Option<u32>), SQLError> {
         if let ScalarExpr::ScalarSubquery(index) = expression {
             let plan = subqueries.get(*index).ok_or_else(|| {
                 SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
@@ -434,7 +427,7 @@ impl SchemaScope {
             // Result typing and validation share the complete lexical row scope.
             let subquery_outer = Some(schema);
             let output = self.bind_query(routines, plan, params, subquery_outer)?;
-            return Ok((output.column_type(0).cloned(), output.column_collation(0)));
+            return Ok(output.column_type(0).cloned());
         }
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
@@ -446,8 +439,19 @@ impl SchemaScope {
             )?;
         }
         crate::type_resolution::validate_catalog_literals(expression, schema, params, &resolver)?;
-        let ty = crate::scalar_type_with_resolver(expression, schema, params, &resolver)?;
-        Ok((ty, schema.input_collation(expression)))
+        crate::scalar_type_with_resolver(expression, schema, params, &resolver)
+    }
+
+    fn bind_projection_metadata(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+    ) -> Result<(Option<ColumnType>, Option<u32>), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        preparation::projection_metadata(self, routines, expression, &schema, subqueries, params)
     }
 
     #[expect(

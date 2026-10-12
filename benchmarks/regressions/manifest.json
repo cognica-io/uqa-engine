@@ -2587,9 +2587,9 @@
         ""
       ],
       "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
-      "capability": "Prepared collation outputs and diagnostics",
+      "capability": "Prepared and ordinary computed collation outputs",
       "workload": "Thirty-eight PostgreSQL references for computed output selections, independent ROW fields, NULL/unknown coercion and type-versus-collation diagnostic ordering.",
-      "invariant": "Preparation preserves each selected output identity and the PostgreSQL SQLSTATE, message, detail and hint of every rejected query."
+      "invariant": "Prepared and ordinary analysis preserve selected output identities and the PostgreSQL SQLSTATE, message, detail and hint of every rejected query; ordinary binding preserves all valid output observations."
     },
     {
       "package": "uqa-sql",
@@ -2602,7 +2602,7 @@
       "source": "crates/uqa-sql/src/binding/preparation/tests/domain_collations.rs",
       "capability": "Domain and array coercion collations",
       "workload": "Thirty PostgreSQL references for direct and inherited COLLATE clauses, domain identity casts, array literals and columns, nested and empty arrays, and domains over arrays.",
-      "invariant": "Preparation preserves the selected output OID of every valid coercion and the complete explicit-conflict diagnostic without changing existing limits."
+      "invariant": "Prepared and ordinary binding preserve the selected output OID of every valid coercion and analysis preserves the complete explicit-conflict diagnostic without changing existing limits."
     },
     {
       "package": "uqa-sql",
@@ -2615,7 +2615,46 @@
       "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
       "capability": "Window result collations and independent filters",
       "workload": "Nineteen PostgreSQL observations cover first/last/nth value, lead/lag defaults, window aggregates, independent FILTER/order/partition metadata and diagnostic priority.",
-      "invariant": "Window result metadata derives from the analyzed call arguments, while independent clauses retain their own diagnostics and all query type errors keep PostgreSQL precedence."
+      "invariant": "Prepared and ordinary window result metadata derive from analyzed call arguments, while independent clauses retain their own diagnostics and query type errors keep PostgreSQL precedence."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_metadata_visits_nested_call_arguments_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Bounded ordinary result inference",
+      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls.",
+      "invariant": "Result binding performs 1 and 17 catalog lookups respectively; strict analysis performs one signature and one result lookup per catalog call (2 and 34), without recursively resolving previously analyzed inputs."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "computed_returning_collations_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Computed DML output collations",
+      "workload": "Six independent PostgreSQL references for computed INSERT, UPDATE, DELETE and MERGE RETURNING and command-CTE outputs, including NULL row images.",
+      "invariant": "Both result-analysis paths and ordinary command-CTE binding preserve every selected output collation independently of row-image values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "observed_call_types_preserve_reference_validation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Observed function input diagnostic preservation",
+      "workload": "Twenty-four independent PostgreSQL errors for missing/invalid arguments, fixed and variadic signatures, and aggregate/window modifiers.",
+      "invariant": "Prepared and ordinary analysis reuse the original argument observations while retaining PostgreSQL SQLSTATE, message, detail and hint, including signature errors before modifier errors."
     }
   ]
 }

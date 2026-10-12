@@ -17,6 +17,11 @@ pub(super) struct ObservedFunctionArguments {
     pub(super) variadic: bool,
 }
 
+pub(super) struct ObservedFunctionModifiers {
+    pub(super) diagnostics: Derivation,
+    order_types: Vec<Option<ColumnType>>,
+}
+
 impl ObservedFunctionArguments {
     pub(super) fn types(&self) -> Vec<Option<ColumnType>> {
         self.values.iter().map(|value| value.ty.clone()).collect()
@@ -367,14 +372,13 @@ impl Preparation<'_> {
         filter: Option<&ScalarExpr>,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Derivation, SQLError> {
+    ) -> Result<ObservedFunctionModifiers, SQLError> {
         let mut selected = Derivation::None;
+        let mut order_types = Vec::with_capacity(orders.len());
         for order in orders {
-            selected = selected.combine(
-                self.expression(&order.expr, input, subqueries)?
-                    .derivation
-                    .error_only(),
-            );
+            let value = self.expression(&order.expr, input, subqueries)?;
+            selected = selected.combine(value.derivation.error_only());
+            order_types.push(value.ty);
         }
         if let Some(filter) = filter {
             selected = selected.combine(
@@ -383,7 +387,73 @@ impl Preparation<'_> {
                     .error_only(),
             );
         }
-        Ok(selected)
+        Ok(ObservedFunctionModifiers {
+            diagnostics: selected,
+            order_types,
+        })
+    }
+
+    pub(super) fn observed_call_type(
+        &mut self,
+        expression: &ScalarExpr,
+        arguments: &ObservedFunctionArguments,
+        modifiers: &ObservedFunctionModifiers,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<Option<ColumnType>, SQLError> {
+        let (args, orders, filter) = match expression {
+            ScalarExpr::Func {
+                binding,
+                args,
+                order_by,
+                filter,
+                ..
+            } => {
+                if binding.as_ref().and_then(|binding| binding.dispatch)
+                    == Some(crate::ast::FunctionDispatch::FieldSelect)
+                {
+                    return self.known_type(expression, input, subqueries);
+                }
+                (args.as_slice(), order_by.as_slice(), filter.as_deref())
+            }
+            ScalarExpr::WindowCall { args, filter, .. } => {
+                (args.as_slice(), &[][..], filter.as_deref())
+            }
+            _ => return Err(SQLError::Internal("expected analyzed function call".into())),
+        };
+        let mut observations = crate::scalar_call_arguments(args)?
+            .into_iter()
+            .zip(&arguments.values)
+            .map(|(argument, value)| (argument.value, value.ty.as_ref()))
+            .collect::<Vec<_>>();
+        for (position, order) in orders.iter().enumerate() {
+            let ty = arguments
+                .values
+                .get(args.len() + position)
+                .map(|value| value.ty.as_ref())
+                .unwrap_or_else(|| modifiers.order_types[position].as_ref());
+            observations.push((&order.expr, ty));
+        }
+        if let Some(filter) = filter {
+            observations.push((filter, Some(&ColumnType::Boolean)));
+        }
+        let inputs = crate::type_resolution::CallInputTypes::new(input, observations);
+        let parameters = self.parameters.values();
+        if self.scope.validate_references {
+            super::super::analysis::validate_call(
+                self.routines,
+                expression,
+                &inputs,
+                &parameters,
+                self.routines,
+            )?;
+        }
+        crate::type_resolution::call_type_from_observations(
+            expression,
+            &inputs,
+            &parameters,
+            self.routines,
+        )
     }
 }
 

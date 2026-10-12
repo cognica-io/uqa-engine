@@ -13,16 +13,22 @@ use std::{collections::BTreeMap, ptr::NonNull};
 
 /// Valid inputs allocate no diagnostic storage. Addresses identify borrowed syntax and are never dereferenced or retained in an executable plan.
 #[derive(Default)]
-pub(super) struct PendingCollations(BTreeMap<NonNull<ScalarExpr>, Derivation>);
+pub(in crate::binding) struct PendingCollations(BTreeMap<NonNull<ScalarExpr>, Derivation>);
 
 impl PendingCollations {
+    pub(in crate::binding) fn append(&mut self, mut other: Self) {
+        self.0.append(&mut other.0);
+    }
     pub(super) fn record(&mut self, expression: &ScalarExpr, selected: Derivation) {
         if matches!(selected, Derivation::InvalidExplicit(..)) {
             self.0.insert(NonNull::from(expression), selected);
         }
     }
 
-    pub(super) fn validate_expression(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
+    pub(in crate::binding) fn validate_expression(
+        &self,
+        expression: &ScalarExpr,
+    ) -> Result<(), SQLError> {
         if self.0.is_empty() {
             return Ok(());
         }
@@ -37,7 +43,7 @@ impl PendingCollations {
         result
     }
 
-    pub(super) fn validate_query(&self, query: &QueryPlan) -> Result<(), SQLError> {
+    pub(in crate::binding) fn validate_query(&self, query: &QueryPlan) -> Result<(), SQLError> {
         if self.0.is_empty() {
             return Ok(());
         }

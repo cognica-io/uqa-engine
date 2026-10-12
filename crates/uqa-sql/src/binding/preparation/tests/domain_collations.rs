@@ -101,37 +101,53 @@ fn domain_cast_collations_match_postgresql_for_literals_columns_and_identity_cas
         };
         let mut preparation = Preparation {
             routines: &Domains,
-            scope: SchemaScope::for_analysis(&binding).unwrap(),
+            scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
             schema_expression: None,
         };
-        let result = preparation.query(&query, None);
-        if let Some(expected) = case.error {
-            let error = result.unwrap_err();
-            assert_eq!(
-                error.sqlstate(),
-                expected["sqlstate"].as_str(),
-                "{}",
-                case.sql
-            );
-            assert_eq!(
-                error.to_string(),
-                expected["message"].as_str().unwrap(),
-                "{}",
-                case.sql
-            );
-            assert_eq!(error.detail(), expected["detail"].as_str(), "{}", case.sql);
-            assert_eq!(error.hint(), expected["hint"].as_str(), "{}", case.sql);
-        } else {
-            let output = result.unwrap_or_else(|error| panic!("{}: {error}", case.sql));
-            assert_eq!(output.len(), case.collations.len(), "{}", case.sql);
-            for (position, oid) in case.collations.iter().enumerate() {
+        let prepared = preparation.query(&query, None);
+        let ordinary =
+            crate::binding::analyze_query_plan_schema(&Domains, &query, &[], &binding, None);
+        let mut results = vec![prepared, ordinary];
+        if case.error.is_none() {
+            results.push(crate::binding::bind_query_plan_schema(
+                &Domains,
+                &query,
+                &[],
+                &binding,
+                None,
+            ));
+        }
+        for result in results {
+            if let Some(expected) = &case.error {
+                let error = result
+                    .err()
+                    .unwrap_or_else(|| panic!("expected PostgreSQL error: {}", case.sql));
                 assert_eq!(
-                    output.column_collation(position),
-                    Some(*oid),
+                    error.sqlstate(),
+                    expected["sqlstate"].as_str(),
                     "{}",
                     case.sql
                 );
+                assert_eq!(
+                    error.to_string(),
+                    expected["message"].as_str().unwrap(),
+                    "{}",
+                    case.sql
+                );
+                assert_eq!(error.detail(), expected["detail"].as_str(), "{}", case.sql);
+                assert_eq!(error.hint(), expected["hint"].as_str(), "{}", case.sql);
+            } else {
+                let output = result.unwrap_or_else(|error| panic!("{}: {error}", case.sql));
+                assert_eq!(output.len(), case.collations.len(), "{}", case.sql);
+                for (position, oid) in case.collations.iter().enumerate() {
+                    assert_eq!(
+                        output.column_collation(position),
+                        Some(*oid),
+                        "{}",
+                        case.sql
+                    );
+                }
             }
         }
     }
