@@ -2434,6 +2434,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regobject_identifier_clipping_never_retains_the_discarded_suffix",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/types/object_names/tests.rs",
+      "capability": "Identifier normalization memory",
+      "workload": "32 KiB identifiers, multibyte characters at the 63-byte limit and doubled quotes after truncation under 256 bytes.",
+      "invariant": "Only the PostgreSQL identifier prefix is retained; normalized results match and all charged memory is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regobject_name_admission_releases_partial_components_on_failure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/types/object_names/tests.rs",
+      "capability": "Identifier normalization admission",
+      "workload": "A three-component quoted name under 0, 8, 32, 64, 128, 256 and 512 byte allowances.",
+      "invariant": "Partial strings and container capacities never exceed the allowance; failures return 53200 and every path releases its reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collation_name_selection_admits_scratch_but_reuses_selected_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/collations/expression/tests.rs",
+      "capability": "Collation selection memory",
+      "workload": "Selected and unselected C/POSIX clauses under zero and 1024 byte allowances.",
+      "invariant": "Selected OIDs require no scratch allocation or name lookup; new selection admits its names and releases scratch."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collated_unknown_inputs_charge_name_selection_to_common_type_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/common/production_tests.rs",
+      "capability": "Common-type collation admission",
+      "workload": "An unknown text literal with explicit C collation under zero and 1024 byte allowances.",
+      "invariant": "The common-type path propagates 53200 rather than bypassing its allowance; successful resolution preserves unknown identity and releases scratch."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_collation_binding_releases_scratch_and_keeps_selected_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/introspection/tests.rs",
+      "capability": "Retained collation binding",
+      "workload": "Bind an admitted explicit C expression, occupy all remaining allowance and bind the selected expression again.",
+      "invariant": "Selection preserves OID 950 without growing the retained tree; rebinding requires no additional space and all reservations are released."
     }
   ]
 }

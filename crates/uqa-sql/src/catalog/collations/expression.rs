@@ -8,7 +8,7 @@
 
 use crate::ast::{Expr, FunctionDispatch};
 use crate::{ColumnType, FunctionTypeResolver, SQLError, ScalarExpr};
-use uqa_core::Value;
+use uqa_core::{memory::ProductionControl, Value};
 
 pub struct Clause<'a, T> {
     pub argument: &'a T,
@@ -96,16 +96,38 @@ pub fn select(
     ty: Option<&ColumnType>,
     catalog: Option<&dyn FunctionTypeResolver>,
 ) -> Result<u32, SQLError> {
+    select_with_control(
+        name,
+        selected,
+        ty,
+        catalog,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+pub(crate) fn select_with_control(
+    name: &str,
+    selected: Option<u32>,
+    ty: Option<&ColumnType>,
+    catalog: Option<&dyn FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<u32, SQLError> {
+    control.check()?;
+    assert!(
+        catalog.is_none() || control.budget().is_none(),
+        "catalog callbacks are resolved outside retained generated inference"
+    );
     if let Some(ty) = ty.filter(|ty| !crate::schema::composites::type_is_collatable(ty)) {
-        let ty = ty.without_type_modifiers();
-        let name = catalog.map_or_else(
-            || Ok(ty.display_name()),
-            |catalog| catalog.format_type_name(&ty),
-        )?;
-        return Err(SQLError::Routine {
-            sqlstate: "42804".into(),
-            message: format!("collations are not supported by type {name}"),
-        });
+        let ty = ty.without_type_modifiers_with_control(control)?;
+        let name = match catalog {
+            Some(catalog) => control.finish(catalog.format_type_name(&ty)?, None)?,
+            None => ty.display_name_with_control(control)?,
+        };
+        return Err(diagnostic(
+            control,
+            "42804",
+            format_args!("collations are not supported by type {}", name.as_str()),
+        )?);
     }
     if let Some(oid) = selected {
         return valid_oid(oid);
@@ -117,7 +139,7 @@ pub fn select(
     {
         return valid_oid(oid);
     }
-    builtin_name(name)
+    builtin_name(name, control)
 }
 
 fn valid_oid(oid: u32) -> Result<u32, SQLError> {
@@ -129,37 +151,40 @@ fn valid_oid(oid: u32) -> Result<u32, SQLError> {
 }
 
 /// Catalog-free analysis has the predefined namespace and collation identities.
-fn builtin_name(name: &str) -> Result<u32, SQLError> {
-    let names = crate::parse_regobject_name(name)
+fn builtin_name(name: &str, control: &ProductionControl<'_>) -> Result<u32, SQLError> {
+    let names = crate::compiler::parse_regobject_name_with_control(name, control)?
         .ok_or_else(|| SQLError::Internal("malformed COLLATE name".into()))?;
     let (schema, local) = match names.as_slice() {
         [local] => (None, local),
         [schema, local] => (Some(schema.as_str()), local),
         [database, schema, local] if database == "uqa" => (Some(schema.as_str()), local),
         [_, _, _] => {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: format!(
+            return Err(diagnostic(
+                control,
+                "0A000",
+                format_args!(
                     "cross-database references are not implemented: {}",
-                    names.join(".")
+                    QualifiedName(&names)
                 ),
-            })
+            )?)
         }
         _ => {
-            return Err(SQLError::Routine {
-                sqlstate: "42601".into(),
-                message: format!(
+            return Err(diagnostic(
+                control,
+                "42601",
+                format_args!(
                     "improper qualified name (too many dotted names): {}",
-                    names.join(".")
+                    QualifiedName(&names)
                 ),
-            })
+            )?)
         }
     };
     if let Some(schema) = schema.filter(|schema| !matches!(*schema, "pg_catalog" | "public")) {
-        return Err(SQLError::Routine {
-            sqlstate: "3F000".into(),
-            message: format!("schema \"{schema}\" does not exist"),
-        });
+        return Err(diagnostic(
+            control,
+            "3F000",
+            format_args!("schema \"{schema}\" does not exist"),
+        )?);
     }
     if schema.is_none_or(|schema| schema == "pg_catalog") {
         if let Some(oid) = super::builtin_collation_oid(local) {
@@ -167,11 +192,42 @@ fn builtin_name(name: &str) -> Result<u32, SQLError> {
                 .map_err(|_| SQLError::Internal("invalid collation identity".into()));
         }
     }
-    Err(SQLError::Routine {
-        sqlstate: "42704".into(),
-        message: format!(
+    Err(diagnostic(
+        control,
+        "42704",
+        format_args!(
             "collation \"{}\" for encoding \"UTF8\" does not exist",
-            names.join(".")
+            QualifiedName(&names)
         ),
+    )?)
+}
+
+struct QualifiedName<'a>(&'a [String]);
+
+impl std::fmt::Display for QualifiedName<'_> {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (position, component) in self.0.iter().enumerate() {
+            if position > 0 {
+                output.write_str(".")?;
+            }
+            output.write_str(component)?;
+        }
+        Ok(())
+    }
+}
+
+fn diagnostic(
+    control: &ProductionControl<'_>,
+    sqlstate: &str,
+    message: std::fmt::Arguments<'_>,
+) -> Result<SQLError, SQLError> {
+    // Error payloads leave this producer through the existing unreserved SQLError boundary after admitted construction.
+    let (message, _memory) = control.format(message)?.into_parts();
+    Ok(SQLError::Routine {
+        sqlstate: sqlstate.into(),
+        message,
     })
 }
+
+#[cfg(test)]
+mod tests;

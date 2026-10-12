@@ -541,7 +541,13 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 let [_, ScalarExpr::Literal(Value::Str(name))] = args else {
                     return Err(SQLError::Internal("invalid COLLATE expression".into()));
                 };
-                crate::catalog::collations::expression::select(name, oid, effective(0), resolver)?;
+                crate::catalog::collations::expression::select_with_control(
+                    name,
+                    oid,
+                    effective(0),
+                    resolver,
+                    control,
+                )?;
                 return copy(first(), control);
             }
             FunctionDispatch::ArrayConcat

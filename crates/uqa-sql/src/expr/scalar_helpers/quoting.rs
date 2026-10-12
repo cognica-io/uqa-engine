@@ -31,7 +31,7 @@ pub fn quote_ident(ident: &str) -> String {
         .expect("ordinary quoted identifier")
 }
 
-pub(in crate::expr) fn quote_ident_with_control(
+pub(crate) fn quote_ident_with_control(
     ident: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {

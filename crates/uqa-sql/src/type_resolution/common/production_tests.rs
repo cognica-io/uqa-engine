@@ -8,6 +8,42 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn collated_unknown_inputs_charge_name_selection_to_common_type_allowance() {
+    let crate::Statement::Select(query) = crate::compile("SELECT 'x' COLLATE \"C\"")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("query")
+    };
+    let expression = crate::plan::ExpressionPlan::lower(query.projections[0].expr.clone()).scalar;
+    let schema = crate::RowSchema::default();
+    let token = CancellationToken::new();
+    let empty = MemoryBudget::new(0);
+    let error = common_context_expression_type_with_control(
+        &expression,
+        &schema,
+        &[],
+        None,
+        &ProductionControl::new(&empty, &token, &token),
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(empty.used(), 0);
+    let budget = MemoryBudget::new(1024);
+    assert!(common_context_expression_type_with_control(
+        &expression,
+        &schema,
+        &[],
+        None,
+        &ProductionControl::new(&budget, &token, &token),
+    )
+    .unwrap()
+    .is_none());
+    assert!(budget.peak() > 0);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn common_type_control_preserves_domain_identity_and_mixed_array_rules() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();

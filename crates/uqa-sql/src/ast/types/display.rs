@@ -8,6 +8,10 @@
 
 use std::cell::RefCell;
 use std::sync::Arc;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    ValueRetentionError,
+};
 
 use super::ColumnType;
 
@@ -55,11 +59,23 @@ fn schema_visible(schema: &str) -> bool {
 
 /// A user-defined type's name, qualified by its schema when the schema is not visible.
 pub(super) fn visible_type_name(schema: &str, name: &str) -> String {
-    let local = crate::expr::quote_ident(name);
+    visible_type_name_with_control(schema, name, &ProductionControl::uncontrolled())
+        .expect("ordinary visible type name")
+        .into_uncontrolled()
+        .expect("ordinary type name has no reservation")
+}
+
+fn visible_type_name_with_control(
+    schema: &str,
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, ValueRetentionError> {
+    let local = crate::expr::quote_ident_with_control(name, control)?;
     if schema_visible(schema) {
-        local
+        Ok(local)
     } else {
-        format!("{}.{local}", crate::expr::quote_ident(schema))
+        let schema = crate::expr::quote_ident_with_control(schema, control)?;
+        control.format(format_args!("{}.{}", schema.as_str(), local.as_str()))
     }
 }
 
@@ -67,28 +83,45 @@ impl ColumnType {
     /// `format_type_be` of this type for a diagnostic.
     #[must_use]
     pub fn display_name(&self) -> String {
+        self.display_name_with_control(&ProductionControl::uncontrolled())
+            .expect("ordinary diagnostic type name")
+            .into_uncontrolled()
+            .expect("ordinary type name has no reservation")
+    }
+
+    pub(crate) fn display_name_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, ValueRetentionError> {
+        control.check()?;
         match self {
-            ColumnType::Enum(reference) => visible_type_name(&reference.schema, &reference.name),
-            ColumnType::Composite(reference) => {
-                visible_type_name(&reference.schema, &reference.name)
+            ColumnType::Enum(reference) => {
+                visible_type_name_with_control(&reference.schema, &reference.name, control)
             }
-            ColumnType::Domain { schema, name, .. } => visible_type_name(schema, name),
+            ColumnType::Composite(reference) => {
+                visible_type_name_with_control(&reference.schema, &reference.name, control)
+            }
+            ColumnType::Domain { schema, name, .. } => {
+                visible_type_name_with_control(schema, name, control)
+            }
             // An array type of any dimensionality is the element's one array type.
             ColumnType::Array(element) => {
                 let mut leaf = element.as_ref();
                 while let ColumnType::Array(inner) = leaf {
+                    control.check()?;
                     leaf = inner;
                 }
                 if matches!(
                     leaf,
                     ColumnType::Enum(_) | ColumnType::Composite(_) | ColumnType::Domain { .. }
                 ) {
-                    format!("{}[]", leaf.display_name())
+                    let leaf = leaf.display_name_with_control(control)?;
+                    control.format(format_args!("{}[]", leaf.as_str()))
                 } else {
-                    self.regtype_name()
+                    self.regtype_name_with_control(control)
                 }
             }
-            other => other.regtype_name(),
+            other => other.regtype_name_with_control(control),
         }
     }
 }

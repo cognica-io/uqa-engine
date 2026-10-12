@@ -185,11 +185,12 @@ pub(super) fn common_context_expression_type_with_control(
             resolver,
             control,
         )?;
-        crate::catalog::collations::expression::select(
+        crate::catalog::collations::expression::select_with_control(
             clause.name,
             clause.oid,
             ty.as_deref(),
             resolver,
+            control,
         )?;
         return Ok(ty);
     }
