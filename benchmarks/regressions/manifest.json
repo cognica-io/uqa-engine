@@ -2603,6 +2603,19 @@
       "capability": "Domain and array coercion collations",
       "workload": "Thirty PostgreSQL references for direct and inherited COLLATE clauses, domain identity casts, array literals and columns, nested and empty arrays, and domains over arrays.",
       "invariant": "Preparation preserves the selected output OID of every valid coercion and the complete explicit-conflict diagnostic without changing existing limits."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_collations_and_independent_filters_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Window result collations and independent filters",
+      "workload": "Nineteen PostgreSQL observations cover first/last/nth value, lead/lag defaults, window aggregates, independent FILTER/order/partition metadata and diagnostic priority.",
+      "invariant": "Window result metadata derives from the analyzed call arguments, while independent clauses retain their own diagnostics and all query type errors keep PostgreSQL precedence."
     }
   ]
 }

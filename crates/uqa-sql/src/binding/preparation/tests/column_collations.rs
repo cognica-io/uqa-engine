@@ -99,8 +99,7 @@ fn prepared_dml_output_collations_match_postgresql_with_null_row_images() {
     }
 }
 
-#[test]
-fn computed_collations_and_deferred_diagnostics_match_postgresql() {
+fn assert_computed_collation_references(sources: &[(&str, usize)]) {
     #[derive(serde::Deserialize)]
     struct Case {
         sql: String,
@@ -124,13 +123,11 @@ fn computed_collations_and_deferred_diagnostics_match_postgresql() {
         )])),
         ..crate::binding::fixture::empty_binding_context()
     };
-    let mut references: Vec<Case> =
-        serde_json::from_str(include_str!("computed_collations.json")).unwrap();
-    assert_eq!(references.len(), 24);
-    let errors: Vec<Case> =
-        serde_json::from_str(include_str!("computed_collation_errors.json")).unwrap();
-    assert_eq!(errors.len(), 14);
-    references.extend(errors);
+    let references = sources.iter().flat_map(|(source, count)| {
+        let references: Vec<Case> = serde_json::from_str(source).unwrap();
+        assert_eq!(references.len(), *count);
+        references
+    });
     for case in references {
         let UnifiedPlan::Query(query) =
             UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0))
@@ -173,6 +170,19 @@ fn computed_collations_and_deferred_diagnostics_match_postgresql() {
             }
         }
     }
+}
+
+#[test]
+fn computed_collations_and_deferred_diagnostics_match_postgresql() {
+    assert_computed_collation_references(&[
+        (include_str!("computed_collations.json"), 24),
+        (include_str!("computed_collation_errors.json"), 14),
+    ]);
+}
+
+#[test]
+fn window_collations_and_independent_filters_match_postgresql() {
+    assert_computed_collation_references(&[(include_str!("window_collations.json"), 19)]);
 }
 
 #[test]

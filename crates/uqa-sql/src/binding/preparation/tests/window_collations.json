@@ -1,0 +1,134 @@
+[
+  {
+    "sql": "SELECT first_value(c) OVER () AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT last_value(p) OVER () AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT nth_value(c,1) OVER () AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT lag(c) OVER () AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT lead(p) OVER () AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT lag(c,1,p) OVER () AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT lag(c COLLATE \"C\",1,p) OVER () AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT lag(c COLLATE \"C\",1,p COLLATE \"POSIX\") OVER () AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT min(c) OVER () AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT max(p) OVER () AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT string_agg(c,p) OVER () AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT min(c) FILTER (WHERE p COLLATE \"POSIX\" = 'p') OVER () AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT first_value(c) OVER (PARTITION BY p ORDER BY p) AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT first_value(p) OVER (ORDER BY c ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT min(c) FILTER (WHERE (p COLLATE \"POSIX\")=(c COLLATE \"ucs_basic\")) OVER () AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"POSIX\" and \"ucs_basic\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT string_agg(c COLLATE \"C\",p COLLATE \"POSIX\") FILTER (WHERE (p COLLATE \"POSIX\")=(c COLLATE \"ucs_basic\")) OVER () AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT lag(c COLLATE \"C\",1,p COLLATE \"POSIX\") OVER (), missing FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT lag(c COLLATE \"C\",1,p COLLATE \"POSIX\") OVER () FROM t WHERE 1",
+    "error": {
+      "sqlstate": "42804",
+      "message": "argument of WHERE must be type boolean, not type integer",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT min(c) FILTER (WHERE p COLLATE \"POSIX\"=c COLLATE \"C\") OVER () FROM t WHERE n+true>0",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  }
+]

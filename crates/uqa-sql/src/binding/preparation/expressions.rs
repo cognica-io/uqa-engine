@@ -339,15 +339,22 @@ impl Preparation<'_> {
                 filter,
                 modifiers,
             } => {
-                self.call(name, None, args, input, subqueries)?;
-                if let Some(filter) = filter {
-                    self.require_boolean(filter, input, subqueries, "FILTER")?;
-                }
+                let mut arguments =
+                    self.observe_function_arguments(name, args, &[], input, subqueries)?;
+                let selected = self.select_function_arguments(name, None, args, &arguments)?;
+                self.coerce_function_arguments(name, None, args, &mut arguments, &selected)?;
+                let additional =
+                    self.function_modifier_collations(&[], filter.as_deref(), input, subqueries)?;
                 self.check_schema_window(name, (args, filter.is_some(), *modifiers), input)?;
                 if self.schema_expression.is_some() {
                     self.window_specification(spec, input, subqueries)?;
                 }
-                ExpressionType::resolved(self.known_type(expression, input, subqueries)?)
+                super::function_calls::collated_result(
+                    self.known_type(expression, input, subqueries)?,
+                    &arguments.values,
+                    None,
+                    additional,
+                )
             }
             _ => ExpressionType::resolved(self.known_type(expression, input, subqueries)?),
         })
