@@ -96,7 +96,7 @@ impl Preparation<'_> {
     pub(super) fn set_output(
         &mut self,
         mut left: QueryOutput,
-        mut right: QueryOutput,
+        right: QueryOutput,
         kind: crate::ast::SetOpKind,
         all: bool,
     ) -> Result<QueryOutput, SQLError> {
@@ -113,27 +113,36 @@ impl Preparation<'_> {
                 ),
             ));
         }
-        for (left, right) in left.types.iter_mut().zip(&mut right.types) {
-            let mut values = [left.clone(), right.clone()];
+        let allow_indeterminate = matches!((kind, all), (crate::ast::SetOpKind::Union, true));
+        for (left, right) in left.types.iter_mut().zip(right.types) {
+            let mut values = [
+                std::mem::replace(left, ExpressionType::resolved(None)),
+                right,
+            ];
             let ty = self.common(
                 crate::type_resolution::CommonTypeContext::set_operation(kind),
                 &mut values,
             )?;
-            let fields = super::super::record_fields::common_fields(
+            if let Some(target) = &ty {
+                for value in &mut values {
+                    value.derivation = value.derivation.coerce(value.ty.as_ref(), target);
+                }
+            }
+            let mut result = ExpressionType::combined(ty, &values);
+            let oid = result.derivation.common_oid(allow_indeterminate)?;
+            if !allow_indeterminate {
+                if let Some(ty) = &result.ty {
+                    crate::type_resolution::ComparisonSupport::Equality
+                        .require_in_catalog(ty, self.routines)?;
+                }
+            }
+            // An enclosing set operation receives an output column, not an explicit leaf expression.
+            result.derivation = crate::catalog::collations::derivation::Derivation::implicit(oid);
+            result.record_fields = super::super::record_fields::common_fields(
                 values.iter().map(|value| value.record_fields.as_ref()),
             );
-            *left = ExpressionType::resolved(ty.clone());
-            left.record_fields.clone_from(&fields);
-            *right = ExpressionType::resolved(ty);
-            right.record_fields = fields;
+            *left = result;
         }
-        super::super::type_resolution::set_operation_output_schema(
-            self.routines,
-            &left.schema(),
-            &right.schema(),
-            kind,
-            all,
-        )?;
         Ok(left)
     }
 
@@ -366,11 +375,10 @@ impl Preparation<'_> {
                 let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
                 let mut value = ExpressionType::combined(ty, column);
                 // VALUES resolves each column after all row expressions have been analyzed, before proceeding to the next column.
-                value.derivation.validate()?;
+                let oid = value.derivation.common_oid(true)?;
                 // The VALUES relation exports a column selection, not its input expression's explicit strength.
-                value.derivation = crate::catalog::collations::derivation::Derivation::implicit(
-                    value.derivation.oid(),
-                );
+                value.derivation =
+                    crate::catalog::collations::derivation::Derivation::implicit(oid);
                 value.record_fields = super::super::record_fields::common_fields(
                     column.iter().map(|item| item.record_fields.as_ref()),
                 );

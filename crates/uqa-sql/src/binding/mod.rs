@@ -74,7 +74,7 @@ use cte_controls::extend_recursive_cte_binding_schema;
 pub use cte_controls::hide_recursive_generated_schema;
 use projection::{projection_star_columns, rename_schema};
 use sources::{alias_table_schema, table_function_member_source, JoinSchemaBinding};
-use type_resolution::{set_operation_output_schema, QueryFunctionTypeResolver};
+use type_resolution::QueryFunctionTypeResolver;
 
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use crate::semantics::{cte_references_own_name, expr_contains_subquery, projection_columns};
@@ -189,56 +189,27 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        self.bind_query_mode(routines, plan, params, outer, false)
-    }
-
-    fn bind_set_operand(
-        &mut self,
-        routines: &dyn RoutineResolution,
-        plan: &QueryPlan,
-        params: &[SQLParam],
-        outer: Option<&RowSchema>,
-    ) -> Result<RowSchema, SQLError> {
-        self.bind_query_mode(routines, plan, params, outer, true)
-    }
-
-    fn bind_query_mode(
-        &mut self,
-        routines: &dyn RoutineResolution,
-        plan: &QueryPlan,
-        params: &[SQLParam],
-        outer: Option<&RowSchema>,
-        preserve_top_level_unknown: bool,
-    ) -> Result<RowSchema, SQLError> {
         let lookup_mode = if plan.relations_bound {
             crate::catalog::resolution::RelationLookupMode::Bound
         } else {
             crate::catalog::resolution::RelationLookupMode::Dynamic
         };
         let previous = self.resolution.set_lookup_mode(lookup_mode);
-        let result =
-            self.bind_query_mode_inner(routines, plan, params, outer, preserve_top_level_unknown);
+        let result = self.bind_query_inner(routines, plan, params, outer);
         self.resolution.set_lookup_mode(previous);
         result
     }
 
-    fn bind_query_mode_inner(
+    fn bind_query_inner(
         &mut self,
         routines: &dyn RoutineResolution,
         plan: &QueryPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
-        preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         let previous = self.bind_cte_schemas(routines, &plan.ctes, params, outer)?;
 
-        let result = self.bind_root(
-            routines,
-            &plan.root,
-            params,
-            outer,
-            preserve_top_level_unknown,
-        );
+        let result = self.bind_root(routines, &plan.root, params, outer);
         self.restore_cte_schemas(previous);
         let output = result?;
         self.collations.validate_query(plan)?;
@@ -254,7 +225,7 @@ impl SchemaScope {
     ) -> Result<RowSchema, SQLError> {
         match &plan.root {
             RelationalPlan::SetOp { left, .. } => self.bind_query(routines, left, params, outer),
-            _ => self.bind_root(routines, &plan.root, params, outer, false),
+            _ => self.bind_root(routines, &plan.root, params, outer),
         }
     }
 
@@ -264,48 +235,13 @@ impl SchemaScope {
         root: &RelationalPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
-        preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         match root {
             RelationalPlan::QueryBlock(block) => {
-                self.bind_query_block(routines, block, params, outer, preserve_top_level_unknown)
+                self.bind_query_block(routines, block, params, outer)
             }
-            RelationalPlan::SetOp {
-                kind,
-                all,
-                left,
-                right,
-                order_by,
-                limit,
-                offset,
-                subqueries,
-                ..
-            } => {
-                let left = self.bind_set_operand(routines, left, params, outer)?;
-                let right = self.bind_set_operand(routines, right, params, outer)?;
-                if left.len() != right.len() {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "set operation has {} columns on the left and {} on the right",
-                        left.len(),
-                        right.len()
-                    )));
-                }
-                let output = set_operation_output_schema(routines, &left, &right, *kind, *all)?;
-                if self.validate_references {
-                    self.validate_set_operation_clauses(
-                        routines,
-                        analysis::SetOperationClauses {
-                            order_by,
-                            limit: limit.as_deref(),
-                            offset: offset.as_deref(),
-                            subqueries,
-                            output: &output,
-                            outer,
-                        },
-                        params,
-                    )?;
-                }
-                Ok(output)
+            RelationalPlan::SetOp { .. } => {
+                preparation::set_metadata(self, routines, root, outer, params)
             }
             RelationalPlan::Values { rows, subqueries } => {
                 self.bind_values_schema(routines, rows, subqueries, outer, params)
@@ -319,7 +255,6 @@ impl SchemaScope {
         block: &QueryBlockPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
-        preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         let source = block.from.as_ref().map_or_else(
             || Ok(RowSchema::default()),
@@ -349,13 +284,7 @@ impl SchemaScope {
                 continue;
             }
             columns.push(labels[position].clone());
-            let (ty, collation) = if preserve_top_level_unknown
-                && matches!(
-                    &projection.expr,
-                    ScalarExpr::Literal(Value::Str(_) | Value::Null)
-                ) {
-                (None, None)
-            } else if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
+            let (ty, collation) = if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
                 (Some(ColumnType::Text), None)
             } else {
                 self.bind_projection_metadata(

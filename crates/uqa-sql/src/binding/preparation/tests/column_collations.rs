@@ -280,6 +280,16 @@ fn output_metadata_visits_nested_call_arguments_once() {
         for (sql, copies) in [
             (format!("SELECT {expression}"), 1),
             (format!("VALUES ({expression}),({expression})"), 2),
+            (
+                format!("SELECT {expression} UNION ALL SELECT {expression}"),
+                2,
+            ),
+            (
+                format!(
+                    "SELECT {expression} UNION ALL SELECT {expression} UNION SELECT {expression}"
+                ),
+                3,
+            ),
         ] {
             let UnifiedPlan::Query(query) =
                 UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
@@ -329,4 +339,9 @@ fn observed_call_types_preserve_reference_validation() {
 #[test]
 fn values_collations_and_column_diagnostics_match_postgresql() {
     assert_computed_collation_references(&[(include_str!("values_collations.json"), 19)]);
+}
+
+#[test]
+fn set_collations_and_column_diagnostics_match_postgresql() {
+    assert_computed_collation_references(&[(include_str!("set_collations.json"), 61)]);
 }

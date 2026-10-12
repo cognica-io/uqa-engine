@@ -23,16 +23,6 @@ use crate::routines::RoutineResolution;
 use crate::semantics::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
 use crate::{ColumnIdentity, FunctionTypeResolver, RowSchema};
 
-pub(super) struct SetOperationClauses<'a> {
-    pub(super) order_by: &'a [crate::plan::OrderPlan],
-    pub(super) limit: Option<&'a ScalarExpr>,
-    pub(super) offset: Option<&'a ScalarExpr>,
-    pub(super) subqueries: &'a [QueryPlan],
-    pub(super) output: &'a RowSchema,
-    /// The scope of the queries that enclose the set operation, which its LIMIT and OFFSET can name.
-    pub(super) outer: Option<&'a RowSchema>,
-}
-
 pub(super) struct TableFunctionSourceValidation<'a> {
     pub(super) name: &'a str,
     pub(super) binding: Option<&'a FunctionBinding>,
@@ -222,37 +212,6 @@ impl SchemaScope {
             });
         }
         Err(error)
-    }
-
-    pub(super) fn validate_set_operation_clauses(
-        &mut self,
-        engine: &dyn RoutineResolution,
-        clauses: SetOperationClauses<'_>,
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        for order in clauses.order_by {
-            self.validate_expression_references(
-                engine,
-                &order.expr,
-                clauses.output,
-                None,
-                clauses.subqueries,
-                params,
-            )?;
-        }
-        // The output columns leave the namespace before LIMIT and OFFSET, as `transformSetOperationStmt` restores it.
-        let enclosing = clauses.outer.cloned().unwrap_or_default();
-        for expression in clauses.limit.into_iter().chain(clauses.offset) {
-            self.validate_expression_references(
-                engine,
-                expression,
-                &enclosing,
-                None,
-                clauses.subqueries,
-                params,
-            )?;
-        }
-        Ok(())
     }
 
     fn validate_alias_reference(

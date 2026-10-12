@@ -2627,8 +2627,8 @@
       ],
       "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
       "capability": "Bounded ordinary result inference",
-      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls, as SELECT outputs and as two VALUES rows.",
-      "invariant": "Per original expression occurrence, result binding performs 1 or 17 catalog lookups and strict analysis performs 2 or 34; two VALUES rows double those counts without revisiting previously analyzed child trees."
+      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls, as SELECT outputs, two VALUES rows and set-operation trees with two or three leaves.",
+      "invariant": "Per original expression occurrence, result binding performs 1 or 17 catalog lookups and strict analysis performs 2 or 34; VALUES rows and set leaves scale those counts linearly without resolving already analyzed children again."
     },
     {
       "package": "uqa-sql",
@@ -2668,6 +2668,19 @@
       "capability": "VALUES output collation and diagnostic preservation",
       "workload": "Nineteen PostgreSQL observations cover top-level/lateral/CTE VALUES, aliases, arrays and NULLs, explicit and implicit conflicts and row/column diagnostic order.",
       "invariant": "Prepared and ordinary VALUES analysis select the same column collations and exact errors as PostgreSQL; row expression errors precede row-width errors, and column collation errors precede later column common-type errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_collations_and_column_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Set-operation column collation preservation",
+      "workload": "Sixty-one PostgreSQL observations cover all six UNION/INTERSECT/EXCEPT variants, implicit/explicit conflicts, nested output boundaries, aliases/CTEs, VALUES/arrays, unknown coercions and competing column errors.",
+      "invariant": "Prepared and ordinary analysis preserve selected output identities and exact PostgreSQL diagnostics; only UNION ALL admits an implicit conflict, column checks retain PostgreSQL order, and enclosing set operations receive column-strength metadata."
     }
   ]
 }

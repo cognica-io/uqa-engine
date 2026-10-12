@@ -1,0 +1,434 @@
+[
+  {
+    "sql": "SELECT c FROM t UNION ALL SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t UNION ALL SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t UNION ALL SELECT p FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION ALL SELECT p FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t UNION ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t UNION SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t UNION SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t UNION SELECT p FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION SELECT p FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION SELECT p COLLATE \"POSIX\" FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t UNION SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT ALL SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT ALL SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT ALL SELECT p FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t INTERSECT ALL SELECT p FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t INTERSECT ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT SELECT p FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t INTERSECT SELECT p FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t INTERSECT SELECT p COLLATE \"POSIX\" FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t INTERSECT SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT ALL SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT ALL SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT ALL SELECT p FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t EXCEPT ALL SELECT p FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t EXCEPT ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT SELECT p FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t EXCEPT SELECT p FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t EXCEPT SELECT p COLLATE \"POSIX\" FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t EXCEPT SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION ALL SELECT p FROM t UNION ALL SELECT plain FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "(SELECT c COLLATE \"C\" FROM t UNION ALL SELECT plain FROM t) UNION ALL SELECT p COLLATE \"POSIX\" FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION ALL (SELECT p COLLATE \"POSIX\" FROM t UNION ALL SELECT plain FROM t)",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "(SELECT c FROM t UNION ALL SELECT p FROM t) UNION SELECT plain FROM t",
+    "collations": [
+      100
+    ]
+  },
+  {
+    "sql": "SELECT c||p FROM t UNION SELECT plain FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c||p FROM t UNION ALL SELECT plain FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "VALUES ('a' COLLATE \"C\") UNION ALL SELECT p FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "VALUES ('a' COLLATE \"C\") UNION SELECT p FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "WITH q(x) AS (SELECT c FROM t UNION ALL SELECT plain FROM t) SELECT x FROM q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT q.x FROM (SELECT c FROM t UNION ALL SELECT plain FROM t)q(x)",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c] FROM t UNION ALL SELECT ARRAY[plain] FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c] FROM t UNION SELECT ARRAY[p] FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c,1 FROM t UNION SELECT p,true FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c,'{}'::json FROM t UNION SELECT p,'{}'::json FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT '{}'::json,c FROM t UNION SELECT '{}'::json,p FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "could not identify an equality operator for type json",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c FROM t UNION SELECT p,n FROM t",
+    "error": {
+      "sqlstate": "42601",
+      "message": "each UNION query must have the same number of columns",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") FROM t UNION ALL SELECT missing FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION ALL SELECT missing FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT NULL UNION ALL SELECT c FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT 1 UNION ALL SELECT '2' COLLATE \"C\"",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT 1 UNION SELECT '2' COLLATE \"C\"",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT NULL COLLATE \"C\" UNION ALL SELECT 1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT NULL COLLATE \"C\" UNION SELECT 1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT NULL COLLATE \"C\" UNION ALL SELECT NULL COLLATE \"POSIX\"",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT c COLLATE \"C\" FROM t UNION SELECT 1",
+    "error": {
+      "sqlstate": "42804",
+      "message": "UNION types text and integer cannot be matched",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

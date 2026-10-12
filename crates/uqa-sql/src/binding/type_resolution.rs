@@ -6,49 +6,13 @@
 
 //! Function and scalar-subquery type resolution for schema binding.
 
-use crate::ast::{ColumnType, SetOpKind};
+use crate::ast::ColumnType;
 use crate::{FunctionTypeResolver, ResolvedFunctionOverload, RowSchema};
 use crate::{SQLError, SQLParam};
 
 use crate::routines::RoutineResolution;
 
-use super::{scope::merge_types, QueryPlan, ScalarExpr, SchemaScope};
-
-pub(super) fn set_operation_output_schema(
-    routines: &dyn RoutineResolution,
-    left: &RowSchema,
-    right: &RowSchema,
-    kind: SetOpKind,
-    all: bool,
-) -> Result<RowSchema, SQLError> {
-    // `select_common_type` resolves a column whose inputs are all `unknown` to text.
-    let context = crate::type_resolution::CommonTypeContext::set_operation(kind);
-    let types = left
-        .column_types()
-        .iter()
-        .zip(right.column_types())
-        .map(|(left, right)| {
-            merge_types(context, left.as_ref(), right.as_ref())
-                .map(|ty| ty.or(Some(ColumnType::Text)))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if !matches!((kind, all), (SetOpKind::Union, true)) {
-        for ty in types.iter().flatten() {
-            crate::type_resolution::ComparisonSupport::Equality.require_in_catalog(ty, routines)?;
-        }
-    }
-    Ok(
-        RowSchema::with_types(left.columns().to_vec(), types).with_record_fields(
-            (0..left.len()).filter_map(|index| {
-                super::record_fields::common_fields([
-                    left.record_fields(index),
-                    right.record_fields(index),
-                ])
-                .map(|fields| (index, fields))
-            }),
-        ),
-    )
-}
+use super::{QueryPlan, ScalarExpr, SchemaScope};
 
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,

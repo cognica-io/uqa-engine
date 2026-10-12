@@ -388,6 +388,28 @@ pub(super) fn values_metadata(
         .map(|output| output.schema())
 }
 
+/// Keep each set operand's original output observations until common type and collation selection finish.
+pub(super) fn set_metadata(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    root: &crate::plan::RelationalPlan,
+    outer: Option<&RowSchema>,
+    params: &[crate::SQLParam],
+) -> Result<RowSchema, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    let output = analysis.root(root, outer, false)?;
+    analysis
+        .scope
+        .collations
+        .append(analysis.parameters.collations);
+    Ok(output.schema())
+}
+
 struct QueryOutput {
     columns: Vec<String>,
     types: Vec<ExpressionType>,

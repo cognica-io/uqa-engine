@@ -71,20 +71,33 @@ impl Derivation {
         let Self::InvalidExplicit(left, right) = self else {
             return Ok(());
         };
-        let name = |oid| {
-            builtin_collation_name(oid).ok_or_else(|| SQLError::Routine {
-                sqlstate: "XX000".into(),
-                message: "unknown collation identity".into(),
-            })
-        };
         Err(SQLError::Routine {
             sqlstate: "42P21".into(),
             message: format!(
                 "collation mismatch between explicit collations \"{}\" and \"{}\"",
-                name(left)?,
-                name(right)?,
+                collation_name(left)?,
+                collation_name(right)?,
             ),
         })
+    }
+
+    /// Result columns may retain an implicit conflict only when their containing operation permits an indeterminate collation.
+    pub(crate) fn common_oid(self, allow_indeterminate: bool) -> Result<i64, SQLError> {
+        self.validate()?;
+        if let Self::Conflict(left, right) = self {
+            if !allow_indeterminate {
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "42P21".into(),
+                    message: format!(
+                        "collation mismatch between implicit collations \"{}\" and \"{}\"",
+                        collation_name(left)?, collation_name(right)?,
+                    ),
+                    detail: None,
+                    hint: Some("You can choose the collation by applying the COLLATE clause to one or both expressions.".into()),
+                });
+            }
+        }
+        Ok(self.oid())
     }
 
     pub(crate) fn error_only(self) -> Self {
@@ -148,4 +161,11 @@ impl Derivation {
         }
         self.result(declared)
     }
+}
+
+fn collation_name(oid: i64) -> Result<&'static str, SQLError> {
+    builtin_collation_name(oid).ok_or_else(|| SQLError::Routine {
+        sqlstate: "XX000".into(),
+        message: "unknown collation identity".into(),
+    })
 }

@@ -244,9 +244,7 @@ impl SchemaScope {
         }
 
         let set_output = match &*root {
-            RelationalPlan::SetOp { .. } => {
-                Some(self.bind_root(routines, root, params, outer, false)?)
-            }
+            RelationalPlan::SetOp { .. } => Some(self.bind_root(routines, root, params, outer)?),
             RelationalPlan::QueryBlock(_) | RelationalPlan::Values { .. } => None,
         };
         match root {
@@ -457,7 +455,7 @@ impl SchemaScope {
                 }
             }
         }
-        self.bind_root(routines, root, params, outer, false)
+        self.bind_root(routines, root, params, outer)
     }
 
     #[expect(
