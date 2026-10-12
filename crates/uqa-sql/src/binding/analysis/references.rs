@@ -144,7 +144,8 @@ pub(super) fn validate_expression(
         }
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             validate_expression(routines, inner, schema, None, params, resolver)
         }
         ScalarExpr::Between { expr, low, high } => {

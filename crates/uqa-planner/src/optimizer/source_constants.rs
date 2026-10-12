@@ -189,6 +189,7 @@ fn single_constant_row<'a>(
 
 fn constant_literal(expr: &ScalarExpr, types: Option<&dyn RoutineTypeCatalog>) -> bool {
     match expr {
+        ScalarExpr::Collated { expr, .. } => constant_literal(expr, types),
         ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral {
             parameter_index: None,

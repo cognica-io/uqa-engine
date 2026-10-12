@@ -307,6 +307,7 @@ fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
 
 fn scalar_literal(expression: &ScalarExpr) -> Option<Value> {
     match expression {
+        ScalarExpr::Collated { expr, .. } => scalar_literal(expr),
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value.clone()),
         ScalarExpr::Cast { expr, ty, .. } => {
             let value = scalar_literal(expr)?;

@@ -12,6 +12,7 @@ use std::{borrow::Cow, collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
 
 mod collations;
+mod results;
 
 #[derive(Clone)]
 pub(super) struct ExpressionType {
@@ -159,6 +160,7 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
+    results::CollationResults,
 );
 
 impl InputConstants {
@@ -204,7 +206,8 @@ impl InputConstants {
         if let Some(constant) = self.0.remove(&identity) {
             *expression = constant;
         }
-        self.3.apply(identity, expression)
+        self.3.apply(identity, expression)?;
+        self.4.apply(identity, expression)
     }
 
     #[cfg(test)]
@@ -235,7 +238,12 @@ impl InputConstants {
                 &mut |node, arena| self.apply_membership(node, arena),
             )?;
         }
-        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() && self.3.is_empty() {
+        if self.0.is_empty()
+            && self.1.is_empty()
+            && self.2.is_empty()
+            && self.3.is_empty()
+            && self.4.is_empty()
+        {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -258,7 +266,12 @@ impl InputConstants {
                 self.apply_membership(node, arena)
             })?;
         }
-        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() && self.3.is_empty() {
+        if self.0.is_empty()
+            && self.1.is_empty()
+            && self.2.is_empty()
+            && self.3.is_empty()
+            && self.4.is_empty()
+        {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -280,6 +293,24 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn retain_result_collations(mut self) -> Self {
+        if let Some(constants) = &mut self.input_constants {
+            constants.4.enabled = true;
+        }
+        self
+    }
+
+    pub(super) fn retain_result_collation(
+        &mut self,
+        expression: &ScalarExpr,
+        value: &ExpressionType,
+    ) -> Result<(), SQLError> {
+        if let Some(constants) = &mut self.input_constants {
+            constants.4.record(expression, value)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ScalarExpr> {
         let constants = self.input_constants.as_mut()?;
         constants.3.take_literal(expression, &mut constants.0)

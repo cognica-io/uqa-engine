@@ -15,6 +15,9 @@ mod tests;
 
 pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
+        (ScalarExpr::Collated { .. }, ScalarExpr::Collated { .. }) => {
+            collated_exprs_match(lhs, rhs)
+        }
         (ScalarExpr::Star, ScalarExpr::Star) => true,
         (ScalarExpr::Column(a), ScalarExpr::Column(b)) => a == b,
         (
@@ -109,6 +112,25 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         ) => at == bt && exprs_match(a, b),
         _ => false,
     }
+}
+
+fn collated_exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
+    let (
+        ScalarExpr::Collated {
+            expr: left,
+            ty: left_type,
+            collation: left_collation,
+        },
+        ScalarExpr::Collated {
+            expr: right,
+            ty: right_type,
+            collation: right_collation,
+        },
+    ) = (lhs, rhs)
+    else {
+        return false;
+    };
+    left_type == right_type && left_collation == right_collation && exprs_match(left, right)
 }
 
 fn composite_rows_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
@@ -242,7 +264,8 @@ pub fn collect_aggregate_exprs<'a>(
         }
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             collect_aggregate_exprs(aggregates, inner, out);
         }
         ScalarExpr::IsNull { expr, .. } => collect_aggregate_exprs(aggregates, expr, out),
@@ -322,7 +345,8 @@ pub fn expr_references_columns(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Cast { expr: inner, .. } => expr_references_columns(inner),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => expr_references_columns(inner),
         ScalarExpr::IsNull { expr, .. } => expr_references_columns(expr),
         ScalarExpr::Between { expr, low, high } => {
             expr_references_columns(expr)

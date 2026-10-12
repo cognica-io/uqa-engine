@@ -248,7 +248,9 @@ fn expression_is_null_with_side(
         )? || expression_is_null_with_side(
             routines, rhs, side, other, params,
         )?),
-        ScalarExpr::UnaryMinus(inner) | ScalarExpr::Cast { expr: inner, .. } => {
+        ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             expression_is_null_with_side(routines, inner, side, other, params)
         }
         ScalarExpr::Between { expr, low, high } => {

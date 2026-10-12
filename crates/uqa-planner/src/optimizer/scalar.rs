@@ -88,6 +88,47 @@ fn optimize_scalar(
     let integer_syntax = matches!(&expression, ScalarExpr::Literal(Value::Int(_)));
     let row_syntax = matches!(&expression, ScalarExpr::Row(_));
     let optimized = match expression {
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => {
+            let mut expr = optimize_scalar(*expr, config)?;
+            if let Some(oid) = collation.implicit_oid() {
+                match &mut expr {
+                    ScalarExpr::TypedLiteral {
+                        ty: name,
+                        bound_type,
+                        collation_oid,
+                        ..
+                    } => {
+                        *name = ty.catalog_name();
+                        *bound_type = Some(ty);
+                        *collation_oid = Some(oid);
+                        return Ok(expr);
+                    }
+                    ScalarExpr::Literal(_) => {
+                        let ScalarExpr::Literal(value) = expr else {
+                            unreachable!()
+                        };
+                        return Ok(ScalarExpr::TypedLiteral {
+                            value,
+                            ty: ty.catalog_name(),
+                            bound_type: Some(ty),
+                            collation_oid: Some(oid),
+                            composite_source: None,
+                            parameter_index: None,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            return Ok(ScalarExpr::Collated {
+                expr: Box::new(expr),
+                ty,
+                collation,
+            });
+        }
         ScalarExpr::Array(items) => ScalarExpr::Array(optimize_list(items, config)?),
         ScalarExpr::Row(items) => ScalarExpr::Row(optimize_list(items, config)?),
         ScalarExpr::Binary { op, lhs, rhs } => {

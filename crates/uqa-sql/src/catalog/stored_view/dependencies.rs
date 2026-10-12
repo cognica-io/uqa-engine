@@ -74,7 +74,8 @@ pub fn rewrite_view_type_references(
             if let crate::ir::ScalarExpr::TypedLiteral {
                 bound_type: Some(ty),
                 ..
-            } = expression
+            }
+            | crate::ir::ScalarExpr::Collated { ty, .. } = expression
             {
                 view_changed |= ty.rename_user_type(oid, identity);
             }

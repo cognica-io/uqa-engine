@@ -371,7 +371,8 @@ fn references_external_row(
         ScalarExpr::Binary { lhs, rhs, .. } => nested(lhs) || nested(rhs),
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Cast { expr: inner, .. } => nested(inner),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => nested(inner),
         ScalarExpr::IsNull { expr, .. } => nested(expr),
         ScalarExpr::Between { expr, low, high } => nested(expr) || nested(low) || nested(high),
         ScalarExpr::InList { expr, list, .. } => nested(expr) || list.iter().any(nested),

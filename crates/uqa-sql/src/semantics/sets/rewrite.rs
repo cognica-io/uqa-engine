@@ -116,7 +116,8 @@ pub fn rewrite_set_calls(
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             **inner = rewrite_set_calls(
                 engine,
                 resolver,
@@ -433,7 +434,9 @@ fn replace_group_set_expression(
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. }
+        | ScalarExpr::InSubquery { expr: inner, .. } => {
             replace_group_set_expression(inner, mappings);
         }
         ScalarExpr::Between { expr, low, high } => {
@@ -478,9 +481,6 @@ fn replace_group_set_expression(
             if let Some(branch) = else_branch {
                 replace_group_set_expression(branch, mappings);
             }
-        }
-        ScalarExpr::InSubquery { expr, .. } => {
-            replace_group_set_expression(expr, mappings);
         }
         ScalarExpr::Default
         | ScalarExpr::Star
@@ -825,6 +825,20 @@ fn rewrite_aggregate_dependencies(
                     dependencies,
                 ))
             }),
+        },
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => ScalarExpr::Collated {
+            expr: Box::new(rewrite_aggregate_dependencies(
+                engine,
+                group_by,
+                expr,
+                dependencies,
+            )),
+            ty: ty.clone(),
+            collation: *collation,
         },
         ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
             implicit: *implicit,

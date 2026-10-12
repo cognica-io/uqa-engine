@@ -439,6 +439,18 @@ impl Binder<'_, '_> {
                     else_branch,
                 }
             }
+            ScalarExpr::Collated {
+                mut expr,
+                ty,
+                collation,
+            } => {
+                self.in_place(&mut expr)?;
+                ScalarExpr::Collated {
+                    expr,
+                    ty,
+                    collation,
+                }
+            }
             ScalarExpr::Cast {
                 mut expr,
                 ty,

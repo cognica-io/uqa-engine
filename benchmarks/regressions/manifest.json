@@ -3045,6 +3045,58 @@
       "capability": "Typed constant semantic identity",
       "workload": "The same text datum and type have equal or different selected collations.",
       "invariant": "Expression matching does not conflate C and POSIX constants."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folding_constant_expressions_preserves_selected_output_collation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "capability": "Computed expression collation retention",
+      "workload": "Forty independent PostgreSQL observations of computed constants, discarded CASE/COALESCE arms, explicit precedence, conflicts and anonymous ROW fields.",
+      "invariant": "Analysis, optimization, JSON restoration and repeated analysis preserve values and complete output schemas; admitted copies fit 8192 bytes and release all reservations on success or cancellation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_collation_selections_survive_reanalysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Analyzed query result selections",
+      "workload": "Existing PostgreSQL direct and derived output references undergo executable input retention and repeated analysis.",
+      "invariant": "Query/CTE result collations survive mutation of original expressions without unmatched addresses or accumulating wrappers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "returning_collation_selections_keep_original_plan_addresses",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Analyzed RETURNING selections",
+      "workload": "Existing PostgreSQL ordinary and computed DML/CTE output references undergo executable input retention and repeated analysis.",
+      "invariant": "RETURNING collations remain selected in the original statement scope and every retained expression identity is consumed."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_collation_codec_preserves_coercibility_and_rejects_invalid_identities",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ir/collation.rs",
+      "capability": "Analyzed selection codec validation",
+      "workload": "Implicit, explicit and conflicting selections round-trip; malformed identities and deferred invalid states are rejected.",
+      "invariant": "Retained selection strength and pre-assignment field metadata survive restoration without invalid OID conversion or suppressing diagnostics."
     }
   ]
 }

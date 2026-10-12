@@ -292,6 +292,15 @@ fn normalize_expression(
                 })
                 .transpose()?,
         },
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => ScalarExpr::Collated {
+            expr: Box::new(normalize_expression(engine, *expr, schema, params)?),
+            ty,
+            collation,
+        },
         ScalarExpr::Cast { expr, ty, .. } => {
             let source_type = expression_type(engine, &expr, schema, params)?;
             let target_type = crate::type_resolution::resolve_declared_column_type(

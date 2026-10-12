@@ -34,6 +34,7 @@ pub(super) fn compile(
         return Ok(None);
     }
     let compiled = match expression {
+        ScalarExpr::Collated { expr, .. } => return compile(expr, schema, params),
         ScalarExpr::Column(column) => {
             let Some(index) = schema.unqualified_position(column) else {
                 return Ok(None);

@@ -74,6 +74,8 @@ impl Preparation<'_> {
         self.parameters
             .collations
             .record(expression, value.derivation);
+        self.parameters
+            .retain_result_collation(expression, &value)?;
         Ok(value)
     }
 
@@ -133,6 +135,22 @@ impl Preparation<'_> {
             ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
             ScalarExpr::Literal(Value::Str(text)) => {
                 return Ok(ExpressionType::unknown_literal(expression, text.clone()));
+            }
+            ScalarExpr::Collated {
+                expr,
+                ty,
+                collation,
+            } => {
+                // The wrapped node has already been assigned. Analyze its inputs without scheduling another wrapper around that same node.
+                let mut value = self.expression_inner(expr, input, subqueries)?;
+                collation.validate(ty)?;
+                value.ty = Some(ty.clone());
+                value.derivation = value
+                    .derivation
+                    .error_only()
+                    .combine(collation.derivation());
+                value.initial_collation = collation.initial_oid();
+                return Ok(value);
             }
             ScalarExpr::Cast { expr, ty, .. } => {
                 return self.cast_expression(expr, ty, input, subqueries);

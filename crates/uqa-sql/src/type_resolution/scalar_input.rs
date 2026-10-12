@@ -221,7 +221,8 @@ fn operand_type_name(
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..
-        } => {
+        }
+        | ScalarExpr::Collated { ty, .. } => {
             return type_name(ty).map(Some);
         }
         ScalarExpr::Func {

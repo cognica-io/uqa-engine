@@ -101,7 +101,8 @@ pub(super) fn outer_expression_contains_volatile_function(
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::InSubquery { expr: inner, .. }
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             outer_expression_contains_volatile_function(context, inner)
         }
         ScalarExpr::Between { expr, low, high } => {

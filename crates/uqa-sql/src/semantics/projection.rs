@@ -36,7 +36,11 @@ pub fn projection_label_at(proj: &ProjectionPlan) -> String {
     if let Some(a) = &proj.alias {
         return a.clone();
     }
-    match &proj.expr {
+    let mut expression = &proj.expr;
+    while let ScalarExpr::Collated { expr, .. } = expression {
+        expression = expr;
+    }
+    match expression {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),

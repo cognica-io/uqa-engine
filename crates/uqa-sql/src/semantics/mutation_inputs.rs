@@ -47,7 +47,9 @@ pub fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
                 })
                 && else_branch.as_deref().map_or(true, expr_is_row_independent)
         }
-        ScalarExpr::Cast { expr, .. } => expr_is_row_independent(expr),
+        ScalarExpr::Cast { expr, .. } | ScalarExpr::Collated { expr, .. } => {
+            expr_is_row_independent(expr)
+        }
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::QualifiedStar(_)

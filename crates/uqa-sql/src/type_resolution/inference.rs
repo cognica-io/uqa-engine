@@ -56,6 +56,7 @@ pub(super) fn scalar_type_inner_with_control(
             qualified_column::resolve_with_control(schema, qualifier, column, control)
         }
         ScalarExpr::Literal(value) => common::value_type_with_control(value, control),
+        ScalarExpr::Collated { ty, .. } => copy_type(Some(ty), control),
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..

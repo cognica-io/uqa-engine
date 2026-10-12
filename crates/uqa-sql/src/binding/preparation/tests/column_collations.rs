@@ -361,3 +361,58 @@ fn set_collations_and_column_diagnostics_match_postgresql() {
 fn sort_group_key_collations_and_diagnostic_order_match_postgresql() {
     assert_computed_collation_references(&[(include_str!("key_collations.json"), 39)]);
 }
+
+#[test]
+fn executable_collation_selections_survive_reanalysis() {
+    let context = binding();
+    let references: BTreeMap<String, Vec<Reference>> =
+        serde_json::from_str(include_str!("../../tests/query_collations.json")).unwrap();
+    for case in references.values().flatten() {
+        let mut plan = UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0));
+        for _ in 0..2 {
+            read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql));
+            let schema = crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql))
+                .unwrap();
+            assert_eq!(
+                (0..schema.len())
+                    .map(|i| schema.column_collation(i).unwrap())
+                    .collect::<Vec<_>>(),
+                case.collations,
+                "{}",
+                case.sql
+            );
+        }
+    }
+}
+
+#[test]
+fn returning_collation_selections_keep_original_plan_addresses() {
+    let context = binding();
+    for source in [
+        include_str!("../../tests/dml_collations.json"),
+        include_str!("computed_dml_collations.json"),
+    ] {
+        let references: BTreeMap<String, Vec<Reference>> = serde_json::from_str(source).unwrap();
+        for case in references.values().flatten() {
+            let mut plan = UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0));
+            for _ in 0..2 {
+                read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None)
+                    .unwrap_or_else(|error| panic!("{}: {error}", case.sql));
+                let schema =
+                    crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context)
+                        .unwrap_or_else(|error| panic!("{}: {error}", case.sql))
+                        .unwrap();
+                assert_eq!(
+                    (0..schema.len())
+                        .map(|i| schema.column_collation(i).unwrap())
+                        .collect::<Vec<_>>(),
+                    case.collations,
+                    "{}",
+                    case.sql
+                );
+            }
+        }
+    }
+}

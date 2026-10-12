@@ -48,6 +48,7 @@ impl Deparser<'_> {
             )),
             ScalarExpr::Literal(value) => literal(value),
             ScalarExpr::TypedLiteral { value, ty, .. } => self.typed_literal(value, ty),
+            ScalarExpr::Collated { expr, .. } => self.expression(expr, scope, subqueries),
             ScalarExpr::Param(index) => Ok(self.parameter(*index, scope)),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
@@ -816,6 +817,9 @@ pub(super) fn type_name(ty: &str) -> String {
 }
 
 fn precedence(expression: &ScalarExpr) -> u8 {
+    if let ScalarExpr::Collated { expr, .. } = expression {
+        return precedence(expr);
+    }
     // IS predicates bind below comparison operators and above NOT.
     match expression {
         // PostgreSQL's isSimpleNode keeps a CollateExpr parenthesized when used as an operand.

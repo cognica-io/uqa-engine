@@ -85,6 +85,7 @@ pub(super) fn eval_scalar_inner(
                 control,
             )
         }
+        ScalarExpr::Collated { expr, .. } => eval_scalar_inner(expr, context, control),
         ScalarExpr::Literal(value) => control.copy_value(value).map_err(Into::into),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params(), control),
         ScalarExpr::Func { .. } => function::evaluate_expression(expression, context, control),

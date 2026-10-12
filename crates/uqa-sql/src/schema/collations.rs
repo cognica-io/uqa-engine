@@ -210,6 +210,7 @@ impl RowSchema {
     pub fn input_collation(&self, expression: &crate::ScalarExpr) -> Option<u32> {
         match expression {
             crate::ScalarExpr::TypedLiteral { collation_oid, .. } => *collation_oid,
+            crate::ScalarExpr::Collated { collation, .. } => Some(collation.oid()),
             crate::ScalarExpr::Column(name) => self.collation_of(name),
             crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
                 self.qualified_collation(qualifier, column)

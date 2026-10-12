@@ -1,0 +1,242 @@
+[
+  {
+    "query": "SELECT upper(c)",
+    "null": false,
+    "collation": 950,
+    "value": "X"
+  },
+  {
+    "query": "SELECT c::varchar",
+    "null": false,
+    "collation": 950,
+    "value": "x"
+  },
+  {
+    "query": "SELECT coalesce(c,'fallback')",
+    "null": false,
+    "collation": 950,
+    "value": "x"
+  },
+  {
+    "query": "SELECT coalesce('fixed',c)",
+    "null": false,
+    "collation": 950,
+    "value": "fixed"
+  },
+  {
+    "query": "SELECT coalesce(c,p)",
+    "null": false,
+    "collation": 0,
+    "value": "x"
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN c ELSE p END",
+    "null": false,
+    "collation": 0,
+    "value": "x"
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN 'fixed' ELSE c END",
+    "null": false,
+    "collation": 950,
+    "value": "fixed"
+  },
+  {
+    "query": "SELECT CASE WHEN false THEN c ELSE 'fixed' END",
+    "null": false,
+    "collation": 950,
+    "value": "fixed"
+  },
+  {
+    "query": "SELECT ARRAY[c]",
+    "null": false,
+    "collation": 950,
+    "value": "{x}"
+  },
+  {
+    "query": "SELECT (ROW(c)).f1",
+    "null": false,
+    "collation": 950,
+    "value": "x"
+  },
+  {
+    "query": "SELECT (ROW(upper(c))).f1",
+    "null": false,
+    "collation": 0,
+    "value": "X"
+  },
+  {
+    "query": "SELECT (ROW(coalesce(c,p))).f1",
+    "null": false,
+    "collation": 0,
+    "value": "x"
+  },
+  {
+    "query": "SELECT (ROW(c::varchar)).f1",
+    "null": false,
+    "collation": 0,
+    "value": "x"
+  },
+  {
+    "query": "SELECT (ROW(upper('x'::text))).f1",
+    "null": false,
+    "collation": 0,
+    "value": "X"
+  },
+  {
+    "query": "SELECT upper(c COLLATE \"default\") || p",
+    "null": false,
+    "collation": 100,
+    "value": "Xy"
+  },
+  {
+    "query": "SELECT (CASE WHEN true THEN c ELSE p END) || 'a'",
+    "null": false,
+    "collation": 0,
+    "value": "xa"
+  },
+  {
+    "query": "SELECT (CASE WHEN true THEN c ELSE p END) COLLATE \"C\"",
+    "null": false,
+    "collation": 950,
+    "value": "x"
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN (c COLLATE \"C\") ELSE p END",
+    "null": false,
+    "collation": 950,
+    "value": "x"
+  },
+  {
+    "query": "SELECT coalesce((c COLLATE \"default\"),p)",
+    "null": false,
+    "collation": 100,
+    "value": "x"
+  },
+  {
+    "query": "SELECT upper(c) || p",
+    "null": false,
+    "collation": 0,
+    "value": "Xy"
+  },
+  {
+    "query": "SELECT upper(c)",
+    "null": true,
+    "collation": 950,
+    "value": null
+  },
+  {
+    "query": "SELECT c::varchar",
+    "null": true,
+    "collation": 950,
+    "value": null
+  },
+  {
+    "query": "SELECT coalesce(c,'fallback')",
+    "null": true,
+    "collation": 950,
+    "value": "fallback"
+  },
+  {
+    "query": "SELECT coalesce('fixed',c)",
+    "null": true,
+    "collation": 950,
+    "value": "fixed"
+  },
+  {
+    "query": "SELECT coalesce(c,p)",
+    "null": true,
+    "collation": 0,
+    "value": null
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN c ELSE p END",
+    "null": true,
+    "collation": 0,
+    "value": null
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN 'fixed' ELSE c END",
+    "null": true,
+    "collation": 950,
+    "value": "fixed"
+  },
+  {
+    "query": "SELECT CASE WHEN false THEN c ELSE 'fixed' END",
+    "null": true,
+    "collation": 950,
+    "value": "fixed"
+  },
+  {
+    "query": "SELECT ARRAY[c]",
+    "null": true,
+    "collation": 950,
+    "value": "{NULL}"
+  },
+  {
+    "query": "SELECT (ROW(c)).f1",
+    "null": true,
+    "collation": 950,
+    "value": null
+  },
+  {
+    "query": "SELECT (ROW(upper(c))).f1",
+    "null": true,
+    "collation": 0,
+    "value": null
+  },
+  {
+    "query": "SELECT (ROW(coalesce(c,p))).f1",
+    "null": true,
+    "collation": 0,
+    "value": null
+  },
+  {
+    "query": "SELECT (ROW(c::varchar)).f1",
+    "null": true,
+    "collation": 0,
+    "value": null
+  },
+  {
+    "query": "SELECT (ROW(upper('x'::text))).f1",
+    "null": true,
+    "collation": 0,
+    "value": "X"
+  },
+  {
+    "query": "SELECT upper(c COLLATE \"default\") || p",
+    "null": true,
+    "collation": 100,
+    "value": null
+  },
+  {
+    "query": "SELECT (CASE WHEN true THEN c ELSE p END) || 'a'",
+    "null": true,
+    "collation": 0,
+    "value": null
+  },
+  {
+    "query": "SELECT (CASE WHEN true THEN c ELSE p END) COLLATE \"C\"",
+    "null": true,
+    "collation": 950,
+    "value": null
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN (c COLLATE \"C\") ELSE p END",
+    "null": true,
+    "collation": 950,
+    "value": null
+  },
+  {
+    "query": "SELECT coalesce((c COLLATE \"default\"),p)",
+    "null": true,
+    "collation": 100,
+    "value": null
+  },
+  {
+    "query": "SELECT upper(c) || p",
+    "null": true,
+    "collation": 0,
+    "value": null
+  }
+]

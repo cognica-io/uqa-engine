@@ -111,14 +111,16 @@ fn analyzed_fixed_calls_retain_their_declaration_before_optimization() {
         read_prepared_inputs(&NoRoutines, &mut plan, &[], &assignment_context(), None).unwrap();
         let mut observed = false;
         plan.visit_scalar_expressions(&mut |expression| {
-            if let ScalarExpr::Func { name, binding, .. } = expression {
-                if name == "lower" {
-                    let binding = binding.as_ref().expect("analyzed fixed declaration");
-                    assert_eq!(binding.name, "pg_catalog.lower");
-                    assert_eq!(binding.argument_types, ["text"]);
-                    observed = true;
+            expression.visit(&mut |expression| {
+                if let ScalarExpr::Func { name, binding, .. } = expression {
+                    if name == "lower" {
+                        let binding = binding.as_ref().expect("analyzed fixed declaration");
+                        assert_eq!(binding.name, "pg_catalog.lower");
+                        assert_eq!(binding.argument_types, ["text"]);
+                        observed = true;
+                    }
                 }
-            }
+            });
         });
         assert!(observed, "{sql}");
     }

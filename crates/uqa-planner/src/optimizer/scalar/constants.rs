@@ -53,6 +53,7 @@ pub(crate) fn retain_computed_integer(
 pub(super) fn literal_value(expression: &ScalarExpr) -> Option<&Value> {
     match expression {
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value),
+        ScalarExpr::Collated { expr, .. } => literal_value(expr),
         _ => None,
     }
 }
@@ -115,6 +116,7 @@ fn is_constant(
     }
     let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
     match expression {
+        ScalarExpr::Collated { expr, .. } => constant(expr),
         ScalarExpr::Literal(value) => {
             !uqa_sql::expr::composites::literal::contains_records(value)
                 && !uqa_sql::expr::datums::contains_datum(value)

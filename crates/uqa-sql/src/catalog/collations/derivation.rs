@@ -10,7 +10,7 @@ use super::{builtin_collation_name, DEFAULT_COLLATION_OID};
 use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
 use crate::{ColumnType, SQLError};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Derivation {
     #[default]
     None,

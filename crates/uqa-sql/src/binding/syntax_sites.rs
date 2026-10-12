@@ -417,6 +417,10 @@ impl Walk {
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        let mut bound = bound;
+        while let ScalarExpr::Collated { expr, .. } = bound {
+            bound = expr;
+        }
         if let Some(clause) = crate::catalog::collations::expression::scalar_clause(lowered)? {
             let mut operand = bound;
             while let ScalarExpr::Cast { expr, .. } = operand {
@@ -477,7 +481,6 @@ impl Walk {
             return self.scalar(&rewritten, bound, subqueries);
         }
         // Binding wraps an operand in the casts its operator needs, outside the casts the syntax writes.
-        let mut bound = bound;
         for _ in 0..cast_depth(bound).saturating_sub(cast_depth(lowered)) {
             let ScalarExpr::Cast { expr, ty, .. } = bound else {
                 return Err(shape_error("relabel"));

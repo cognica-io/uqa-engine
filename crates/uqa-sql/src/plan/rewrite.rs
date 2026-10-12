@@ -460,7 +460,8 @@ pub(super) fn rewrite_scalar(
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => rewrite_scalar(inner, rewrite),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => rewrite_scalar(inner, rewrite),
         ScalarExpr::Between { expr, low, high } => {
             rewrite_scalar(expr, rewrite);
             rewrite_scalar(low, rewrite);

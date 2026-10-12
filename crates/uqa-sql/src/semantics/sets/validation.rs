@@ -244,7 +244,8 @@ pub fn expression_may_return_set(
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             expression_may_return_set(engine, resolver, inner, schema, params)
         }
         ScalarExpr::Between { expr, low, high } => {
@@ -554,7 +555,9 @@ fn validate_set_context(
             validate_set_context(engine, resolver, lhs, schema, params)?;
             validate_set_context(engine, resolver, rhs, schema, params)?;
         }
-        ScalarExpr::IsNull { expr, .. } | ScalarExpr::Cast { expr, .. } => {
+        ScalarExpr::IsNull { expr, .. }
+        | ScalarExpr::Cast { expr, .. }
+        | ScalarExpr::Collated { expr, .. } => {
             validate_set_context(engine, resolver, expr, schema, params)?;
         }
         ScalarExpr::InSubquery { expr, .. } => {

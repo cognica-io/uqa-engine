@@ -185,6 +185,17 @@ impl Lowering<'_> {
                 })?,
                 else_branch: self.scalar_optional_copy(else_branch.as_deref())?,
             },
+            ScalarExpr::Collated {
+                expr,
+                ty,
+                collation,
+            } => ScalarExpr::Collated {
+                expr: self.scalar_box_copy(expr)?,
+                ty: self
+                    .scalar_type_copy(Some(ty))?
+                    .expect("retained result type"),
+                collation: *collation,
+            },
             ScalarExpr::Cast { implicit, expr, ty } => ScalarExpr::Cast {
                 implicit: *implicit,
                 expr: self.scalar_box_copy(expr)?,

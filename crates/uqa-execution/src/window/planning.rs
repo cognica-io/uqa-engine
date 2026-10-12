@@ -177,6 +177,21 @@ pub(super) fn rewrite_window_expr(
                 changed || else_changed,
             )
         }
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => {
+            let (expr, changed) = rewrite_window_expr(expr, slots);
+            (
+                ScalarExpr::Collated {
+                    expr: Box::new(expr),
+                    ty: ty.clone(),
+                    collation: *collation,
+                },
+                changed,
+            )
+        }
         ScalarExpr::Cast { expr, ty, implicit } => {
             let (expr, changed) = rewrite_window_expr(expr, slots);
             (
