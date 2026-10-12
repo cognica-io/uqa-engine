@@ -57,7 +57,7 @@ Serial declarations allocate generated integer values through an owned sequence.
 
 ## Array dimensions and input
 
-Array values retain their actual dimensions and lower bounds. Repeated brackets such as `integer[][]` record a declaration's dimensions but do not enforce the value's rank; both `integer[]` and `integer[][]` accept `{{1,2},{3,4}}` and convert each leaf to integer. Explicit bounds such as `[-2:-1][4:5]={{1,2},{3,4}}` survive compatible casts, assignment and reopen. Element modifiers apply to each scalar value, so `{{1.235,NULL}}` cast to `numeric(5,2)[][]` becomes `{{1.24,NULL}}`. Invalid integer leaves report `22P02` with the integer input diagnostic.
+Array values retain their actual dimensions and lower bounds. Repeated brackets such as `integer[][]` record a declaration's dimensions but do not enforce the value's rank; both `integer[]` and `integer[][]` accept `{{1,2},{3,4}}` and convert each leaf to integer. Explicit bounds such as `[-2:-1][4:5]={{1,2},{3,4}}` survive compatible casts, assignment and reopen. Element modifiers apply to each scalar value, so `{{1.235,NULL}}` cast to `numeric(5,2)[][]` becomes `{{1.24,NULL}}`. Invalid integer leaves report `22P02` with the integer input diagnostic. Routine argument identity also ignores declaration rank: `integer[]` and `integer[][]` select the same array overload. This applies to named element types as well, while the element type identity remains distinct and each value retains its own dimensions.
 
 ## Catalog vectors
 

@@ -3583,6 +3583,61 @@
       "capability": "Structural syntax effect classification",
       "workload": "Collation and Boolean-test syntax are analyzed beside identically named host/routine registrations and volatile children.",
       "invariant": "Structural predicates retain their intrinsic immutability while preserving child effects; ordinary named calls retain their own volatility."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_names_preserve_alias_array_quote_and_modifier_normalization",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/type_names/tests.rs",
+      "capability": "Array routine type identity",
+      "workload": "Builtin aliases, modifiers, quoted names and repeated array brackets share routine type identities.",
+      "invariant": "The admitted canonical result preserves element identity while array rank does not create a distinct routine type; all scratch reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_array_identity_keeps_element_identity_without_declared_rank",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/type_names/tests.rs",
+      "capability": "Array routine type identity",
+      "workload": "Integer and array-valued domain elements are wrapped in one through six declared array dimensions.",
+      "invariant": "Every declared rank retains the same array identity without conflating domain identity or changing the original declaration; only the returned spelling remains reserved."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_name_failure_releases_partial_scratch_and_keeps_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/type_names/tests.rs",
+      "capability": "Array routine type identity",
+      "workload": "Type-name normalization exhausts its original 16-byte allowance and receives either cancellation source.",
+      "invariant": "The original allowance and cancellation identities remain enforced, with zero leaked scratch reservation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "array_routine_identity_matches_postgresql_across_declared_ranks",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/array_transforms/named_overloads.rs",
+      "capability": "Array routine type identity",
+      "workload": "Independent PostgreSQL numeric/enum array signatures, implicit argument conversion, duplicate signature rejection and five fresh-connection observations run on all providers.",
+      "invariant": "Declaration rank does not invent a routine type; catalog identity, invocation values and rejection diagnostics remain exact after persistent reopening."
     }
   ]
 }

@@ -15,7 +15,8 @@ fn routine_names_preserve_alias_array_quote_and_modifier_normalization() {
     for (source, expected) in [
         ("PG_CATALOG.INTEGER", "int4"),
         (" TIMESTAMP ( 3 )  WITH TIME ZONE [] ", "timestamptz[]"),
-        ("numeric(10, -2)[][]", "numeric[][]"),
+        ("numeric(10, -2)[][]", "numeric[]"),
+        ("integer [] []", "int4[]"),
         ("character   varying (5)", "varchar"),
         ("\"Custom (type)\"", "\"custom (type)\""),
         ("\"a\"\"(b)\"(4)", "\"a\"\"(b)\""),
@@ -29,6 +30,33 @@ fn routine_names_preserve_alias_array_quote_and_modifier_normalization() {
         assert_eq!(budget.used(), result.reserved_bytes());
         drop(result);
         assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn routine_array_identity_keeps_element_identity_without_declared_rank() {
+    let domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "array_bound_element".into(),
+        oid: 42,
+        array_oid: None,
+        base: Box::new(ColumnType::Array(Box::new(ColumnType::Integer))),
+        collation_oid: None,
+    };
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    // PostgreSQL routine identity uses one array OID, independently of declaration rank.
+    for (mut ty, identity) in [(ColumnType::Integer, "int4[]"), (domain, "domain#42[]")] {
+        for rank in 1..=6 {
+            ty = ColumnType::Array(Box::new(ty));
+            let result = canonical_column_type_name_with_control(&ty, &control).unwrap();
+            assert_eq!(result.as_str(), identity);
+            assert!(ty.sql_name().ends_with(&"[]".repeat(rank)));
+            assert_eq!(budget.used(), result.reserved_bytes());
+            drop(result);
+            assert_eq!(budget.used(), 0);
+        }
     }
 }
 
