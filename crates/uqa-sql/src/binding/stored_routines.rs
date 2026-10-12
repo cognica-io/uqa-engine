@@ -375,11 +375,7 @@ fn insert_statement_routine_inputs(
         Some(ConflictActionPlan::Update { .. })
     ) {
         let target = statement_target_schema(context, &plan.table, &plan.target_qualifier)?;
-        let excluded = RowSchema::with_qualified_types(
-            "excluded",
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
-        );
+        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
         outer = RowSchema::join(&outer, &excluded, std::iter::empty::<String>());
     }
     Ok(CommandRoutineInputs {
@@ -479,10 +475,12 @@ fn statement_target_schema(
         context.binding,
         None,
     )?;
-    Ok(RowSchema::with_types(
-        target.columns().to_vec(),
-        target.column_types().to_vec(),
-    ))
+    Ok(
+        RowSchema::with_types(target.columns().to_vec(), target.column_types().to_vec())
+            .with_column_collations(
+                (0..target.len()).map(|position| target.column_collation(position)),
+            ),
+    )
 }
 
 /// Routine identities of a bound stored expression in syntax order.

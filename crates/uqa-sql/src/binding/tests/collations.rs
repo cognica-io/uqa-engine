@@ -28,7 +28,10 @@ fn context() -> binding::BindingContext<'static> {
     let table = fixture::table_definition(columns);
     binding::BindingContext {
         catalog: fixture::catalog_with_foreign_tables(
-            BTreeMap::from([(RelationIdentity::new("public", "local"), table.clone())]),
+            BTreeMap::from([
+                (RelationIdentity::new("public", "local"), table.clone()),
+                (RelationIdentity::new("public", "t"), table.clone()),
+            ]),
             BTreeMap::from([(RelationIdentity::new("public", "remote"), table)]),
         ),
         ..fixture::empty_binding_context()
@@ -146,4 +149,61 @@ fn operator_join_inputs_retain_each_relation_declaration() {
     .unwrap();
     assert_eq!(left.qualified_collation("a", "value"), Some(950));
     assert_eq!(right.qualified_collation("b", "value"), Some(951));
+}
+
+#[test]
+fn dml_output_collations_match_postgresql_for_row_images_and_command_ctes() {
+    let context = context();
+    let references: BTreeMap<String, Vec<Reference>> =
+        serde_json::from_str(include_str!("dml_collations.json")).unwrap();
+    for case in references.values().flatten() {
+        let plan = crate::plan::UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0));
+        let schemas = match plan {
+            crate::plan::UnifiedPlan::Command(command) => {
+                vec![binding::analyze_prepared_command_schema(
+                    &EmptyRoutineResolution,
+                    &command,
+                    &[],
+                    &context,
+                )
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql))
+                .unwrap()]
+            }
+            crate::plan::UnifiedPlan::Query(query) => vec![
+                binding::bind_query_plan_schema(
+                    &EmptyRoutineResolution,
+                    &query,
+                    &[],
+                    &context,
+                    None,
+                )
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql)),
+                binding::analyze_query_plan_schema(
+                    &EmptyRoutineResolution,
+                    &query,
+                    &[],
+                    &context,
+                    None,
+                )
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql)),
+            ],
+        };
+        for schema in schemas {
+            assert_eq!(
+                schema.len(),
+                case.collations.len(),
+                "{}: {:?}",
+                case.sql,
+                schema.columns()
+            );
+            for (position, oid) in case.collations.iter().enumerate() {
+                assert_eq!(
+                    schema.column_collation(position),
+                    Some(*oid),
+                    "{}",
+                    case.sql
+                );
+            }
+        }
+    }
 }

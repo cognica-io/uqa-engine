@@ -28,11 +28,7 @@ pub fn analyze_prepared_command_schema(
     let result = (|| {
         let (target, expression) =
             scope.command_expression_schema(routines, command, params, None)?;
-        let excluded = RowSchema::with_qualified_types(
-            "excluded",
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
-        );
+        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
         let conflict_input = RowSchema::join(&expression, &excluded, std::iter::empty::<String>());
         let conflict_expressions = match command {
             CommandPlan::Insert(insert) => insert
@@ -224,8 +220,9 @@ impl SchemaScope {
                     self.bind_query(routines, source, params, None)?;
                 }
             }
-            let returning = command.returning().unwrap_or_default();
-            let labels = projection_columns(returning);
+            let returning =
+                crate::semantics::returning::command_returning_projections(command, &target)?;
+            let labels = projection_columns(&returning);
             let mut columns = Vec::new();
             let mut types: Vec<Option<ColumnType>> = Vec::new();
             let mut collations = super::projection::OutputCollations::default();

@@ -1,0 +1,92 @@
+{
+  "commands": [
+    {
+      "sql": "INSERT INTO t (c,p,n) VALUES (NULL,'new',2) RETURNING c,p,n",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    },
+    {
+      "sql": "UPDATE t AS q SET p=NULL WHERE n=1 RETURNING q.p,old.c,new.c,q.n",
+      "collations": [
+        951,
+        950,
+        950,
+        0
+      ]
+    },
+    {
+      "sql": "UPDATE t SET c='changed' WHERE n=1 RETURNING WITH (OLD AS prior, NEW AS next) prior.c,next.p,n",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    },
+    {
+      "sql": "DELETE FROM t WHERE n=1 RETURNING old.c,new.p,old.n",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    },
+    {
+      "sql": "MERGE INTO t USING (VALUES (1,'updated')) s(n,v) ON t.n=s.n WHEN MATCHED THEN UPDATE SET p=s.v RETURNING old.c,new.p,t.p",
+      "collations": [
+        950,
+        951,
+        951
+      ]
+    },
+    {
+      "sql": "INSERT INTO t (c,p,n) VALUES ('conflict',NULL,1) ON CONFLICT(n) DO UPDATE SET c=excluded.c RETURNING c,p",
+      "collations": [
+        950,
+        951
+      ]
+    },
+    {
+      "sql": "UPDATE t AS q SET p='x' RETURNING q.*",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    },
+    {
+      "sql": "UPDATE t SET p='x' RETURNING old.*",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    },
+    {
+      "sql": "DELETE FROM t RETURNING new.*",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "sql": "WITH changed AS (UPDATE t SET p=NULL RETURNING old.c AS c,new.p AS p) SELECT p,c FROM changed",
+      "collations": [
+        951,
+        950
+      ]
+    },
+    {
+      "sql": "WITH removed AS (DELETE FROM t RETURNING new.c AS c,old.p AS p) SELECT c,p FROM removed",
+      "collations": [
+        950,
+        951
+      ]
+    }
+  ]
+}

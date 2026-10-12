@@ -24,11 +24,7 @@ impl SchemaScope {
             .target_alias
             .as_deref()
             .unwrap_or(&merge.target_qualifier);
-        let target = RowSchema::with_qualified_types(
-            qualifier,
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
-        );
+        let target = RowSchema::with_relation_qualifier(target, qualifier);
         let source = self.bind_source(routines, &merge.source, &merge.subqueries, params, None)?;
         self.bind_expression_type(
             routines,

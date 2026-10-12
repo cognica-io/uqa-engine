@@ -14,8 +14,7 @@ struct Reference {
     collations: Vec<u32>,
 }
 
-#[test]
-fn prepared_outputs_retain_direct_and_explicit_collations_after_aliasing() {
+fn binding() -> BindingContext<'static> {
     let crate::Statement::CreateTable(mut table) =
         crate::compile("CREATE TABLE t (c text, p text, n integer)")
             .unwrap()
@@ -26,13 +25,19 @@ fn prepared_outputs_retain_direct_and_explicit_collations_after_aliasing() {
     table.columns[0].collation_oid = Some(950);
     table.columns[1].collation_oid = Some(951);
     let table = crate::binding::fixture::table_definition(table.columns);
-    let binding = BindingContext {
+    BindingContext {
         catalog: crate::binding::fixture::catalog(BTreeMap::from([
             (RelationIdentity::new("public", "local"), table.clone()),
-            (RelationIdentity::new("public", "remote"), table),
+            (RelationIdentity::new("public", "remote"), table.clone()),
+            (RelationIdentity::new("public", "t"), table),
         ])),
         ..crate::binding::fixture::empty_binding_context()
-    };
+    }
+}
+
+#[test]
+fn prepared_outputs_retain_direct_and_explicit_collations_after_aliasing() {
+    let binding = binding();
     let references: BTreeMap<String, Vec<Reference>> =
         serde_json::from_str(include_str!("../../tests/query_collations.json")).unwrap();
     for case in references.values().flatten() {
@@ -54,6 +59,42 @@ fn prepared_outputs_retain_direct_and_explicit_collations_after_aliasing() {
         assert_eq!(output.len(), expected.len(), "{sql}");
         for (position, oid) in expected.iter().enumerate() {
             assert_eq!(output.column_collation(position), Some(*oid), "{sql}");
+        }
+    }
+}
+
+#[test]
+fn prepared_dml_output_collations_match_postgresql_with_null_row_images() {
+    let binding = binding();
+    let references: BTreeMap<String, Vec<Reference>> =
+        serde_json::from_str(include_str!("../../tests/dml_collations.json")).unwrap();
+    for case in references.values().flatten() {
+        let plan = UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0));
+        let mut preparation = Preparation {
+            routines: &NoRoutines,
+            scope: SchemaScope::for_analysis(&binding).unwrap(),
+            parameters: ParameterTypes::new(&[]),
+            schema_expression: None,
+        };
+        let output = match plan {
+            UnifiedPlan::Command(command) => preparation.command(&command).map(Option::unwrap),
+            UnifiedPlan::Query(query) => preparation.query(&query, None),
+        }
+        .unwrap_or_else(|error| panic!("{}: {error}", case.sql));
+        assert_eq!(
+            output.len(),
+            case.collations.len(),
+            "{}: {:?}",
+            case.sql,
+            output.columns()
+        );
+        for (position, oid) in case.collations.iter().enumerate() {
+            assert_eq!(
+                output.column_collation(position),
+                Some(*oid),
+                "{}",
+                case.sql
+            );
         }
     }
 }

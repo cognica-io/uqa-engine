@@ -83,11 +83,7 @@ impl Preparation<'_> {
                         predicate,
                     } = &conflict.action
                     {
-                        let excluded = RowSchema::with_qualified_types(
-                            "excluded",
-                            target.columns().to_vec(),
-                            target.column_types().to_vec(),
-                        );
+                        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
                         let conflict_input =
                             RowSchema::join(&input, &excluded, std::iter::empty::<String>());
                         self.assignments(
@@ -143,7 +139,10 @@ impl Preparation<'_> {
         if returning.is_empty() {
             return Ok(None);
         }
-        let mut output = self.projections(returning, target, input, command.scalar_subqueries())?;
+        let returning =
+            crate::semantics::returning::command_returning_projections(command, target)?;
+        let mut output =
+            self.projections(&returning, target, input, command.scalar_subqueries())?;
         self.resolve_targets(&mut output)?;
         Ok(Some(output.schema()))
     }
@@ -166,11 +165,7 @@ impl Preparation<'_> {
             .target_alias
             .as_deref()
             .unwrap_or(&merge.target_qualifier);
-        let target_input = RowSchema::with_qualified_types(
-            target_qualifier,
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
-        );
+        let target_input = RowSchema::with_relation_qualifier(target, target_qualifier);
         let target_input = crate::binding::overlay_outer_schema(&target_input, outer);
         let source_input = self.source(&merge.source, subqueries, outer)?;
         let source_input = crate::binding::overlay_outer_schema(&source_input, outer);

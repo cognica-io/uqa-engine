@@ -13,8 +13,11 @@ use crate::{
     routines::RoutineResolution,
     ResultRow as Document, RowSchema, SQLError, SQLParam,
 };
-use std::collections::BTreeSet;
+use std::{borrow::Cow, collections::BTreeSet};
 use uqa_core::{DocId, Value};
+
+#[cfg(test)]
+mod tests;
 
 pub trait ReturningCatalog {
     fn try_describe_table_row_type(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
@@ -55,15 +58,12 @@ pub fn returning_target_schema(
         let width = columns.len();
         return Ok(RowSchema::with_types(columns, vec![None; width]));
     }
-    let columns = definitions
-        .iter()
-        .map(|definition| definition.name.clone())
-        .collect();
-    let types = definitions
-        .into_iter()
-        .map(|definition| Some(definition.ty))
-        .collect();
-    Ok(RowSchema::with_types(columns, types))
+    Ok(RowSchema::with_column_metadata(
+        None,
+        definitions
+            .into_iter()
+            .map(|column| (column.name, Some(column.ty), column.collation_oid)),
+    ))
 }
 
 pub fn expanded_returning_projections(
@@ -73,7 +73,42 @@ pub fn expanded_returning_projections(
     aliases: &ReturningAliases,
     returning: &[ProjectionPlan],
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
-    let columns = returning_target_schema(catalog, table)?.columns().to_vec();
+    let target = returning_target_schema(catalog, table)?;
+    expand_returning_target_stars(target.columns(), target_qualifier, aliases, returning)
+        .map(Cow::into_owned)
+}
+
+pub(crate) fn command_returning_projections<'a>(
+    command: &'a crate::plan::CommandPlan,
+    target: &RowSchema,
+) -> Result<Cow<'a, [ProjectionPlan]>, SQLError> {
+    let aliases = command
+        .returning_aliases()
+        .ok_or_else(|| SQLError::Internal("command has no RETURNING namespace".into()))?;
+    expand_returning_target_stars(
+        target.columns(),
+        command.target_qualifier().unwrap_or_default(),
+        aliases,
+        command.returning().unwrap_or_default(),
+    )
+}
+
+/// All RETURNING consumers expand target and image wildcards from the declared user columns. System columns remain individually addressable but are never wildcard outputs.
+fn expand_returning_target_stars<'a>(
+    columns: &[String],
+    target_qualifier: &str,
+    aliases: &ReturningAliases,
+    returning: &'a [ProjectionPlan],
+) -> Result<Cow<'a, [ProjectionPlan]>, SQLError> {
+    if !returning.iter().any(|projection| match &projection.expr {
+        crate::ScalarExpr::Star => true,
+        crate::ScalarExpr::QualifiedStar(qualifier) => {
+            qualifier == target_qualifier || qualifier == &aliases.old || qualifier == &aliases.new
+        }
+        _ => false,
+    }) {
+        return Ok(Cow::Borrowed(returning));
+    }
     let mut projections = Vec::with_capacity(returning.len().max(columns.len()));
     for projection in returning {
         match &projection.expr {
@@ -105,7 +140,7 @@ pub fn expanded_returning_projections(
             message: "RETURNING must have at least one column".into(),
         });
     }
-    Ok(projections)
+    Ok(Cow::Owned(projections))
 }
 
 pub fn dml_statement_returning_schema(
