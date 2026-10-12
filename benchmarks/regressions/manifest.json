@@ -2627,8 +2627,8 @@
       ],
       "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
       "capability": "Bounded ordinary result inference",
-      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls.",
-      "invariant": "Result binding performs 1 and 17 catalog lookups respectively; strict analysis performs one signature and one result lookup per catalog call (2 and 34), without recursively resolving previously analyzed inputs."
+      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls, as SELECT outputs and as two VALUES rows.",
+      "invariant": "Per original expression occurrence, result binding performs 1 or 17 catalog lookups and strict analysis performs 2 or 34; two VALUES rows double those counts without revisiting previously analyzed child trees."
     },
     {
       "package": "uqa-sql",
@@ -2655,6 +2655,19 @@
       "capability": "Observed function input diagnostic preservation",
       "workload": "Twenty-four independent PostgreSQL errors for missing/invalid arguments, fixed and variadic signatures, and aggregate/window modifiers.",
       "invariant": "Prepared and ordinary analysis reuse the original argument observations while retaining PostgreSQL SQLSTATE, message, detail and hint, including signature errors before modifier errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "values_collations_and_column_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "VALUES output collation and diagnostic preservation",
+      "workload": "Nineteen PostgreSQL observations cover top-level/lateral/CTE VALUES, aliases, arrays and NULLs, explicit and implicit conflicts and row/column diagnostic order.",
+      "invariant": "Prepared and ordinary VALUES analysis select the same column collations and exact errors as PostgreSQL; row expression errors precede row-width errors, and column collation errors precede later column common-type errors."
     }
   ]
 }

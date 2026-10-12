@@ -308,13 +308,7 @@ impl SchemaScope {
                 Ok(output)
             }
             RelationalPlan::Values { rows, subqueries } => {
-                let columns = rows.first().map_or_else(Vec::new, |row| {
-                    (1..=row.len())
-                        .map(|index| format!("column{index}"))
-                        .collect()
-                });
-                let types = self.bind_values_types(routines, rows, subqueries, outer, params)?;
-                Ok(RowSchema::with_types(columns, types))
+                self.bind_values_schema(routines, rows, subqueries, outer, params)
             }
         }
     }
@@ -612,25 +606,8 @@ impl SchemaScope {
                         internal_column_types.clone(),
                     ));
                 }
-                let columns = if column_aliases.is_empty() {
-                    (1..=rows.first().map_or(0, Vec::len))
-                        .map(|index| format!("column{index}"))
-                        .collect::<Vec<_>>()
-                } else {
-                    column_aliases.clone()
-                };
-                let binding_schema = outer.cloned().unwrap_or_default();
-                let types = self.bind_values_types(
-                    routines,
-                    rows,
-                    subqueries,
-                    Some(&binding_schema),
-                    params,
-                )?;
-                Ok(match alias.as_deref() {
-                    Some(qualifier) => RowSchema::with_qualified_types(qualifier, columns, types),
-                    None => RowSchema::with_types(columns, types),
-                })
+                let schema = self.bind_values_schema(routines, rows, subqueries, outer, params)?;
+                Ok(rename_schema(&schema, column_aliases, alias.as_deref()))
             }
             SourcePlan::Function {
                 name,

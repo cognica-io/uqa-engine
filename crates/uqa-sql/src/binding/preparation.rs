@@ -368,6 +368,26 @@ pub(super) fn condition_metadata(
     Ok(())
 }
 
+/// VALUES relation typing and collation selection share preparation's row-then-column order.
+pub(super) fn values_metadata(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
+    outer: Option<&RowSchema>,
+    params: &[crate::SQLParam],
+) -> Result<RowSchema, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    analysis
+        .values(rows, subqueries, outer)
+        .map(|output| output.schema())
+}
+
 struct QueryOutput {
     columns: Vec<String>,
     types: Vec<ExpressionType>,

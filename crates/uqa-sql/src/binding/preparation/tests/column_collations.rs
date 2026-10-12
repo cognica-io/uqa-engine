@@ -277,44 +277,56 @@ fn output_metadata_visits_nested_call_arguments_once() {
         for _ in 0..16 {
             expression = format!("{wrapper}({expression})");
         }
-        let UnifiedPlan::Query(query) = UnifiedPlan::lower(
-            crate::compile(&format!("SELECT {expression}"))
-                .unwrap()
-                .remove(0),
-        ) else {
-            panic!("query");
-        };
-        let calls = Calls(AtomicUsize::new(0));
-        let output = crate::binding::bind_query_plan_schema(
-            &calls,
-            &query,
-            &[],
-            &crate::binding::fixture::empty_binding_context(),
-            None,
-        )
-        .unwrap();
-        assert_eq!(output.column_type(0), Some(&expected_type));
-        assert_eq!(calls.0.load(Ordering::Relaxed), expected_calls, "{wrapper}");
-        calls.0.store(0, Ordering::Relaxed);
-        let output = crate::binding::analyze_query_plan_schema(
-            &calls,
-            &query,
-            &[],
-            &crate::binding::fixture::empty_binding_context(),
-            None,
-        )
-        .unwrap();
-        assert_eq!(output.column_type(0), Some(&expected_type));
-        // Each call resolves its own signature and result; already analyzed children do not resolve again.
-        assert_eq!(
-            calls.0.load(Ordering::Relaxed),
-            2 * expected_calls,
-            "{wrapper}"
-        );
+        for (sql, copies) in [
+            (format!("SELECT {expression}"), 1),
+            (format!("VALUES ({expression}),({expression})"), 2),
+        ] {
+            let UnifiedPlan::Query(query) =
+                UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0))
+            else {
+                panic!("query");
+            };
+            let calls = Calls(AtomicUsize::new(0));
+            let output = crate::binding::bind_query_plan_schema(
+                &calls,
+                &query,
+                &[],
+                &crate::binding::fixture::empty_binding_context(),
+                None,
+            )
+            .unwrap();
+            assert_eq!(output.column_type(0), Some(&expected_type));
+            assert_eq!(
+                calls.0.load(Ordering::Relaxed),
+                copies * expected_calls,
+                "{wrapper}"
+            );
+            calls.0.store(0, Ordering::Relaxed);
+            let output = crate::binding::analyze_query_plan_schema(
+                &calls,
+                &query,
+                &[],
+                &crate::binding::fixture::empty_binding_context(),
+                None,
+            )
+            .unwrap();
+            assert_eq!(output.column_type(0), Some(&expected_type));
+            // Each call resolves its own signature and result; already analyzed children do not resolve again.
+            assert_eq!(
+                calls.0.load(Ordering::Relaxed),
+                2 * copies * expected_calls,
+                "{wrapper}"
+            );
+        }
     }
 }
 
 #[test]
 fn observed_call_types_preserve_reference_validation() {
     assert_computed_collation_references(&[(include_str!("call_reference_errors.json"), 24)]);
+}
+
+#[test]
+fn values_collations_and_column_diagnostics_match_postgresql() {
+    assert_computed_collation_references(&[(include_str!("values_collations.json"), 19)]);
 }

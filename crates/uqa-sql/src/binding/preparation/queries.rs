@@ -347,21 +347,30 @@ impl Preparation<'_> {
         let empty = RowSchema::default();
         let input = outer.unwrap_or(&empty);
         for row in rows {
+            for (position, expression) in row.iter().enumerate() {
+                let value = self.expression(expression, input, subqueries)?;
+                if let Some(column) = columns.get_mut(position) {
+                    column.push(value);
+                }
+            }
             if row.len() != width {
                 return Err(error(
                     "42601",
                     "VALUES lists must all be the same length".into(),
                 ));
             }
-            for (column, expression) in columns.iter_mut().zip(row) {
-                column.push(self.expression(expression, input, subqueries)?);
-            }
         }
         let types = columns
             .iter_mut()
             .map(|column| {
                 let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
-                let mut value = ExpressionType::resolved(ty);
+                let mut value = ExpressionType::combined(ty, column);
+                // VALUES resolves each column after all row expressions have been analyzed, before proceeding to the next column.
+                value.derivation.validate()?;
+                // The VALUES relation exports a column selection, not its input expression's explicit strength.
+                value.derivation = crate::catalog::collations::derivation::Derivation::implicit(
+                    value.derivation.oid(),
+                );
                 value.record_fields = super::super::record_fields::common_fields(
                     column.iter().map(|item| item.record_fields.as_ref()),
                 );

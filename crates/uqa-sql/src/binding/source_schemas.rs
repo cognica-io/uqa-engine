@@ -6,7 +6,7 @@
 
 //! The output columns of a `VALUES` list and of a join, as their query level sees them.
 
-use super::scope::{merge_types, overlay_outer_schema};
+use super::scope::overlay_outer_schema;
 use super::sources::JoinSchemaBinding;
 use super::SchemaScope;
 use crate::ast::ColumnType;
@@ -14,7 +14,6 @@ use crate::plan::QueryPlan;
 use crate::routines::RoutineResolution;
 use crate::semantics::{alias_join_schema, join_using_output_schema, resolve_join_using};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
-use uqa_core::Value;
 
 impl SchemaScope {
     pub(super) fn bind_values_types(
@@ -25,34 +24,19 @@ impl SchemaScope {
         schema: Option<&RowSchema>,
         params: &[SQLParam],
     ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-        let width = rows.first().map_or(0, Vec::len);
-        let empty = RowSchema::default();
-        let schema = schema.unwrap_or(&empty);
-        let mut types = vec![None; width];
-        for row in rows {
-            if row.len() != width {
-                return Err(SQLError::TypeMismatch(
-                    "VALUES lists must all be the same length".into(),
-                ));
-            }
-            for (position, expression) in row.iter().enumerate() {
-                let candidate =
-                    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
-                        None
-                    } else {
-                        self.bind_expression_type(routines, expression, schema, subqueries, params)?
-                    };
-                types[position] = merge_types(
-                    crate::type_resolution::CommonTypeContext::Values,
-                    types[position].as_ref(),
-                    candidate.as_ref(),
-                )?;
-            }
-        }
-        Ok(types
-            .into_iter()
-            .map(|ty| ty.or(Some(ColumnType::Text)))
-            .collect())
+        self.bind_values_schema(routines, rows, subqueries, schema, params)
+            .map(|schema| schema.column_types().to_vec())
+    }
+
+    pub(super) fn bind_values_schema(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        rows: &[Vec<ScalarExpr>],
+        subqueries: &[QueryPlan],
+        schema: Option<&RowSchema>,
+        params: &[SQLParam],
+    ) -> Result<RowSchema, SQLError> {
+        super::preparation::values_metadata(self, routines, rows, subqueries, schema, params)
     }
 
     pub(super) fn bind_join_output_schema(
