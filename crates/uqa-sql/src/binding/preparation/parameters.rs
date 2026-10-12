@@ -15,6 +15,8 @@ mod collations;
 #[derive(Clone)]
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
+    /// Already-selected output metadata for direct bindings and retained clauses; absence uses the result type's default.
+    pub(super) selected_collation: Option<u32>,
     pub(super) record_fields: Option<crate::schema::RecordFields>,
     /// An anonymous ROW retains each analyzed input until a named cast selects its field coercions.
     pub(super) row_constructor: Option<Vec<Self>>,
@@ -31,6 +33,7 @@ impl ExpressionType {
     pub(super) fn resolved(ty: Option<ColumnType>) -> Self {
         Self {
             ty,
+            selected_collation: None,
             record_fields: None,
             row_constructor: None,
             occurrence: None,
@@ -43,6 +46,7 @@ impl ExpressionType {
     pub(super) fn unknown() -> Self {
         Self {
             ty: None,
+            selected_collation: None,
             record_fields: None,
             row_constructor: None,
             occurrence: None,
@@ -56,6 +60,7 @@ impl ExpressionType {
     pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
         Self {
             ty: None,
+            selected_collation: None,
             record_fields: None,
             row_constructor: None,
             occurrence: None,
@@ -223,6 +228,7 @@ impl<'a> ParameterTypes<'a> {
             constants.3.select(origin, value.collation, oid);
         }
         value.collation = Some(origin);
+        value.selected_collation = Some(oid);
     }
 
     pub(super) fn retain_membership(
@@ -291,6 +297,7 @@ impl<'a> ParameterTypes<'a> {
         self.occurrences.push((index, ty.clone()));
         Ok(ExpressionType {
             ty,
+            selected_collation: None,
             record_fields: None,
             row_constructor: None,
             occurrence: Some(occurrence),
@@ -325,6 +332,9 @@ impl<'a> ParameterTypes<'a> {
             }
             self.types[*index] = Some(target.clone());
             *observed = Some(target.clone());
+        }
+        if !crate::schema::composites::type_is_collatable(&target) {
+            expression.selected_collation = None;
         }
         expression.ty = Some(target);
         Ok(())

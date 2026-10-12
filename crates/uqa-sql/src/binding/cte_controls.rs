@@ -16,6 +16,7 @@ pub fn hide_recursive_generated_schema(schema: &RowSchema, visible: usize) -> Ro
         schema.columns()[..visible].to_vec(),
         schema.column_types()[..visible].to_vec(),
     )
+    .with_column_collations((0..visible).map(|position| schema.column_collation(position)))
     .with_record_fields_from(schema);
     let generated = schema
         .columns()
@@ -144,7 +145,10 @@ fn extend_cte_generated_schema_mode(
         columns.push(cycle.path_column.clone());
         types.push(Some(ColumnType::Array(Box::new(ColumnType::Record))));
     }
-    Ok(RowSchema::with_types(columns, types).with_record_fields_from(&schema))
+    let width = columns.len();
+    Ok(RowSchema::with_types(columns, types)
+        .with_column_collations((0..width).map(|position| schema.column_collation(position)))
+        .with_record_fields_from(&schema))
 }
 
 pub fn extend_recursive_cte_binding_schema(

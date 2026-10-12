@@ -206,6 +206,19 @@ impl Collations {
 }
 
 impl RowSchema {
+    /// Observe the selected collation of a direct logical reference, including static bindings and executor attributes without a visible output position.
+    pub fn input_collation(&self, expression: &crate::ScalarExpr) -> Option<u32> {
+        match expression {
+            crate::ScalarExpr::Column(name) => self.collation_of(name),
+            crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
+                self.qualified_collation(qualifier, column)
+            }
+            crate::ScalarExpr::Position(position) => self.column_collation(*position),
+            crate::ScalarExpr::InternalColumn(column) => self.internal_collation(*column),
+            _ => None,
+        }
+    }
+
     /// Bind a direct scalar reference without confusing its SQL identity with another logical column that shares the same physical value. Static binding-only names remain with expression evaluation.
     pub fn projection_input(&self, expression: &crate::ScalarExpr) -> Option<super::ProjectedSlot> {
         let (logical, alias) = match expression {

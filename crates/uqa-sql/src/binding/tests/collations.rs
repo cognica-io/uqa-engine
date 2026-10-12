@@ -9,8 +9,13 @@
 use super::*;
 use crate::binding::{self, fixture};
 
-#[test]
-fn declared_collations_follow_native_foreign_and_bound_source_aliases() {
+#[derive(serde::Deserialize)]
+struct Reference {
+    sql: String,
+    collations: Vec<u32>,
+}
+
+fn context() -> binding::BindingContext<'static> {
     let mut columns = vec![
         column("c", ColumnType::Text),
         column("p", ColumnType::Text),
@@ -21,13 +26,18 @@ fn declared_collations_follow_native_foreign_and_bound_source_aliases() {
     columns[0].collation_oid = Some(950);
     columns[1].collation_oid = Some(951);
     let table = fixture::table_definition(columns);
-    let context = binding::BindingContext {
+    binding::BindingContext {
         catalog: fixture::catalog_with_foreign_tables(
             BTreeMap::from([(RelationIdentity::new("public", "local"), table.clone())]),
             BTreeMap::from([(RelationIdentity::new("public", "remote"), table)]),
         ),
         ..fixture::empty_binding_context()
-    };
+    }
+}
+
+#[test]
+fn declared_collations_follow_native_foreign_and_bound_source_aliases() {
+    let context = context();
     for table in ["local", "remote"] {
         for bound in [false, true] {
             let mut source = SourcePlan::Table {
@@ -71,6 +81,38 @@ fn declared_collations_follow_native_foreign_and_bound_source_aliases() {
                 assert_eq!(schema.collation_of("second"), Some(expected[1]));
                 assert_eq!(schema.columns(), ["first", "second", "number"]);
                 assert_eq!(schema.physical_slot(1), Some(1));
+            }
+        }
+    }
+}
+
+#[test]
+fn query_outputs_preserve_direct_collations_through_ctes_and_subqueries() {
+    let context = context();
+    let references: BTreeMap<String, Vec<Reference>> =
+        serde_json::from_str(include_str!("query_collations.json")).unwrap();
+    for case in &references["direct_queries"] {
+        let sql = &case.sql;
+        let expected = &case.collations;
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        for schema in [
+            binding::bind_query_plan_schema(&EmptyRoutineResolution, &query, &[], &context, None),
+            binding::analyze_query_plan_schema(
+                &EmptyRoutineResolution,
+                &query,
+                &[],
+                &context,
+                None,
+            ),
+        ] {
+            let schema = schema.unwrap_or_else(|error| panic!("{sql}: {error}"));
+            assert_eq!(schema.len(), expected.len(), "{sql}");
+            for (position, oid) in expected.iter().enumerate() {
+                assert_eq!(schema.column_collation(position), Some(*oid), "{sql}");
             }
         }
     }

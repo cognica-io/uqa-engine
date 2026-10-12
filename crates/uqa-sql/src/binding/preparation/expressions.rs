@@ -102,6 +102,16 @@ impl Preparation<'_> {
             }
         }
         let ty = match expression {
+            ScalarExpr::ScalarSubquery(index) => {
+                let query = subqueries.get(*index).ok_or_else(|| {
+                    error("XX000", "scalar subquery slot is outside its plan".into())
+                })?;
+                let schema = self.query(query, Some(input))?;
+                let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
+                result.selected_collation = schema.column_collation(0);
+                result.record_fields = schema.record_fields(0).cloned();
+                return Ok(result);
+            }
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
             ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
             ScalarExpr::Literal(Value::Str(text)) => {
@@ -169,7 +179,6 @@ impl Preparation<'_> {
             ScalarExpr::Between { .. }
             | ScalarExpr::InList { .. }
             | ScalarExpr::Case { .. }
-            | ScalarExpr::ScalarSubquery(_)
             | ScalarExpr::Exists { .. }
             | ScalarExpr::InSubquery { .. }
             | ScalarExpr::Func { .. }
@@ -187,6 +196,7 @@ impl Preparation<'_> {
             | ScalarExpr::Default => self.known_type(expression, input, subqueries)?,
         };
         let mut result = ExpressionType::resolved(ty);
+        result.selected_collation = input.input_collation(expression);
         if matches!(result.ty, Some(ColumnType::Record)) {
             result.record_fields = self.scope.bind_record_fields(
                 self.routines,
@@ -245,19 +255,14 @@ impl Preparation<'_> {
                 input,
                 subqueries,
             )?,
-            ScalarExpr::ScalarSubquery(index)
-            | ScalarExpr::Exists {
+            ScalarExpr::Exists {
                 subquery: index, ..
             } => {
                 let query = subqueries.get(*index).ok_or_else(|| {
                     error("XX000", "scalar subquery slot is outside its plan".into())
                 })?;
-                let schema = self.query(query, Some(input))?;
-                if matches!(expression, ScalarExpr::Exists { .. }) {
-                    Some(ColumnType::Boolean)
-                } else {
-                    schema.column_type(0).cloned()
-                }
+                self.query(query, Some(input))?;
+                Some(ColumnType::Boolean)
             }
             ScalarExpr::InSubquery { expr, subquery, .. } => {
                 let mut value = self.expression(expr, input, subqueries)?;

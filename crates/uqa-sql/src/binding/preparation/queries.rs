@@ -302,9 +302,10 @@ impl Preparation<'_> {
                 };
                 let fields = super::super::record_fields::star_fields(&projection.expr, expansion)
                     .unwrap_or_default();
-                for ((column, ty), fields) in columns.into_iter().zip(fields) {
+                for ((column, ty, collation), fields) in columns.into_iter().zip(fields) {
                     output.columns.push(column);
                     let mut value = ExpressionType::resolved(ty);
+                    value.selected_collation = collation;
                     value.record_fields = fields;
                     output.types.push(value);
                 }

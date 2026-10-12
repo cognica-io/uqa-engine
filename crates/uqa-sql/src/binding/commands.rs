@@ -160,7 +160,10 @@ impl SchemaScope {
             .enumerate()
             .map(|(position, column)| target.public_name(position).unwrap_or(column).to_string())
             .collect();
-        let schema = RowSchema::with_types(columns, target.column_types().to_vec());
+        let schema = RowSchema::with_types(columns, target.column_types().to_vec())
+            .with_column_collations(
+                (0..target.len()).map(|position| target.column_collation(position)),
+            );
         Ok(if target.columns_are_open(None) {
             RowSchema::with_open_columns(&schema, None)
         } else {
@@ -225,6 +228,7 @@ impl SchemaScope {
             let labels = projection_columns(returning);
             let mut columns = Vec::new();
             let mut types: Vec<Option<ColumnType>> = Vec::new();
+            let mut collations = super::projection::OutputCollations::default();
             for (position, projection) in returning.iter().enumerate() {
                 let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                     &expression
@@ -232,19 +236,22 @@ impl SchemaScope {
                     &target
                 };
                 if let Some(star) = projection_star_columns(&projection.expr, expansion)? {
-                    for (column, ty) in star {
+                    for (column, ty, collation) in star {
+                        collations.push(types.len(), ty.as_ref(), collation);
                         columns.push(column);
                         types.push(ty);
                     }
                 } else {
                     columns.push(labels[position].clone());
-                    types.push(self.bind_expression_type(
+                    let (ty, collation) = self.bind_projection_metadata(
                         routines,
                         &projection.expr,
                         &expression,
                         command.scalar_subqueries(),
                         params,
-                    )?);
+                    )?;
+                    collations.push(types.len(), ty.as_ref(), collation);
+                    types.push(ty);
                 }
             }
             if let Some(error) = crate::semantics::virtual_relation_mutation_error(
@@ -254,7 +261,7 @@ impl SchemaScope {
             )? {
                 return Err(error);
             }
-            Ok(RowSchema::with_types(columns, types))
+            Ok(collations.apply(RowSchema::with_types(columns, types)))
         })();
         self.restore_cte_schemas(previous);
         result

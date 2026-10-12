@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod array_transforms;
 mod body_inputs;
+mod column_collations;
 mod comparison_capabilities;
 mod defaults;
 mod dependencies;

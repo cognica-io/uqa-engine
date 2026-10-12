@@ -1,0 +1,74 @@
+{
+  "direct_queries": [
+    {
+      "sql": "SELECT p, c, n FROM local",
+      "collations": [
+        951,
+        950,
+        0
+      ]
+    },
+    {
+      "sql": "SELECT q.* FROM local q",
+      "collations": [
+        950,
+        951,
+        0
+      ]
+    },
+    {
+      "sql": "SELECT q.* FROM (SELECT p AS x, c AS x FROM remote) q",
+      "collations": [
+        951,
+        950
+      ]
+    },
+    {
+      "sql": "WITH a AS (SELECT p, c FROM local), b(x, y) AS (SELECT * FROM a) SELECT y, x FROM b",
+      "collations": [
+        950,
+        951
+      ]
+    },
+    {
+      "sql": "SELECT (SELECT q.p), q.c FROM local q",
+      "collations": [
+        951,
+        950
+      ]
+    },
+    {
+      "sql": "SELECT inner_row.* FROM local q, LATERAL (SELECT q.p AS p) inner_row",
+      "collations": [
+        951
+      ]
+    }
+  ],
+  "prepared_expressions": [
+    {
+      "sql": "SELECT p COLLATE \"C\", c COLLATE \"POSIX\" FROM local",
+      "collations": [
+        950,
+        951
+      ]
+    },
+    {
+      "sql": "WITH a AS (SELECT p COLLATE \"C\" AS p FROM local) SELECT * FROM a",
+      "collations": [
+        950
+      ]
+    },
+    {
+      "sql": "SELECT 'x' COLLATE \"C\"",
+      "collations": [
+        950
+      ]
+    },
+    {
+      "sql": "SELECT 1 + ('2' COLLATE \"C\")",
+      "collations": [
+        0
+      ]
+    }
+  ]
+}

@@ -336,38 +336,39 @@ impl SchemaScope {
         let mut columns = Vec::new();
         let mut types = Vec::new();
         let mut records = Vec::new();
+        let mut collations = projection::OutputCollations::default();
         for (position, projection) in block.projections.iter().enumerate() {
             if let Some(star_columns) = projection_star_columns(&projection.expr, &source)? {
                 records.extend(
                     record_fields::star_fields(&projection.expr, &source).unwrap_or_default(),
                 );
-                for (column, ty) in star_columns {
+                for (column, ty, collation) in star_columns {
+                    collations.push(types.len(), ty.as_ref(), collation);
                     columns.push(column);
                     types.push(ty);
                 }
                 continue;
             }
             columns.push(labels[position].clone());
-            types.push(
-                if preserve_top_level_unknown
-                    && matches!(
-                        &projection.expr,
-                        ScalarExpr::Literal(Value::Str(_) | Value::Null)
-                    )
-                {
-                    None
-                } else if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
-                    Some(ColumnType::Text)
-                } else {
-                    self.bind_expression_type(
-                        routines,
-                        &projection.expr,
-                        &expression_schema,
-                        &block.subqueries,
-                        params,
-                    )?
-                },
-            );
+            let (ty, collation) = if preserve_top_level_unknown
+                && matches!(
+                    &projection.expr,
+                    ScalarExpr::Literal(Value::Str(_) | Value::Null)
+                ) {
+                (None, None)
+            } else if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
+                (Some(ColumnType::Text), None)
+            } else {
+                self.bind_projection_metadata(
+                    routines,
+                    &projection.expr,
+                    &expression_schema,
+                    &block.subqueries,
+                    params,
+                )?
+            };
+            collations.push(types.len(), ty.as_ref(), collation);
+            types.push(ty);
             records.push(
                 if types.last().is_some_and(|ty| {
                     matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_)))
@@ -384,12 +385,14 @@ impl SchemaScope {
                 },
             );
         }
-        let output = RowSchema::with_types(columns, types).with_record_fields(
-            records
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
-        );
+        let output = collations
+            .apply(RowSchema::with_types(columns, types))
+            .with_record_fields(
+                records
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
+            );
         let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
         if self.validate_references {
             self.validate_query_block_clauses(
@@ -412,6 +415,18 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
+        self.bind_projection_metadata(routines, expression, schema, subqueries, params)
+            .map(|(ty, _)| ty)
+    }
+
+    fn bind_projection_metadata(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+    ) -> Result<(Option<ColumnType>, Option<u32>), SQLError> {
         if let ScalarExpr::ScalarSubquery(index) = expression {
             let plan = subqueries.get(*index).ok_or_else(|| {
                 SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
@@ -419,7 +434,7 @@ impl SchemaScope {
             // Result typing and validation share the complete lexical row scope.
             let subquery_outer = Some(schema);
             let output = self.bind_query(routines, plan, params, subquery_outer)?;
-            return Ok(output.column_type(0).cloned());
+            return Ok((output.column_type(0).cloned(), output.column_collation(0)));
         }
         let schema = self.with_stored_outer_internal_aliases(schema);
         let schema = &schema;
@@ -431,7 +446,8 @@ impl SchemaScope {
             )?;
         }
         crate::type_resolution::validate_catalog_literals(expression, schema, params, &resolver)?;
-        crate::scalar_type_with_resolver(expression, schema, params, &resolver)
+        let ty = crate::scalar_type_with_resolver(expression, schema, params, &resolver)?;
+        Ok((ty, schema.input_collation(expression)))
     }
 
     #[expect(

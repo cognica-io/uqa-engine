@@ -313,9 +313,17 @@ impl QueryOutput {
                 self.columns.clone(),
                 self.types.iter().map(|value| value.ty.clone()).collect(),
             )
-            .with_record_fields(self.types.iter().enumerate().filter_map(
-                |(index, value)| value.record_fields.clone().map(|fields| (index, fields)),
-            ));
+            // Unknown target entries retain their selection in ExpressionType until coercion determines a collatable output type; clause binding also uses this provisional schema before that coercion.
+            .with_column_collations(self.types.iter().map(|value| {
+                value
+                    .ty
+                    .as_ref()
+                    .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+                    .and(value.selected_collation)
+            }))
+            .with_record_fields(self.types.iter().enumerate().filter_map(|(index, value)| {
+                value.record_fields.clone().map(|fields| (index, fields))
+            }));
         if self.open {
             RowSchema::with_open_columns(&schema, None)
         } else {
