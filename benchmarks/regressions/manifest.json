@@ -3292,6 +3292,19 @@
       "capability": "Procedural parameter collation identity",
       "workload": "Eighteen independent PostgreSQL record-field observations pass through PL/pgSQL parameterization, preparation, codec restoration and fresh variable reads.",
       "invariant": "Parameters retain implicit C/POSIX/default selections and conflicts without capturing invocation values or promoting the selection to explicit strength."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_record_fields_preserve_postgresql_declared_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Retained trigger record descriptors",
+      "workload": "Sixteen independent PostgreSQL trigger field identities are resolved from both populated and NULL OLD/NEW records, including cached record-field references.",
+      "invariant": "Each field retains its declared type and collation through activation-record lookup without changing values or missing-field diagnostics."
     }
   ]
 }

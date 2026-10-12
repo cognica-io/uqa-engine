@@ -55,7 +55,7 @@ mod transaction_control;
 pub use records::shape_trigger_outcome;
 
 pub struct TriggerRoutineContext {
-    pub column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    pub row_schema: uqa_sql::RowSchema,
     pub old: Value,
     pub new: Value,
     pub name: String,
@@ -99,7 +99,7 @@ pub struct Interpreter<'a> {
     def: &'a CreateFunction,
     datums: &'a [PLpgSQLDatum],
     values: Vec<Value>,
-    record_types: HashMap<usize, Vec<Option<ColumnType>>>,
+    record_schemas: HashMap<usize, uqa_sql::RowSchema>,
     bindings: HashMap<String, Vec<usize>>,
     cursor_arguments: BTreeSet<usize>,
     err_stack: Vec<CaughtError>,
@@ -122,10 +122,10 @@ struct CaughtError {
 
 /// Maps variable names and positional parameters onto an activation record.
 struct DatumResolver<'a> {
-    services: RoutineContext<'a>,
+    types: &'a dyn uqa_sql::assignment::routines::RoutineValueContext,
     datums: &'a [PLpgSQLDatum],
     values: &'a [Value],
-    record_types: &'a HashMap<usize, Vec<Option<ColumnType>>>,
+    record_schemas: &'a HashMap<usize, uqa_sql::RowSchema>,
     bindings: &'a HashMap<String, Vec<usize>>,
     error: Option<&'a (String, String)>,
     param_count: usize,

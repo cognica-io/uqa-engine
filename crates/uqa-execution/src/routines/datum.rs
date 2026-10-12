@@ -30,7 +30,7 @@ impl Interpreter<'_> {
         idx: usize,
         value: Value,
         source: Option<&ColumnType>,
-        record_types: Option<Vec<Option<ColumnType>>>,
+        record_schema: Option<uqa_sql::RowSchema>,
     ) -> Result<(), SQLError> {
         let target_type = self.datum_type(idx);
         match &self.datums[idx] {
@@ -60,10 +60,10 @@ impl Interpreter<'_> {
                 Ok(())
             }
             PLpgSQLDatum::Rec { .. } => {
-                if let Some(types) = record_types {
-                    self.record_types.insert(idx, types);
+                if let Some(schema) = record_schema {
+                    self.record_schemas.insert(idx, schema);
                 } else {
-                    self.record_types.remove(&idx);
+                    self.record_schemas.remove(&idx);
                 }
                 match value {
                     Value::Record(_) | Value::Null => {
@@ -189,7 +189,10 @@ impl Interpreter<'_> {
                         .into(),
                 );
                 self.values[*dno] = value;
-                self.record_types.insert(*dno, column_types.to_vec());
+                self.record_schemas.insert(
+                    *dno,
+                    uqa_sql::RowSchema::with_types(columns.to_vec(), column_types.to_vec()),
+                );
                 Ok(())
             }
             IntoTarget::Row(fields) => {

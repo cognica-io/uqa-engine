@@ -226,9 +226,9 @@ impl Interpreter<'_> {
         target: usize,
         expr: &super::PLpgSQLExpression,
     ) -> Result<Flow, SQLError> {
-        let record_types = self.record_expression_types(expr)?;
+        let record_schema = self.record_expression_schema(expr)?;
         let (value, source) = self.eval_expr_with_type(expr)?;
-        self.assign_datum_typed(target, value, source.as_ref(), record_types)?;
+        self.assign_datum_typed(target, value, source.as_ref(), record_schema)?;
         Ok(Flow::Normal)
     }
 
