@@ -1,0 +1,203 @@
+[
+  {
+    "expression": "'Grüße Σ' COLLATE \"default\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"default\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"default\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "'Grüße Σ' COLLATE \"C\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"C\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"C\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "'Grüße Σ' COLLATE \"POSIX\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"POSIX\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"POSIX\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "'Grüße Σ' COLLATE \"ucs_basic\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"ucs_basic\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"ucs_basic\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "'Grüße Σ' COLLATE \"unicode\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"unicode\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"unicode\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "'Grüße Σ' COLLATE \"pg_c_utf8\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"pg_c_utf8\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"pg_c_utf8\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "'Grüße Σ' COLLATE \"pg_unicode_fast\"",
+    "type_oid": 25,
+    "value": "Grüße Σ",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "NULL::text COLLATE \"pg_unicode_fast\"",
+    "type_oid": 25,
+    "value": null,
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ARRAY['x',NULL] COLLATE \"pg_unicode_fast\"",
+    "type_oid": 1009,
+    "value": "{x,NULL}",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "('nested' COLLATE \"C\") COLLATE \"POSIX\"",
+    "type_oid": 25,
+    "value": "nested",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "COALESCE(NULL::text COLLATE \"C\", 'fallback')",
+    "type_oid": 25,
+    "value": "fallback",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "('42' COLLATE \"C\")::integer",
+    "type_oid": 23,
+    "value": "42",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "ROW('x' COLLATE \"C\",1)",
+    "type_oid": 2249,
+    "value": "(x,1)",
+    "error": null,
+    "requires_sequence": false
+  },
+  {
+    "expression": "(1/0)::text COLLATE \"C\"",
+    "type_oid": null,
+    "value": null,
+    "error": {
+      "sqlstate": "22012",
+      "message": "division by zero",
+      "detail": null,
+      "hint": null
+    },
+    "requires_sequence": false
+  },
+  {
+    "expression": "nextval('effect')::text COLLATE \"C\"",
+    "type_oid": 25,
+    "value": "1",
+    "error": null,
+    "requires_sequence": true
+  },
+  {
+    "expression": "currval('effect')",
+    "type_oid": 20,
+    "value": "1",
+    "error": null,
+    "requires_sequence": true
+  }
+]

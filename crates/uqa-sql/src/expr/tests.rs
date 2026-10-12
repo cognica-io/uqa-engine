@@ -9,6 +9,8 @@ use super::json::value_to_json;
 use super::*;
 use crate::ast::Expr;
 
+mod collations;
+
 struct DomainCastHook;
 
 impl EngineHook for DomainCastHook {

@@ -133,6 +133,18 @@ pub(super) fn format_regcollation(visibility: &OutputVisibility, oid: i64) -> Op
     )
 }
 
+/// Reconstruct a selected collation using only namespace visibility, without building unrelated type metadata.
+pub(crate) fn format_expression_collation(
+    catalog: &crate::catalog::CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+    oid: u32,
+) -> Option<String> {
+    format_regcollation(
+        &OutputVisibility::from_resolution(catalog, resolution),
+        i64::from(oid),
+    )
+}
+
 #[cfg(test)]
 mod namespaces_tests;
 

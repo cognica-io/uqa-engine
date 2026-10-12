@@ -10,6 +10,9 @@ use std::path::Path;
 use std::sync::Arc;
 use uqa_engine::Engine;
 
+#[path = "regcollation/values.rs"]
+mod values;
+
 fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::new(),

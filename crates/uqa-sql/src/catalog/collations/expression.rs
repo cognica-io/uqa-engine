@@ -16,6 +16,21 @@ pub struct Clause<'a, T> {
     pub oid: Option<u32>,
 }
 
+impl<T> Clause<'_, T> {
+    /// Executable SQL retains a selected identity instead of resolving its former spelling again.
+    pub fn executable_name(&self) -> Result<std::borrow::Cow<'_, str>, SQLError> {
+        let Some(oid) = self.oid else {
+            return Ok(std::borrow::Cow::Borrowed(self.name));
+        };
+        let name = super::builtin_collation_name(i64::from(oid))
+            .ok_or_else(|| SQLError::Internal("unknown collation identity".into()))?;
+        Ok(std::borrow::Cow::Owned(format!(
+            "pg_catalog.{}",
+            crate::expr::quote_ident(name)
+        )))
+    }
+}
+
 pub fn scalar_clause(expression: &ScalarExpr) -> Result<Option<Clause<'_, ScalarExpr>>, SQLError> {
     let ScalarExpr::Func {
         binding: Some(binding),

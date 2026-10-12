@@ -11,6 +11,69 @@ use crate::ast::{BinaryOp, Expr, FromClause, FunctionOrderSyntax, Statement};
 use crate::SQLError;
 
 #[test]
+fn collation_syntax_survives_executable_and_schema_rendering() {
+    for input in [
+        "source COLLATE \"C\"",
+        "(source || 'x') COLLATE pg_catalog.\"C\"",
+        "(source COLLATE \"C\") COLLATE \"POSIX\"",
+        "(source COLLATE \"C\")::varchar(5)",
+        "(source COLLATE \"C\") IS NULL",
+        "public.\"COLLATE\"(source)",
+    ] {
+        let Statement::Select(mut query) = crate::compile(&format!("SELECT {input}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT");
+        };
+        let expression = query.projections.remove(0).expr;
+        for rendered in [
+            expression_sql(&expression).unwrap(),
+            crate::catalog::expression_text::schema_expr_text(&expression).unwrap(),
+        ] {
+            let Statement::Select(mut restored) = crate::compile(&format!("SELECT {rendered}"))
+                .unwrap()
+                .remove(0)
+            else {
+                panic!("SELECT");
+            };
+            assert_eq!(
+                restored.projections.remove(0).expr,
+                expression,
+                "{input}: {rendered}"
+            );
+        }
+    }
+}
+
+#[test]
+fn collation_rendering_names_the_selected_identity() {
+    let Statement::Select(mut query) = crate::compile("SELECT source COLLATE \"C\"")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("SELECT");
+    };
+    let expression = &mut query.projections[0].expr;
+    let Expr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = expression
+    else {
+        panic!("COLLATE");
+    };
+    binding.dispatch = Some(crate::ast::FunctionDispatch::Collate { oid: Some(950) });
+    args[1] = Expr::Literal(Value::Str("missing.old_name".into()));
+    for rendered in [
+        expression_sql(expression).unwrap(),
+        crate::catalog::expression_text::schema_expr_text(expression).unwrap(),
+    ] {
+        assert_eq!(rendered, "(source COLLATE pg_catalog.\"C\")");
+    }
+}
+
+#[test]
 fn extract_syntax_survives_compilation_lowering_storage_and_executable_rendering() {
     use crate::ast::FunctionCallSyntax;
     use crate::plan::ExpressionPlan;

@@ -77,6 +77,53 @@ fn schema() -> RowSchema {
 }
 
 #[test]
+fn stored_collation_casts_keep_only_the_selected_outer_identity() {
+    let schema = RowSchema::with_types(vec!["source".into()], vec![Some(ColumnType::Text)]);
+    for (input, oid, has_cast) in [
+        ("(source COLLATE \"C\")::varchar(5)", Some(950), true),
+        (
+            "((source COLLATE \"C\") COLLATE \"POSIX\")::varchar(5)",
+            Some(951),
+            true,
+        ),
+        (
+            "((source COLLATE \"C\") COLLATE \"POSIX\")::text",
+            Some(951),
+            false,
+        ),
+        ("(source COLLATE \"C\")::integer", None, true),
+    ] {
+        let mut stored = expression(input);
+        store_operand_coercions(&mut stored, &schema, &[], &Catalog).unwrap();
+        let clause = crate::catalog::collations::expression::scalar_clause(&stored).unwrap();
+        assert_eq!(
+            clause.as_ref().and_then(|clause| clause.oid),
+            oid,
+            "{input}"
+        );
+        let operand = clause.map_or(&stored, |clause| clause.argument);
+        assert_eq!(
+            matches!(operand, ScalarExpr::Cast { .. }),
+            has_cast,
+            "{input}"
+        );
+        let mut clauses = 0;
+        operand.visit(&mut |node| {
+            clauses += usize::from(
+                crate::catalog::collations::expression::scalar_clause(node)
+                    .unwrap()
+                    .is_some(),
+            );
+        });
+        assert_eq!(clauses, 0, "{input}");
+        let once = stored.clone();
+        let mut restored = serde_json::from_slice(&serde_json::to_vec(&stored).unwrap()).unwrap();
+        assert!(!store_operand_coercions(&mut restored, &schema, &[], &Catalog).unwrap());
+        assert_eq!(restored, once, "{input}");
+    }
+}
+
+#[test]
 fn stored_operators_keep_selected_inputs_without_result_type_or_carrier_casts() {
     for (input, expected) in [
         ("n + i", "n + i::numeric"),

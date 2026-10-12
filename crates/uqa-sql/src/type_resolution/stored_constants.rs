@@ -13,6 +13,8 @@ use crate::schema::ScalarTypeSchema;
 use crate::{SQLError, SQLParam, ScalarExpr, ScalarFrameBound};
 use uqa_core::Value;
 
+mod collations;
+
 /// Whether an expression has an `unknown` literal outside its subqueries, the only nodes that binding converts to enum constants.
 #[must_use]
 pub fn contains_unknown_literal(expression: &ScalarExpr) -> bool {
@@ -158,15 +160,23 @@ impl Folding for OperatorCoercions<'_> {
         if self.preserve_syntax_shape {
             return Ok(false);
         }
+        let normalized = collations::normalize_cast(stored, self.resolver)?;
+        if normalized && crate::catalog::collations::expression::scalar_clause(stored)?.is_some() {
+            let ScalarExpr::Func { args, .. } = stored else {
+                unreachable!("normalized collation clause");
+            };
+            self.identity_cast(&mut args[0])?;
+            return Ok(true);
+        }
         let ScalarExpr::Cast { expr, ty, .. } = stored else {
-            return Ok(false);
+            return Ok(normalized);
         };
         // Retained input constants keep their written coercion boundary and modifier; reconstruction already prints that boundary once.
         if matches!(
             **expr,
             ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
         ) {
-            return Ok(false);
+            return Ok(normalized);
         }
         let target = super::inference::resolved_type_name(
             ty,
@@ -180,7 +190,7 @@ impl Folding for OperatorCoercions<'_> {
             .zip(target.as_deref())
             .is_some_and(|(source, target)| source == target)
         {
-            return Ok(false);
+            return Ok(normalized);
         }
         // Parse analysis keeps the existing expression when its exact selected type and modifier already match the requested coercion.
         let ScalarExpr::Cast { expr, .. } =

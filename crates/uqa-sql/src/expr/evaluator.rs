@@ -154,6 +154,10 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 if let Some(error) = &binding.resolution_error {
                     return Err(error.sql_error());
                 }
+                if let Some(clause) = crate::catalog::collations::expression::ast_clause(expr)? {
+                    // Analysis retains the selected collation for consumers; evaluating the clause only evaluates its operand.
+                    return eval(clause.argument, ctx);
+                }
                 if let Some(hook) = ctx.engine {
                     hook.require_builtin_execute(binding)?;
                 }

@@ -2499,6 +2499,19 @@
       "capability": "Retained collation binding",
       "workload": "Bind an admitted explicit C expression, occupy all remaining allowance and bind the selected expression again.",
       "invariant": "Selection preserves OID 950 without growing the retained tree; rebinding requires no additional space and all reservations are released."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "collation_clauses_forward_one_admitted_operand",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/scalar/evaluator/collation_tests.rs",
+      "capability": "Collation operand retention",
+      "workload": "Thirty-two nested C collation clauses around a 4096-byte row field, exact and insufficient allowances, and both cancellation owners.",
+      "invariant": "Only one operand payload is admitted and retained; 4095 bytes fails with 53200, either cancellation fails with 57014, and all reservations are released."
     }
   ]
 }

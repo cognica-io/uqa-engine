@@ -106,6 +106,12 @@ fn is_constant(
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> bool {
+    // A TypedLiteral cannot retain the clause's selected collation; its operand can still fold.
+    if uqa_sql::catalog::collations::expression::scalar_clause(expression)
+        .is_ok_and(|clause| clause.is_some())
+    {
+        return false;
+    }
     let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
     match expression {
         ScalarExpr::Literal(value) => {

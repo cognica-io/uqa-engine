@@ -8,6 +8,7 @@
 
 mod collations;
 mod format_type;
+pub(crate) use collations::format_expression_collation;
 pub use collations::{resolve_expression_collation_oid, resolve_regcollation_oid};
 pub mod relation_oid;
 mod row_types;

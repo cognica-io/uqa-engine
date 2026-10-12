@@ -25,6 +25,9 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
+        if let Some(clause) = uqa_sql::catalog::collations::expression::scalar_clause(expression)? {
+            return self.collation(clause, scope, subqueries);
+        }
         match expression {
             ScalarExpr::Column(name) => Ok(self.column_reference(None, name, scope)),
             ScalarExpr::QualifiedColumn { qualifier, column } => {
@@ -119,6 +122,27 @@ impl Deparser<'_> {
                 self.subquery(*subquery, scope, subqueries)?
             )),
         }
+    }
+
+    fn collation(
+        &self,
+        clause: uqa_sql::catalog::collations::expression::Clause<'_, ScalarExpr>,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let name = match clause.oid {
+            Some(oid) => crate::catalog::projection::regtypes::format_expression_collation(
+                self.catalog,
+                &self.dynamic,
+                oid,
+            )
+            .ok_or_else(|| SQLError::Internal("unknown collation identity".into()))?,
+            None => clause.name.to_string(),
+        };
+        Ok(self.parenthesize(format!(
+            "{} COLLATE {name}",
+            self.operand(clause.argument, 75, false, scope, subqueries)?
+        )))
     }
 
     fn boolean_expression(
@@ -794,6 +818,11 @@ pub(super) fn type_name(ty: &str) -> String {
 fn precedence(expression: &ScalarExpr) -> u8 {
     // IS predicates bind below comparison operators and above NOT.
     match expression {
+        // PostgreSQL's isSimpleNode keeps a CollateExpr parenthesized when used as an operand.
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if matches!(binding.dispatch, Some(FunctionDispatch::Collate { .. })) => 0,
         ScalarExpr::Func {
             binding: Some(binding),
             ..
@@ -835,6 +864,9 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         ) =>
         {
             0
+        }
+        ScalarExpr::Func { name, args, .. } if args.len() == 2 => {
+            binary_function_operator(name).map_or(100, |(_, precedence)| precedence)
         }
         ScalarExpr::InList { list, .. } if list.len() > 1 => 0,
         ScalarExpr::Or(_) => 10,
@@ -906,6 +938,7 @@ pub(super) fn prints_as_call(
             FunctionDispatch::ArraySubscripts
                 | FunctionDispatch::ArraySlices
                 | FunctionDispatch::NumericOperator(_)
+                | FunctionDispatch::Collate { .. }
         )
     ) || (args.len() == 2 && binary_function_operator(name).is_some());
     !printed_otherwise
