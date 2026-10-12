@@ -180,3 +180,23 @@ fn preparation_preserves_untyped_callback_identity_and_original_arguments() {
         }
     });
 }
+
+#[test]
+fn ordered_set_results_substitute_the_observed_element_identity() {
+    for sql in [
+        "SELECT mode() WITHIN GROUP (ORDER BY 1) = 1",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY 1) = 1",
+        "SELECT mode() WITHIN GROUP (ORDER BY ARRAY[1]) = ARRAY[1]",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[1]) = ARRAY[1]",
+        "SELECT mode() WITHIN GROUP (ORDER BY 'x'::text) = 'x'::text",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY 'x'::text) = 'x'::text",
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        assert!(
+            infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context())
+                .unwrap()
+                .is_empty(),
+            "{sql}"
+        );
+    }
+}

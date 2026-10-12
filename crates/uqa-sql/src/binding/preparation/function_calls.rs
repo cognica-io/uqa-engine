@@ -231,7 +231,29 @@ impl Preparation<'_> {
             }
             return Ok(FunctionResult::Unselected);
         }
-        let targets = if let Some(selected) = &selection.overload {
+        let targets = self.function_argument_targets(name, selection, types)?;
+        for (index, value) in arguments.values.iter_mut().enumerate() {
+            let position = selection
+                .positions
+                .as_ref()
+                .map_or(index, |positions| positions[index]);
+            if let Some(target) = targets.get(position).and_then(Option::as_ref) {
+                self.parameters.coerce_unknown(value, target)?;
+            }
+        }
+        if let Some(ty) = ordered_result_type(selection, arguments)? {
+            return Ok(FunctionResult::Selected(Some(ty)));
+        }
+        Ok(FunctionResult::Unselected)
+    }
+
+    fn function_argument_targets(
+        &mut self,
+        name: &str,
+        selection: &SelectedFunctionArguments,
+        types: Vec<Option<ColumnType>>,
+    ) -> Result<Vec<Option<ColumnType>>, SQLError> {
+        Ok(if let Some(selected) = &selection.overload {
             let types = selected
                 .binding
                 .invocation
@@ -270,16 +292,68 @@ impl Preparation<'_> {
                 types
             };
             crate::type_resolution::builtin_function_argument_targets(name, &declared)
-        };
-        for (index, value) in arguments.values.iter_mut().enumerate() {
-            let position = selection
-                .positions
-                .as_ref()
-                .map_or(index, |positions| positions[index]);
-            if let Some(target) = targets.get(position).and_then(Option::as_ref) {
-                self.parameters.coerce_unknown(value, target)?;
-            }
-        }
-        Ok(FunctionResult::Unselected)
+        })
     }
+}
+
+/// Substitute a selected ordered-set declaration from the argument occurrences already observed, after modifier checks and input coercion. The shared routine matcher preserves enum/domain/record identities instead of exposing a pseudo-type as the expression result.
+fn ordered_result_type(
+    selection: &SelectedFunctionArguments,
+    arguments: &ObservedFunctionArguments,
+) -> Result<Option<ColumnType>, SQLError> {
+    use crate::type_resolution::{
+        match_routine_signature, routine_polymorphic_type, RoutineCallDescriptor,
+        RoutineParameterDescriptor,
+    };
+    if !matches!(
+        selection.kind,
+        Some(super::super::ordered_calls::Kind::OrderedSet {
+            polymorphic: true,
+            ..
+        })
+    ) {
+        return Ok(None);
+    }
+    let Some(selected) = &selection.overload else {
+        return Ok(None);
+    };
+    let ColumnType::Named(result) = &selected.return_type else {
+        return Ok(None);
+    };
+    if routine_polymorphic_type(result).is_none() {
+        return Ok(None);
+    }
+    let parameters = selected
+        .binding
+        .argument_types
+        .iter()
+        .map(|name| RoutineParameterDescriptor {
+            name: None,
+            type_name: name.clone(),
+            column_type: None,
+            has_default: false,
+            default_type: None,
+            variadic: false,
+        })
+        .collect::<Vec<_>>();
+    let types = arguments.types();
+    let matched = match_routine_signature(
+        &parameters,
+        RoutineCallDescriptor {
+            argument_names: &arguments.names,
+            argument_types: &types,
+            explicit_variadic: arguments.variadic,
+        },
+    )
+    .map_err(|error| {
+        SQLError::Internal(format!(
+            "selected ordered-set signature cannot resolve its result: {error:?}"
+        ))
+    })?
+    .ok_or_else(|| {
+        SQLError::Internal("selected ordered-set signature no longer matches its arguments".into())
+    })?;
+    matched.substitute_type(result).map(Some).ok_or_else(|| {
+        SQLError::Internal("selected ordered-set result type remains polymorphic".into())
+    })
 }
