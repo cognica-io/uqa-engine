@@ -143,6 +143,10 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         self.routines.resolve_type_name(name)
     }
 
+    fn resolve_collation_name(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        self.routines.resolve_collation_name(name)
+    }
+
     fn enum_labels(&self) -> Option<&dyn crate::expr::enums::EnumLabelCatalog> {
         self.routines.enum_labels()
     }

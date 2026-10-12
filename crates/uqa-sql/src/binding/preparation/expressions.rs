@@ -78,13 +78,15 @@ impl Preparation<'_> {
         }
         self.check_schema_subquery(expression)?;
         if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)? {
-            let value = self.expression(clause.argument, input, subqueries)?;
-            crate::catalog::collations::expression::select(
+            let mut value = self.expression(clause.argument, input, subqueries)?;
+            let oid = crate::catalog::collations::expression::select(
                 clause.name,
                 clause.oid,
                 value.ty.as_ref(),
                 Some(self.routines),
             )?;
+            self.parameters
+                .retain_collation(expression, &mut value, oid);
             return Ok(value);
         }
         if self.schema_expression.is_some() {
@@ -111,7 +113,15 @@ impl Preparation<'_> {
             ScalarExpr::Binary { op, lhs, rhs } => {
                 let mut left = self.expression(lhs, input, subqueries)?;
                 let mut right = self.expression(rhs, input, subqueries)?;
-                Some(self.binary(*op, &mut left, &mut right)?)
+                if matches!(
+                    (lhs.as_ref(), rhs.as_ref()),
+                    (ScalarExpr::Row(_), ScalarExpr::Row(_))
+                ) {
+                    self.coerce_row_comparison(*op, &mut left, &mut right, false)?;
+                    Some(ColumnType::Boolean)
+                } else {
+                    Some(self.binary(*op, &mut left, &mut right)?)
+                }
             }
             ScalarExpr::Not(inner) => {
                 self.require_boolean(inner, input, subqueries, "NOT")?;
@@ -364,7 +374,8 @@ impl Preparation<'_> {
                 filter.is_some(),
             )?;
         }
-        let result = self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
+        let result =
+            self.coerce_function_arguments(name, binding, args, &mut arguments, &selected)?;
         let selected = selected.overload;
         // Keep the result selected from the observed occurrences: a later sibling can determine a parameter's type after an earlier COLLATE operand was admitted as unknown, so retyping that syntax loses its state.
         let ty = match (result, &selected) {
@@ -438,7 +449,7 @@ impl Preparation<'_> {
     ) -> Result<Option<crate::type_resolution::ResolvedFunctionOverload>, SQLError> {
         let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
         let selected = self.select_function_arguments(name, binding, args, &arguments)?;
-        self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
+        self.coerce_function_arguments(name, binding, args, &mut arguments, &selected)?;
         Ok(selected.overload)
     }
 }

@@ -10,6 +10,8 @@ use super::{expressions, Routines};
 use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::{ColumnType, FunctionTypeResolver, RowSchema, SQLError, Statement};
 
+mod prepared;
+
 struct Catalog;
 
 impl FunctionTypeResolver for Catalog {
@@ -46,6 +48,7 @@ impl FunctionTypeResolver for RetainedCatalog {
         ))
     }
 }
+impl crate::routines::RoutineResolution for RetainedCatalog {}
 
 #[derive(Debug, serde::Deserialize)]
 struct Diagnostic {

@@ -10,6 +10,8 @@ use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
 use std::{collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
 
+mod collations;
+
 #[derive(Clone)]
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
@@ -22,6 +24,7 @@ pub(super) struct ExpressionType {
     coercible_unknown: bool,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
     literal: Option<(NonNull<ScalarExpr>, String)>,
+    collation: Option<NonNull<ScalarExpr>>,
 }
 
 impl ExpressionType {
@@ -33,6 +36,7 @@ impl ExpressionType {
             occurrence: None,
             coercible_unknown: false,
             literal: None,
+            collation: None,
         }
     }
 
@@ -44,6 +48,7 @@ impl ExpressionType {
             occurrence: None,
             coercible_unknown: true,
             literal: None,
+            collation: None,
         }
     }
 
@@ -56,6 +61,7 @@ impl ExpressionType {
             occurrence: None,
             coercible_unknown: true,
             literal: Some((NonNull::from(expression), text)),
+            collation: None,
         }
     }
 
@@ -79,6 +85,7 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, ScalarExpr>,
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
+    collations::CollationInputs,
 );
 
 impl InputConstants {
@@ -92,7 +99,14 @@ impl InputConstants {
                     .values()
                     .flat_map(|membership| membership.left_constants.iter().flatten()),
             )
-            .all(|expression| {
+            .all(|mut expression| {
+                loop {
+                    match crate::catalog::collations::expression::scalar_clause(expression) {
+                        Ok(Some(clause)) => expression = clause.argument,
+                        Ok(None) => break,
+                        Err(_) => return false,
+                    }
+                }
                 let ScalarExpr::TypedLiteral {
                     bound_type: Some(ty),
                     ..
@@ -107,7 +121,7 @@ impl InputConstants {
             })
     }
 
-    fn apply_node(&mut self, expression: &mut ScalarExpr) {
+    fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         let identity = NonNull::from(&*expression);
         if let Some(selected) = self.1.remove(&identity) {
             if let ScalarExpr::Func { binding, .. } = expression {
@@ -117,6 +131,7 @@ impl InputConstants {
         if let Some(constant) = self.0.remove(&identity) {
             *expression = constant;
         }
+        self.3.apply(identity, expression)
     }
 
     #[cfg(test)]
@@ -129,12 +144,17 @@ impl InputConstants {
         expression: &mut ScalarExpr,
         subqueries: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
-        crate::plan::rewrite_scalar_expression(expression, &mut |node| {
-            self.apply_node(node);
-        });
+        let mut result = Ok(());
+        let mut apply = |node: &mut ScalarExpr| {
+            if result.is_ok() {
+                result = self.apply_node(node);
+            }
+        };
+        crate::plan::rewrite_scalar_expression(expression, &mut apply);
         for query in subqueries.iter_mut() {
-            query.rewrite_scalar_expressions(&mut |node| self.apply_node(node));
+            query.rewrite_scalar_expressions(&mut apply);
         }
+        result?;
         if !self.2.is_empty() {
             crate::plan::subqueries::rewrite_expression_with_arena(
                 expression,
@@ -142,7 +162,7 @@ impl InputConstants {
                 &mut |node, arena| self.apply_membership(node, arena),
             )?;
         }
-        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() {
+        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() && self.3.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -152,16 +172,20 @@ impl InputConstants {
     }
 
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
-        // Replacing leaves preserves every other node's address; the plan is neither cloned nor moved between analysis and this walk.
+        // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
+        let mut result = Ok(());
         plan.rewrite_scalar_expressions(&mut |expression| {
-            self.apply_node(expression);
+            if result.is_ok() {
+                result = self.apply_node(expression);
+            }
         });
+        result?;
         if !self.2.is_empty() {
             crate::plan::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
                 self.apply_membership(node, arena)
             })?;
         }
-        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() {
+        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() && self.3.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -184,10 +208,21 @@ impl InputConstants {
 
 impl<'a> ParameterTypes<'a> {
     pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ScalarExpr> {
-        self.input_constants
-            .as_mut()?
-            .0
-            .remove(&NonNull::from(expression))
+        let constants = self.input_constants.as_mut()?;
+        constants.3.take_literal(expression, &mut constants.0)
+    }
+
+    pub(super) fn retain_collation(
+        &mut self,
+        expression: &ScalarExpr,
+        value: &mut ExpressionType,
+        oid: u32,
+    ) {
+        let origin = NonNull::from(expression);
+        if let Some(constants) = &mut self.input_constants {
+            constants.3.select(origin, value.collation, oid);
+        }
+        value.collation = Some(origin);
     }
 
     pub(super) fn retain_membership(
@@ -261,6 +296,7 @@ impl<'a> ParameterTypes<'a> {
             occurrence: Some(occurrence),
             coercible_unknown: true,
             literal: None,
+            collation: None,
         })
     }
 
@@ -276,6 +312,9 @@ impl<'a> ParameterTypes<'a> {
             self.read_literal(*origin, text, target)?;
         }
         let target = target.without_type_modifiers();
+        if let Some(constants) = &mut self.input_constants {
+            constants.3.coerce(expression.collation, &target)?;
+        }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];
             if self.types[*index].as_ref().is_some_and(|ty| *ty != target) {

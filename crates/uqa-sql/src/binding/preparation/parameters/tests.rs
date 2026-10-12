@@ -34,28 +34,46 @@ fn interval_input_applies_fields_before_parameter_type_modifiers_are_removed() {
 fn copied_membership_constants_keep_input_cache_volatility() {
     for (text, target, reusable) in [
         ("1", ColumnType::Integer, true),
+        ("hello", ColumnType::Text, true),
         ("2020-02-03", ColumnType::Date, false),
     ] {
-        let expression = ScalarExpr::Literal(Value::Str(text.into()));
-        let mut parameters = ParameterTypes::with_input_constants(&[], None, None, None);
-        parameters
-            .coerce_unknown(
-                &mut ExpressionType::unknown_literal(&expression, text.into()),
-                &target,
-            )
-            .unwrap();
-        let constant = parameters.take_literal(&expression).unwrap();
-        parameters.retain_membership(
-            &expression,
-            super::super::membership::MembershipAnalysis {
-                shape: crate::type_resolution::membership::MembershipShape::default(),
-                array_coercions: Vec::new(),
-                left_constants: vec![Some(constant)],
-            },
-        );
-        let constants = parameters.take_input_constants();
-        assert!(constants.0.is_empty());
-        assert_eq!(constants.reusable_across_messages(), reusable, "{target:?}");
+        for collated in [false, true] {
+            let clause = if collated { " COLLATE \"C\"" } else { "" };
+            let crate::Statement::Select(query) =
+                crate::compile(&format!("SELECT '{text}'{clause}"))
+                    .unwrap()
+                    .remove(0)
+            else {
+                panic!("query")
+            };
+            let expression =
+                crate::plan::ExpressionPlan::lower(query.projections[0].expr.clone()).scalar;
+            let mut parameters = ParameterTypes::with_input_constants(&[], None, None, None);
+            let argument = crate::catalog::collations::expression::scalar_clause(&expression)
+                .unwrap()
+                .map_or(&expression, |clause| clause.argument);
+            let mut inferred = ExpressionType::unknown_literal(argument, text.into());
+            if collated {
+                parameters.retain_collation(&expression, &mut inferred, 950);
+            }
+            parameters.coerce_unknown(&mut inferred, &target).unwrap();
+            let constant = parameters.take_literal(&expression).unwrap();
+            parameters.retain_membership(
+                &expression,
+                super::super::membership::MembershipAnalysis {
+                    shape: crate::type_resolution::membership::MembershipShape::default(),
+                    array_coercions: Vec::new(),
+                    left_constants: vec![Some(constant)],
+                },
+            );
+            let constants = parameters.take_input_constants();
+            assert!(constants.0.is_empty());
+            assert_eq!(
+                constants.reusable_across_messages(),
+                reusable,
+                "{target:?}, collated={collated}"
+            );
+        }
     }
 }
 

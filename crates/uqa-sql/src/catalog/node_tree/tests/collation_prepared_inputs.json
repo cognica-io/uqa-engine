@@ -1,0 +1,44 @@
+[
+  {
+    "sql": "SELECT 'now' COLLATE \"C\" IN (a, b) FROM (VALUES (NULL::timestamp, NULL::date)) v(a,b)",
+    "clock": 1791769805080845,
+    "inputs": [
+      {
+        "oid": 1114,
+        "text": "2026-10-12 01:50:05.080845"
+      },
+      {
+        "oid": 1082,
+        "text": "2026-10-12"
+      }
+    ]
+  },
+  {
+    "sql": "SELECT '1' COLLATE \"C\" IN (a, b) FROM (VALUES (NULL::numeric, NULL::integer)) v(a,b)",
+    "clock": 1791769805080845,
+    "inputs": [
+      {
+        "oid": 1700,
+        "text": "1"
+      },
+      {
+        "oid": 23,
+        "text": "1"
+      }
+    ]
+  },
+  {
+    "sql": "SELECT '1' COLLATE \"C\" IN (a, b) FROM (VALUES (NULL::text, NULL::integer)) v(a,b)",
+    "clock": 1791769805080845,
+    "inputs": [
+      {
+        "oid": 25,
+        "text": "1"
+      },
+      {
+        "oid": 23,
+        "text": "1"
+      }
+    ]
+  }
+]

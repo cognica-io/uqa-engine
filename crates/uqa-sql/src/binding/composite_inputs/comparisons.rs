@@ -46,12 +46,7 @@ pub(super) fn retain_comparison_inputs(
     let (Some(left), Some(right)) = (fields(left, types)?, fields(right, types)?) else {
         return Ok(());
     };
-    if left.len() != right.len() {
-        return Err(SQLError::Routine {
-            sqlstate: "42601".into(),
-            message: "unequal number of entries in row expressions".into(),
-        });
-    }
+    crate::type_resolution::row_comparison::validate_width(left.len(), right.len(), true)?;
     for (left, right) in left.iter().zip(right) {
         let left_type = crate::scalar_type_with_resolver(left, schema, params, types)?;
         let right_type = crate::scalar_type_with_resolver(right, schema, params, types)?;

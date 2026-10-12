@@ -11,6 +11,7 @@ use super::{
 };
 use crate::catalog::type_metadata::pg_type_oid;
 use crate::type_resolution::binary_operator_by_oid;
+use crate::type_resolution::row_comparison;
 use uqa_core::Value;
 
 mod distinct;
@@ -29,30 +30,16 @@ impl ExpressionContext<'_> {
         left: &[Expr],
         right: &[Expr],
     ) -> Result<TypedNode, SQLError> {
-        require_equal_width(left, right)?;
-        if left.is_empty() {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "cannot compare rows of zero length".into(),
-            });
-        }
+        row_comparison::validate_width(left.len(), right.len(), false)?;
         let mut operators = left
             .iter()
             .zip(right)
             .map(|(left, right)| {
                 let selected = self.scalar_binary(op, left, right)?;
-                if selected.ty != ColumnType::Boolean {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42804".into(),
-                        message: format!(
-                            "row comparison operator must yield type boolean, not type {}",
-                            selected.ty.sql_name()
-                        ),
-                    });
-                }
+                row_comparison::require_boolean(&selected.ty)?;
                 Ok(selected.node)
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, SQLError>>()?;
         if operators.len() == 1 {
             return Ok(boolean_node(operators.pop().expect("one comparison")));
         }
@@ -71,23 +58,7 @@ impl ExpressionContext<'_> {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let comparison = (1..=6)
-            .find(|comparison| {
-                interpretations
-                    .iter()
-                    .all(|options| options.iter().any(|(candidate, _)| candidate == comparison))
-            })
-            .ok_or_else(|| SQLError::Diagnostic {
-                sqlstate: "0A000".into(),
-                message: format!(
-                    "could not determine interpretation of row comparison operator {operator_name}"
-                ),
-                detail: None,
-                hint: Some(
-                    "Row comparison operators must be associated with btree operator families."
-                        .into(),
-                ),
-            })?;
+        let comparison = row_comparison::interpretation(operator_name, &interpretations)?;
         if matches!(comparison, 3 | 6) {
             return Ok(boolean_node(boolean(
                 if comparison == 3 { "and" } else { "or" },
@@ -143,13 +114,7 @@ fn row_ordering_node(
 }
 
 fn require_equal_width<T, U>(left: &[T], right: &[U]) -> Result<(), SQLError> {
-    if left.len() != right.len() {
-        return Err(SQLError::Routine {
-            sqlstate: "42601".into(),
-            message: "unequal number of entries in row expressions".into(),
-        });
-    }
-    Ok(())
+    row_comparison::validate_width(left.len(), right.len(), true)
 }
 
 fn node_list(values: Vec<Field>) -> Field {

@@ -10,6 +10,42 @@ use super::{ColumnType, ExpressionType, Preparation, SQLError};
 use crate::type_resolution::composite_rows::{row_cast_error, validate_field_cast, validate_width};
 
 impl Preparation<'_> {
+    pub(super) fn coerce_row_comparison(
+        &mut self,
+        op: crate::ast::BinaryOp,
+        left: &mut ExpressionType,
+        right: &mut ExpressionType,
+        distinct: bool,
+    ) -> Result<(), SQLError> {
+        let (Some(left), Some(right)) = (&mut left.row_constructor, &mut right.row_constructor)
+        else {
+            return Err(SQLError::Internal(
+                "ROW analysis lost its input fields".into(),
+            ));
+        };
+        crate::type_resolution::row_comparison::validate_width(left.len(), right.len(), distinct)?;
+        let mut interpretations = Vec::new();
+        let mut operator_name = "";
+        let ordered = !distinct && left.len() > 1;
+        for (left, right) in left.iter_mut().zip(right) {
+            let [left, right, result] = self.binary_types(op, left, right)?;
+            crate::type_resolution::row_comparison::require_boolean(&result)?;
+            if ordered {
+                let operator =
+                    crate::type_resolution::binary_operator_catalog_entry(op, [&left, &right])?;
+                operator_name = operator.name;
+                interpretations.push(operator.row_comparison_interpretations().collect());
+            }
+        }
+        if ordered {
+            crate::type_resolution::row_comparison::interpretation(
+                operator_name,
+                &interpretations,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(super) fn coerce_row_constructor(
         &mut self,
         fields: &mut [ExpressionType],

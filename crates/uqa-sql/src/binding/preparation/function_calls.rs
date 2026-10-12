@@ -177,11 +177,25 @@ impl Preparation<'_> {
         &mut self,
         name: &str,
         binding: Option<&FunctionBinding>,
+        original_args: &[ScalarExpr],
         arguments: &mut ObservedFunctionArguments,
         selection: &SelectedFunctionArguments,
     ) -> Result<FunctionResult, SQLError> {
         if binding.is_none() && self.routines.has_untyped_function(name) {
             return Ok(FunctionResult::Selected(None));
+        }
+        if matches!(
+            binding.and_then(|binding| binding.dispatch),
+            Some(crate::ast::FunctionDispatch::IsDistinct)
+        ) && matches!(original_args, [ScalarExpr::Row(_), ScalarExpr::Row(_)])
+        {
+            let [left, right] = arguments.values.as_mut_slice() else {
+                return Err(SQLError::Internal(
+                    "ROW DISTINCT analysis lost its arguments".into(),
+                ));
+            };
+            self.coerce_row_comparison(BinaryOp::Equal, left, right, true)?;
+            return Ok(FunctionResult::Selected(Some(ColumnType::Boolean)));
         }
         let types = arguments.types();
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
