@@ -26,6 +26,47 @@ fn lower_binding() -> FunctionBinding {
 }
 
 #[test]
+fn scoped_collation_lookup_keeps_catalog_permissions_without_recapturing() {
+    use uqa_sql::FunctionTypeResolver;
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SCHEMA collate_private; CREATE ROLE collate_reader",
+            &[],
+        )
+        .unwrap();
+    for (role, private_state) in [("uqa", "42704"), ("collate_reader", "42501")] {
+        engine.sql(&format!("SET ROLE {role}"), &[]).unwrap();
+        let scope = query_scope::new_for_current_routine(&engine);
+        let hook = ScopedEngineHook::new(&engine, &scope);
+        scope.catalog_read_view().unwrap();
+        for resolver in [&engine as &dyn FunctionTypeResolver, &hook] {
+            assert_eq!(resolver.resolve_collation_name("\"C\"").unwrap(), Some(950));
+            let error = resolver
+                .resolve_collation_name("collate_private.\"C\"")
+                .unwrap_err();
+            assert_eq!(error.sqlstate(), Some(private_state));
+            assert_eq!(
+                resolver
+                    .resolve_collation_name("collate_missing.\"C\"")
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("3F000")
+            );
+        }
+        CATALOG_CAPTURES.set(0);
+        for _ in 0..16 {
+            assert_eq!(
+                hook.resolve_collation_name("pg_catalog.\"C\"").unwrap(),
+                Some(950)
+            );
+            assert_eq!(hook.resolve_collation_name("\"POSIX\"").unwrap(), Some(951));
+        }
+        assert_eq!(CATALOG_CAPTURES.get(), 0, "{role}");
+    }
+}
+
+#[test]
 fn scoped_permissions_and_overloads_reuse_catalog_inputs() {
     let engine = Engine::new();
     engine

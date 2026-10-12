@@ -8,7 +8,7 @@
 
 mod collations;
 mod format_type;
-pub use collations::resolve_regcollation_oid;
+pub use collations::{resolve_expression_collation_oid, resolve_regcollation_oid};
 pub mod relation_oid;
 mod row_types;
 pub use format_type::{format_type_name, format_type_value};

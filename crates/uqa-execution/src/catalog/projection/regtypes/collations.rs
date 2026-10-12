@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Collation OID input and the soft-error boundary of `to_regcollation`.
+//! Collation namespace selection and the OID-input and soft-error boundaries of `regcollation`.
 
 use super::{parse_dash_or_oid, CatalogContext, OutputVisibility, SQLError};
 use crate::catalog::security::schema::SchemaAclPrivilege;
@@ -25,6 +25,23 @@ pub fn resolve_regcollation_oid(
     if let Some(oid) = parse_dash_or_oid(input)? {
         return Ok(Some(oid));
     }
+    resolve_named_collation(context, input, true).map(Some)
+}
+
+/// A COLLATE name must identify an existing namespace and collation; numeric OID input and soft missing-schema lookup belong only to `regcollation`.
+pub fn resolve_expression_collation_oid(
+    context: &CatalogContext<'_>,
+    input: &str,
+) -> Result<u32, SQLError> {
+    let oid = resolve_named_collation(context, input, false)?;
+    u32::try_from(oid).map_err(|_| SQLError::Internal("invalid collation identity".into()))
+}
+
+fn resolve_named_collation(
+    context: &CatalogContext<'_>,
+    input: &str,
+    missing_schema_ok: bool,
+) -> Result<i64, SQLError> {
     let names = uqa_sql::parse_regobject_name(input)
         .ok_or_else(|| input_error("42602", "invalid name syntax".into()))?;
     let (schema, local) = match names.as_slice() {
@@ -43,23 +60,14 @@ pub fn resolve_regcollation_oid(
         }
     };
     let visible = match schema {
-        Some(schema) => {
-            if context.schema_security_for_privilege(schema).is_some() {
-                context.require_schema_privilege(
-                    schema,
-                    &context.current_role(),
-                    SchemaAclPrivilege::Usage,
-                )?;
-            }
-            schema == "pg_catalog"
-        }
+        Some(schema) => visible_in_schema(context, schema, missing_schema_ok)?,
         None => context
             .current_schema_names(true)?
             .iter()
             .any(|schema| schema == "pg_catalog"),
     };
     if let Some(oid) = visible.then(|| builtin_collation_oid(local)).flatten() {
-        return Ok(Some(oid));
+        return Ok(oid);
     }
     Err(input_error(
         "42704",
@@ -68,6 +76,32 @@ pub fn resolve_regcollation_oid(
             names.join(".")
         ),
     ))
+}
+
+fn visible_in_schema(
+    context: &CatalogContext<'_>,
+    schema: &str,
+    missing_ok: bool,
+) -> Result<bool, SQLError> {
+    let resolution = context.session.relation_name_resolution();
+    if schema == "pg_temp" && resolution.temporary_namespace_allocated {
+        return Ok(false);
+    }
+    let allocated =
+        schema != resolution.temporary_schema || resolution.temporary_namespace_allocated;
+    if allocated && context.schema_security_for_privilege(schema).is_some() {
+        context.require_schema_privilege(
+            schema,
+            &context.current_role(),
+            SchemaAclPrivilege::Usage,
+        )?;
+    } else if !missing_ok {
+        return Err(input_error(
+            "3F000",
+            format!("schema \"{schema}\" does not exist"),
+        ));
+    }
+    Ok(schema == "pg_catalog")
 }
 
 pub(super) fn lookup_regcollation_oid(
@@ -98,6 +132,9 @@ pub(super) fn format_regcollation(visibility: &OutputVisibility, oid: i64) -> Op
         },
     )
 }
+
+#[cfg(test)]
+mod namespaces_tests;
 
 #[cfg(test)]
 mod tests {

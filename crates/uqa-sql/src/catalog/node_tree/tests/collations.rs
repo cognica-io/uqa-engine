@@ -50,6 +50,27 @@ impl FunctionTypeResolver for RetainedCatalog {
 }
 impl crate::routines::RoutineResolution for RetainedCatalog {}
 
+#[test]
+fn binding_scopes_do_not_bypass_catalog_collation_errors() {
+    let context = crate::binding::fixture::empty_binding_context();
+    let snapshot = crate::binding::snapshot::BindingSnapshot::from(context);
+    let resolver = crate::binding::scoped_types::BindingTypeResolver {
+        routines: &RetainedCatalog,
+        scope: &snapshot,
+    };
+    let error = crate::catalog::collations::expression::select(
+        "\"C\"",
+        None,
+        Some(&ColumnType::Text),
+        Some(&resolver),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "internal error: retained collation was resolved by name again"
+    );
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct Diagnostic {
     sqlstate: String,

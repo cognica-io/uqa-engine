@@ -57,6 +57,14 @@ impl EngineHook for Context {
 }
 
 impl FunctionTypeResolver for Context {
+    fn resolve_collation_name(&self, _: &str) -> Result<Option<u32>, SQLError> {
+        self.events.lock().push("collation");
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: "permission denied for schema private".into(),
+        })
+    }
+
     fn has_untyped_function(&self, name: &str) -> bool {
         self.callback && name == "pg_get_viewdef"
     }
@@ -70,6 +78,27 @@ impl FunctionTypeResolver for Context {
     ) -> Result<Option<ColumnType>, SQLError> {
         Ok(None)
     }
+}
+
+#[test]
+fn scoped_collation_lookup_preserves_catalog_errors() {
+    let context = Arc::new(Context::default());
+    let evaluator =
+        ScopedExpressionEvaluator::shared(context.clone(), &[], uqa_core::CancellationToken::new());
+    let uqa_sql::Statement::Select(query) =
+        uqa_sql::compile("SELECT 'x'::text COLLATE private.\"C\"")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("query")
+    };
+    let expression = uqa_sql::plan::ExpressionPlan::lower(query.projections[0].expr.clone()).scalar;
+    let error = evaluator
+        .expression_type(&expression, &RowSchema::default())
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert_eq!(error.to_string(), "permission denied for schema private");
+    assert_eq!(*context.events.lock(), ["collation"]);
 }
 
 impl AggregateClassifier for Context {
