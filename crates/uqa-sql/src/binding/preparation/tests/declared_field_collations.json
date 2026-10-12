@@ -1,0 +1,154 @@
+[
+  {
+    "sql": "SELECT (t).c,(t.*).p,(t).n,(t).plain FROM t",
+    "collations": [
+      950,
+      951,
+      0,
+      100
+    ]
+  },
+  {
+    "sql": "SELECT (x).c FROM t x",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (q).x FROM (SELECT c AS x FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c,p)::pair).a FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c,p)::pair).b FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (NULL::pair).a,(NULL::pair).b",
+    "collations": [
+      951,
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (NULL::domain_pair).a,(NULL::domain_pair).b",
+    "collations": [
+      951,
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(NULL::d_posix,NULL::d_posix)::domain_fields).a",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(NULL::d_posix,NULL::d_posix)::domain_fields).b",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (v).a FROM (SELECT NULL::pair AS v) q",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "WITH q AS (SELECT NULL::pair AS v) SELECT (v).b FROM q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT ((NULL::pair[])[1]).a",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (NULL::pair).a COLLATE \"C\"",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce((NULL::pair).a,(NULL::pair).b)",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT coalesce((NULL::pair).a,(NULL::pair).b) ORDER BY 1",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"POSIX\" and \"C\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT (coalesce(NULL::pair,NULL::pair)).a",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (CASE WHEN true THEN NULL::pair ELSE NULL::pair END).b",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(c COLLATE \"C\",p COLLATE \"POSIX\")::pair).a FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(coalesce(c COLLATE \"C\",p COLLATE \"POSIX\"),c)::pair).b FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (ROW(coalesce(c COLLATE \"C\",p COLLATE \"POSIX\"),c)::pair).missing FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" not found in data type pair",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (NULL::pair).missing",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" not found in data type pair",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (t).missing FROM t",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column t.missing does not exist",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

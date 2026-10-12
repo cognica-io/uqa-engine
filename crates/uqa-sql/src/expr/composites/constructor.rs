@@ -165,6 +165,7 @@ mod tests {
                 attributes: [1, 3, 4]
                     .into_iter()
                     .map(|number| CompositeAttribute {
+                        collation_oid: None,
                         name: format!("a{number}"),
                         ty: ColumnType::Integer,
                         number,

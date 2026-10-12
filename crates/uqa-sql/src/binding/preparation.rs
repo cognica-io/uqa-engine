@@ -12,6 +12,7 @@ mod commands;
 mod ctes;
 mod expression_contexts;
 mod expressions;
+mod fields;
 mod function_calls;
 mod membership;
 mod parameters;

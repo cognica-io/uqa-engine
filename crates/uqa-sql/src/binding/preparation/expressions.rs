@@ -404,6 +404,11 @@ impl Preparation<'_> {
             input,
             subqueries,
         )?;
+        if let Some(mut field) = self.declared_field_selection(binding, args, &arguments, input)? {
+            self.check_schema_function(expression, binding, input)?;
+            field.derivation = field.derivation.combine(additional.diagnostics);
+            return Ok(field);
+        }
         let selected = if within_group || super::super::ordered_calls::is_ordered_set(name) {
             self.select_ordered_function_arguments(name, binding, args, ordered, &arguments)?
         } else {

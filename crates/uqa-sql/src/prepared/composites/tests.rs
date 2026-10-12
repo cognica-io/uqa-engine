@@ -28,11 +28,13 @@ fn descriptor(second: i16) -> Arc<CompositeTypeDescriptor> {
         relation_oid: 20_002,
         attributes: vec![
             CompositeAttribute {
+                collation_oid: None,
                 name: "a".into(),
                 ty: ColumnType::Integer,
                 number: 1,
             },
             CompositeAttribute {
+                collation_oid: None,
                 name: "b".into(),
                 ty: ColumnType::Text,
                 number: second,
@@ -295,7 +297,10 @@ fn nested_constants_capture_descriptors_and_cached_variants_follow_current_numbe
 
 #[test]
 fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_changes() {
-    let types = Types(RwLock::new(descriptor(2)));
+    let mut original = descriptor(2).as_ref().clone();
+    original.attributes[1].collation_oid = Some(951);
+    let original = Arc::new(original);
+    let types = Types(RwLock::new(original.clone()));
     let mut plan = UnifiedPlan::lower(crate::compile("SELECT (ROW(1, 'x')).b").unwrap().remove(0));
     plan.rewrite_scalar_expressions(&mut |node| {
         if let ScalarExpr::Func {
@@ -305,6 +310,7 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
         {
             if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect) {
                 binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+                    collation_oid: Some(951),
                     type_oid: 20_001,
                     number: 2,
                     result_type: ColumnType::Text,
@@ -318,6 +324,7 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
     for ty in [ColumnType::Varchar(Some(8)), ColumnType::Varchar(Some(2))] {
         let mut current = descriptor(2).as_ref().clone();
         current.attributes[1].ty = ty.clone();
+        current.attributes[1].collation_oid = Some(950);
         *types.0.write().unwrap() = Arc::new(current);
         let projected = inputs.project_logical(&plan, &types).unwrap().unwrap();
         let mut fields = 0;
@@ -331,6 +338,7 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
                     if let Some(field) = &binding.composite_field {
                         fields += 1;
                         assert_eq!(field.result_type, ColumnType::Text);
+                        assert_eq!(field.collation_oid, Some(951));
                         assert_eq!(field.changed_type.as_ref(), Some(&ty));
                     }
                 }
@@ -338,6 +346,6 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
         });
         assert_eq!(fields, 1);
     }
-    *types.0.write().unwrap() = descriptor(2);
+    *types.0.write().unwrap() = original;
     assert!(inputs.project_logical(&plan, &types).unwrap().is_none());
 }

@@ -37,6 +37,9 @@ pub struct CompositeFieldBinding {
     pub type_oid: u32,
     pub number: i16,
     pub result_type: super::ColumnType,
+    /// The field's declaration at preparation, independently of the argument's collation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
     pub dropped: bool,
     /// The live attribute type in an executable copy, when it differs from the original type OID. Type modifiers do not change `FieldSelect`'s result contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -123,6 +123,13 @@ fn computed_returning_collations_match_postgresql() {
 }
 
 fn assert_computed_collation_references(sources: &[(&str, usize)]) {
+    assert_collation_references(&NoRoutines, sources);
+}
+
+pub(super) fn assert_collation_references(
+    routines: &dyn RoutineResolution,
+    sources: &[(&str, usize)],
+) {
     #[derive(serde::Deserialize)]
     struct Case {
         sql: String,
@@ -158,19 +165,19 @@ fn assert_computed_collation_references(sources: &[(&str, usize)]) {
             panic!("query")
         };
         let mut preparation = Preparation {
-            routines: &NoRoutines,
+            routines,
             scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
             parameters: ParameterTypes::new(&[]),
             schema_expression: None,
         };
         let prepared = preparation.query(&query, None);
         let ordinary =
-            crate::binding::analyze_query_plan_schema(&NoRoutines, &query, &[], &binding, None);
+            crate::binding::analyze_query_plan_schema(routines, &query, &[], &binding, None);
         let mut results = vec![("prepared", prepared), ("ordinary", ordinary)];
         if case.error.is_none() {
             results.push((
                 "bound",
-                crate::binding::bind_query_plan_schema(&NoRoutines, &query, &[], &binding, None),
+                crate::binding::bind_query_plan_schema(routines, &query, &[], &binding, None),
             ));
         }
         for (entry, result) in results {

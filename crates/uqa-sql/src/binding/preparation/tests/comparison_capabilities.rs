@@ -68,11 +68,13 @@ impl CompositeTypeCatalog for Types {
             dropped: Vec::new(),
             attributes: vec![
                 CompositeAttribute {
+                    collation_oid: None,
                     name: "n".into(),
                     ty: ColumnType::Integer,
                     number: 1,
                 },
                 CompositeAttribute {
+                    collation_oid: None,
                     name: "v".into(),
                     ty: self.0.clone(),
                     number: 2,

@@ -11,6 +11,26 @@ use crate::SQLError;
 
 use super::FunctionTypeResolver;
 
+/// Whole-row projection resolves directly against the relation namespace, before consulting a named composite descriptor.
+pub(crate) fn whole_row_qualifier<'a>(
+    base: &'a crate::ScalarExpr,
+    schema: &dyn crate::schema::ScalarTypeSchema,
+) -> Option<&'a str> {
+    match base {
+        crate::ScalarExpr::Column(qualifier)
+            if !schema.has_unqualified_column(qualifier)
+                && !schema.column_is_ambiguous(qualifier)
+                && schema.has_qualifier(qualifier) =>
+        {
+            Some(qualifier)
+        }
+        crate::ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => {
+            Some(qualifier)
+        }
+        _ => None,
+    }
+}
+
 /// The field of a whole-row reference that does not exist, named by the reference's alias.
 #[must_use]
 pub fn missing_relation_column(qualifier: &str, field: &str) -> SQLError {
@@ -47,6 +67,15 @@ pub fn value_field_type(
     field: &str,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    value_field_metadata(base, field, resolver).map(|selected| selected.map(|(ty, _)| ty))
+}
+
+/// Select type and declaration collation together from one catalog generation.
+pub(crate) fn value_field_metadata(
+    base: Option<&ColumnType>,
+    field: &str,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<Option<(ColumnType, u32)>, SQLError> {
     let Some(base) = base else {
         return Ok(None);
     };
@@ -62,7 +91,7 @@ pub fn value_field_type(
             let descriptor = crate::expr::composites::descriptor(Some(catalog), reference.oid)?;
             descriptor
                 .attribute(field)
-                .map(|(_, attribute)| Some(attribute.ty.clone()))
+                .map(|(_, attribute)| Some((attribute.ty.clone(), attribute.collation_oid())))
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42703".into(),
                     message: format!(

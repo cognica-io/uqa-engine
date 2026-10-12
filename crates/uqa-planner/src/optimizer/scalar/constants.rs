@@ -393,6 +393,7 @@ fn composite_constant_field(
             };
         let (_, attribute) = descriptor.attribute(name)?;
         resolved = uqa_sql::ast::CompositeFieldBinding {
+            collation_oid: Some(attribute.collation_oid()),
             type_oid: reference.oid,
             number: attribute.number,
             result_type: attribute.ty.clone(),

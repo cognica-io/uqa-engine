@@ -36,6 +36,7 @@ impl CompositeTypeCatalog for Types {
             type_oid: oid,
             relation_oid: oid + 2,
             attributes: vec![CompositeAttribute {
+                collation_oid: None,
                 name: "b".into(),
                 ty: ColumnType::Text,
                 number: 3,

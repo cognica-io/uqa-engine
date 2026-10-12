@@ -168,6 +168,7 @@ impl Lowering<'_> {
                                     descriptor.attributes.iter(),
                                     |this, attribute| {
                                         Ok(CompositeAttribute {
+                                            collation_oid: attribute.collation_oid,
                                             name: this.copy_text(&attribute.name)?,
                                             ty: this
                                                 .scalar_type_copy(Some(&attribute.ty))?

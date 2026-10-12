@@ -183,30 +183,29 @@ fn descriptor_in(
                 })
             })
             .collect::<Result<_, SQLError>>()?;
-    let columns = if let Some(table) = snapshot.tables.get(&identity) {
-        table
-            .columns
+    let declared = snapshot
+        .tables
+        .get(&identity)
+        .map(|table| table.columns.as_slice())
+        .or_else(|| {
+            snapshot
+                .definitions
+                .foreign_tables
+                .get(&identity)
+                .map(|table| table.columns.as_slice())
+        });
+    let columns = if let Some(columns) = declared {
+        columns
             .iter()
             .map(|column| {
                 (
                     column.name.clone(),
                     column.ty.clone(),
                     column.attribute_number,
+                    column.collation_oid,
                 )
             })
             .collect::<Vec<_>>()
-    } else if let Some(table) = snapshot.definitions.foreign_tables.get(&identity) {
-        table
-            .columns
-            .iter()
-            .map(|column| {
-                (
-                    column.name.clone(),
-                    column.ty.clone(),
-                    column.attribute_number,
-                )
-            })
-            .collect()
     } else if let Some(view) = snapshot.definitions.views.get(&identity) {
         let schema = context.stored_view_schema_with_catalog(
             view,
@@ -223,7 +222,8 @@ fn descriptor_in(
                     .iter()
                     .map(|ty| ty.clone().unwrap_or(ColumnType::Text)),
             )
-            .map(|(name, ty)| (name, ty, None))
+            .enumerate()
+            .map(|(index, (name, ty))| (name, ty, None, schema.column_collation(index)))
             .collect()
     } else {
         return Ok(None);
@@ -231,8 +231,9 @@ fn descriptor_in(
     let attributes = columns
         .into_iter()
         .enumerate()
-        .map(|(index, (name, ty, number))| {
+        .map(|(index, (name, ty, number, collation_oid))| {
             Ok(CompositeAttribute {
+                collation_oid,
                 name,
                 ty,
                 number: if let Some(number) = number {

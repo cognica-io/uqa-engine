@@ -2746,6 +2746,84 @@
       "capability": "Named composite output metadata preservation",
       "workload": "A two-field named composite projected through a typed NULL, CTE, derived table, DISTINCT and COALESCE.",
       "invariant": "Prepared analysis and both ordinary output paths retain the named type and its ordered field descriptors without inferring them from a runtime value."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_field_collations_and_diagnostic_order_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Declared field collation selection",
+      "workload": "Twenty-two independent PostgreSQL observations cover relation fields, named composites, domains, arrays, derived sources, explicit overrides and competing errors.",
+      "invariant": "Prepared and ordinary output paths retain the declaration collation independently of unrelated fields; complete diagnostics match PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_field_metadata_reuses_each_observed_call_argument",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Bounded field argument analysis",
+      "workload": "One or seventeen nested composite-returning calls, followed by named field projection and an ORDER BY output alias.",
+      "invariant": "Field metadata reuses original child observations: one result lookup per call in binding and two per call in strict analysis, with the selected field type and collation preserved."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_descriptors_keep_selected_legacy_and_type_default_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Retained declared attribute metadata",
+      "workload": "Composite declarations with selected identities, legacy written collations and older serialized descriptors.",
+      "invariant": "Declaration and descriptor codecs preserve selected identities; legacy declarations retain written names and descriptors without a selection preserve their original type default."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "relation_descriptors_preserve_selected_collations_and_attribute_numbers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/composite_type/relations/tests.rs",
+      "capability": "Relation field catalog metadata",
+      "workload": "Native and foreign relation descriptors with a dropped physical slot, two selected collations, a type-default text column and a noncollatable integer.",
+      "invariant": "Both relation kinds preserve attribute identities and collations without reading table values; repeated lookups reuse the retained descriptor."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "view_descriptors_preserve_analyzed_output_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/composite_type/relations/tests.rs",
+      "capability": "View field catalog metadata",
+      "workload": "A view with two explicitly collated NULL output columns.",
+      "invariant": "Named view descriptors retain the analyzed output collations without executing the query or consulting a runtime row."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_view_schemas_preserve_collations_and_shared_composite_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/view/tests.rs",
+      "capability": "Named view output metadata",
+      "workload": "Renamed outputs with a selected collation, an indeterminate collation and a named composite descriptor.",
+      "invariant": "Publishing fixed view column names preserves selected and indeterminate collations and shares the original field descriptor without copying values or widening the row."
     }
   ]
 }

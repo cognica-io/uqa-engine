@@ -664,6 +664,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
     {
         binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
         binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+            collation_oid: None,
             type_oid: 20001,
             number: 2,
             result_type: ColumnType::Text,

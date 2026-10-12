@@ -66,11 +66,13 @@ impl SQLValueCatalog for Catalog {
                 dropped: Vec::new(),
                 attributes: vec![
                     CompositeAttribute {
+                        collation_oid: None,
                         name: "n".into(),
                         number: 1,
                         ty: ColumnType::Integer,
                     },
                     CompositeAttribute {
+                        collation_oid: None,
                         name: "t".into(),
                         number: 2,
                         ty: ColumnType::Text,

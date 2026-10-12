@@ -205,6 +205,7 @@ impl CompositeTypeCatalog for Catalog<'_> {
                         .iter()
                         .filter(|attr| !attr.dropped)
                         .map(|attr| CompositeAttribute {
+                            collation_oid: None,
                             name: attr.name.clone(),
                             number: attr.number,
                             ty: self.named(&attr.ty).unwrap(),

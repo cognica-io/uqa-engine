@@ -30,6 +30,7 @@ impl CompositeTypeCatalog for Catalog {
                 type_oid: oid,
                 relation_oid: 20_003,
                 attributes: vec![CompositeAttribute {
+                    collation_oid: None,
                     name: "a".into(),
                     ty: ColumnType::Integer,
                     number: 1,

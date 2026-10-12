@@ -68,7 +68,11 @@ pub fn named_view_schema(
     Ok(RowSchema::with_types(
         output_columns.to_vec(),
         query_schema.column_types().to_vec(),
-    ))
+    )
+    .with_column_collations(
+        (0..query_schema.len()).map(|index| query_schema.column_collation(index)),
+    )
+    .with_record_fields_from(query_schema))
 }
 
 pub fn validate_view_column_types(
@@ -146,3 +150,6 @@ impl ViewRewriteDefinition {
         named_view_schema(&query_schema, &output_columns)
     }
 }
+
+#[cfg(test)]
+mod tests;

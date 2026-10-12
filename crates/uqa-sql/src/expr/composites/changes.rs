@@ -186,6 +186,7 @@ mod tests {
 
     fn catalog() -> Catalog {
         let attribute = |name: &str, ty: ColumnType, number: i16| CompositeAttribute {
+            collation_oid: None,
             name: name.into(),
             ty,
             number,

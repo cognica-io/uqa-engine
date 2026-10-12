@@ -178,6 +178,7 @@ fn copied_bindings_keep_invocation_identity_and_both_error_variants() {
                     variadic_mode: RoutineVariadicMode::Expanded { parameter_index: 1 },
                 })),
                 composite_field: Some(Box::new(crate::ast::CompositeFieldBinding {
+                    collation_oid: Some(950),
                     type_oid: 20_001,
                     number: 2,
                     result_type: crate::ColumnType::Array(Box::new(crate::ColumnType::Named(

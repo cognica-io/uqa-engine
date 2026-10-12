@@ -35,6 +35,22 @@ pub struct StoredCompositeAttribute {
 }
 
 impl StoredCompositeAttribute {
+    /// Preserve the selected identity, including legacy declarations with only a written name.
+    #[must_use]
+    pub fn collation_oid(&self) -> u32 {
+        self.collation_oid.unwrap_or_else(|| {
+            u32::try_from(
+                self.collation
+                    .as_deref()
+                    .and_then(crate::catalog::collations::builtin_collation_oid)
+                    .unwrap_or_else(|| {
+                        crate::catalog::type_metadata::pg_type_collation_oid(&self.ty)
+                    }),
+            )
+            .expect("attribute collation identity")
+        })
+    }
+
     /// The name `pg_attribute` gives a dropped attribute.
     #[must_use]
     pub fn dropped_name(number: i16) -> String {
@@ -102,6 +118,7 @@ impl<Owner> StoredComposite<Owner> {
             attributes: self
                 .live_attributes()
                 .map(|attribute| CompositeAttribute {
+                    collation_oid: Some(attribute.collation_oid()),
                     name: attribute.name.clone(),
                     ty: attribute.ty.clone(),
                     number: attribute.number,

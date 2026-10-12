@@ -84,11 +84,13 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
             relation_oid: 20_003,
             attributes: vec![
                 CompositeAttribute {
+                    collation_oid: None,
                     name: "a".into(),
                     ty: ColumnType::InternalChar,
                     number: 1,
                 },
                 CompositeAttribute {
+                    collation_oid: Some(951),
                     name: "dropped".into(),
                     ty: ColumnType::Text,
                     number: 2,

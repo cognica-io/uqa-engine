@@ -413,18 +413,7 @@ pub(super) fn field_selection_type(
             "field selection takes an expression and a field name".into(),
         ));
     };
-    let whole_row = match base {
-        ScalarExpr::Column(qualifier)
-            if !schema.has_unqualified_column(qualifier)
-                && !schema.column_is_ambiguous(qualifier)
-                && schema.has_qualifier(qualifier) =>
-        {
-            Some(qualifier)
-        }
-        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => Some(qualifier),
-        _ => None,
-    };
-    if let Some(qualifier) = whole_row {
+    if let Some(qualifier) = field_selection::whole_row_qualifier(base, schema) {
         if !schema.has_qualified_column(qualifier, field) {
             return Err(field_selection::missing_relation_column(qualifier, field));
         }

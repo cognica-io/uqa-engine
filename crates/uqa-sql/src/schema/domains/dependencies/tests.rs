@@ -70,6 +70,7 @@ fn descriptor_with(oid: u32, types: Vec<ColumnType>) -> Arc<CompositeTypeDescrip
             .into_iter()
             .enumerate()
             .map(|(index, ty)| CompositeAttribute {
+                collation_oid: None,
                 name: format!("field_{index}"),
                 ty,
                 number: i16::try_from(index + 1).unwrap(),

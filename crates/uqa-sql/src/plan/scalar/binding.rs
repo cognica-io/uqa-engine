@@ -49,6 +49,7 @@ impl Lowering<'_> {
                 .map(|field| {
                     self.boxed(|this| {
                         Ok(crate::ast::CompositeFieldBinding {
+                            collation_oid: field.collation_oid,
                             type_oid: field.type_oid,
                             number: field.number,
                             result_type: this

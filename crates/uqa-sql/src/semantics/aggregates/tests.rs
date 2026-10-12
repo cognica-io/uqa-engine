@@ -243,6 +243,7 @@ fn composite_literals_with_equal_current_values_keep_distinct_original_datums() 
                 type_oid: 20_001,
                 relation_oid: 20_003,
                 attributes: vec![CompositeAttribute {
+                    collation_oid: None,
                     name: "a".into(),
                     ty: crate::ColumnType::InternalChar,
                     number: 1,
