@@ -10,6 +10,7 @@ use super::{expressions, Routines};
 use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::{ColumnType, FunctionTypeResolver, RowSchema, SQLError, Statement};
 
+mod columns;
 mod prepared;
 
 struct Catalog;

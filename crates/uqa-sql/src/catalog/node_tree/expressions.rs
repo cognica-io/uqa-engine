@@ -11,6 +11,8 @@ mod collations;
 mod constructs;
 mod operators;
 mod rows;
+mod schema;
+pub use schema::{ColumnReference, ExpressionSchema};
 
 use super::{values, Field, Node};
 use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax};
@@ -19,7 +21,7 @@ use crate::type_resolution::{
     binary_operator_catalog_entry, binary_operator_types, common_context_expression_type,
     FunctionTypeResolver,
 };
-use crate::{ColumnType, RowSchema, SQLError};
+use crate::{ColumnType, SQLError};
 
 pub struct RoutineIdentity {
     pub oid: i64,
@@ -37,7 +39,7 @@ pub trait ExpressionRoutines {
 }
 
 pub struct ExpressionContext<'a> {
-    pub schema: &'a RowSchema,
+    pub schema: &'a dyn ExpressionSchema,
     pub domain_value: Option<&'a ColumnType>,
     pub types: Option<&'a dyn FunctionTypeResolver>,
     pub routines: &'a dyn ExpressionRoutines,
@@ -245,18 +247,9 @@ impl ExpressionContext<'_> {
                 ty: ty.clone(),
             });
         }
-        let position = qualifier
-            .map_or_else(
-                || self.schema.unqualified_position(name),
-                |qualifier| self.schema.qualified_position(qualifier, name),
-            )
-            .ok_or_else(|| SQLError::UnknownColumn(name.into()))?;
-        let ty = self
-            .schema
-            .column_type(position)
-            .ok_or_else(|| SQLError::Internal("catalog column has no declared type".into()))?;
-        let ordinal = i64::try_from(position + 1)
-            .map_err(|_| SQLError::Internal("column ordinal overflow".into()))?;
+        let column = self.schema.column_reference(name, qualifier)?;
+        let ty = column.ty;
+        let ordinal = column.attribute_number;
         Ok(TypedNode {
             node: Node::new(
                 "VAR",
@@ -265,7 +258,7 @@ impl ExpressionContext<'_> {
                     ("varattno", ordinal.into()),
                     ("vartype", pg_type_oid(ty).into()),
                     ("vartypmod", pg_type_modifier(ty).into()),
-                    ("varcollid", pg_type_collation_oid(ty).into()),
+                    ("varcollid", column.collation_oid.into()),
                     ("varnullingrels", Field::List(vec![Field::Atom("b".into())])),
                     ("varlevelsup", 0.into()),
                     ("varreturningtype", 0.into()),

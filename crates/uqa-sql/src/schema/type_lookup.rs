@@ -72,6 +72,11 @@ impl<'a> ColumnTypeSchema<'a> {
     pub fn new(columns: &'a [ColumnDef]) -> Self {
         Self { columns }
     }
+
+    /// Original declarations, including stable attribute numbers and selected collations, borrowed from the same catalog generation as type lookup.
+    pub fn columns(&self) -> &'a [ColumnDef] {
+        self.columns
+    }
 }
 
 impl ScalarTypeSchema for ColumnTypeSchema<'_> {
