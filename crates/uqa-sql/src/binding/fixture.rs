@@ -20,10 +20,23 @@ pub(super) fn table_definition(columns: Vec<crate::ast::ColumnDef>) -> TableDefi
 }
 
 pub(super) fn catalog(tables: BTreeMap<RelationIdentity, TableDefinition>) -> CatalogReadView {
-    Arc::new(FixtureCatalog(tables))
+    catalog_with_foreign_tables(tables, BTreeMap::new())
 }
 
-struct FixtureCatalog(BTreeMap<RelationIdentity, TableDefinition>);
+pub(super) fn catalog_with_foreign_tables(
+    tables: BTreeMap<RelationIdentity, TableDefinition>,
+    foreign_tables: BTreeMap<RelationIdentity, TableDefinition>,
+) -> CatalogReadView {
+    Arc::new(FixtureCatalog {
+        tables,
+        foreign_tables,
+    })
+}
+
+struct FixtureCatalog {
+    tables: BTreeMap<RelationIdentity, TableDefinition>,
+    foreign_tables: BTreeMap<RelationIdentity, TableDefinition>,
+}
 
 impl AnalysisCatalog for FixtureCatalog {
     fn table_resolved(
@@ -34,7 +47,7 @@ impl AnalysisCatalog for FixtureCatalog {
         Ok(resolution
             .raw_relation_lookup_candidates(name)?
             .iter()
-            .find_map(|identity| self.0.get(identity).cloned()))
+            .find_map(|identity| self.tables.get(identity).cloned()))
     }
     fn table_name_resolved(
         &self,
@@ -44,7 +57,7 @@ impl AnalysisCatalog for FixtureCatalog {
         Ok(resolution
             .raw_relation_lookup_candidates(name)?
             .iter()
-            .find(|identity| self.0.contains_key(identity))
+            .find(|identity| self.tables.contains_key(identity))
             .map(RelationIdentity::qualified_name))
     }
     fn view_resolved(
@@ -56,10 +69,13 @@ impl AnalysisCatalog for FixtureCatalog {
     }
     fn foreign_table_resolved(
         &self,
-        _: &RelationNameResolution,
-        _: &str,
+        resolution: &RelationNameResolution,
+        name: &str,
     ) -> Result<Option<TableDefinition>, SQLError> {
-        Ok(None)
+        Ok(resolution
+            .raw_relation_lookup_candidates(name)?
+            .iter()
+            .find_map(|identity| self.foreign_tables.get(identity).cloned()))
     }
     fn sequence_exists(&self, _: &RelationNameResolution, _: &str) -> Result<bool, SQLError> {
         Ok(false)

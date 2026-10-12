@@ -18,6 +18,8 @@ use super::analyze_query_plan_schema_with_catalog;
 use crate::routines::RoutineResolution;
 use crate::RelationIdentity;
 
+mod collations;
+
 struct EmptyRoutineResolution;
 
 impl FunctionTypeResolver for EmptyRoutineResolution {

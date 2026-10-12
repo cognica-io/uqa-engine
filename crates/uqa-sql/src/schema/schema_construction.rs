@@ -68,6 +68,61 @@ impl RowSchema {
         Self::with_identities(columns, identities, types)
     }
 
+    /// Build a positional source from its catalog declarations without discarding selected column collations. Attribute numbers remain a catalog identity, independent of these query positions.
+    pub fn with_column_definitions(
+        qualifier: Option<&str>,
+        columns: &[crate::ast::ColumnDef],
+    ) -> Self {
+        Self::with_column_metadata(
+            qualifier,
+            columns.iter().map(|column| {
+                (
+                    column.name.clone(),
+                    Some(column.ty.clone()),
+                    column.collation_oid,
+                )
+            }),
+        )
+    }
+
+    /// Build a positional source while selecting names, types and collations together. This accepts projected, aliased and system columns without a second declaration lookup or a dense collation buffer.
+    pub fn with_column_metadata(
+        qualifier: Option<&str>,
+        columns: impl IntoIterator<Item = (String, Option<ColumnType>, Option<u32>)>,
+    ) -> Self {
+        let columns = columns.into_iter();
+        let capacity = columns.size_hint().0;
+        let mut names = Vec::with_capacity(capacity);
+        let mut identities = Vec::with_capacity(capacity);
+        let mut types = Vec::with_capacity(capacity);
+        let mut metadata = SchemaBuildMetadata::default();
+        for (name, ty, oid) in columns {
+            assert!(
+                oid.is_none_or(|oid| oid == 0
+                    || ty
+                        .as_ref()
+                        .is_some_and(super::composites::type_is_collatable)),
+                "collation requires a collatable column type"
+            );
+            metadata.collations.column(names.len(), oid, ty.as_ref());
+            identities.push(qualifier.map_or_else(
+                || ColumnIdentity::unqualified(&name),
+                |qualifier| ColumnIdentity::qualified(qualifier, &name),
+            ));
+            names.push(name);
+            types.push(ty);
+        }
+        let width = names.len();
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            names,
+            identities,
+            types,
+            (0..width).collect(),
+            width,
+            metadata,
+        )
+    }
+
     /// Build a positional schema from explicit structured identities.
     pub fn with_identities(
         columns: Vec<String>,

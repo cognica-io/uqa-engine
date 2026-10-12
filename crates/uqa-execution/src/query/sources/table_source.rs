@@ -410,20 +410,11 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .foreign_tables
                     .scan_foreign_source(&foreign_name, &[])
                     .map_err(SQLError::Unsupported)?;
-                let typed_columns = foreign_table
-                    .columns
-                    .into_iter()
-                    .map(|column| (column.name, column.ty))
-                    .collect::<Vec<_>>();
-                let columns = typed_columns
-                    .iter()
-                    .map(|(column, _)| column.clone())
-                    .collect::<Vec<_>>();
-                let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
+                let schema =
+                    crate::RowSchema::with_column_definitions(None, &foreign_table.columns);
                 let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::RowIteratorScan::with_types(
-                        columns.clone(),
-                        types,
+                    Box::new(crate::RowIteratorScan::with_row_schema(
+                        schema,
                         Box::new(rows.map(|row| {
                             row.map_err(SQLError::Unsupported)
                                 .map_err(crate::ExecError::from)

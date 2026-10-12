@@ -2564,6 +2564,19 @@
       "capability": "Collated projection payload sharing",
       "workload": "Two SQL identities with different collations share one 4096-byte physical value, projected through direct columns, stars and hidden aliases.",
       "invariant": "Every selected collation survives projection while the original physical value and fragment remain shared; no computed payload slot is added."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_scored_sources_retain_selected_collations_without_reading_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/table_sources/scan/tests.rs",
+      "capability": "Declared scan metadata without document reads",
+      "workload": "An empty scored source with selected C/POSIX, a default text field and noncollatable system columns.",
+      "invariant": "Schema construction preserves declared collation identities and never opens the document store; the fixture rejects any value read."
     }
   ]
 }

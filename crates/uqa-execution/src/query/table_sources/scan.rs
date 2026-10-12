@@ -163,34 +163,13 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     if include_table_oid {
         schema.push(TABLE_OID_COLUMN.into());
     }
-    let root_column_definitions = &root_table.columns;
-    let mut column_types = columns
-        .iter()
-        .map(|column| {
-            root_column_definitions
-                .iter()
-                .find(|definition| definition.name == *column)
-                .map(|definition| definition.ty.clone())
-                .or_else(|| (column == XMIN_COLUMN).then_some(uqa_sql::ast::ColumnType::Xid))
-        })
-        .collect::<Vec<_>>();
-    if include_table_oid {
-        column_types.push(Some(uqa_sql::ast::ColumnType::Oid));
-    }
-    let mut physical_schema =
-        crate::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
-    // System columns are addressable by name but never expand into `*` or a whole-row value.
-    let system_positions = schema
-        .iter()
-        .enumerate()
-        .filter_map(|(position, column)| {
-            (column == XMIN_COLUMN || column == TABLE_OID_COLUMN).then_some(position)
-        })
-        .collect::<Vec<_>>();
-    if !system_positions.is_empty() {
-        physical_schema =
-            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, system_positions);
-    }
+    let mut physical_schema = projected_scan_schema(
+        &qualifier,
+        &columns,
+        &schema,
+        &root_table.columns,
+        include_table_oid,
+    );
     let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut metadata_attributes = Vec::with_capacity(2);
     if metadata.includes_doc_id() {
@@ -397,3 +376,50 @@ fn expression_references_tableoid(expression: &crate::ScalarExpr) -> bool {
     let mut columns = std::collections::BTreeSet::new();
     expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
 }
+
+/// Keep a scan's selected stored fields, public aliases and system-column metadata in one positional layout.
+fn projected_scan_schema(
+    qualifier: &str,
+    columns: &[String],
+    visible: &[String],
+    definitions: &[uqa_sql::ast::ColumnDef],
+    include_table_oid: bool,
+) -> crate::RowSchema {
+    let column_metadata = columns.iter().zip(visible).map(|(column, visible)| {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.name == *column);
+        (
+            visible.clone(),
+            definition
+                .map(|definition| definition.ty.clone())
+                .or_else(|| (column == XMIN_COLUMN).then_some(uqa_sql::ast::ColumnType::Xid)),
+            definition.and_then(|definition| definition.collation_oid),
+        )
+    });
+    let table_oid = include_table_oid.then(|| {
+        (
+            TABLE_OID_COLUMN.to_string(),
+            Some(uqa_sql::ast::ColumnType::Oid),
+            None,
+        )
+    });
+    let mut physical_schema =
+        crate::RowSchema::with_column_metadata(Some(qualifier), column_metadata.chain(table_oid));
+    // System columns are addressable by name but never expand into `*` or a whole-row value.
+    let system_positions = visible
+        .iter()
+        .enumerate()
+        .filter_map(|(position, column)| {
+            (column == XMIN_COLUMN || column == TABLE_OID_COLUMN).then_some(position)
+        })
+        .collect::<Vec<_>>();
+    if !system_positions.is_empty() {
+        physical_schema =
+            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, system_positions);
+    }
+    physical_schema
+}
+
+#[cfg(test)]
+mod tests;

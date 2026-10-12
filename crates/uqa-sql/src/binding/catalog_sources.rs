@@ -47,17 +47,7 @@ fn relation_schema(
     let table = catalog
         .table_resolved(resolution, &resolved)?
         .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    let columns = table
-        .columns
-        .iter()
-        .map(|column| column.name.clone())
-        .collect();
-    let types = table
-        .columns
-        .iter()
-        .map(|column| Some(column.ty.clone()))
-        .collect();
-    let schema = RowSchema::with_qualified_types(&identity.name, columns, types);
+    let schema = RowSchema::with_column_definitions(Some(&identity.name), &table.columns);
     Ok(analysis::with_table_pseudo_columns(&schema, &identity.name))
 }
 

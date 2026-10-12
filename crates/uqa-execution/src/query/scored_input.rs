@@ -446,22 +446,6 @@ impl ScoredDocumentSource {
         let extra_columns = HiddenColumn::ALL.map(HiddenColumn::name);
         let projected_slots =
             crate::ProjectedValueSlot::compile(&schema, &projected_fields, &extra_columns);
-        let column_types = schema
-            .iter()
-            .map(|column| {
-                column_definitions
-                    .iter()
-                    .find(|definition| definition.name == *column)
-                    .map(|definition| definition.ty.clone())
-                    .or(match column.as_str() {
-                        DOC_ID_COLUMN => Some(uqa_sql::ast::ColumnType::BigInteger),
-                        SCORE_COLUMN => Some(uqa_sql::ast::ColumnType::DoublePrecision),
-                        TABLE_OID_COLUMN => Some(uqa_sql::ast::ColumnType::Oid),
-                        XMIN_COLUMN => Some(uqa_sql::ast::ColumnType::Xid),
-                        _ => None,
-                    })
-            })
-            .collect();
         let wildcard_hidden = schema
             .iter()
             .enumerate()
@@ -474,7 +458,29 @@ impl ScoredDocumentSource {
                 .then_some(position)
             })
             .collect::<Vec<_>>();
-        let schema = crate::RowSchema::with_types(schema, column_types);
+        let schema = crate::RowSchema::with_column_metadata(
+            None,
+            schema.into_iter().map(|column| {
+                let definition = column_definitions
+                    .iter()
+                    .find(|definition| definition.name == column);
+                let ty =
+                    definition
+                        .map(|definition| definition.ty.clone())
+                        .or(match column.as_str() {
+                            DOC_ID_COLUMN => Some(uqa_sql::ast::ColumnType::BigInteger),
+                            SCORE_COLUMN => Some(uqa_sql::ast::ColumnType::DoublePrecision),
+                            TABLE_OID_COLUMN => Some(uqa_sql::ast::ColumnType::Oid),
+                            XMIN_COLUMN => Some(uqa_sql::ast::ColumnType::Xid),
+                            _ => None,
+                        });
+                (
+                    column,
+                    ty,
+                    definition.and_then(|definition| definition.collation_oid),
+                )
+            }),
+        );
         let schema = crate::RowSchema::with_wildcard_hidden_positions(&schema, wildcard_hidden);
         let mut schema = schema;
         let mut metadata_doc_id_attribute = None;

@@ -262,7 +262,9 @@ pub(super) fn rename_schema(
         }
         None => RowSchema::with_types(columns, schema.column_types().to_vec()),
     };
-    let renamed = renamed.with_record_fields_from(schema);
+    let renamed = renamed
+        .with_column_collations((0..schema.len()).map(|position| schema.column_collation(position)))
+        .with_record_fields_from(schema);
     let renamed = if schema.columns_are_open(None) {
         RowSchema::with_open_columns(&renamed, qualifier)
     } else {

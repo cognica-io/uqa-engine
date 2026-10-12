@@ -539,17 +539,8 @@ impl SchemaScope {
                 let table = self.catalog.table_resolved(&self.resolution, name)?;
                 if let Some(table) = table {
                     self.record_relation_dependency(name)?;
-                    let columns = table
-                        .columns
-                        .iter()
-                        .map(|column| column.name.clone())
-                        .collect();
-                    let types = table
-                        .columns
-                        .iter()
-                        .map(|column| Some(column.ty.clone()))
-                        .collect();
-                    let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema =
+                        RowSchema::with_column_definitions(Some(qualifier), &table.columns);
                     let schema =
                         crate::semantics::bound_source_schema(&schema, bound_columns.as_deref())?;
                     let schema = alias_table_schema(&schema, qualifier, column_aliases)?;
@@ -565,17 +556,8 @@ impl SchemaScope {
                     .foreign_table_resolved(&self.resolution, name)?;
                 if let Some(foreign_table) = foreign_table {
                     self.record_relation_dependency(name)?;
-                    let typed_columns = foreign_table
-                        .columns
-                        .iter()
-                        .map(|column| (column.name.clone(), column.ty.clone()))
-                        .collect::<Vec<_>>();
-                    let columns = typed_columns
-                        .iter()
-                        .map(|(column, _)| column.clone())
-                        .collect();
-                    let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
-                    let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema =
+                        RowSchema::with_column_definitions(Some(qualifier), &foreign_table.columns);
                     let schema =
                         crate::semantics::bound_source_schema(&schema, bound_columns.as_deref())?;
                     return alias_table_schema(&schema, qualifier, column_aliases);
