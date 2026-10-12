@@ -1,0 +1,42 @@
+[
+  {
+    "clock": 1791768637447499,
+    "base": "timestamp",
+    "check": "('now' COLLATE \"C\")::timestamp < VALUE",
+    "conbin": "{OPEXPR :opno 2062 :opfuncid 2054 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 1114 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 75 189 239 105 153 0 3 0 ]} {COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1}) :location -1}",
+    "sql": "('2026-10-12 01:30:37.447499'::timestamp without time zone < VALUE)",
+    "pretty": "'2026-10-12 01:30:37.447499'::timestamp without time zone < VALUE"
+  },
+  {
+    "clock": 1791768637447499,
+    "base": "timestamp",
+    "check": "'now' COLLATE \"C\" < VALUE",
+    "conbin": "{OPEXPR :opno 2062 :opfuncid 2054 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 1114 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 75 189 239 105 153 0 3 0 ]} {COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1}) :location -1}",
+    "sql": "('2026-10-12 01:30:37.447499'::timestamp without time zone < VALUE)",
+    "pretty": "'2026-10-12 01:30:37.447499'::timestamp without time zone < VALUE"
+  },
+  {
+    "clock": 1791768637447499,
+    "base": "timestamp",
+    "check": "COALESCE('now' COLLATE \"C\", VALUE) < VALUE",
+    "conbin": "{OPEXPR :opno 2062 :opfuncid 2054 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 1114 :coalescecollid 0 :args ({CONST :consttype 1114 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 75 189 239 105 153 0 3 0 ]} {COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1}) :location -1} {COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1}) :location -1}",
+    "sql": "(COALESCE('2026-10-12 01:30:37.447499'::timestamp without time zone, VALUE) < VALUE)",
+    "pretty": "COALESCE('2026-10-12 01:30:37.447499'::timestamp without time zone, VALUE) < VALUE"
+  },
+  {
+    "clock": 1791768637447499,
+    "base": "timestamp",
+    "check": "NULLIF('now' COLLATE \"C\", VALUE) IS NULL",
+    "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 2060 :opfuncid 2052 :opresulttype 1114 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 1114 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 75 189 239 105 153 0 3 0 ]} {COERCETODOMAINVALUE :typeId 1114 :typeMod -1 :collation 0 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(NULLIF('2026-10-12 01:30:37.447499'::timestamp without time zone, VALUE) IS NULL)",
+    "pretty": "NULLIF('2026-10-12 01:30:37.447499'::timestamp without time zone, VALUE) IS NULL"
+  },
+  {
+    "clock": 1791768637447499,
+    "base": "date",
+    "check": "('today' COLLATE \"C\")::date <= VALUE",
+    "conbin": "{OPEXPR :opno 1096 :opfuncid 1088 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 53 38 0 0 0 0 0 0 ]} {COERCETODOMAINVALUE :typeId 1082 :typeMod -1 :collation 0 :location -1}) :location -1}",
+    "sql": "('2026-10-12'::date <= VALUE)",
+    "pretty": "'2026-10-12'::date <= VALUE"
+  }
+]

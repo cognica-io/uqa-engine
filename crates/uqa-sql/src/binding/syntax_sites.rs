@@ -15,6 +15,8 @@ use uqa_core::Value;
 /// An expression site of stored syntax and what binding recorded for it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueSite {
+    /// A collation clause removed by the selected operand coercion.
+    DiscardCollation,
     /// A ROW DISTINCT predicate expanded into its selected field comparisons.
     RowDistinct,
     /// Positions grouped into a scalar-array comparison; the other IN items become individual comparisons.
@@ -415,6 +417,16 @@ impl Walk {
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        if let Some(clause) = crate::catalog::collations::expression::scalar_clause(lowered)? {
+            let mut operand = bound;
+            while let ScalarExpr::Cast { expr, .. } = operand {
+                operand = expr;
+            }
+            if crate::catalog::collations::expression::scalar_clause(operand)?.is_none() {
+                self.sites.values.push(ValueSite::DiscardCollation);
+                return self.scalar(clause.argument, bound, subqueries);
+            }
+        }
         if crate::type_resolution::row_distinct::expanded(lowered, bound) {
             let mut rewritten = lowered.clone();
             crate::type_resolution::row_distinct::rewrite_scalar(&mut rewritten)?;

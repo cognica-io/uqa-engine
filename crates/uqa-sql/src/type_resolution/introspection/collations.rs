@@ -10,6 +10,29 @@ use super::{Binder, BindingCall, LiteralBinding, SQLError, ScalarExpr, Value};
 use crate::ast::FunctionDispatch;
 
 impl Binder<'_, '_> {
+    /// Selected coercions act on the operand and keep only the outer clause for a collatable target.
+    pub(super) fn coerce_collated_operand(
+        &mut self,
+        expression: &mut ScalarExpr,
+        target: &crate::ColumnType,
+    ) -> Result<bool, SQLError> {
+        use crate::catalog::collations::expression::{discard_scalar_clause, scalar_clause};
+        if scalar_clause(expression)?.is_none() {
+            return Ok(false);
+        }
+        if crate::schema::composites::type_is_collatable(target) {
+            let ScalarExpr::Func { args, .. } = expression else {
+                unreachable!("validated collation clause");
+            };
+            while discard_scalar_clause(&mut args[0])? {}
+            self.common_cast(&mut args[0], target)?;
+        } else {
+            while discard_scalar_clause(expression)? {}
+            self.common_cast(expression, target)?;
+        }
+        Ok(true)
+    }
+
     pub(super) fn bind_collation(&self, call: &mut BindingCall) -> Result<bool, SQLError> {
         let Some(FunctionDispatch::Collate { oid }) =
             call.binding.as_ref().and_then(|binding| binding.dispatch)

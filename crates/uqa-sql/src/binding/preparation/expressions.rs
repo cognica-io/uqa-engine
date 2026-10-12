@@ -366,9 +366,7 @@ impl Preparation<'_> {
         }
         let result = self.coerce_function_arguments(name, binding, &mut arguments, &selected)?;
         let selected = selected.overload;
-        // Keep the result selected from the observed occurrences. A later
-        // sibling can determine a parameter's type after an earlier COLLATE
-        // operand was admitted as unknown; retyping that syntax loses its state.
+        // Keep the result selected from the observed occurrences: a later sibling can determine a parameter's type after an earlier COLLATE operand was admitted as unknown, so retyping that syntax loses its state.
         let ty = match (result, &selected) {
             (super::function_calls::FunctionResult::Selected(ty), _) => ty,
             (_, Some(selected)) => Some(selected.return_type.clone()),

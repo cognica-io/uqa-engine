@@ -26,6 +26,27 @@ impl FunctionTypeResolver for Catalog {
 }
 impl crate::routines::RoutineResolution for Catalog {}
 
+struct RetainedCatalog;
+
+impl FunctionTypeResolver for RetainedCatalog {
+    fn resolve_function_type(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        names: &[Option<String>],
+        arguments: &[Option<ColumnType>],
+        variadic: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Catalog.resolve_function_type(name, binding, names, arguments, variadic)
+    }
+
+    fn resolve_collation_name(&self, _: &str) -> Result<Option<u32>, SQLError> {
+        Err(SQLError::Internal(
+            "retained collation was resolved by name again".into(),
+        ))
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct Diagnostic {
     sqlstate: String,
@@ -197,4 +218,98 @@ fn nonvalidating_introspection_preserves_collation_errors_for_analysis() {
             "{sql}"
         );
     }
+}
+
+fn retain_expression(
+    expression: &mut crate::ast::Expr,
+    schema: &RowSchema,
+    catalog: &dyn FunctionTypeResolver,
+) -> Result<bool, SQLError> {
+    let original = crate::plan::ExpressionPlan::lower(expression.clone());
+    let mut bound = original.clone();
+    crate::type_resolution::store_syntax_operand_coercions(
+        &mut bound.scalar,
+        schema,
+        &[],
+        catalog,
+    )?;
+    let sites = crate::binding::syntax_sites::expression_syntax_sites(&original, &bound)?;
+    crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)
+}
+
+#[test]
+fn stored_collations_keep_postgresql_nodes_after_binding_and_serialization() {
+    #[derive(serde::Deserialize)]
+    struct Case {
+        clock: Option<i64>,
+        base: String,
+        check: String,
+        conbin: String,
+        sql: String,
+        pretty: String,
+    }
+    let mut cases: Vec<Case> =
+        serde_json::from_str(include_str!("explicit_collations.json")).unwrap();
+    cases.extend(serde_json::from_str::<Vec<Case>>(include_str!("collated_inputs.json")).unwrap());
+    let mut failures = Vec::new();
+    for case in cases {
+        let _clock = case.clock.map(crate::expr::TransactionClockScope::enter);
+        let sql = format!("CREATE DOMAIN d AS {} CHECK({})", case.base, case.check);
+        let Statement::CreateDomain(mut domain) = crate::compile(&sql).unwrap().remove(0) else {
+            panic!("domain declaration");
+        };
+        let base = ColumnType::from_sql_name(&case.base).unwrap();
+        let schema = RowSchema::with_types(vec!["value".into()], vec![Some(base.clone())]);
+        let expression = &mut domain.checks[0].expression;
+        let retain = retain_expression(expression, &schema, &Catalog);
+        if let Err(error) = retain {
+            failures.push(format!("{}: binding: {error}", case.check));
+            continue;
+        }
+        let serialized = serde_json::to_vec(expression).unwrap();
+        let mut expression = serde_json::from_slice(&serialized).unwrap();
+        // A later catalog read must retain the definition-time input function's result.
+        let _later = case
+            .clock
+            .map(|clock| crate::expr::TransactionClockScope::enter(clock + 86_400_000_000));
+        match retain_expression(&mut expression, &schema, &RetainedCatalog) {
+            Ok(_) if serde_json::to_vec(&expression).unwrap() == serialized => {}
+            result => {
+                failures.push(format!(
+                    "{}: retained binding is not stable: {result:?}",
+                    case.check
+                ));
+                continue;
+            }
+        }
+        let context = expressions::ExpressionContext {
+            schema: &schema,
+            domain_value: Some(&base),
+            types: Some(&RetainedCatalog),
+            routines: &Routines,
+        };
+        match context.check(&expression) {
+            Ok(node) => {
+                let actual = super::Field::Node(node);
+                let expected = super::parse(&case.conbin).unwrap();
+                if actual != expected {
+                    failures.push(format!(
+                        "{}: actual {actual}\nexpected {expected}",
+                        case.check
+                    ));
+                }
+                for (pretty, expected) in [(false, &case.sql), (true, &case.pretty)] {
+                    let output = super::deparse::expression(&actual, &Routines, pretty);
+                    if output.as_ref().ok() != Some(expected) {
+                        failures.push(format!(
+                            "{} (pretty={pretty}): {output:?}, expected {expected}",
+                            case.check
+                        ));
+                    }
+                }
+            }
+            Err(error) => failures.push(format!("{}: encoding: {error}", case.check)),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

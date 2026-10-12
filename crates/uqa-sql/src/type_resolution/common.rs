@@ -17,7 +17,10 @@ use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 use super::FunctionTypeResolver;
 
 /// Inputs whose absent type means `PostgreSQL` `unknown`, rather than an unresolved UQA runtime value.
-pub(super) fn unknown_input(expression: &ScalarExpr) -> bool {
+pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {
+    while let Ok(Some(clause)) = crate::catalog::collations::expression::scalar_clause(expression) {
+        expression = clause.argument;
+    }
     matches!(
         expression,
         ScalarExpr::Literal(Value::Null | Value::Str(_)) | ScalarExpr::Param(_)

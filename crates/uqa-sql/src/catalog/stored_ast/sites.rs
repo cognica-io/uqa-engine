@@ -81,15 +81,24 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
     Ok(routines_changed || values_changed)
 }
 
+fn mismatch(what: &str) -> SQLError {
+    SQLError::Internal(format!(
+        "stored catalog binding does not match the {what} of its syntax"
+    ))
+}
+
 fn apply_value_site<'a>(
     node: &mut Expr,
     sites: &mut std::iter::Peekable<impl Iterator<Item = &'a ValueSite>>,
 ) -> Result<bool, SQLError> {
-    let mismatch = |what: &str| {
-        SQLError::Internal(format!(
-            "stored catalog binding does not match the {what} of its syntax"
-        ))
-    };
+    if let Some(ValueSite::DiscardCollation) = sites.peek() {
+        sites.next();
+        if !crate::catalog::collations::expression::discard_ast_clause(node)? {
+            return Err(mismatch("discarded collation"));
+        }
+        apply_value_site(node, sites)?;
+        return Ok(true);
+    }
     if let Some(ValueSite::RowDistinct) = sites.peek() {
         sites.next();
         crate::type_resolution::row_distinct::rewrite_ast(node)?;

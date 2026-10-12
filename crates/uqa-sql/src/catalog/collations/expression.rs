@@ -60,6 +60,36 @@ pub fn ast_clause(expression: &Expr) -> Result<Option<Clause<'_, Expr>>, SQLErro
     }))
 }
 
+pub(crate) fn discard_scalar_clause(expression: &mut ScalarExpr) -> Result<bool, SQLError> {
+    if scalar_clause(expression)?.is_none() {
+        return Ok(false);
+    }
+    let ScalarExpr::Func { args, .. } =
+        std::mem::replace(expression, ScalarExpr::Literal(Value::Null))
+    else {
+        unreachable!("validated collation clause");
+    };
+    *expression = args
+        .into_iter()
+        .next()
+        .expect("validated collation argument");
+    Ok(true)
+}
+
+pub(crate) fn discard_ast_clause(expression: &mut Expr) -> Result<bool, SQLError> {
+    if ast_clause(expression)?.is_none() {
+        return Ok(false);
+    }
+    let Expr::Func { args, .. } = std::mem::replace(expression, Expr::Literal(Value::Null)) else {
+        unreachable!("validated collation clause");
+    };
+    *expression = args
+        .into_iter()
+        .next()
+        .expect("validated collation argument");
+    Ok(true)
+}
+
 pub fn select(
     name: &str,
     selected: Option<u32>,

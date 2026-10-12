@@ -204,6 +204,9 @@ impl Binder<'_, '_> {
                 return Ok(());
             }
         }
+        if self.coerce_collated_operand(expression, &target)? {
+            return Ok(());
+        }
         if let Some(folded) = self.fold_enum_literal(expression, &target)? {
             *expression = folded;
             return Ok(());
@@ -239,11 +242,18 @@ impl Binder<'_, '_> {
             &target,
             &self.control,
         )?;
-        if !matches!(expression, ScalarExpr::Literal(Value::Str(_))) {
+        let mut original = &*expression;
+        while let Some(clause) = crate::catalog::collations::expression::scalar_clause(original)? {
+            original = clause.argument;
+        }
+        if !matches!(original, ScalarExpr::Literal(Value::Str(_))) {
             return Ok(());
         }
         let input =
             crate::type_resolution::literal_input_type_with_control(&target, &self.control)?;
+        if self.coerce_collated_operand(expression, &input)? {
+            return Ok(());
+        }
         if let Some(constant) = self.read_unknown_literal(expression, &input)? {
             *expression = constant;
         }

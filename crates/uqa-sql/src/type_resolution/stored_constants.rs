@@ -90,6 +90,13 @@ trait Folding {
     fn array_domain_input(&mut self, _: &mut ScalarExpr) -> Result<bool, SQLError> {
         Ok(false)
     }
+    fn call_identity(
+        &mut self,
+        _: &mut Option<crate::ast::FunctionBinding>,
+        _: Option<&crate::ast::FunctionBinding>,
+    ) -> bool {
+        false
+    }
     /// A stored `unknown` literal and what binding made of it.
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError>;
     /// The casts binding added around a node, outermost first, which the stored node may take over.
@@ -129,6 +136,24 @@ struct OperatorCoercions<'a> {
 }
 
 impl Folding for OperatorCoercions<'_> {
+    fn call_identity(
+        &mut self,
+        stored: &mut Option<crate::ast::FunctionBinding>,
+        selected: Option<&crate::ast::FunctionBinding>,
+    ) -> bool {
+        if stored.as_ref() != selected
+            && matches!(
+                selected.and_then(|binding| binding.dispatch),
+                Some(crate::ast::FunctionDispatch::Collate { oid: Some(_) })
+            )
+        {
+            *stored = selected.cloned();
+            true
+        } else {
+            false
+        }
+    }
+
     fn identity_cast(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
         if self.preserve_syntax_shape {
             return Ok(false);
@@ -319,7 +344,13 @@ fn transfer(
         false
     };
     let (bound, added) = split_added_casts(stored, bound);
-    let mut changed = if is_unknown_literal(stored) {
+    let mut changed = if crate::catalog::collations::expression::scalar_clause(stored)?.is_some()
+        && crate::catalog::collations::expression::scalar_clause(bound)?.is_none()
+    {
+        crate::catalog::collations::expression::discard_scalar_clause(stored)?;
+        transfer(stored, bound, folding)?;
+        true
+    } else if is_unknown_literal(stored) {
         folding.literal(stored, bound)?
     } else {
         transfer_children(stored, bound, folding)?
@@ -354,6 +385,7 @@ fn transfer_children(
         (
             ScalarExpr::Func {
                 name,
+                binding,
                 args,
                 order_by,
                 filter,
@@ -383,6 +415,7 @@ fn transfer_children(
             if let (Some(filter), Some(bound)) = (filter, bound_filter) {
                 changed |= transfer(filter, bound, folding)?;
             }
+            changed |= folding.call_identity(binding, bound_binding.as_ref());
             changed
         }
         (ScalarExpr::Array(items), ScalarExpr::Array(bound))
