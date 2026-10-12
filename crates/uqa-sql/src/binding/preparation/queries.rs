@@ -75,16 +75,21 @@ impl Preparation<'_> {
                 let output = self.set_output(left, right, *kind, *all)?;
                 let schema = output.schema();
                 for order in order_by {
-                    if let Some(ty) = self.alias_expression(
+                    let value = self.alias_expression(
                         &order.expr,
+                        &output,
                         &schema,
                         &schema,
                         subqueries,
                         "ORDER BY",
-                    )? {
+                    )?;
+                    if let Some(ty) = value.ty {
                         crate::type_resolution::ComparisonSupport::Ordering
                             .require_in_catalog(&ty, self.routines)?;
                     }
+                    self.parameters
+                        .collations
+                        .require_key(&order.expr, value.derivation);
                 }
                 let input = overlay_outer_schema(&RowSchema::default(), outer);
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
@@ -143,6 +148,7 @@ impl Preparation<'_> {
             );
             *left = result;
         }
+        left.key_origins.clear();
         Ok(left)
     }
 
@@ -159,9 +165,19 @@ impl Preparation<'_> {
             .transpose()?
             .unwrap_or_default();
         let source = analysis::with_query_source_columns(&source, block);
-        let input = overlay_outer_schema(&source, outer);
-        let mut output =
-            self.projections(&block.projections, &source, &input, &block.subqueries)?;
+        self.block_with_source(block, &source, outer, preserve_unknown)
+    }
+
+    pub(super) fn block_with_source(
+        &mut self,
+        block: &QueryBlockPlan,
+        source: &RowSchema,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+    ) -> Result<QueryOutput, SQLError> {
+        let input = overlay_outer_schema(source, outer);
+        let input = self.scope.with_stored_outer_internal_aliases(&input);
+        let mut output = self.projections(&block.projections, source, &input, &block.subqueries)?;
         if let Some(predicate) = &block.r#where {
             self.require_boolean(predicate, &input, &block.subqueries, "WHERE")?;
         }
@@ -170,16 +186,19 @@ impl Preparation<'_> {
         }
         let projected = output.schema();
         for order in &block.order_by {
-            if let Some(ty) = self.alias_expression(
+            let value = self.alias_expression(
                 &order.expr,
+                &output,
                 &projected,
                 &input,
                 &block.subqueries,
                 "ORDER BY",
-            )? {
+            )?;
+            if let Some(ty) = &value.ty {
                 crate::type_resolution::ComparisonSupport::Ordering
-                    .require_in_catalog(&ty, self.routines)?;
+                    .require_in_catalog(ty, self.routines)?;
             }
+            self.query_key(&order.expr, value.derivation, block, &input)?;
         }
         for expression in block
             .group_by
@@ -191,7 +210,7 @@ impl Preparation<'_> {
                     self.routines,
                     expression,
                     &block.projections,
-                    &source,
+                    source,
                     outer,
                     &self.parameters.values(),
                 )?;
@@ -202,23 +221,32 @@ impl Preparation<'_> {
                 crate::type_resolution::ComparisonSupport::Equality
                     .require_in_catalog(ty, self.routines)?;
             }
+            self.query_key(expression, value.derivation, block, &input)?;
         }
         for expression in &block.distinct_on {
-            if let Some(ty) = self.alias_expression(
+            let value = self.alias_expression(
                 expression,
+                &output,
                 &projected,
                 &input,
                 &block.subqueries,
                 "DISTINCT ON",
-            )? {
-                crate::type_resolution::ComparisonSupport::Equality
-                    .require_in_catalog(&ty, self.routines)?;
-            }
-        }
-        if block.distinct && block.distinct_on.is_empty() {
-            for ty in output.types.iter().filter_map(|value| value.ty.as_ref()) {
+            )?;
+            if let Some(ty) = &value.ty {
                 crate::type_resolution::ComparisonSupport::Equality
                     .require_in_catalog(ty, self.routines)?;
+            }
+            self.query_key(expression, value.derivation, block, &input)?;
+        }
+        if block.distinct && block.distinct_on.is_empty() {
+            for (position, value) in output.types.iter().enumerate() {
+                if let Some(ty) = &value.ty {
+                    crate::type_resolution::ComparisonSupport::Equality
+                        .require_in_catalog(ty, self.routines)?;
+                }
+                if let Some(origin) = output.key_origin(position) {
+                    self.parameters.collations.require_key_at(origin);
+                }
             }
         }
         self.slice(
@@ -231,7 +259,7 @@ impl Preparation<'_> {
         crate::semantics::grouping_sets::validate_grouped_expressions(
             self.routines,
             block,
-            &source,
+            source,
             outer,
             &self.parameters.values(),
         )?;
@@ -300,6 +328,7 @@ impl Preparation<'_> {
             columns: Vec::new(),
             types: Vec::new(),
             open: false,
+            key_origins: Vec::new(),
         };
         for (projection, label) in projections.iter().zip(labels) {
             let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
@@ -329,10 +358,30 @@ impl Preparation<'_> {
                     output.types.push(value);
                 }
             } else {
+                let mut value = self.expression(&projection.expr, input, subqueries)?;
+                if matches!(value.ty, Some(ColumnType::Composite(_))) {
+                    value.record_fields = self.scope.bind_record_fields(
+                        self.routines,
+                        &projection.expr,
+                        input,
+                        subqueries,
+                        &self.parameters.values(),
+                    )?;
+                }
+                if matches!(
+                    value.derivation,
+                    crate::catalog::collations::derivation::Derivation::Conflict(..)
+                ) {
+                    output.key_origins.push((
+                        output.types.len(),
+                        std::ptr::NonNull::from(&projection.expr),
+                    ));
+                    self.parameters
+                        .collations
+                        .record_target(&projection.expr, value.derivation);
+                }
                 output.columns.push(label);
-                output
-                    .types
-                    .push(self.expression(&projection.expr, input, subqueries)?);
+                output.types.push(value);
             }
         }
         Ok(output)
@@ -387,6 +436,7 @@ impl Preparation<'_> {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(QueryOutput {
             open: false,
+            key_origins: Vec::new(),
             columns: (1..=width)
                 .map(|position| format!("column{position}"))
                 .collect(),
@@ -397,14 +447,29 @@ impl Preparation<'_> {
     fn alias_expression(
         &mut self,
         expression: &ScalarExpr,
+        output: &QueryOutput,
         primary: &RowSchema,
         fallback: &RowSchema,
         subqueries: &[QueryPlan],
         clause: &str,
-    ) -> Result<Option<ColumnType>, SQLError> {
-        if let ScalarExpr::Literal(uqa_core::Value::Int(position)) = expression {
-            let index = crate::semantics::query_output_position(*position, primary.len(), clause)?;
-            return Ok(primary.column_type(index).cloned());
+    ) -> Result<ExpressionType, SQLError> {
+        let index = match expression {
+            ScalarExpr::Literal(uqa_core::Value::Int(position)) => Some(
+                crate::semantics::query_output_position(*position, primary.len(), clause)?,
+            ),
+            ScalarExpr::Column(name) if !primary.column_is_ambiguous(name) => {
+                primary.column_slot(name)
+            }
+            ScalarExpr::Position(position) if *position < output.types.len() => Some(*position),
+            _ => None,
+        };
+        if let Some(index) = index.filter(|index| *index < output.types.len()) {
+            if let Some(origin) = output.key_origin(index) {
+                self.parameters.collations.require_key_at(origin);
+            }
+            let mut value = ExpressionType::resolved(output.types[index].ty.clone());
+            value.derivation = output.types[index].derivation;
+            return Ok(value);
         }
         let mut value = if matches!(expression, ScalarExpr::Column(_) | ScalarExpr::Position(_)) {
             let input = overlay_outer_schema(primary, Some(fallback));
@@ -414,7 +479,58 @@ impl Preparation<'_> {
         };
         self.parameters
             .coerce_unknown(&mut value, &ColumnType::Text)?;
-        Ok(value.ty)
+        Ok(value)
+    }
+
+    fn query_key(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: crate::catalog::collations::derivation::Derivation,
+        block: &QueryBlockPlan,
+        input: &RowSchema,
+    ) -> Result<(), SQLError> {
+        use crate::catalog::collations::derivation::Derivation;
+        if !matches!(selected, Derivation::Conflict(..)) {
+            return Ok(());
+        }
+        self.parameters.collations.require_key(expression, selected);
+        let mut identity = None;
+        for projection in &block.projections {
+            if !self
+                .parameters
+                .collations
+                .indeterminate_target(&projection.expr)
+            {
+                continue;
+            }
+            let same = if projection.expr == *expression {
+                true
+            } else {
+                let parameters = self.parameters.values();
+                let key = match &identity {
+                    Some(key) => key,
+                    None => identity.insert(crate::semantics::grouping_sets::expression_identity(
+                        self.routines,
+                        expression,
+                        input,
+                        &parameters,
+                    )?),
+                };
+                *key == crate::semantics::grouping_sets::expression_identity(
+                    self.routines,
+                    &projection.expr,
+                    input,
+                    &parameters,
+                )?
+            };
+            if same {
+                self.parameters
+                    .collations
+                    .require_key(&projection.expr, selected);
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn slice(

@@ -93,6 +93,43 @@ fn analyze(sql: &str, catalog: &Types) -> Result<Vec<Option<ColumnType>>, SQLErr
 }
 
 #[test]
+fn shared_query_outputs_preserve_named_composite_field_descriptors() {
+    let catalog = Types(ColumnType::Text);
+    let binding = crate::binding::fixture::empty_binding_context();
+    for sql in [
+        "SELECT NULL::pair",
+        "WITH r AS (SELECT NULL::pair AS v) SELECT v FROM r",
+        "SELECT r.v FROM (SELECT NULL::pair AS v) r",
+        "SELECT DISTINCT NULL::pair",
+        "SELECT coalesce(NULL::pair,NULL::pair)",
+    ] {
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let mut preparation = Preparation {
+            routines: &catalog,
+            scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
+            parameters: ParameterTypes::new(&[]),
+            schema_expression: None,
+        };
+        for output in [
+            preparation.query(&query, None),
+            crate::binding::analyze_query_plan_schema(&catalog, &query, &[], &binding, None),
+            crate::binding::bind_query_plan_schema(&catalog, &query, &[], &binding, None),
+        ] {
+            let output = output.unwrap_or_else(|error| panic!("{sql}: {error}"));
+            assert_eq!(output.column_type(0), Some(&pair()), "{sql}");
+            assert_eq!(
+                output.record_fields(0).unwrap().as_ref(),
+                [Some(ColumnType::Integer), Some(ColumnType::Text)],
+                "{sql}"
+            );
+        }
+    }
+}
+
+#[test]
 fn empty_named_composite_queries_require_equality_from_every_live_field() {
     for sql in [
         "SELECT DISTINCT NULL::pair WHERE false",

@@ -19,6 +19,8 @@ pub(crate) enum Derivation {
     Explicit(i64),
     /// Keep the first ordered conflict until the containing query's type checks finish.
     InvalidExplicit(i64, i64),
+    /// A comparison key requires a determinate collation after type analysis finishes.
+    InvalidImplicit(i64, i64),
 }
 
 impl Derivation {
@@ -32,7 +34,10 @@ impl Derivation {
 
     pub(crate) fn oid(self) -> i64 {
         match self {
-            Self::None | Self::Conflict(..) | Self::InvalidExplicit(..) => 0,
+            Self::None
+            | Self::Conflict(..)
+            | Self::InvalidExplicit(..)
+            | Self::InvalidImplicit(..) => 0,
             Self::Implicit(oid) | Self::Explicit(oid) => oid,
         }
     }
@@ -40,9 +45,8 @@ impl Derivation {
     /// Combine in child visitation order without reporting a collation error before a later type error.
     pub(crate) fn combine(self, next: Self) -> Self {
         match (self, next) {
-            (value @ Self::InvalidExplicit(..), _) | (_, value @ Self::InvalidExplicit(..)) => {
-                value
-            }
+            (value @ (Self::InvalidExplicit(..) | Self::InvalidImplicit(..)), _)
+            | (_, value @ (Self::InvalidExplicit(..) | Self::InvalidImplicit(..))) => value,
             (Self::Explicit(left), Self::Explicit(right)) if left != right => {
                 Self::InvalidExplicit(left, right)
             }
@@ -68,6 +72,9 @@ impl Derivation {
     }
 
     pub(crate) fn validate(self) -> Result<(), SQLError> {
+        if let Self::InvalidImplicit(left, right) = self {
+            return Self::Conflict(left, right).common_oid(false).map(|_| ());
+        }
         let Self::InvalidExplicit(left, right) = self else {
             return Ok(());
         };
@@ -102,20 +109,20 @@ impl Derivation {
 
     pub(crate) fn error_only(self) -> Self {
         match self {
-            Self::InvalidExplicit(..) => self,
+            Self::InvalidExplicit(..) | Self::InvalidImplicit(..) => self,
             _ => Self::None,
         }
     }
 
     pub(crate) fn explicit(self, oid: i64) -> Self {
         match self {
-            Self::InvalidExplicit(..) => self,
+            Self::InvalidExplicit(..) | Self::InvalidImplicit(..) => self,
             _ => Self::Explicit(oid),
         }
     }
 
     pub(crate) fn result(self, declared: i64) -> Self {
-        if matches!(self, Self::InvalidExplicit(..)) {
+        if self.error_only() != Self::None {
             self
         } else if declared == 0 {
             Self::None
@@ -123,6 +130,14 @@ impl Derivation {
             Self::Implicit(declared)
         } else {
             self
+        }
+    }
+
+    /// A key turns its otherwise permitted implicit conflict into a deferred diagnostic.
+    pub(crate) fn key(self) -> Self {
+        match self {
+            Self::Conflict(left, right) => Self::InvalidImplicit(left, right),
+            _ => self,
         }
     }
 

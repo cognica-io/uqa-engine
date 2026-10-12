@@ -2627,8 +2627,8 @@
       ],
       "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
       "capability": "Bounded ordinary result inference",
-      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls, as SELECT outputs, two VALUES rows and set-operation trees with two or three leaves.",
-      "invariant": "Per original expression occurrence, result binding performs 1 or 17 catalog lookups and strict analysis performs 2 or 34; VALUES rows and set leaves scale those counts linearly without resolving already analyzed children again."
+      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls, as SELECT outputs, ORDER BY aliases/ordinals, DISTINCT/DISTINCT ON, two VALUES rows and set-operation trees with two or three leaves.",
+      "invariant": "Per original expression occurrence, result binding performs 1 or 17 catalog lookups and strict analysis performs 2 or 34; output-key references do not repeat them, while VALUES rows and set leaves scale those counts linearly without resolving already analyzed children again."
     },
     {
       "package": "uqa-sql",
@@ -2720,6 +2720,32 @@
       "capability": "Runtime array domain identity",
       "workload": "Bound domain columns mixed with unknown NULL before and after a known input, under a fixed 2048-byte allowance.",
       "invariant": "Runtime ARRAY element identity agrees with SQL common-type selection without evaluating items; identical domains retain their OID and unknown inputs select the base OID, releasing every reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sort_group_key_collations_and_diagnostic_order_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Determinate sort and group key collations",
+      "workload": "Thirty-nine independent PostgreSQL observations cover output ordinals and aliases, expanded stars, qualified-equivalent expressions, GROUP BY, DISTINCT, aggregate keys and window keys, with competing type and explicit-collation errors.",
+      "invariant": "Prepared and ordinary analysis reject indeterminate keys with the same SQLSTATE, message, detail and hint as PostgreSQL, preserving original target-list diagnostic order; valid outputs keep their selected collations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_query_outputs_preserve_named_composite_field_descriptors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/comparison_capabilities.rs",
+      "capability": "Named composite output metadata preservation",
+      "workload": "A two-field named composite projected through a typed NULL, CTE, derived table, DISTINCT and COALESCE.",
+      "invariant": "Prepared analysis and both ordinary output paths retain the named type and its ordered field descriptors without inferring them from a runtime value."
     }
   ]
 }

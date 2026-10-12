@@ -409,26 +409,17 @@ impl Preparation<'_> {
         } else {
             self.select_function_arguments(name, binding, args, &arguments)?
         };
-        if let Some(kind) = selected.kind.or_else(|| {
-            selected
-                .overload
-                .as_ref()
-                .map(|_| super::super::ordered_calls::Kind::Ordinary)
-        }) {
-            super::super::ordered_calls::validate(
-                name,
-                kind,
-                super::super::ordered_calls::Modifiers {
-                    direct: args.len(),
-                    ordered: order_by.len(),
-                    within_group,
-                    distinct: *distinct,
-                    filtered: filter.is_some(),
-                },
-                &arguments.names,
-                &arguments.types(),
-            )?;
-        }
+        selected.validate_modifiers(
+            name,
+            super::super::ordered_calls::Modifiers {
+                direct: args.len(),
+                ordered: order_by.len(),
+                within_group,
+                distinct: *distinct,
+                filtered: filter.is_some(),
+            },
+            &arguments,
+        )?;
         // Pure name/signature validation must finish before implicit input
         // conversion: a rejected scalar call cannot run a domain CHECK.
         if within_group && selected.overload.is_none() {
@@ -469,11 +460,12 @@ impl Preparation<'_> {
                 .or(binding),
             input,
         )?;
-        Ok(super::function_calls::collated_result(
+        Ok(arguments.into_collated_result(
             ty,
-            &arguments.values,
             binding,
             additional.diagnostics,
+            *distinct,
+            within_group.then_some(args.len()),
         ))
     }
 

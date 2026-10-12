@@ -166,21 +166,18 @@ fn assert_computed_collation_references(sources: &[(&str, usize)]) {
         let prepared = preparation.query(&query, None);
         let ordinary =
             crate::binding::analyze_query_plan_schema(&NoRoutines, &query, &[], &binding, None);
-        let mut results = vec![prepared, ordinary];
+        let mut results = vec![("prepared", prepared), ("ordinary", ordinary)];
         if case.error.is_none() {
-            results.push(crate::binding::bind_query_plan_schema(
-                &NoRoutines,
-                &query,
-                &[],
-                &binding,
-                None,
+            results.push((
+                "bound",
+                crate::binding::bind_query_plan_schema(&NoRoutines, &query, &[], &binding, None),
             ));
         }
-        for result in results {
+        for (entry, result) in results {
             if let Some(expected) = &case.error {
                 let error = result
                     .err()
-                    .unwrap_or_else(|| panic!("expected PostgreSQL error: {}", case.sql));
+                    .unwrap_or_else(|| panic!("{entry}: expected PostgreSQL error: {}", case.sql));
                 assert_eq!(
                     error.sqlstate(),
                     expected["sqlstate"].as_str(),
@@ -279,6 +276,13 @@ fn output_metadata_visits_nested_call_arguments_once() {
         }
         for (sql, copies) in [
             (format!("SELECT {expression}"), 1),
+            (format!("SELECT {expression} AS value ORDER BY value"), 1),
+            (format!("SELECT {expression} ORDER BY 1"), 1),
+            (format!("SELECT DISTINCT {expression}"), 1),
+            (
+                format!("SELECT DISTINCT ON (value) {expression} AS value ORDER BY value"),
+                1,
+            ),
             (format!("VALUES ({expression}),({expression})"), 2),
             (
                 format!("SELECT {expression} UNION ALL SELECT {expression}"),
@@ -309,7 +313,7 @@ fn output_metadata_visits_nested_call_arguments_once() {
             assert_eq!(
                 calls.0.load(Ordering::Relaxed),
                 copies * expected_calls,
-                "{wrapper}"
+                "{sql}"
             );
             calls.0.store(0, Ordering::Relaxed);
             let output = crate::binding::analyze_query_plan_schema(
@@ -325,7 +329,7 @@ fn output_metadata_visits_nested_call_arguments_once() {
             assert_eq!(
                 calls.0.load(Ordering::Relaxed),
                 2 * copies * expected_calls,
-                "{wrapper}"
+                "{sql}"
             );
         }
     }
@@ -344,4 +348,9 @@ fn values_collations_and_column_diagnostics_match_postgresql() {
 #[test]
 fn set_collations_and_column_diagnostics_match_postgresql() {
     assert_computed_collation_references(&[(include_str!("set_collations.json"), 61)]);
+}
+
+#[test]
+fn sort_group_key_collations_and_diagnostic_order_match_postgresql() {
+    assert_computed_collation_references(&[(include_str!("key_collations.json"), 39)]);
 }

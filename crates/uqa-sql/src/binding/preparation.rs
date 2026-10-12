@@ -410,13 +410,45 @@ pub(super) fn set_metadata(
     Ok(output.schema())
 }
 
+/// Ordinary query blocks retain the same original output observations through clause and key selection.
+pub(super) fn block_metadata(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    block: &crate::plan::QueryBlockPlan,
+    source: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[crate::SQLParam],
+) -> Result<RowSchema, SQLError> {
+    let mut analysis = Preparation {
+        routines,
+        scope,
+        parameters: ParameterTypes::fixed(params),
+        schema_expression: None,
+    };
+    let output = analysis.block_with_source(block, source, outer, false)?;
+    analysis
+        .scope
+        .collations
+        .append(analysis.parameters.collations);
+    Ok(output.schema())
+}
+
 struct QueryOutput {
     columns: Vec<String>,
     types: Vec<ExpressionType>,
     open: bool,
+    /// Sparse original targets for indeterminate output collations; addresses are never dereferenced.
+    key_origins: Vec<(usize, std::ptr::NonNull<ScalarExpr>)>,
 }
 
 impl QueryOutput {
+    fn key_origin(&self, position: usize) -> Option<std::ptr::NonNull<ScalarExpr>> {
+        self.key_origins
+            .binary_search_by_key(&position, |(position, _)| *position)
+            .ok()
+            .map(|index| self.key_origins[index].1)
+    }
+
     fn schema(&self) -> RowSchema {
         let schema =
             RowSchema::with_types(

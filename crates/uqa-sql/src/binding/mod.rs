@@ -81,7 +81,6 @@ use crate::semantics::{cte_references_own_name, expr_contains_subquery, projecti
 use crate::{SQLError, SQLParam, ScalarExpr};
 use catalog_sources::user_function_output_columns;
 pub use context::BindingContext;
-use uqa_core::Value;
 
 pub mod context;
 mod rule_inputs;
@@ -266,61 +265,7 @@ impl SchemaScope {
             source
         };
         let expression_schema = overlay_outer_schema(&source, outer);
-        let labels = projection_columns(&block.projections);
-        let mut columns = Vec::new();
-        let mut types = Vec::new();
-        let mut records = Vec::new();
-        let mut collations = projection::OutputCollations::default();
-        for (position, projection) in block.projections.iter().enumerate() {
-            if let Some(star_columns) = projection_star_columns(&projection.expr, &source)? {
-                records.extend(
-                    record_fields::star_fields(&projection.expr, &source).unwrap_or_default(),
-                );
-                for (column, ty, collation) in star_columns {
-                    collations.push(types.len(), ty.as_ref(), collation);
-                    columns.push(column);
-                    types.push(ty);
-                }
-                continue;
-            }
-            columns.push(labels[position].clone());
-            let (ty, collation) = if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
-                (Some(ColumnType::Text), None)
-            } else {
-                self.bind_projection_metadata(
-                    routines,
-                    &projection.expr,
-                    &expression_schema,
-                    &block.subqueries,
-                    params,
-                )?
-            };
-            collations.push(types.len(), ty.as_ref(), collation);
-            types.push(ty);
-            records.push(
-                if types.last().is_some_and(|ty| {
-                    matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_)))
-                }) {
-                    self.bind_record_fields(
-                        routines,
-                        &projection.expr,
-                        &expression_schema,
-                        &block.subqueries,
-                        params,
-                    )?
-                } else {
-                    None
-                },
-            );
-        }
-        let output = collations
-            .apply(RowSchema::with_types(columns, types))
-            .with_record_fields(
-                records
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
-            );
+        let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
         let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
         if self.validate_references {
             self.validate_query_block_clauses(

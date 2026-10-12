@@ -26,12 +26,51 @@ impl ObservedFunctionArguments {
     pub(super) fn types(&self) -> Vec<Option<ColumnType>> {
         self.values.iter().map(|value| value.ty.clone()).collect()
     }
+
+    pub(super) fn into_collated_result(
+        mut self,
+        ty: Option<ColumnType>,
+        binding: Option<&FunctionBinding>,
+        additional: Derivation,
+        distinct: bool,
+        ordered_start: Option<usize>,
+    ) -> ExpressionType {
+        for (position, value) in self.values.iter_mut().enumerate() {
+            if distinct || ordered_start.is_some_and(|start| position >= start) {
+                value.derivation = value.derivation.key();
+            }
+        }
+        collated_result(ty, &self.values, binding, additional)
+    }
 }
 
 pub(super) struct SelectedFunctionArguments {
     pub(super) overload: Option<ResolvedFunctionOverload>,
     positions: Option<Vec<usize>>,
     pub(super) kind: Option<super::super::ordered_calls::Kind>,
+}
+
+impl SelectedFunctionArguments {
+    pub(super) fn validate_modifiers(
+        &self,
+        name: &str,
+        modifiers: super::super::ordered_calls::Modifiers,
+        arguments: &ObservedFunctionArguments,
+    ) -> Result<(), SQLError> {
+        let kind = self.kind.or(self
+            .overload
+            .as_ref()
+            .map(|_| super::super::ordered_calls::Kind::Ordinary));
+        kind.map_or(Ok(()), |kind| {
+            super::super::ordered_calls::validate(
+                name,
+                kind,
+                modifiers,
+                &arguments.names,
+                &arguments.types(),
+            )
+        })
+    }
 }
 
 pub(super) enum FunctionResult {
@@ -377,7 +416,7 @@ impl Preparation<'_> {
         let mut order_types = Vec::with_capacity(orders.len());
         for order in orders {
             let value = self.expression(&order.expr, input, subqueries)?;
-            selected = selected.combine(value.derivation.error_only());
+            selected = selected.combine(value.derivation.key().error_only());
             order_types.push(value.ty);
         }
         if let Some(filter) = filter {

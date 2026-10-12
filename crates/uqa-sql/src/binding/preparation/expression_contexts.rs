@@ -138,7 +138,7 @@ impl Preparation<'_> {
                     .derivation
                     .error_only()
             };
-            if matches!(selected, Derivation::InvalidExplicit(..)) {
+            if selected.error_only() != Derivation::None {
                 conditions.push((index, selected));
             }
             values.push(self.expression(value, input, subqueries)?);
@@ -195,6 +195,9 @@ impl Preparation<'_> {
                 crate::type_resolution::ComparisonSupport::Ordering
                     .require_in_catalog(ty, self.routines)?;
             }
+            self.parameters
+                .collations
+                .require_key(&item.expr, value.derivation);
             if order_type.is_none() {
                 order_type = value.ty;
             }
@@ -207,6 +210,9 @@ impl Preparation<'_> {
                 crate::type_resolution::ComparisonSupport::Equality
                     .require_in_catalog(ty, self.routines)?;
             }
+            self.parameters
+                .collations
+                .require_key(item, value.derivation);
         }
         let (order_count, order_type) = if spec.order_by.is_empty() {
             inherited.cloned().unwrap_or_default()

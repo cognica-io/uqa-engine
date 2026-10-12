@@ -11,7 +11,7 @@ use crate::plan::{CommandPlan, QueryPlan, RelationalPlan};
 use crate::{SQLError, ScalarExpr};
 use std::{collections::BTreeMap, ptr::NonNull};
 
-/// Valid inputs allocate no diagnostic storage. Addresses identify borrowed syntax and are never dereferenced or retained in an executable plan.
+/// Only conflicting inputs retain diagnostic metadata. Addresses identify borrowed syntax and are never dereferenced or retained in an executable plan.
 #[derive(Default)]
 pub(in crate::binding) struct PendingCollations(BTreeMap<NonNull<ScalarExpr>, Derivation>);
 
@@ -20,8 +20,31 @@ impl PendingCollations {
         self.0.append(&mut other.0);
     }
     pub(super) fn record(&mut self, expression: &ScalarExpr, selected: Derivation) {
-        if matches!(selected, Derivation::InvalidExplicit(..)) {
+        if selected.error_only() != Derivation::None {
             self.0.insert(NonNull::from(expression), selected);
+        }
+    }
+
+    pub(super) fn record_target(&mut self, expression: &ScalarExpr, selected: Derivation) {
+        if matches!(selected, Derivation::Conflict(..)) {
+            self.0.entry(NonNull::from(expression)).or_insert(selected);
+        }
+    }
+
+    pub(super) fn indeterminate_target(&self, expression: &ScalarExpr) -> bool {
+        matches!(
+            self.0.get(&NonNull::from(expression)),
+            Some(Derivation::Conflict(..) | Derivation::InvalidImplicit(..))
+        )
+    }
+
+    pub(super) fn require_key(&mut self, expression: &ScalarExpr, selected: Derivation) {
+        self.record(expression, selected.key());
+    }
+
+    pub(super) fn require_key_at(&mut self, expression: NonNull<ScalarExpr>) {
+        if let Some(selected) = self.0.get_mut(&expression) {
+            *selected = selected.key();
         }
     }
 

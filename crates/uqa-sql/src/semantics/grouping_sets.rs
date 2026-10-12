@@ -69,7 +69,7 @@ fn grouping_set_identity(
     Ok(identity)
 }
 
-fn expression_identity(
+pub(crate) fn expression_identity(
     engine: &dyn FunctionTypeResolver,
     expression: &ScalarExpr,
     schema: &RowSchema,
