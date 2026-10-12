@@ -136,7 +136,7 @@ fn values_delivery_keeps_postgresql_collations_and_diagnostics() {
 }
 
 fn capture_spill(output: QueryOutput, capture: &Capture) {
-    assert!(matches!(output.rows, QueryRows::SharedSpill(_)));
+    assert!(matches!(&output.rows, QueryRows::SharedSpill(rows) if rows.has_spilled()));
     let mut operator = output.into_operator();
     let schema = operator.row_schema();
     capture.begin(schema.columns(), schema).unwrap();
@@ -146,5 +146,47 @@ fn capture_spill(output: QueryOutput, capture: &Capture) {
                 .consume(OwnedPhysicalRow::new(batch.schema.clone(), row))
                 .unwrap();
         }
+    }
+}
+
+#[test]
+fn materialized_values_retain_metadata_at_query_boundaries() {
+    let cases: Vec<Reference> =
+        serde_json::from_str(include_str!("tests/collations.json")).unwrap();
+    for case in cases {
+        let Some(expected) = case.collations else {
+            continue;
+        };
+        let mut operator = execute(&case.sql, QueryOutputMode::Rows)
+            .unwrap()
+            .into_operator();
+        for (position, oid) in expected.iter().enumerate() {
+            assert_eq!(
+                operator.row_schema().column_collation(position),
+                Some(*oid),
+                "{}",
+                case.sql
+            );
+        }
+        let (_, rows) = crate::physical::run_to_rows(operator.as_mut()).unwrap();
+        let values = rows
+            .into_iter()
+            .map(|row| vec![row["column1"].clone()])
+            .collect::<Vec<_>>();
+        super::test_support::assert_values(&case.sql, &values);
+        let result = execute(&case.sql, QueryOutputMode::Rows)
+            .unwrap()
+            .into_subquery_result()
+            .unwrap();
+        let mut values = Vec::new();
+        for row in result.rows {
+            let row = row.unwrap();
+            for (position, oid) in expected.iter().enumerate() {
+                assert_eq!(row.schema.column_collation(position), Some(*oid));
+            }
+            let view = row.schema.view(&row.row);
+            values.push(vec![view.value_at(0).unwrap().clone()]);
+        }
+        super::test_support::assert_values(&case.sql, &values);
     }
 }

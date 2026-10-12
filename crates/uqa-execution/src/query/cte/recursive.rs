@@ -739,7 +739,7 @@ pub fn alias_query_output_to_shared<S: Clone>(
     aliases: &[String],
 ) -> Result<crate::SharedSpill, SQLError> {
     let visible_source_columns = output.columns.clone();
-    let source_columns = output.internal_columns.clone();
+    let source_columns = output.internal_schema.columns().to_vec();
     let columns = visible_source_columns
         .iter()
         .enumerate()

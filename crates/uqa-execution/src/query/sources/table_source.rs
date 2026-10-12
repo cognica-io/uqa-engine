@@ -319,7 +319,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &local_cte_names,
                     )?
                 };
-                let columns = output.internal_columns.clone();
+                let columns = output.internal_schema.columns().to_vec();
                 let shared = query_output_shared(output, "view")?;
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(crate::SharedSpillScan::new(shared));

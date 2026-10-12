@@ -81,7 +81,7 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
             }
         };
         let mut columns = result.columns.clone();
-        let source_columns = result.internal_columns.clone();
+        let source_columns = result.internal_schema.columns().to_vec();
         let mut operator = result.into_operator();
         if !plan.columns.is_empty() {
             let renamed_columns = columns

@@ -314,11 +314,7 @@ fn consumed_values_output(schema: crate::RowSchema) -> QueryOutput {
     QueryOutput {
         columns: schema.columns().to_vec(),
         column_types: schema.column_types().to_vec(),
-        internal_columns: schema.columns().to_vec(),
-        internal_types: schema.column_types().to_vec(),
-        rows: QueryRows::Rows {
-            named: Vec::new(),
-            positional: None,
-        },
+        internal_schema: schema,
+        rows: QueryRows::Rows(Vec::new()),
     }
 }

@@ -3253,6 +3253,32 @@
       "capability": "VALUES source qualification",
       "workload": "Four independently captured valid VALUES selections build actual source operators with and without a relation and column alias.",
       "invariant": "Physical source binding and qualification retain declared implicit collations and exact values without reconstructing metadata from types alone."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_values_retain_metadata_at_query_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/relational/values/tests.rs",
+      "capability": "Materialized VALUES child metadata",
+      "workload": "Four independent PostgreSQL VALUES selections materialize and reopen as physical operators and scalar-subquery inputs.",
+      "invariant": "Selected collations, field positions and exact scalar/NULL/array values remain intact across the shared result carrier."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_query_outputs_preserve_postgresql_slots_and_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/output/tests.rs",
+      "capability": "Query result slots and retained schema",
+      "workload": "Independent populated and empty PostgreSQL duplicate-label outputs pass through memory and forced-disk materialization, child/public operators, scalar subqueries and public SQL results.",
+      "invariant": "Duplicate labels cannot replace or erase positional values; selected collations and zero-row metadata survive every result boundary, and public positional results preserve both fields."
     }
   ]
 }
