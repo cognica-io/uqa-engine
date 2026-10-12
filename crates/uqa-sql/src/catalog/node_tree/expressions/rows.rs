@@ -15,6 +15,7 @@ use uqa_core::Value;
 
 mod distinct;
 mod named;
+mod stored;
 
 impl ExpressionContext<'_> {
     pub(super) fn row(&self, elements: &[Expr]) -> Result<TypedNode, SQLError> {

@@ -195,10 +195,19 @@ fn bind_composite_constructor(
         return Ok(changed);
     }
     let original = std::mem::replace(node, Expr::Literal(Value::Null));
-    let row = match original {
+    let mut row = match original {
         Expr::Cast { expr, .. } => *expr,
         row => row,
     };
+    while let Expr::Cast { ref ty, .. } = row {
+        if crate::ColumnType::from_sql_name(ty).ok() != Some(crate::ColumnType::Record) {
+            break;
+        }
+        let Expr::Cast { expr, .. } = row else {
+            unreachable!()
+        };
+        row = *expr;
+    }
     let Expr::Row(items) = row else {
         return Err(SQLError::Internal(
             "stored catalog binding does not match the composite constructor of its syntax".into(),

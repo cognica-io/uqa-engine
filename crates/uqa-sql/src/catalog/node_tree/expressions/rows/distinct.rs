@@ -10,12 +10,14 @@ use super::{
     boolean, boolean_node, require_equal_width, values, BinaryOp, ColumnType, Expr,
     ExpressionContext, SQLError, TypedNode,
 };
+use crate::ast::CompositeRowBinding;
 use crate::type_resolution::{binary_operator_catalog_entry, binary_operator_types};
 use uqa_core::Value;
 
 enum Constructor<'a> {
     Anonymous(&'a [Expr]),
     Named(&'a [Expr], ColumnType),
+    Stored(&'a [Expr], &'a CompositeRowBinding),
 }
 
 enum Argument<'a> {
@@ -73,6 +75,7 @@ impl ExpressionContext<'_> {
     ) -> Result<Option<Constructor<'a>>, SQLError> {
         match expression {
             Expr::Row(elements) => Ok(Some(Constructor::Anonymous(elements))),
+            Expr::CompositeRow { items, binding } => Ok(Some(Constructor::Stored(items, binding))),
             Expr::Cast { expr, ty, .. } => {
                 let target = self.resolve_type(ty)?;
                 match &target {
@@ -83,6 +86,11 @@ impl ExpressionContext<'_> {
                         }
                         Some(Constructor::Named(elements, source)) if source == target => {
                             Ok(Some(Constructor::Named(elements, source)))
+                        }
+                        Some(Constructor::Stored(items, binding))
+                            if self.resolve_type(&binding.ty)? == target =>
+                        {
+                            Ok(Some(Constructor::Stored(items, binding)))
                         }
                         _ => Ok(None),
                     },
@@ -111,6 +119,11 @@ impl ExpressionContext<'_> {
                     .map(Argument::Selected)
                     .collect())
             }
+            Constructor::Stored(items, binding) => Ok(self
+                .stored_row_fields(items, binding)?
+                .into_iter()
+                .map(Argument::Selected)
+                .collect()),
         }
     }
 

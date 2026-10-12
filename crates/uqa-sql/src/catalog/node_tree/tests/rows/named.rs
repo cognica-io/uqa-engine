@@ -13,6 +13,8 @@ use super::super::{
 use crate::{ColumnType, RowSchema, Statement};
 use serde::Deserialize;
 
+mod stored;
+
 #[derive(Deserialize)]
 struct Fixture {
     cases: Vec<Case>,

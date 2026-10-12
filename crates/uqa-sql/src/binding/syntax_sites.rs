@@ -422,10 +422,16 @@ impl Walk {
             return self.scalar(&rewritten, bound, subqueries);
         }
         if let ScalarExpr::CompositeRow { items, binding, .. } = bound {
-            let source = match lowered {
+            let mut source = match lowered {
                 ScalarExpr::Cast { expr, .. } => expr.as_ref(),
                 expression => expression,
             };
+            while let ScalarExpr::Cast { expr, ty, .. } = source {
+                if crate::ColumnType::from_sql_name(ty).ok() != Some(crate::ColumnType::Record) {
+                    break;
+                }
+                source = expr;
+            }
             if let ScalarExpr::Row(original)
             | ScalarExpr::CompositeRow {
                 items: original, ..

@@ -126,6 +126,7 @@ impl Lowering<'_> {
         match binding {
             Source::Owned(binding) => Ok(binding),
             Source::Borrowed(binding) => Ok(crate::ast::CompositeRowBinding {
+                layout: binding.layout,
                 ty: self.copy_text(&binding.ty)?,
                 attributes: self.map(binding.attributes.iter(), |_, number| Ok(*number))?,
                 argument_types: binding

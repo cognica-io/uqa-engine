@@ -88,13 +88,7 @@ impl Renderer<'_> {
                     sqlstate: "42704".into(),
                     message: format!("type with OID {type_oid} does not exist"),
                 })?;
-            let width = descriptor
-                .attributes
-                .iter()
-                .map(|attribute| attribute.number)
-                .chain(descriptor.dropped.iter().map(|attribute| attribute.number))
-                .max()
-                .unwrap_or(0);
+            let width = descriptor.physical_width();
             if arguments.len()
                 > usize::try_from(width).map_err(|_| invalid("invalid ROW descriptor width"))?
             {

@@ -92,13 +92,7 @@ impl ExpressionContext<'_> {
         )?;
         let mut fields = Vec::new();
         let mut arguments = elements.iter();
-        let width = descriptor
-            .attributes
-            .iter()
-            .map(|attribute| attribute.number)
-            .chain(descriptor.dropped.iter().map(|attribute| attribute.number))
-            .max()
-            .unwrap_or(0);
+        let width = descriptor.physical_width();
         for position in 1..=width {
             let Some(attribute) = descriptor
                 .attributes
@@ -117,7 +111,11 @@ impl ExpressionContext<'_> {
         Ok(fields)
     }
 
-    fn row_field(&self, expression: &Expr, target: &ColumnType) -> Result<TypedNode, SQLError> {
+    pub(super) fn row_field(
+        &self,
+        expression: &Expr,
+        target: &ColumnType,
+    ) -> Result<TypedNode, SQLError> {
         if let Some(row) = self.row_cast(expression, target, 2)? {
             return Ok(row);
         }

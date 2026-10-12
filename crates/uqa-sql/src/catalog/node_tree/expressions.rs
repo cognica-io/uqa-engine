@@ -76,6 +76,7 @@ impl ExpressionContext<'_> {
             Expr::UnaryMinus(argument) => self.unary_minus(argument)?,
             Expr::Array(elements) => self.array(elements, expected)?,
             Expr::Row(elements) => self.row(elements)?,
+            Expr::CompositeRow { items, binding } => self.stored_row(items, binding)?,
             Expr::InList {
                 expr,
                 list,

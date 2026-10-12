@@ -93,6 +93,7 @@ fn composite_constructor_sites_preserve_children_and_rebinding_is_idempotent() {
             bound_type: None,
             items: items.clone(),
             binding: crate::ast::CompositeRowBinding {
+                layout: None,
                 argument_types: None,
                 ty: "composite#20001".into(),
                 attributes: vec![1, 3],

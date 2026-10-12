@@ -197,6 +197,7 @@ mod tests {
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
         let binding = CompositeRowBinding {
+            layout: None,
             argument_types: Some(vec![
                 ColumnType::Integer,
                 ColumnType::Text,
@@ -234,6 +235,7 @@ mod tests {
     fn retained_argument_types_are_checked_before_any_argument_effect() {
         let control = ProductionControl::uncontrolled();
         let binding = CompositeRowBinding {
+            layout: None,
             ty: "composite#20001".into(),
             attributes: vec![1, 2, 3],
             argument_types: Some(vec![
@@ -259,6 +261,7 @@ mod tests {
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
         let binding = CompositeRowBinding {
+            layout: None,
             argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],

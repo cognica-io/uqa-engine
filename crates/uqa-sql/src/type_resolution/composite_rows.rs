@@ -19,17 +19,8 @@ pub fn expression_requires_binding(
     let mut expression = expression.clone();
     let mut found = false;
     crate::catalog::stored_ast::visit_stored_expression(&mut expression, &mut |node| {
-        if let crate::ast::Expr::Cast { expr, ty, .. } = node {
-            if !found
-                && matches!(
-                    expr.as_ref(),
-                    crate::ast::Expr::Row(_) | crate::ast::Expr::Literal(uqa_core::Value::Str(_))
-                )
-            {
-                found = resolver
-                    .resolve_type_name(ty)?
-                    .is_some_and(|ty| crate::expr::requires_catalog_constant_input(&ty));
-            }
+        if !found {
+            found = syntax_requires_binding(node, resolver)?;
         }
         Ok(())
     })?;
@@ -42,21 +33,46 @@ pub fn statement_requires_binding(
 ) -> Result<bool, SQLError> {
     let mut found = false;
     crate::catalog::stored_ast::visit_stored_statement_expressions(statement, &mut |node| {
-        if let crate::ast::Expr::Cast { expr, ty, .. } = node {
-            if !found
-                && matches!(
-                    expr.as_ref(),
-                    crate::ast::Expr::Row(_) | crate::ast::Expr::Literal(uqa_core::Value::Str(_))
-                )
-            {
-                found = resolver
-                    .resolve_type_name(ty)?
-                    .is_some_and(|ty| crate::expr::requires_catalog_constant_input(&ty));
-            }
+        if !found {
+            found = syntax_requires_binding(node, resolver)?;
         }
         Ok(())
     })?;
     Ok(found)
+}
+
+fn syntax_requires_binding(
+    expression: &crate::ast::Expr,
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<bool, SQLError> {
+    let crate::ast::Expr::Cast { expr, ty, .. } = expression else {
+        return Ok(false);
+    };
+    if !matches!(
+        expr.as_ref(),
+        crate::ast::Expr::Literal(uqa_core::Value::Str(_))
+    ) && !anonymous_row_syntax(expr, resolver)?
+    {
+        return Ok(false);
+    }
+    Ok(resolver
+        .resolve_type_name(ty)?
+        .is_some_and(|ty| crate::expr::requires_catalog_constant_input(&ty)))
+}
+
+fn anonymous_row_syntax(
+    expression: &crate::ast::Expr,
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<bool, SQLError> {
+    match expression {
+        crate::ast::Expr::Row(_) => Ok(true),
+        crate::ast::Expr::Cast { expr, ty, .. }
+            if resolver.resolve_type_name(ty)? == Some(ColumnType::Record) =>
+        {
+            anonymous_row_syntax(expr, resolver)
+        }
+        _ => Ok(false),
+    }
 }
 
 pub fn query_requires_binding(
@@ -78,19 +94,23 @@ fn inspect(
     if *found || failure.is_some() {
         return;
     }
-    if let ScalarExpr::Cast { expr, ty, .. } = node {
-        if matches!(
-            expr.as_ref(),
-            ScalarExpr::Row(_) | ScalarExpr::Literal(uqa_core::Value::Str(_))
-        ) {
-            match resolver.resolve_type_name(ty) {
-                Ok(Some(ty)) => {
-                    *found = crate::expr::requires_catalog_constant_input(&ty);
-                }
-                Ok(None) => {}
-                Err(error) => *failure = Some(error),
-            }
+    let ScalarExpr::Cast { expr, ty, .. } = node else {
+        return;
+    };
+    let required = (|| {
+        if matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Str(_)))
+            || anonymous_row_elements(expr, resolver)?.is_some()
+        {
+            Ok(resolver
+                .resolve_type_name(ty)?
+                .is_some_and(|ty| crate::expr::requires_catalog_constant_input(&ty)))
+        } else {
+            Ok(false)
         }
+    })();
+    match required {
+        Ok(required) => *found = required,
+        Err(error) => *failure = Some(error),
     }
 }
 
@@ -107,10 +127,10 @@ pub(crate) fn bind_stored_row(
             resolver.composite_types(),
         );
     }
-    let ScalarExpr::Cast { expr, ty, .. } = expression else {
+    let ScalarExpr::Cast { expr, ty, implicit } = expression else {
         return Ok(false);
     };
-    let ScalarExpr::Row(items) = expr.as_ref() else {
+    let Some(items) = anonymous_row_elements(expr, resolver)? else {
         return Ok(false);
     };
     let Some(target) = resolver.resolve_type_name(ty)? else {
@@ -156,17 +176,19 @@ pub(crate) fn bind_stored_row(
                     .unwrap_or_else(|| attribute.ty.catalog_name()),
             }
         };
-        converted.push(super::introspection::bind_stored_inputs(
-            converted_item,
-            schema,
-            params,
-            resolver,
-        )?);
+        let mut converted_item =
+            super::introspection::bind_stored_inputs(converted_item, schema, params, resolver)?;
+        bind_stored_row(&mut converted_item, schema, params, resolver)?;
+        converted.push(converted_item);
     }
     let row = ScalarExpr::CompositeRow {
         items: converted,
         bound_type: Some(ColumnType::Composite(reference.clone())),
         binding: CompositeRowBinding {
+            layout: Some(crate::ast::CompositeRowLayout {
+                width: descriptor.physical_width(),
+                implicit: domain || *implicit,
+            }),
             ty: if domain {
                 ColumnType::Composite(reference)
                     .user_type_identity()
@@ -194,6 +216,21 @@ pub(crate) fn bind_stored_row(
         *expression = row;
     }
     Ok(true)
+}
+
+fn anonymous_row_elements<'a>(
+    expression: &'a ScalarExpr,
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<&'a [ScalarExpr]>, SQLError> {
+    match expression {
+        ScalarExpr::Row(items) => Ok(Some(items)),
+        ScalarExpr::Cast { expr, ty, .. }
+            if resolver.resolve_type_name(ty)? == Some(ColumnType::Record) =>
+        {
+            anonymous_row_elements(expr, resolver)
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Validate an analyzed ROW cast before any surrounding field lookup.

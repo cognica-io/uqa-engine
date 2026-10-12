@@ -13,6 +13,7 @@ fn analyzed_composite_rows_keep_complete_grouping_identity() {
     let row = ScalarExpr::CompositeRow {
         items: vec![ScalarExpr::Column("n".into())],
         binding: crate::ast::CompositeRowBinding {
+            layout: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
             argument_types: Some(vec![crate::ColumnType::Integer]),

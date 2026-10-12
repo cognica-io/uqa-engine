@@ -68,6 +68,16 @@ impl DroppedCompositeAttribute {
 }
 
 impl CompositeTypeDescriptor {
+    /// Number of physical positions, including trailing dropped attributes.
+    pub fn physical_width(&self) -> i16 {
+        self.attributes
+            .iter()
+            .map(|attribute| attribute.number)
+            .chain(self.dropped.iter().map(|attribute| attribute.number))
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn attribute(&self, name: &str) -> Option<(usize, &CompositeAttribute)> {
         self.attributes
             .iter()
