@@ -56,6 +56,7 @@ pub use operators::comparison::{
     comparison_key_is_constant, type_supports_hashing, type_supports_ordering, ComparisonKeySupport,
 };
 mod overload_resolution;
+pub(crate) use overload_resolution::resolve_local_builtin_call_with_control;
 mod qualified_column;
 mod range;
 mod range_offsets;
@@ -125,11 +126,11 @@ pub use operators::{
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
-    canonical_routine_type_name, function_resolution_error, match_builtin_function_overload,
-    match_function_signature, parse_enum_type_identity, rank_function_matches,
-    resolve_local_builtin_overload, routine_type_accepts_implicit_cast, routine_type_category,
-    routine_type_is_preferred, FunctionParameterDescriptor, MatchedBuiltinFunction,
-    MatchedFunctionSignature, RankedFunctionMatch,
+    canonical_routine_type_name, function_resolution_error, match_builtin_function_call,
+    match_builtin_function_overload, match_function_signature, parse_enum_type_identity,
+    rank_function_matches, resolve_local_builtin_overload, routine_type_accepts_implicit_cast,
+    routine_type_category, routine_type_is_preferred, FunctionParameterDescriptor,
+    MatchedBuiltinFunction, MatchedFunctionSignature, RankedFunctionMatch,
 };
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
@@ -250,6 +251,8 @@ pub trait FunctionTypeResolver: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinFunctionOverload {
+    /// The final declared array parameter accepts expanded elements or an explicit VARIADIC array.
+    pub variadic: bool,
     pub name: String,
     pub argument_names: Vec<Option<String>>,
     pub argument_types: Vec<ColumnType>,

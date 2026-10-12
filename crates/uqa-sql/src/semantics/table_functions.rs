@@ -282,6 +282,7 @@ fn builtin_table_function_overloads(
     let overload = |argument_types: Vec<ColumnType>,
                     default_arguments: usize,
                     return_type: ColumnType| BuiltinFunctionOverload {
+        variadic: false,
         name: canonical_name.clone(),
         argument_names: vec![None; argument_types.len()],
         argument_types,

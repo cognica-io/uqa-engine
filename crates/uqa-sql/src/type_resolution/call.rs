@@ -7,7 +7,7 @@
 //! Call binding transfers the existing expression allocations and new constructors through one produced owner.
 
 use crate::{ast::FunctionBinding, ColumnType, SQLError, ScalarExpr};
-use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl, ProductionString};
 
 /// Every moved Func field keeps its incoming reservation until its replacement is returned or destroyed, including decorations whose payloads may share that lease.
 #[derive(Debug)]
@@ -81,6 +81,54 @@ pub(super) fn infer_with_control(
     infer(expression)?
         .map(|ty| check_owner(ty, control))
         .transpose()
+}
+
+pub(super) fn unresolved_call_signature_with_control(
+    name: &str,
+    names: &[Option<String>],
+    types: &[Option<ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    let mut signature = ProductionString::new(*control);
+    signature.push_str(name)?;
+    signature.push('(')?;
+    for (position, (name, ty)) in names.iter().zip(types).enumerate() {
+        if position > 0 {
+            signature.push_str(", ")?;
+        }
+        if let Some(name) = name {
+            signature.push_str(name)?;
+            signature.push_str(" => ")?;
+        }
+        if let Some(ty) = ty {
+            signature.push_str(&ty.regtype_name_with_control(control)?)?;
+        } else {
+            signature.push_str("unknown")?;
+        }
+    }
+    signature.push(')')?;
+    Ok(signature.finish()?)
+}
+
+/// Retain an undefined overload as typed metadata without discarding the original argument payloads.
+pub(super) fn retain_undefined_call(
+    call: &mut BindingCall,
+    memory: &mut Option<MemoryReservation>,
+    names: &[Option<String>],
+    types: &[Option<ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    check_memory(memory.as_ref(), control)?;
+    let signature = unresolved_call_signature_with_control(&call.name, names, types, control)?;
+    let name = control.copy_text(&call.name)?;
+    let error_memory = control.reserve(size_of::<crate::ast::FunctionResolutionError>())?;
+    let (signature, extra) = signature.into_parts();
+    *memory = control.combine(memory.take(), extra);
+    let (name, extra) = name.into_parts();
+    *memory = control.combine(memory.take(), extra);
+    *memory = control.combine(memory.take(), error_memory);
+    call.binding = Some(FunctionBinding::undefined_function(name, signature));
+    Ok(())
 }
 
 #[cfg(test)]

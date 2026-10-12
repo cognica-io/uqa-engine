@@ -85,6 +85,7 @@ pub(super) fn resolve(
             _ => Kind::Aggregate,
         };
         declarations.push(BuiltinFunctionOverload {
+            variadic: false,
             name: format!("pg_catalog.{lower}"),
             argument_names: vec![None; arguments.len()],
             argument_types: arguments,
@@ -97,6 +98,7 @@ pub(super) fn resolve(
     // unknown input is read until the selected call has passed its modifiers.
     if matches!(lower.as_str(), "lower" | "upper" | "initcap") {
         declarations.push(BuiltinFunctionOverload {
+            variadic: false,
             name: format!("pg_catalog.{lower}"),
             argument_names: vec![None],
             argument_types: vec![ColumnType::Text],
