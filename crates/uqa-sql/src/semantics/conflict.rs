@@ -52,14 +52,7 @@ pub fn prepare_inference_predicate<'a>(
         .try_describe_table(&statement.table)
         .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::UnknownTable(statement.table.clone()))?;
-    let schema = RowSchema::with_qualified_types(
-        &statement.target_qualifier,
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let schema = RowSchema::with_column_definitions(Some(&statement.target_qualifier), &columns);
     let mut statement = statement.clone();
     if let Some(conflict) = &mut statement.on_conflict {
         for expression in conflict
@@ -163,8 +156,16 @@ fn prepare_inference_expression(
 }
 
 fn inference_identity(mut expression: Expr) -> Expr {
-    // PostgreSQL expression equality ignores coercion display form, but retains the conversion itself and its destination type.
+    // Inference precedes optimization: result envelopes derive from these bound inputs, while stored index syntax retains the explicit COLLATE nodes, typed constants and routine identities themselves.
     crate::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
+        while matches!(node, Expr::Collated { .. }) {
+            let Expr::Collated { expr, .. } = std::mem::replace(node, Expr::Literal(Value::Null))
+            else {
+                unreachable!("derived result envelope");
+            };
+            *node = *expr;
+        }
+        // Coercion display form is not identity, but the conversion and destination type are.
         if let Expr::Cast { implicit, .. } = node {
             *implicit = false;
         }
@@ -418,6 +419,9 @@ fn validate_conflict_columns(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod inference;
 
 #[cfg(test)]
 mod tests {

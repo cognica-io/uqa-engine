@@ -1,0 +1,70 @@
+[
+  {
+    "table": "CREATE TABLE sources(email text COLLATE \"C\", tenant integer, active boolean, n integer)",
+    "index": "CREATE UNIQUE INDEX folded_active ON sources(lower(email), tenant) WHERE active",
+    "query": "INSERT INTO sources VALUES('one',1,true,3) ON CONFLICT(upper(email),tenant) WHERE active DO NOTHING",
+    "error": {
+      "sqlstate": "42P10",
+      "message": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "table": "CREATE TABLE sources(email text COLLATE \"C\", tenant integer, active boolean, n integer)",
+    "index": "CREATE UNIQUE INDEX folded_active ON sources(lower(email), tenant) WHERE active",
+    "query": "INSERT INTO sources VALUES('one',1,true,3) ON CONFLICT((lower(email)::varchar),tenant) WHERE active DO NOTHING",
+    "error": {
+      "sqlstate": "42P10",
+      "message": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "table": "CREATE TABLE sources(email text COLLATE \"C\", tenant integer, active boolean, n integer)",
+    "index": "CREATE UNIQUE INDEX folded_active ON sources(lower(email), tenant) WHERE active",
+    "query": "INSERT INTO sources VALUES('one',1,true,3) ON CONFLICT(lower(email),tenant) DO NOTHING",
+    "error": {
+      "sqlstate": "42P10",
+      "message": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "table": "CREATE TABLE sources(email text COLLATE \"C\", tenant integer, active boolean, n integer)",
+    "index": "CREATE UNIQUE INDEX folded_active ON sources(lower(email), tenant) WHERE active",
+    "query": "INSERT INTO sources VALUES('two',2,true,4) ON CONFLICT(lower(email),tenant) WHERE active AND tenant>0 DO UPDATE SET n=excluded.n",
+    "error": null
+  },
+  {
+    "table": "CREATE TABLE selected(email text,n integer)",
+    "index": "CREATE UNIQUE INDEX selected_c ON selected(lower(email COLLATE \"C\"))",
+    "query": "INSERT INTO selected VALUES('One',1) ON CONFLICT(lower(email COLLATE \"C\")) DO NOTHING",
+    "error": null
+  },
+  {
+    "table": "CREATE TABLE selected(email text,n integer)",
+    "index": "CREATE UNIQUE INDEX selected_c ON selected(lower(email COLLATE \"C\"))",
+    "query": "INSERT INTO selected VALUES('one',2) ON CONFLICT(lower(email COLLATE \"C\")) DO UPDATE SET n=excluded.n",
+    "error": null
+  },
+  {
+    "table": "CREATE TABLE selected(email text,n integer)",
+    "index": "CREATE UNIQUE INDEX selected_c ON selected(lower(email COLLATE \"C\"))",
+    "query": "INSERT INTO selected VALUES('one',3) ON CONFLICT(lower(email COLLATE \"POSIX\")) DO NOTHING",
+    "error": {
+      "sqlstate": "42P10",
+      "message": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "table": "CREATE TABLE sources(email text COLLATE \"C\", tenant integer, active boolean, n integer)",
+    "index": "CREATE UNIQUE INDEX folded_active ON sources(lower(email), tenant) WHERE active",
+    "query": "INSERT INTO sources VALUES('ONE',1,true,5) ON CONFLICT(lower(email),tenant) WHERE active DO UPDATE SET n=excluded.n",
+    "error": null
+  }
+]

@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Retain declared field collations in rule/trigger inputs, procedural parameter binding, OLD/NEW records, whole-record copies, VALUES execution, query INTO assignments, DML RETURNING and cursor/FOR results. Observe selected collations with PostgreSQL `pg_collation_for`, preserving typed NULLs, ordinary argument effects and runtime diagnostics. Preserve column positions and exact values across materialized query results, including repeated column names, empty outputs, subqueries and disk spill.
+- Match analyzed `ON CONFLICT` expressions to their stored unique-index definitions, including partial indexes, while preserving explicit collations, casts, selected routines and PostgreSQL rejection diagnostics.
+
+- Retain declared field collations in rule/trigger inputs, procedural parameter binding, OLD/NEW records, whole-record copies, VALUES execution, query INTO assignments, DML RETURNING and cursor/FOR results. Observe selected collations with PostgreSQL `pg_collation_for`, preserving typed NULLs, ordinary argument effects and runtime diagnostics. Preserve column positions and exact values across materialized query results, including repeated column names, empty outputs, subqueries and disk spill. Reconstruct analyzed character casts and the selected outer COLLATE in stored view definitions while retaining result metadata through persistence.
 
 - Preserve PostgreSQL infinite date, timestamp and interval values through input/output, casts, arithmetic, comparisons, ranges, window frames, aggregates and persistent storage. Keep finite interval overflow and mixed-infinity diagnostics, validate range bounds before canonicalization, and preserve empty containment.
 

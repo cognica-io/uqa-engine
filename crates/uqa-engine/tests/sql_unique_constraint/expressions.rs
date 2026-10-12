@@ -9,6 +9,9 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "expressions/inference.rs"]
+mod inference;
+
 fn exec(engine: &Engine, sql: &str) {
     engine
         .sql(sql, &[])
