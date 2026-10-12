@@ -1,0 +1,170 @@
+[
+  {
+    "base": "integer",
+    "check": "(ROW('x')).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW('x')).f1 IS NULL)",
+    "pretty": "(ROW('x')).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(NULL)).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull true :location -1 :constvalue <>}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(NULL::unknown)).f1 IS NULL)",
+    "pretty": "(ROW(NULL::unknown)).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('x')).f1 = 'x'",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('x')).f1::text IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {COERCEVIAIO :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(((ROW('x')).f1)::text IS NULL)",
+    "pretty": "(ROW('x')).f1::text IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('x')).f1 COLLATE \"C\" IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {COLLATEEXPR :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :collOid 950 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(((ROW('x')).f1 COLLATE \"C\") IS NULL)",
+    "pretty": "((ROW('x')).f1 COLLATE \"C\") IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('1')).f1::integer > 0",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to integer",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('1')).f1::varchar(2) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCEVIAIO :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 49 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :resulttype 1043 :resultcollid 100 :coerceformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(((ROW('1')).f1)::character varying(2) IS NULL)",
+    "pretty": "(ROW('1')).f1::character varying(2) IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('1')).f1::boolean IS NULL",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to boolean",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('1')).f1::numeric IS NULL",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to numeric",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('1')).f1::text[] IS NULL",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text[]",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "-(ROW('1')).f1 IS NULL",
+    "error": {
+      "sqlstate": "42725",
+      "message": "operator is not unique: - unknown",
+      "detail": null,
+      "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "integer",
+    "check": "ARRAY[(ROW('1')).f1] IS NULL",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "COALESCE((ROW('1')).f1, 'x') IS NULL",
+    "error": {
+      "sqlstate": "XX000",
+      "message": "failed to find conversion function from unknown to text",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "integer",
+    "check": "(ROW((ROW('x')).f1)).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW((ROW('x')).f1)).f1 IS NULL)",
+    "pretty": "(ROW((ROW('x')).f1)).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW((ROW('x')).f1 COLLATE \"C\")).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({COLLATEEXPR :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :collOid 950 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(((ROW('x')).f1 COLLATE \"C\"))).f1 IS NULL)",
+    "pretty": "(ROW((ROW('x')).f1 COLLATE \"C\")).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "((ROW('x')).f1 COLLATE \"C\")::text IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {COLLATEEXPR :arg {COERCEVIAIO :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :collOid 950 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((((ROW('x')).f1)::text COLLATE \"C\") IS NULL)",
+    "pretty": "((ROW('x')).f1::text COLLATE \"C\") IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "((ROW('x')).f1::text COLLATE \"C\") IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {COLLATEEXPR :arg {COERCEVIAIO :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 705 :resulttypmod -1 :resultcollid 0} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :collOid 950 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((((ROW('x')).f1)::text COLLATE \"C\") IS NULL)",
+    "pretty": "((ROW('x')).f1::text COLLATE \"C\") IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(1, ('x'::text COLLATE \"C\"))).f2 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 25 :resulttypmod -1 :resultcollid 950} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(1, ('x'::text COLLATE \"C\"))).f2 IS NULL)",
+    "pretty": "(ROW(1, 'x'::text COLLATE \"C\")).f2 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(1, ('x'::text COLLATE \"C\"))).f2 = 'x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({FIELDSELECT :arg {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :fieldnum 2 :resulttype 25 :resulttypmod -1 :resultcollid 950} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+    "sql": "((ROW(1, ('x'::text COLLATE \"C\"))).f2 = 'x'::text)",
+    "pretty": "(ROW(1, 'x'::text COLLATE \"C\")).f2 = 'x'::text"
+  }
+]

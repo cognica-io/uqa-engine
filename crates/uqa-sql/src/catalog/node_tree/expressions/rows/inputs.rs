@@ -24,7 +24,7 @@ impl RowInput<'_> {
             Self::Unknown(_) => None,
             Self::Collated { argument, .. } => argument.ty(),
             Self::Row(_) => Some(&ColumnType::Record),
-            Self::Value(value) => Some(&value.ty),
+            Self::Value(value) => value.ty.as_ref(),
         }
     }
 
@@ -110,6 +110,6 @@ pub(super) fn anonymous_row(fields: Vec<RowInput<'_>>) -> Result<TypedNode, SQLE
                 ("location", (-1).into()),
             ],
         ),
-        ty: ColumnType::Record,
+        ty: Some(ColumnType::Record),
     })
 }

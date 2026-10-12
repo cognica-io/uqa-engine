@@ -462,13 +462,7 @@ impl<'a> ParameterTypes<'a> {
             return Ok(());
         }
         if expression.unknown == UnknownOrigin::Field {
-            return Err(error(
-                "XX000",
-                format!(
-                    "failed to find conversion function from unknown to {}",
-                    crate::type_resolution::base_type(target).display_name()
-                ),
-            ));
+            return Err(crate::type_resolution::field_selection::unknown_conversion_error(target));
         }
         if let Some((origin, text)) = &expression.literal {
             self.read_literal(*origin, text, target)?;

@@ -42,13 +42,17 @@ impl ExpressionContext<'_> {
     pub(super) fn unary_minus(&self, argument: &Expr) -> Result<TypedNode, SQLError> {
         let value = self.encode(argument, None)?;
         if let Expr::Literal(literal) = argument {
-            let negated = crate::expr::negate_value(literal, Some(&value.ty.sql_name()))?;
+            let negated = crate::expr::negate_value(literal, Some(&value.type_ref()?.sql_name()))?;
             return Ok(TypedNode {
-                node: values::constant(&negated, &value.ty)?,
+                node: values::constant(&negated, value.type_ref()?)?,
                 ty: value.ty,
             });
         }
-        let operator = unary_minus_catalog_entry(&value.ty)?;
+        let ty = value
+            .ty
+            .as_ref()
+            .ok_or_else(|| crate::type_resolution::ambiguous_prefix_operator("-", "unknown"))?;
+        let operator = unary_minus_catalog_entry(ty)?;
         let value = Self::coerce(value, &operator.operand_type, 2)?;
         Ok(operator_node(
             operator.oid,
@@ -108,7 +112,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty,
+            ty: Some(ty),
         })
     }
 
@@ -200,7 +204,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: ColumnType::Boolean,
+            ty: Some(ColumnType::Boolean),
         })
     }
 
@@ -209,7 +213,7 @@ impl ExpressionContext<'_> {
         lhs: TypedNode,
         rhs: TypedNode,
     ) -> Result<TypedNode, SQLError> {
-        let [left, right, result] = binary_operator_types(op, Some(&lhs.ty), Some(&rhs.ty))?;
+        let [left, right, result] = binary_operator_types(op, lhs.ty.as_ref(), rhs.ty.as_ref())?;
         let identity = binary_operator_catalog_entry(op, [&left, &right])?;
         let arguments = [Self::coerce(lhs, &left, 2)?, Self::coerce(rhs, &right, 2)?];
         Ok(operator_node(
@@ -228,7 +232,7 @@ fn scalar_array_node(
     element: &ColumnType,
     use_or: bool,
 ) -> Result<TypedNode, SQLError> {
-    let operator = binary_operator_catalog_entry(op, [&lhs.ty, element])?;
+    let operator = binary_operator_catalog_entry(op, [lhs.type_ref()?, element])?;
     Ok(TypedNode {
         node: Node::new(
             "SCALARARRAYOPEXPR",
@@ -243,6 +247,6 @@ fn scalar_array_node(
                 ("location", (-1).into()),
             ],
         ),
-        ty: ColumnType::Boolean,
+        ty: Some(ColumnType::Boolean),
     })
 }

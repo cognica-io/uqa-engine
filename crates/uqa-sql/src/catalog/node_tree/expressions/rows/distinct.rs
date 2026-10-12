@@ -130,7 +130,7 @@ impl ExpressionContext<'_> {
     fn argument_type(&self, argument: &Argument<'_>) -> Result<Option<ColumnType>, SQLError> {
         match argument {
             Argument::Expression(expression) => self.expression_type(expression),
-            Argument::Selected(value) => Ok(Some(value.ty.clone())),
+            Argument::Selected(value) => Ok(value.ty.clone()),
         }
     }
 

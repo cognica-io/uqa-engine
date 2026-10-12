@@ -33,7 +33,7 @@ impl ExpressionContext<'_> {
     fn array_access(&self, access: ArrayAccess, args: &[Expr]) -> Result<TypedNode, SQLError> {
         let source_type = self.expression_type(&args[0])?;
         let input = self.encode(&args[0], None)?;
-        let base = base_type(&input.ty);
+        let base = base_type(input.type_ref()?);
         let Some(element) = array_element_type(base) else {
             let name = match source_type.as_ref().map(base_type) {
                 None => "unknown".into(),
@@ -104,7 +104,7 @@ impl ExpressionContext<'_> {
                     ("refassgnexpr", Field::Null),
                 ],
             ),
-            ty,
+            ty: Some(ty),
         })
     }
 

@@ -36,7 +36,10 @@ impl ExpressionContext<'_> {
             input_type = base;
         }
         let input_type = input_type.without_type_modifiers();
-        let inner = self.encode(expression, unknown.then_some(&input_type))?;
+        let inner = self.encode(
+            expression,
+            (unknown && needs_input_context(expression)?).then_some(&input_type),
+        )?;
         Self::coerce(inner, &ty, format)
     }
 
@@ -92,7 +95,10 @@ impl ExpressionContext<'_> {
         coercion: Coercion,
     ) -> Result<TypedNode, SQLError> {
         let format = coercion.format;
-        let same_type = pg_type_oid(&value.ty) == pg_type_oid(target);
+        let same_type = value
+            .ty
+            .as_ref()
+            .is_some_and(|ty| pg_type_oid(ty) == pg_type_oid(target));
         if same_type && !coercion.explicit && pg_type_modifier(target) < 0 {
             return Ok(value);
         }
@@ -124,10 +130,17 @@ impl ExpressionContext<'_> {
                         ("location", (-1).into()),
                     ],
                 ),
-                ty: target.clone(),
+                ty: Some(target.clone()),
             });
         }
-        let mut source = &value.ty;
+        if value.ty.is_none() {
+            if coercion.explicit && is_string(target) {
+                let value = input_output_cast(value, target.without_type_modifiers(), format);
+                return Self::modify_type(value, target, coercion, true);
+            }
+            return Err(crate::type_resolution::field_selection::unknown_conversion_error(target));
+        }
+        let mut source = value.type_ref()?;
         while let ColumnType::Domain { base, .. } = source {
             source = base;
         }
@@ -149,7 +162,7 @@ impl ExpressionContext<'_> {
                 && entry.context != b'i'
                 && !(coercion.assignment && entry.context == b'a')
             {
-                return Err(coercion_error(&value.ty, target));
+                return Err(coercion_error(value.type_ref()?, target));
             }
             entry.method
         } else if coercion.explicit
@@ -158,26 +171,14 @@ impl ExpressionContext<'_> {
         {
             CastMethod::InputOutput
         } else {
-            return Err(coercion_error(&value.ty, target));
+            return Err(coercion_error(value.type_ref()?, target));
         };
         let value = match method {
             CastMethod::Binary => relabel(value, &base_target, format),
             CastMethod::Function { oid, arguments } => {
                 cast_function(value, &base_target, oid, arguments, coercion)?
             }
-            CastMethod::InputOutput => TypedNode {
-                node: Node::new(
-                    "COERCEVIAIO",
-                    [
-                        ("arg", value.node.into()),
-                        ("resulttype", pg_type_oid(&base_target).into()),
-                        ("resultcollid", pg_type_collation_oid(&base_target).into()),
-                        ("coerceformat", format.into()),
-                        ("location", (-1).into()),
-                    ],
-                ),
-                ty: base_target,
-            },
+            CastMethod::InputOutput => input_output_cast(value, base_target, format),
         };
         Self::modify_type(value, target, coercion, true)
     }
@@ -188,14 +189,14 @@ impl ExpressionContext<'_> {
         coercion: Coercion,
     ) -> Result<TypedNode, SQLError> {
         let format = coercion.format;
-        let mut source = &value.ty;
+        let mut source = value.type_ref()?;
         while let ColumnType::Domain { base, .. } = source {
             source = base;
         }
         let (ColumnType::Array(source_element), ColumnType::Array(target_element)) =
             (source, target)
         else {
-            return Err(coercion_error(&value.ty, target));
+            return Err(coercion_error(value.type_ref()?, target));
         };
         let source_element = scalar_element(source_element);
         let target_element = scalar_element(target_element);
@@ -208,9 +209,12 @@ impl ExpressionContext<'_> {
                     ("collation", 0.into()),
                 ],
             ),
-            ty: source_element.clone(),
+            ty: Some(source_element.clone()),
         };
         let element = Self::coerce_selected(element, target_element, coercion)?;
+        let element_type = element
+            .ty
+            .ok_or_else(|| super::super::invalid("unknown coerced array element"))?;
         Ok(TypedNode {
             node: Node::new(
                 "ARRAYCOERCEEXPR",
@@ -218,13 +222,13 @@ impl ExpressionContext<'_> {
                     ("arg", value.node.into()),
                     ("elemexpr", element.node.into()),
                     ("resulttype", pg_type_oid(target).into()),
-                    ("resulttypmod", pg_type_modifier(&element.ty).into()),
+                    ("resulttypmod", pg_type_modifier(&element_type).into()),
                     ("resultcollid", pg_type_collation_oid(target).into()),
                     ("coerceformat", format.into()),
                     ("location", (-1).into()),
                 ],
             ),
-            ty: ColumnType::Array(Box::new(element.ty)),
+            ty: Some(ColumnType::Array(Box::new(element_type))),
         })
     }
 
@@ -236,7 +240,7 @@ impl ExpressionContext<'_> {
     ) -> Result<TypedNode, SQLError> {
         let format = coercion.format;
         let modifier = pg_type_modifier(target);
-        if modifier == pg_type_modifier(&value.ty) {
+        if modifier == pg_type_modifier(value.type_ref()?) {
             return Ok(value);
         }
         if hide_input {
@@ -258,7 +262,7 @@ impl ExpressionContext<'_> {
             return Ok(relabel(value, target, format));
         }
         if matches!(
-            (&value.ty, target),
+            (value.type_ref()?, target),
             (ColumnType::Array(_), ColumnType::Array(_))
         ) {
             return Self::array_coercion(value, target, coercion);
@@ -268,7 +272,7 @@ impl ExpressionContext<'_> {
                 return cast_function(value, target, oid, arguments, coercion);
             }
         }
-        Err(coercion_error(&value.ty, target))
+        Err(coercion_error(value.type_ref()?, target))
     }
 }
 
@@ -292,7 +296,7 @@ fn relabel(value: TypedNode, target: &ColumnType, format: i64) -> TypedNode {
                 ("location", (-1).into()),
             ],
         ),
-        ty: target.clone(),
+        ty: Some(target.clone()),
     }
 }
 
@@ -332,7 +336,7 @@ fn cast_function(
                 ("location", (-1).into()),
             ],
         ),
-        ty: target.clone(),
+        ty: Some(target.clone()),
     })
 }
 
@@ -355,5 +359,31 @@ fn coercion_error(source: &ColumnType, target: &ColumnType) -> SQLError {
             source.sql_name(),
             target.sql_name()
         ),
+    }
+}
+
+fn needs_input_context(expression: &Expr) -> Result<bool, SQLError> {
+    if let Some(clause) = crate::catalog::collations::expression::ast_clause(expression)? {
+        return needs_input_context(clause.argument);
+    }
+    Ok(matches!(
+        expression,
+        Expr::Literal(Value::Null | Value::Str(_)) | Expr::Array(_)
+    ))
+}
+
+fn input_output_cast(value: TypedNode, target: ColumnType, format: i64) -> TypedNode {
+    TypedNode {
+        node: Node::new(
+            "COERCEVIAIO",
+            [
+                ("arg", value.node.into()),
+                ("resulttype", pg_type_oid(&target).into()),
+                ("resultcollid", pg_type_collation_oid(&target).into()),
+                ("coerceformat", format.into()),
+                ("location", (-1).into()),
+            ],
+        ),
+        ty: Some(target),
     }
 }

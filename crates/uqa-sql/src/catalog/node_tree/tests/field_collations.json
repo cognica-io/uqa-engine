@@ -1,0 +1,82 @@
+[
+  {
+    "base": "integer",
+    "check": "(ROW(COALESCE('x'::text COLLATE \"C\", 'y'))).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(COALESCE(('x'::text COLLATE \"C\"), 'y'::text))).f1 IS NULL)",
+    "pretty": "(ROW(COALESCE('x'::text COLLATE \"C\", 'y'::text))).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(CASE WHEN true THEN ('x'::text COLLATE \"C\") ELSE 'y' END)).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({CASEEXPR :casetype 25 :casecollid 950 :arg <> :args ({CASEWHEN :expr {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} :result {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1} :location -1}) :defresult {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]} :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(\nCASE\n    WHEN true THEN ('x'::text COLLATE \"C\")\n    ELSE 'y'::text\nEND)).f1 IS NULL)",
+    "pretty": "(ROW(\nCASE\n    WHEN true THEN 'x'::text COLLATE \"C\"\n    ELSE 'y'::text\nEND)).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(COALESCE('x'::text COLLATE \"C\", 'y'))).f1 = 'x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({FIELDSELECT :arg {ROWEXPR :args ({COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+    "sql": "((ROW(COALESCE(('x'::text COLLATE \"C\"), 'y'::text))).f1 = 'x'::text)",
+    "pretty": "(ROW(COALESCE('x'::text COLLATE \"C\", 'y'::text))).f1 = 'x'::text"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(('a'::varchar(2))::text)).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({RELABELTYPE :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 1 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(('a'::character varying(2))::text)).f1 IS NULL)",
+    "pretty": "(ROW('a'::character varying(2)::text)).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(ARRAY['a'::text COLLATE \"C\", 'b'])).f1[1] IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 100 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {FIELDSELECT :arg {ROWEXPR :args ({ARRAYEXPR :array_typeid 1009 :array_collid 950 :element_typeid 25 :elements ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 1009 :resulttypmod -1 :resultcollid 0} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(ARRAY[('a'::text COLLATE \"C\"), 'b'::text])).f1[1] IS NULL)",
+    "pretty": "(ROW(ARRAY['a'::text COLLATE \"C\", 'b'::text])).f1[1] IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW((ARRAY['a'::text COLLATE \"C\", 'b'])[1])).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 950 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {ARRAYEXPR :array_typeid 1009 :array_collid 950 :element_typeid 25 :elements ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :multidims false :list_start -1 :list_end -1 :location -1} :refassgnexpr <>}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW((ARRAY[('a'::text COLLATE \"C\"), 'b'::text])[1])).f1 IS NULL)",
+    "pretty": "(ROW((ARRAY['a'::text COLLATE \"C\", 'b'::text])[1])).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(GREATEST('a'::text COLLATE \"C\", 'b'))).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({MINMAXEXPR :minmaxtype 25 :minmaxcollid 950 :inputcollid 950 :op 0 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(GREATEST(('a'::text COLLATE \"C\"), 'b'::text))).f1 IS NULL)",
+    "pretty": "(ROW(GREATEST('a'::text COLLATE \"C\", 'b'::text))).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(NULLIF('a'::text COLLATE \"C\", 'b'))).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({NULLIFEXPR :opno 98 :opfuncid 67 :opresulttype 25 :opretset false :opcollid 950 :inputcollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(NULLIF(('a'::text COLLATE \"C\"), 'b'::text))).f1 IS NULL)",
+    "pretty": "(ROW(NULLIF('a'::text COLLATE \"C\", 'b'::text))).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('42'::integer::text)).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({COERCEVIAIO :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 42 0 0 0 0 0 0 0 ]} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW((42)::text)).f1 IS NULL)",
+    "pretty": "(ROW(42::text)).f1 IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW(lower('X'::text COLLATE \"C\"))).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 950 :inputcollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 88 ]} :collOid 950 :location -1}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(lower(('X'::text COLLATE \"C\")))).f1 IS NULL)",
+    "pretty": "(ROW(lower('X'::text COLLATE \"C\"))).f1 IS NULL"
+  }
+]

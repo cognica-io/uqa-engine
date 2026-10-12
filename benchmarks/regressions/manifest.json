@@ -4106,6 +4106,58 @@
       "capability": "Registered JSON callback views",
       "workload": "Four same-name host callbacks with non-native arguments and retained views on four providers, including independent sessions on persistent providers.",
       "invariant": "Host callbacks retain original arguments and results without false migration; a qualified native JSON call keeps its selected implementation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_composite_field_nodes_preserve_identity_through_attribute_rename",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/fields.rs",
+      "capability": "Typed composite field catalog nodes",
+      "workload": "Twelve independent PostgreSQL field nodes and both SQL renderings against original and renamed composite catalogs.",
+      "invariant": "Physical attribute numbers, selected type/modifier/collation and complete inputs remain identical through name changes, dropped slots and nested fields or arrays."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_field_catalog_diagnostics_and_unknown_types_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/fields.rs",
+      "capability": "Typed composite field catalog nodes",
+      "workload": "Three named-field diagnostics, nineteen unknown-field contexts and ten derived-child collation cases captured independently from PostgreSQL.",
+      "invariant": "Exact node and SQL output plus SQLSTATE/message/detail/hint match PostgreSQL; produced unknown fields are never substituted with text literals."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_composite_field_nodes_keep_original_attribute_identity_after_rename",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/fields.rs",
+      "capability": "Typed composite field catalog nodes",
+      "workload": "Serialized retained field bindings inspected through a renamed descriptor with their original source spellings.",
+      "invariant": "Encoding retains original physical field identity and result metadata while both SQL renderings use the current field name."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_field_reconstruction_rejects_missing_attributes_and_invalid_nodes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/fields.rs",
+      "capability": "Typed composite field catalog nodes",
+      "workload": "Dropped and missing attributes, zero/negative/overflow field numbers, invalid result identities and malformed field operands in both SQL modes.",
+      "invariant": "Malformed typed nodes fail instead of selecting a different attribute or silently discarding invalid metadata."
     }
   ]
 }

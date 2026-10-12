@@ -47,6 +47,16 @@ pub(crate) fn undefined_record_field(field: &str) -> SQLError {
     }
 }
 
+pub(crate) fn unknown_conversion_error(target: &ColumnType) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "XX000".into(),
+        message: format!(
+            "failed to find conversion function from unknown to {}",
+            super::base_type(target).display_name()
+        ),
+    }
+}
+
 pub(crate) fn unregistered_record() -> SQLError {
     SQLError::Routine {
         sqlstate: "42809".into(),
@@ -93,6 +103,22 @@ pub(crate) fn value_field_metadata(
     field: &str,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<(ColumnType, u32)>, SQLError> {
+    value_field_selection(base, field, resolver)
+        .map(|selected| selected.map(|selected| (selected.ty, selected.collation)))
+}
+
+pub(crate) struct SelectedValueField {
+    pub number: i16,
+    pub ty: ColumnType,
+    pub collation: u32,
+}
+
+/// Keep the physical attribute number beside its type and collation from the same descriptor.
+pub(crate) fn value_field_selection(
+    base: Option<&ColumnType>,
+    field: &str,
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<Option<SelectedValueField>, SQLError> {
     let Some(base) = base else {
         return Ok(None);
     };
@@ -108,7 +134,13 @@ pub(crate) fn value_field_metadata(
             let descriptor = crate::expr::composites::descriptor(Some(catalog), reference.oid)?;
             descriptor
                 .attribute(field)
-                .map(|(_, attribute)| Some((attribute.ty.clone(), attribute.collation_oid())))
+                .map(|(_, attribute)| {
+                    Some(SelectedValueField {
+                        number: attribute.number,
+                        ty: attribute.ty.clone(),
+                        collation: attribute.collation_oid(),
+                    })
+                })
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42703".into(),
                     message: format!(

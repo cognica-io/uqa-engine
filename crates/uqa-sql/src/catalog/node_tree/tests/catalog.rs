@@ -45,6 +45,8 @@ struct Attribute {
     dropped: bool,
     length: i64,
     alignment: String,
+    #[serde(default)]
+    collation_oid: Option<u32>,
 }
 
 pub(super) struct Catalog<'a>(pub(super) &'a [Type], pub(super) bool);
@@ -205,7 +207,7 @@ impl CompositeTypeCatalog for Catalog<'_> {
                         .iter()
                         .filter(|attr| !attr.dropped)
                         .map(|attr| CompositeAttribute {
-                            collation_oid: None,
+                            collation_oid: attr.collation_oid,
                             name: attr.name.clone(),
                             number: attr.number,
                             ty: self.named(&attr.ty).unwrap(),
@@ -304,8 +306,8 @@ impl deparse::ExpressionNames for Catalog<'_> {
     fn column(&self, _: i64) -> Result<String, SQLError> {
         unreachable!()
     }
-    fn routine(&self, _: i64) -> Result<Vec<String>, SQLError> {
-        unreachable!()
+    fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError> {
+        super::Routines.routine(oid)
     }
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError> {
         for item in self.0 {

@@ -64,7 +64,7 @@ impl ExpressionContext<'_> {
                     ("location", (-1).into()),
                 ],
             ),
-            ty: base.clone(),
+            ty: Some(base.clone()),
         };
         if target == base {
             Ok(row)
@@ -73,7 +73,7 @@ impl ExpressionContext<'_> {
         }
     }
 
-    pub(super) fn anonymous_row_elements<'a>(
+    pub(in super::super) fn anonymous_row_elements<'a>(
         &self,
         expression: &'a Expr,
     ) -> Result<Option<&'a [Expr]>, SQLError> {
@@ -117,7 +117,7 @@ impl ExpressionContext<'_> {
             else {
                 fields.push(TypedNode {
                     node: values::constant(&Value::Null, &ColumnType::Integer)?,
-                    ty: ColumnType::Integer,
+                    ty: Some(ColumnType::Integer),
                 });
                 continue;
             };

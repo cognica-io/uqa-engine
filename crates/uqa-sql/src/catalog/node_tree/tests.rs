@@ -9,6 +9,7 @@ use super::*;
 mod arrays;
 mod catalog;
 mod collations;
+mod fields;
 mod rows;
 mod scalar;
 mod subscripts;
@@ -130,8 +131,11 @@ impl deparse::ExpressionNames for Routines {
     }
 
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError> {
-        assert_eq!(oid, 1317);
-        Ok(vec!["length".into()])
+        Ok(vec![match oid {
+            1317 => "length".into(),
+            870 => "lower".into(),
+            _ => panic!("unknown fixture routine {oid}"),
+        }])
     }
 
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError> {
@@ -329,12 +333,16 @@ impl expressions::ExpressionRoutines for Routines {
         _: Option<&crate::ast::FunctionBinding>,
         arguments: &[Option<crate::ColumnType>],
     ) -> Result<expressions::RoutineIdentity, crate::SQLError> {
-        assert_eq!(name, "length");
         assert_eq!(arguments, &[Some(crate::ColumnType::Text)]);
+        let (oid, result_type) = match name {
+            "length" => (1317, crate::ColumnType::Integer),
+            "lower" => (870, crate::ColumnType::Text),
+            _ => panic!("unknown fixture routine {name}"),
+        };
         Ok(expressions::RoutineIdentity {
-            oid: 1317,
+            oid,
             argument_types: vec![crate::ColumnType::Text],
-            result_type: crate::ColumnType::Integer,
+            result_type,
         })
     }
 }
