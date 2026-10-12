@@ -3279,6 +3279,19 @@
       "capability": "Query result slots and retained schema",
       "workload": "Independent populated and empty PostgreSQL duplicate-label outputs pass through memory and forced-disk materialization, child/public operators, scalar subqueries and public SQL results.",
       "invariant": "Duplicate labels cannot replace or erase positional values; selected collations and zero-row metadata survive every result boundary, and public positional results preserve both fields."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_parameters_preserve_postgresql_implicit_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plpgsql/parameters/tests/collations.rs",
+      "capability": "Procedural parameter collation identity",
+      "workload": "Eighteen independent PostgreSQL record-field observations pass through PL/pgSQL parameterization, preparation, codec restoration and fresh variable reads.",
+      "invariant": "Parameters retain implicit C/POSIX/default selections and conflicts without capturing invocation values or promoting the selection to explicit strength."
     }
   ]
 }

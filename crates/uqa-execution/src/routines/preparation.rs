@@ -194,10 +194,9 @@ impl Interpreter<'_> {
                     &mut |statement, parameters, names| {
                         self.resolve_variable_sites(statement, &parameters, names)
                     },
+                    &|name: &str| self.services.runtime.has_aggregate_function(name),
                 )?;
-                let mut plan = UnifiedPlan::lower_with(bound.statement, &|name: &str| {
-                    self.services.runtime.has_aggregate_function(name)
-                });
+                let mut plan = bound.plan;
                 let analysis = self
                     .services
                     .statements

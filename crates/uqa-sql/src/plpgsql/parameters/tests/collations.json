@@ -1,0 +1,92 @@
+[
+  {
+    "query": "SELECT r.c",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT r.p",
+    "null": false,
+    "collation": 951
+  },
+  {
+    "query": "SELECT r.plain",
+    "null": false,
+    "collation": 100
+  },
+  {
+    "query": "SELECT r.c || r.p",
+    "null": false,
+    "collation": 0
+  },
+  {
+    "query": "SELECT coalesce(r.c, r.p)",
+    "null": false,
+    "collation": 0
+  },
+  {
+    "query": "SELECT r.c COLLATE \"POSIX\"",
+    "null": false,
+    "collation": 951
+  },
+  {
+    "query": "SELECT r.p || ('!' COLLATE \"C\")",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT lower(r.c)",
+    "null": false,
+    "collation": 950
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN r.c ELSE r.p END",
+    "null": false,
+    "collation": 0
+  },
+  {
+    "query": "SELECT r.c",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT r.p",
+    "null": true,
+    "collation": 951
+  },
+  {
+    "query": "SELECT r.plain",
+    "null": true,
+    "collation": 100
+  },
+  {
+    "query": "SELECT r.c || r.p",
+    "null": true,
+    "collation": 0
+  },
+  {
+    "query": "SELECT coalesce(r.c, r.p)",
+    "null": true,
+    "collation": 0
+  },
+  {
+    "query": "SELECT r.c COLLATE \"POSIX\"",
+    "null": true,
+    "collation": 951
+  },
+  {
+    "query": "SELECT r.p || ('!' COLLATE \"C\")",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT lower(r.c)",
+    "null": true,
+    "collation": 950
+  },
+  {
+    "query": "SELECT CASE WHEN true THEN r.c ELSE r.p END",
+    "null": true,
+    "collation": 0
+  }
+]

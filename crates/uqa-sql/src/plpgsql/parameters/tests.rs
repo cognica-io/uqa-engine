@@ -6,6 +6,8 @@
 use super::*;
 use crate::{binding::VariableSiteResolution, ColumnType};
 use uqa_core::Value;
+
+mod collations;
 struct Variables(i64);
 impl VariableResolver for Variables {
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
@@ -38,12 +40,16 @@ fn prepared_variable_sites_keep_types_and_read_fresh_values() {
         &mut Variables(4),
         VariableConflict::Error,
         &mut |_, _, sites| Ok(vec![VariableSiteResolution::Variable; sites.len()]),
+        &|_: &str| false,
     )
     .unwrap();
-    let Statement::Select(query) = &bound.statement else {
+    let crate::plan::UnifiedPlan::Query(query) = &bound.plan else {
         panic!("SELECT")
     };
-    let Expr::Binary {
+    let crate::plan::RelationalPlan::QueryBlock(query) = &query.root else {
+        panic!("SELECT")
+    };
+    let crate::ScalarExpr::Binary {
         lhs: left,
         rhs: right,
         ..
@@ -51,8 +57,8 @@ fn prepared_variable_sites_keep_types_and_read_fresh_values() {
     else {
         panic!("addition")
     };
-    assert!(matches!(&**left, Expr::Param(1)));
-    assert!(matches!(&**right, Expr::Param(2)));
+    assert!(matches!(&**left, crate::ScalarExpr::Param(1)));
+    assert!(matches!(&**right, crate::ScalarExpr::Param(2)));
     assert_eq!(bound.parameters.len(), 2);
     for reference in &bound.references {
         let parameter = reference.read(&mut Variables(9)).unwrap();
@@ -68,11 +74,15 @@ fn selected_columns_are_not_captured_as_routine_arguments() {
         &mut Variables(4),
         VariableConflict::UseColumn,
         &mut |_, _, _| Ok(vec![VariableSiteResolution::Column]),
+        &|_: &str| false,
     )
     .unwrap();
     assert!(bound.references.is_empty());
-    let Statement::Select(query) = bound.statement else {
+    let crate::plan::UnifiedPlan::Query(query) = bound.plan else {
         panic!("SELECT")
     };
-    assert!(matches!(&query.projections[0].expr,Expr::Column(v) if v=="v"));
+    let crate::plan::RelationalPlan::QueryBlock(query) = &query.root else {
+        panic!("SELECT")
+    };
+    assert!(matches!(&query.projections[0].expr,crate::ScalarExpr::Column(v) if v=="v"));
 }
