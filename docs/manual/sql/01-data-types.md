@@ -263,6 +263,13 @@ SELECT array_length(ARRAY[10, 20, 30], 1) AS length;
 SELECT * FROM unnest(ARRAY['sql', 'graph']) AS item(value);
 ```
 
+Use `a[index]` for an element and `a[lower:upper]` for a slice. A missing endpoint selects the original dimension boundary, while an explicitly supplied NULL endpoint makes the result NULL. Bounds use integer assignment coercion, including rounding numeric input; incompatible bound types report `42804`, and more than six indexed dimensions report `54000` after bound analysis. If any dimension uses a colon, every indexed dimension is treated as a slice. Result slices use lower bounds of one. At execution the array is evaluated once; a NULL array skips runtime bound evaluation. Otherwise every upper bound is evaluated in dimension order, then every lower bound, including after a bound yields NULL. Static input and constant-expression errors still precede execution.
+
+```sql execute
+SELECT (ARRAY[10, 20, 30])[:2] AS prefix,
+       (ARRAY[10, 20, 30])[NULL:2] AS null_slice;
+```
+
 Array values are homogeneous under SQL coercion. A SQL `NULL` element remains distinct from an empty array.
 
 An unknown string cast to an array of domains is read by the array and element-domain input functions during analysis. Element CHECK and NOT NULL constraints therefore apply even under `WHERE false`, in an unselected CASE arm, or when a statement is prepared. The converted array retains its domain identity, dimensions and lower bounds, and execution does not repeat those input checks. A prepared array constant keeps its accepted value after domain constraints change; an explicitly typed text expression or parameter is converted against the current domain when it executes. A NULL array differs from an array containing a NULL domain element. Column and routine defaults, stored CHECK expressions and ALTER TABLE USING retain the same typed input values; default assignment and column backfill preserve their source type. A scalar domain cast retains its outer domain checks for execution after its base input is read, including a NULL cast in a default.

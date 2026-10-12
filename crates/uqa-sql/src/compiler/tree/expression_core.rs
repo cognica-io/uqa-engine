@@ -243,11 +243,17 @@ pub(in crate::compiler) fn compile_indirection(
                     )
                 });
                 let mut args = vec![current];
-                for step in indices {
+                let mut omitted = crate::ast::ArraySliceBounds::default();
+                for (dimension, step) in indices.iter().enumerate() {
                     let Some(NodeEnum::AIndices(index)) = step.node.as_ref() else {
                         return Err(SQLError::Internal("invalid array indirection group".into()));
                     };
                     if has_slice {
+                        omitted.omit(
+                            dimension,
+                            index.is_slice && index.lidx.is_none(),
+                            index.uidx.is_none(),
+                        );
                         let lower = if index.is_slice {
                             index
                                 .lidx
@@ -281,7 +287,7 @@ pub(in crate::compiler) fn compile_indirection(
                 }
                 current = dispatched_call(
                     if has_slice {
-                        FunctionDispatch::ArraySlices
+                        FunctionDispatch::ArraySlicesWithBounds(omitted)
                     } else {
                         FunctionDispatch::ArraySubscripts
                     },

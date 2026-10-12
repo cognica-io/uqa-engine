@@ -173,6 +173,7 @@ impl Preparation<'_> {
             binding,
             args,
             &types,
+            &self.parameters.values(),
             arguments.variadic,
             self.routines,
         )? {

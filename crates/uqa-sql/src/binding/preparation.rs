@@ -6,6 +6,7 @@
 
 //! Preparation-time semantic analysis with ordered parameter coercion.
 
+mod array_access;
 mod collations;
 pub(super) use collations::PendingCollations;
 mod commands;

@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 mod acl_role_specification;
+mod array_access;
 mod assignment_target;
 mod composites;
 mod constraints;
@@ -48,6 +49,7 @@ mod type_privileges;
 mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
+pub use array_access::{ArrayAccess, ArraySliceBounds, MAX_ARRAY_SUBSCRIPT_DIMENSIONS};
 pub use assignment_target::{AssignmentStep, AssignmentTarget, AssignmentTargets};
 pub use composites::*;
 pub use constraints::*;

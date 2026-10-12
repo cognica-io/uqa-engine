@@ -231,8 +231,7 @@ pub fn bound_scalar_function_strictness(
         return match dispatch {
             FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::Collate { .. } => None,
-            FunctionDispatch::ArraySubscripts
-            | FunctionDispatch::Subscript
+            FunctionDispatch::Subscript
             | FunctionDispatch::FieldSelect
             | FunctionDispatch::BetweenSymmetric
             | FunctionDispatch::ToBinInt4
@@ -247,7 +246,9 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::ArraySortJson
             | FunctionDispatch::JsonExtract { .. }
             | FunctionDispatch::Range { .. } => Some(true),
-            FunctionDispatch::ArraySlices
+            FunctionDispatch::ArraySubscripts
+            | FunctionDispatch::ArraySlices
+            | FunctionDispatch::ArraySlicesWithBounds(_)
             | FunctionDispatch::CollationFor { .. }
             | FunctionDispatch::ArrayConcat
             | FunctionDispatch::ArrayAppend

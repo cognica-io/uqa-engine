@@ -200,6 +200,24 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     _ => Value::Bool(false),
                 });
             }
+            if let Some(access) = binding
+                .as_ref()
+                .and_then(|binding| binding.dispatch)
+                .and_then(|dispatch| {
+                    crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+                        matches!(args[index], Expr::Literal(Value::Null))
+                    })
+                })
+            {
+                let control = uqa_core::memory::ProductionControl::uncontrolled();
+                return Ok(
+                    super::eval_array_access_with_control(access?, &control, |index| {
+                        Ok(control.finish(eval(&args[index], ctx)?, None)?)
+                    })?
+                    .into_uncontrolled()
+                    .expect("ordinary array access"),
+                );
+            }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
                 if binding.builtin {

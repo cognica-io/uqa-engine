@@ -57,6 +57,20 @@ pub fn function_binding_is_volatile(
         == FunctionVolatility::Volatile
 }
 
+fn is_intrinsic_scalar_syntax(binding: Option<&FunctionBinding>) -> bool {
+    matches!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(
+            crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::Collate { .. }
+                | crate::ast::FunctionDispatch::BooleanTest(_)
+                | crate::ast::FunctionDispatch::ArraySubscripts
+                | crate::ast::FunctionDispatch::ArraySlices
+                | crate::ast::FunctionDispatch::ArraySlicesWithBounds(_)
+        )
+    )
+}
+
 pub fn function_volatility_with_binding(
     catalog: &dyn VolatilityCatalog,
     name: &str,
@@ -64,15 +78,7 @@ pub fn function_volatility_with_binding(
     argument_count: usize,
 ) -> FunctionVolatility {
     let builtin = builtin_function_volatility(name, binding, argument_count);
-    if matches!(
-        binding.and_then(|binding| binding.dispatch),
-        Some(
-            crate::ast::FunctionDispatch::NumericOperator(_)
-                | crate::ast::FunctionDispatch::Collate { .. }
-                | crate::ast::FunctionDispatch::BooleanTest(_)
-        )
-    ) || builtin == FunctionVolatility::Volatile
-    {
+    if is_intrinsic_scalar_syntax(binding) || builtin == FunctionVolatility::Volatile {
         return builtin;
     }
     let identity = name.to_ascii_lowercase();
@@ -96,14 +102,7 @@ pub fn builtin_function_volatility(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
-    if matches!(
-        binding.and_then(|binding| binding.dispatch),
-        Some(
-            crate::ast::FunctionDispatch::NumericOperator(_)
-                | crate::ast::FunctionDispatch::Collate { .. }
-                | crate::ast::FunctionDispatch::BooleanTest(_)
-        )
-    ) {
+    if is_intrinsic_scalar_syntax(binding) {
         return FunctionVolatility::Immutable;
     }
     let lower = builtin_function_dispatch_name(&name.to_ascii_lowercase());
@@ -621,6 +620,12 @@ mod tests {
             ("true IS TRUE", false),
             ("(nextval('effect') > 0) IS NOT FALSE", true),
             ("\"IS TRUE\"(true)", true),
+            ("(ARRAY[1,2])[1]", false),
+            ("(ARRAY[1,2])[:1]", false),
+            ("(ARRAY[1,2])[nextval('effect')]", true),
+            ("(ARRAY[1,2])[:nextval('effect')]", true),
+            ("slice(ARRAY[1,2], 1, 2)", true),
+            ("subscript(ARRAY[1,2], 1)", true),
         ] {
             let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {input}"))
                 .unwrap()

@@ -40,7 +40,7 @@ impl Deparser<'_> {
                 binding.dispatch,
                 Some(
                     FunctionDispatch::ArraySubscripts
-                        | FunctionDispatch::ArraySlices
+                        | FunctionDispatch::ArraySlices | FunctionDispatch::ArraySlicesWithBounds(_)
                         | FunctionDispatch::FieldSelect
                 )
             )

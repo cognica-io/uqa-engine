@@ -602,9 +602,15 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                 };
                 return copy(field_type.as_ref(), control);
             }
-            FunctionDispatch::ArraySlices | FunctionDispatch::Slice => {
-                return copy(first(), control)
+            FunctionDispatch::ArraySlices | FunctionDispatch::ArraySlicesWithBounds(_) => {
+                return match first().map(base_type) {
+                    Some(ty @ (ColumnType::Int2Vector | ColumnType::OidVector)) => {
+                        array(crate::type_resolution::array_element_type(ty), control)
+                    }
+                    input => copy(input, control),
+                };
             }
+            FunctionDispatch::Slice => return copy(first(), control),
             FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator => {
                 let operator = match args.get(2) {
                     Some(ScalarExpr::Literal(Value::Str(operator))) => match operator.as_str() {

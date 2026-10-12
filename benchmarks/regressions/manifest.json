@@ -3638,6 +3638,193 @@
       "capability": "Array routine type identity",
       "workload": "Independent PostgreSQL numeric/enum array signatures, implicit argument conversion, duplicate signature rejection and five fresh-connection observations run on all providers.",
       "invariant": "Declaration rank does not invent a routine type; catalog identity, invocation values and rejection diagnostics remain exact after persistent reopening."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "omitted_bounds_survive_storage_without_conflating_supplied_null",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/array_access/tests.rs",
+      "capability": "Array bound identity and resource control",
+      "workload": "Omitted and explicit NULL slice syntax is serialized and lowered with a 4096-byte allowance.",
+      "invariant": "Distinct endpoint identities survive round-trip and admitted copying; all retained memory is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "legacy_slice_upgrade_retains_supplied_expressions_before_constant_folding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/array_access/tests.rs",
+      "capability": "Array bound identity and resource control",
+      "workload": "Legacy absent, typed NULL and computed NULL syntax is upgraded twice.",
+      "invariant": "Only absent syntax sets the omission bit; the second upgrade is idempotent."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "slice_values_match_null_absence_and_integer_rounding_references",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/array_access/tests.rs",
+      "capability": "Array bound identity and resource control",
+      "workload": "Independent PostgreSQL omission, NULL and numeric-rounding cases use the original 4096-byte allowance.",
+      "invariant": "Values match the reference; only returned output retains memory and dropping it releases the allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_access_preserves_null_array_prefix_and_upper_before_lower_effects",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/array_access/tests.rs",
+      "capability": "Array bound identity and resource control",
+      "workload": "Two-dimensional bounds produce NULL after an absent or present array input.",
+      "invariant": "NULL arrays skip all bounds; otherwise every supplied upper then lower expression runs once and all reservations release."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_access_releases_admitted_inputs_on_cancellation_and_quota_failure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/array_access/tests.rs",
+      "capability": "Array bound identity and resource control",
+      "workload": "Array evaluation exhausts a zero-byte allowance or is cancelled during bound evaluation.",
+      "invariant": "Quota and cancellation failures remain enforced and leave no retained memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_bound_analysis_matches_postgresql_type_and_error_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/array_bounds.rs",
+      "capability": "Array bound analysis",
+      "workload": "Thirteen independent PostgreSQL invalid-base, invalid-bound and excessive-rank observations.",
+      "invariant": "SQLSTATE, message and input-analysis precedence match PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_bounds_infer_integer_parameters_without_retyping_declared_text",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/array_bounds.rs",
+      "capability": "Array bound parameters",
+      "workload": "Undeclared and declared parameters occupy slice and element positions.",
+      "invariant": "Unknown parameters infer integer; declared text is rejected with the exact array-bound diagnostic."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/tests/array_transforms.rs",
+      "capability": "Array parameter type identity",
+      "workload": "Polymorphic arrays, named options, JSON dispatch, unknown strings and declared Boolean/text/integer parameters.",
+      "invariant": "Unknown option inputs receive Boolean context without discarding declared SQL identities or conflating ordinary scalar integers."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_array_keys_follow_postgresql_subscript_and_slice_syntax",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/view_definition/subscripts.rs",
+      "capability": "Stored array expression reconstruction",
+      "workload": "Element, slice, mixed, nested, operator and ordinary named-call index keys in both render modes.",
+      "invariant": "Array syntax reconstructs structurally while named functions retain their own syntax."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "array_bounds_match_postgresql_values_types_effects_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/array_transforms/bounds.rs",
+      "capability": "Durable array input semantics",
+      "workload": "Ninety-two independent PostgreSQL observations of bounds, integer contexts, vector/domain types, ordered effects, parameters and fresh-connection views on four providers.",
+      "invariant": "Exact values, metadata, errors and effects survive stored definitions and persistent reopen."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "legacy_array_slice_bounds_upgrade_once_before_folding",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/array_transforms/bounds.rs",
+      "capability": "Legacy array view restoration",
+      "workload": "Three persistent providers restore historical slice dispatches with absent, typed NULL and computed NULL bounds, then reopen again.",
+      "invariant": "Original endpoint identities are frozen before folding, independently referenced results remain correct and the second reopen leaves the upgraded definition unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_array_transforms_bind_polymorphic_and_named_arguments",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/array_transforms.rs",
+      "capability": "Host array parameter semantics",
+      "workload": "The public Engine API binds polymorphic/named calls with unknown strings and explicitly typed scalar parameters.",
+      "invariant": "Unknown strings retain Boolean input semantics while incompatible declared text/integer inputs preserve PostgreSQL diagnostics."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_array_transforms_report_exact_overload_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/array_transforms.rs",
+      "capability": "Host array parameter semantics",
+      "workload": "The public Engine API binds polymorphic/named calls with unknown strings and explicitly typed scalar parameters.",
+      "invariant": "Unknown strings retain Boolean input semantics while incompatible declared text/integer inputs preserve PostgreSQL diagnostics."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_array_transforms_preserve_declared_parameter_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/array_transforms.rs",
+      "capability": "Host array parameter semantics",
+      "workload": "The public Engine API binds explicitly typed text, typed NULL text and ordinary integer parameters in array option slots.",
+      "invariant": "Declared scalar identity is preserved and incompatible options retain exact PostgreSQL resolution errors."
     }
   ]
 }

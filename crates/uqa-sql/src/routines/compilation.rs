@@ -294,10 +294,21 @@ pub fn lower_sql_routine_statement(
     });
     if lowering.persisted_definition {
         plan.rewrite_scalar_expressions(&mut |expression| {
-            let ScalarExpr::Func { name, binding, .. } = expression else {
+            let ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } = expression
+            else {
                 return;
             };
             crate::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+            crate::ast::FunctionBinding::upgrade_legacy_array_slices(
+                binding,
+                args.len(),
+                |index| matches!(args[index], ScalarExpr::Literal(uqa_core::Value::Null)),
+            );
         });
     }
     if lowering.bind_catalog_dependencies {
