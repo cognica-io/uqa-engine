@@ -26,6 +26,7 @@ impl Renderer<'_> {
             "FUNCEXPR" => "funcresulttype",
             "RELABELTYPE" | "COERCEVIAIO" | "COERCETODOMAIN" | "ARRAYCOERCEEXPR" => "resulttype",
             "ARRAYEXPR" => "array_typeid",
+            "SUBSCRIPTINGREF" => "refrestype",
             "CASEEXPR" => "casetype",
             "COALESCEEXPR" => "coalescetype",
             "MINMAXEXPR" => "minmaxtype",

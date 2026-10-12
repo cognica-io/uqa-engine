@@ -12,6 +12,7 @@ mod constructs;
 mod operators;
 mod rows;
 mod schema;
+mod subscripts;
 pub use schema::{ColumnReference, ExpressionSchema};
 
 use super::{values, Field, Node};

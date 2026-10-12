@@ -1,0 +1,369 @@
+{
+  "catalog": [
+    {
+      "oid": 28723,
+      "name": "subscript_array",
+      "array_oid": 28722,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "integer[]",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 28721,
+      "name": "subscript_element",
+      "array_oid": 28720,
+      "relation_oid": 0,
+      "kind": "d",
+      "base": "integer",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 28713,
+      "name": "subscript_enum",
+      "array_oid": 28712,
+      "relation_oid": 0,
+      "kind": "e",
+      "base": null,
+      "labels": [
+        {
+          "oid": 28714,
+          "label": "first"
+        },
+        {
+          "oid": 28716,
+          "label": "second"
+        }
+      ],
+      "attributes": null
+    },
+    {
+      "oid": 28719,
+      "name": "subscript_row",
+      "array_oid": 28718,
+      "relation_oid": 28717,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "name": "id",
+          "number": 1,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        },
+        {
+          "name": "label",
+          "number": 2,
+          "type": "text",
+          "dropped": false,
+          "length": -1,
+          "alignment": "i"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "base": "integer[]",
+      "check": "VALUE[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1][2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1][2] IS NULL)",
+      "pretty": "(VALUE)[1][2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1:2] IS NULL)",
+      "pretty": "(VALUE)[1:2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr (<>) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[:2] IS NULL)",
+      "pretty": "(VALUE)[:2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1:] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr (<>) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1:] IS NULL)",
+      "pretty": "(VALUE)[1:] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[:] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr (<>) :reflowerindexpr (<>) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[:] IS NULL)",
+      "pretty": "(VALUE)[:] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[NULL:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[NULL::integer:2] IS NULL)",
+      "pretty": "(VALUE)[NULL::integer:2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1:NULL] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1:NULL::integer] IS NULL)",
+      "pretty": "(VALUE)[1:NULL::integer] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[NULL:NULL] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[NULL::integer:NULL::integer] IS NULL)",
+      "pretty": "(VALUE)[NULL::integer:NULL::integer] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[NULL] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[NULL::integer] IS NULL)",
+      "pretty": "(VALUE)[NULL::integer] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[2.8] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 2 0 64 31 ]}) :location -1}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[2.8] IS NULL)",
+      "pretty": "(VALUE)[2.8] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1:2.8] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 2 0 64 31 ]}) :location -1}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1:2.8] IS NULL)",
+      "pretty": "(VALUE)[1:2.8] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE['1'] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1::bigint] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({FUNCEXPR :funcid 480 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[(1)::bigint] IS NULL)",
+      "pretty": "(VALUE)[1::bigint] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1:2][2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1:2][1:2] IS NULL)",
+      "pretty": "(VALUE)[1:2][1:2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[:][2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr (<> {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr (<> {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[:][1:2] IS NULL)",
+      "pretty": "(VALUE)[:][1:2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "(VALUE[1:2])[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((VALUE)[1:2])[1] IS NULL)",
+      "pretty": "((VALUE)[1:2])[1] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1][2][3][4][5][6] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 5 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1][2][3][4][5][6] IS NULL)",
+      "pretty": "(VALUE)[1][2][3][4][5][6] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[CASE WHEN true THEN NULL::integer ELSE 1 END:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({CASEEXPR :casetype 23 :casecollid 0 :arg <> :args ({CASEWHEN :expr {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} :result {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} :location -1}) :defresult {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} :location -1}) :refexpr {COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[\nCASE\n    WHEN true THEN NULL::integer\n    ELSE 1\nEND:2] IS NULL)",
+      "pretty": "(VALUE)[\nCASE\n    WHEN true THEN NULL::integer\n    ELSE 1\nEND:2] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "(ARRAY[1,2])[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((ARRAY[1, 2])[1] IS NULL)",
+      "pretty": "(ARRAY[1, 2])[1] IS NULL"
+    },
+    {
+      "base": "integer[]",
+      "check": "(ARRAY[]::integer[])[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements <> :multidims false :list_start -1 :list_end -1 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((ARRAY[]::integer[])[1] IS NULL)",
+      "pretty": "(ARRAY[]::integer[])[1] IS NULL"
+    },
+    {
+      "base": "int2vector",
+      "check": "VALUE[0] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1005 :refelemtype 21 :refrestype 21 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 22 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[0] IS NULL)",
+      "pretty": "(VALUE)[0] IS NULL"
+    },
+    {
+      "base": "int2vector",
+      "check": "VALUE[0:1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1005 :refelemtype 21 :refrestype 1005 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :refexpr {COERCETODOMAINVALUE :typeId 22 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[0:1] IS NULL)",
+      "pretty": "(VALUE)[0:1] IS NULL"
+    },
+    {
+      "base": "oidvector",
+      "check": "VALUE[0] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1028 :refelemtype 26 :refrestype 26 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 30 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[0] IS NULL)",
+      "pretty": "(VALUE)[0] IS NULL"
+    },
+    {
+      "base": "oidvector",
+      "check": "VALUE[:1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1028 :refelemtype 26 :refrestype 1028 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr (<>) :refexpr {COERCETODOMAINVALUE :typeId 30 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[:1] IS NULL)",
+      "pretty": "(VALUE)[:1] IS NULL"
+    },
+    {
+      "base": "varchar(4)[]",
+      "check": "VALUE[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1015 :refelemtype 1043 :refrestype 1043 :reftypmod 8 :refcollid 100 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1015 :typeMod 8 :collation 100 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "varchar(4)[]",
+      "check": "VALUE[:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1015 :refelemtype 1043 :refrestype 1015 :reftypmod 8 :refcollid 100 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr (<>) :refexpr {COERCETODOMAINVALUE :typeId 1015 :typeMod 8 :collation 100 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[:2] IS NULL)",
+      "pretty": "(VALUE)[:2] IS NULL"
+    },
+    {
+      "base": "text[]",
+      "check": "VALUE[1] COLLATE \"C\" = 'x'",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COLLATEEXPR :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 100 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 1009 :typeMod -1 :collation 100 :location -1} :refassgnexpr <>} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+      "sql": "(((VALUE)[1] COLLATE \"C\") = 'x'::text)",
+      "pretty": "((VALUE)[1] COLLATE \"C\") = 'x'::text"
+    },
+    {
+      "base": "text[]",
+      "check": "(VALUE COLLATE \"C\")[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 950 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COLLATEEXPR :arg {COERCETODOMAINVALUE :typeId 1009 :typeMod -1 :collation 100 :location -1} :collOid 950 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((VALUE COLLATE \"C\"))[1] IS NULL)",
+      "pretty": "(VALUE COLLATE \"C\")[1] IS NULL"
+    },
+    {
+      "base": "text[]",
+      "check": "(VALUE COLLATE \"C\")[:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 1009 :reftypmod -1 :refcollid 950 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr (<>) :refexpr {COLLATEEXPR :arg {COERCETODOMAINVALUE :typeId 1009 :typeMod -1 :collation 100 :location -1} :collOid 950 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((VALUE COLLATE \"C\"))[:2] IS NULL)",
+      "pretty": "(VALUE COLLATE \"C\")[:2] IS NULL"
+    },
+    {
+      "base": "subscript_enum[]",
+      "check": "VALUE[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 28712 :refelemtype 28713 :refrestype 28713 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 28712 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "subscript_row[]",
+      "check": "VALUE[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 28718 :refelemtype 28719 :refrestype 28719 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 28718 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow true :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "subscript_element[]",
+      "check": "VALUE[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 28720 :refelemtype 28721 :refrestype 28721 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 28720 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "subscript_array",
+      "check": "VALUE[1] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {COERCETODOMAINVALUE :typeId 28723 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[1] IS NULL)",
+      "pretty": "(VALUE)[1] IS NULL"
+    },
+    {
+      "base": "subscript_array",
+      "check": "VALUE[:2] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :reflowerindexpr (<>) :refexpr {COERCETODOMAINVALUE :typeId 28723 :typeMod -1 :collation 0 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((VALUE)[:2] IS NULL)",
+      "pretty": "(VALUE)[:2] IS NULL"
+    }
+  ],
+  "errors": [
+    {
+      "base": "integer[]",
+      "check": "VALUE[true] IS NULL",
+      "error": {
+        "sqlstate": "42804",
+        "message": "array subscript must have type integer",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE['bad'] IS NULL",
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1][2][3][4][5][6][7] IS NULL",
+      "error": {
+        "sqlstate": "54000",
+        "message": "number of array dimensions (7) exceeds the maximum allowed (6)",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "base": "integer[]",
+      "check": "VALUE[1][2][3][4][5][6][true] IS NULL",
+      "error": {
+        "sqlstate": "42804",
+        "message": "array subscript must have type integer",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "base": "integer",
+      "check": "VALUE[1] IS NULL",
+      "error": {
+        "sqlstate": "42804",
+        "message": "cannot subscript type integer because it does not support subscripting",
+        "detail": null,
+        "hint": null
+      }
+    }
+  ]
+}

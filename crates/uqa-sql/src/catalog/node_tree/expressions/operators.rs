@@ -94,7 +94,14 @@ impl ExpressionContext<'_> {
                     ("array_typeid", pg_type_oid(&ty).into()),
                     ("array_collid", pg_type_collation_oid(&ty).into()),
                     ("element_typeid", pg_type_oid(leaf).into()),
-                    ("elements", Field::List(elements)),
+                    (
+                        "elements",
+                        if elements.is_empty() {
+                            Field::Null
+                        } else {
+                            Field::List(elements)
+                        },
+                    ),
                     ("multidims", matches!(element, ColumnType::Array(_)).into()),
                     ("list_start", (-1).into()),
                     ("list_end", (-1).into()),

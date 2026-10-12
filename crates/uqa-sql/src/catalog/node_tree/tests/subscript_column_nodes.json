@@ -1,0 +1,71 @@
+{
+  "create": "CREATE TABLE subscript_columns (gone integer, words text[] COLLATE \"C\", index numeric, numbers integer[])",
+  "dropped": "gone",
+  "attributes": [
+    {
+      "name": "words",
+      "attribute_number": 2,
+      "collation_oid": 950
+    },
+    {
+      "name": "index",
+      "attribute_number": 3,
+      "collation_oid": 0
+    },
+    {
+      "name": "numbers",
+      "attribute_number": 4,
+      "collation_oid": 0
+    }
+  ],
+  "cases": [
+    {
+      "check": "words[index] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 950 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 2 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(words[index] IS NULL)",
+      "pretty": "words[index] IS NULL"
+    },
+    {
+      "check": "words[numbers[1]] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 950 :refupperindexpr ({SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 4 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1} :refassgnexpr <>}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 2 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(words[numbers[1]] IS NULL)",
+      "pretty": "words[numbers[1]] IS NULL"
+    },
+    {
+      "check": "words[:index] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 1009 :reftypmod -1 :refcollid 950 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}) :reflowerindexpr (<>) :refexpr {VAR :varno 1 :varattno 2 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(words[:index] IS NULL)",
+      "pretty": "words[:index] IS NULL"
+    },
+    {
+      "check": "words[index] > 'x'",
+      "conbin": "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 950 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 2 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :refassgnexpr <>} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1}",
+      "sql": "(words[index] > 'x'::text)",
+      "pretty": "words[index] > 'x'::text"
+    },
+    {
+      "check": "numbers[index]::bigint > 0",
+      "conbin": "{OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 4 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1} :refassgnexpr <>}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((numbers[index])::bigint > 0)",
+      "pretty": "numbers[index]::bigint > 0"
+    },
+    {
+      "check": "numbers[index:4][3] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 1007 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]}) :reflowerindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :refexpr {VAR :varno 1 :varattno 4 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(numbers[index:4][1:3] IS NULL)",
+      "pretty": "numbers[index:4][1:3] IS NULL"
+    },
+    {
+      "check": "(words COLLATE \"POSIX\")[index] IS NULL",
+      "conbin": "{NULLTEST :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 951 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}) :reflowerindexpr <> :refexpr {COLLATEEXPR :arg {VAR :varno 1 :varattno 2 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :collOid 951 :location -1} :refassgnexpr <>} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((words COLLATE \"POSIX\"))[index] IS NULL)",
+      "pretty": "(words COLLATE \"POSIX\")[index] IS NULL"
+    },
+    {
+      "check": "(words[index])::varchar(4) IS NULL",
+      "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({RELABELTYPE :arg {SUBSCRIPTINGREF :refcontainertype 1009 :refelemtype 25 :refrestype 25 :reftypmod -1 :refcollid 950 :refupperindexpr ({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 1700 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 2 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :refassgnexpr <>} :resulttype 1043 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 8 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((words[index])::character varying(4) IS NULL)",
+      "pretty": "words[index]::character varying(4) IS NULL"
+    }
+  ]
+}
