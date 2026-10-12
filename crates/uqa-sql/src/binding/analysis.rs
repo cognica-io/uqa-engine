@@ -15,6 +15,7 @@ mod windows;
 pub(super) use calls::validate_call;
 pub(super) use functions::validate_window_function;
 pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
+pub(super) use references::require_scalar_boolean_test;
 pub(super) use windows::references_local_column;
 
 use super::{QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};

@@ -11,7 +11,7 @@ use super::super::{
     value_to_string_with_control, EvalContext,
 };
 use crate::{
-    ast::{BinaryOp, FunctionDispatch},
+    ast::{BinaryOp, BooleanTest, FunctionDispatch},
     error::{Result, SQLError},
 };
 use uqa_core::{
@@ -47,10 +47,34 @@ pub(in crate::expr) fn evaluate_with_context(
             };
             Ok(Value::Bool(matches!(value, Value::Null) != negated))
         }
+        FunctionDispatch::BooleanTest(test) => boolean_test(test, args),
         FunctionDispatch::BetweenSymmetric => between_symmetric(args, control, context),
         _ => return None,
     };
     Some(result.and_then(|value| Ok(control.finish(value, control.empty_reservation())?)))
+}
+
+fn boolean_test(test: BooleanTest, args: &[Value]) -> Result<Value> {
+    let [value] = args else {
+        return Err(SQLError::Internal("Boolean test takes one input".into()));
+    };
+    let input = match value {
+        Value::Bool(value) => Some(*value),
+        Value::Null => None,
+        _ => {
+            return Err(SQLError::Internal(
+                "Boolean test received an untyped input".into(),
+            ))
+        }
+    };
+    Ok(Value::Bool(match test {
+        BooleanTest::IsTrue => input == Some(true),
+        BooleanTest::IsNotTrue => input != Some(true),
+        BooleanTest::IsFalse => input == Some(false),
+        BooleanTest::IsNotFalse => input != Some(false),
+        BooleanTest::IsUnknown => input.is_none(),
+        BooleanTest::IsNotUnknown => input.is_some(),
+    }))
 }
 
 fn any_all(

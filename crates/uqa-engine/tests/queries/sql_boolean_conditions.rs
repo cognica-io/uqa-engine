@@ -8,6 +8,9 @@
 
 use uqa_engine::Engine;
 
+#[path = "boolean_tests/mod.rs"]
+mod boolean_tests;
+
 fn verify_boolean_conditions(engine: &Engine) {
     crate::pg18_oracle::verify(
         engine,

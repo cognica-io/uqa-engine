@@ -183,6 +183,44 @@ fn typed_check_nodes_and_sql_match_postgresql() {
 }
 
 #[test]
+fn boolean_test_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/boolean_tests.json"));
+}
+
+#[test]
+fn boolean_test_catalog_validates_operand_types_and_kind_tags() {
+    let schema = crate::RowSchema::default();
+    let context = expressions::ExpressionContext {
+        schema: &schema,
+        domain_value: Some(&crate::ColumnType::Boolean),
+        types: None,
+        routines: &Routines,
+    };
+    for (input, state) in [
+        ("1", "42804"),
+        ("'t'::text", "42804"),
+        ("'invalid'", "22P02"),
+    ] {
+        let sql = format!("CREATE DOMAIN d AS boolean CHECK ({input} IS TRUE)");
+        let crate::Statement::CreateDomain(domain) = crate::compile(&sql).unwrap().remove(0) else {
+            panic!("domain")
+        };
+        let error = context.check(&domain.checks[0].expression).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+    }
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("tests/boolean_tests.json")).unwrap();
+    let source = reference[0]["conbin"].as_str().unwrap();
+    for code in [-1, 6, i64::MAX] {
+        let node =
+            parse(&source.replace(":booltesttype 0", &format!(":booltesttype {code}"))).unwrap();
+        for pretty in [false, true] {
+            assert!(deparse::expression(&node, &Routines, pretty).is_err());
+        }
+    }
+}
+
+#[test]
 fn infinite_temporal_nodes_and_sql_match_postgresql() {
     check_typed_nodes(include_str!("tests/temporal.json"));
 }

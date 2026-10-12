@@ -23,6 +23,9 @@ impl ExpressionContext<'_> {
         args: &[Expr],
     ) -> Result<Option<TypedNode>, SQLError> {
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::BooleanTest(test)) => {
+                return self.boolean_test(args, test).map(Some);
+            }
             Some(FunctionDispatch::ValueNullTest { negated }) => {
                 return self.value_null_test(args, negated).map(Some);
             }
@@ -117,6 +120,33 @@ impl ExpressionContext<'_> {
             )
         };
         Ok(Some(TypedNode { node, ty }))
+    }
+
+    fn boolean_test(
+        &self,
+        args: &[Expr],
+        test: crate::ast::BooleanTest,
+    ) -> Result<TypedNode, SQLError> {
+        let [argument] = args else {
+            return Err(SQLError::Internal("Boolean test takes one input".into()));
+        };
+        crate::type_resolution::boolean::require_argument_type(
+            self.expression_type(argument)?.as_ref(),
+            test.label(),
+            self.types,
+        )?;
+        let argument = self.encode(argument, Some(&ColumnType::Boolean))?;
+        Ok(TypedNode {
+            node: Node::new(
+                "BOOLEANTEST",
+                [
+                    ("arg", argument.node.into()),
+                    ("booltesttype", test.catalog_code().into()),
+                    ("location", (-1).into()),
+                ],
+            ),
+            ty: ColumnType::Boolean,
+        })
     }
 
     fn value_null_test(&self, args: &[Expr], negated: bool) -> Result<TypedNode, SQLError> {

@@ -15,9 +15,8 @@ impl Renderer<'_> {
         };
         let field = match node.kind.as_str() {
             "ROWEXPR" => return Ok(true),
-            "BOOLEXPR" | "NULLTEST" | "DISTINCTEXPR" | "SCALARARRAYOPEXPR" | "ROWCOMPAREEXPR" => {
-                return Ok(false)
-            }
+            "BOOLEXPR" | "BOOLEANTEST" | "NULLTEST" | "DISTINCTEXPR" | "SCALARARRAYOPEXPR"
+            | "ROWCOMPAREEXPR" => return Ok(false),
             "COLLATEEXPR" => return self.is_record_argument(node.field("arg")?),
             "VAR" => "vartype",
             "PARAM" => "paramtype",

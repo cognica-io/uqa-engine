@@ -9,6 +9,35 @@
 use super::{atom, invalid, list, parentheses, prefix, values, Field, Node, Renderer, SQLError};
 
 impl Renderer<'_> {
+    pub(super) fn boolean_test(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
+        let test = crate::ast::BooleanTest::from_catalog_code(node.integer("booltesttype")?)
+            .ok_or_else(|| invalid("invalid Boolean test"))?;
+        Ok(parentheses(
+            format!(
+                "{} {}",
+                self.field(node.field("arg")?, false)?,
+                test.label()
+            ),
+            !outer,
+        ))
+    }
+
+    pub(super) fn null_test(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
+        let scalar_row_test =
+            !node.boolean("argisrow")? && self.is_record_argument(node.field("arg")?)?;
+        let operator = match (node.integer("nulltesttype")?, scalar_row_test) {
+            (0, false) => "IS NULL",
+            (1, false) => "IS NOT NULL",
+            (0, true) => "IS NOT DISTINCT FROM NULL",
+            (1, true) => "IS DISTINCT FROM NULL",
+            _ => return Err(invalid("invalid null test")),
+        };
+        Ok(parentheses(
+            format!("{} {operator}", self.field(node.field("arg")?, false)?),
+            !outer,
+        ))
+    }
+
     pub(super) fn operator(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
         if let [argument] = list(node, "args")? {
             let operator = crate::type_resolution::unary_operator_by_oid(node.integer("opno")?)

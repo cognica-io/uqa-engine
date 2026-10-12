@@ -78,6 +78,8 @@ impl FunctionResolutionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionDispatch {
     NumericOperator(NumericOperator),
+    /// A non-strict SQL Boolean test, distinct from routine lookup and equality.
+    BooleanTest(BooleanTest),
     /// A collation clause, retaining its selected identity independently of its written name.
     Collate {
         oid: Option<u32>,
@@ -135,6 +137,57 @@ pub enum FunctionDispatch {
     },
 }
 
+/// The six predicates over SQL's true, false and NULL Boolean inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BooleanTest {
+    IsTrue,
+    IsNotTrue,
+    IsFalse,
+    IsNotFalse,
+    IsUnknown,
+    IsNotUnknown,
+}
+
+impl BooleanTest {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::IsTrue => "IS TRUE",
+            Self::IsNotTrue => "IS NOT TRUE",
+            Self::IsFalse => "IS FALSE",
+            Self::IsNotFalse => "IS NOT FALSE",
+            Self::IsUnknown => "IS UNKNOWN",
+            Self::IsNotUnknown => "IS NOT UNKNOWN",
+        }
+    }
+
+    /// Stable `PostgreSQL` catalog node identity, independent of parser protobuf tags.
+    #[must_use]
+    pub const fn catalog_code(self) -> i64 {
+        match self {
+            Self::IsTrue => 0,
+            Self::IsNotTrue => 1,
+            Self::IsFalse => 2,
+            Self::IsNotFalse => 3,
+            Self::IsUnknown => 4,
+            Self::IsNotUnknown => 5,
+        }
+    }
+
+    #[must_use]
+    pub const fn from_catalog_code(code: i64) -> Option<Self> {
+        match code {
+            0 => Some(Self::IsTrue),
+            1 => Some(Self::IsNotTrue),
+            2 => Some(Self::IsFalse),
+            3 => Some(Self::IsNotFalse),
+            4 => Some(Self::IsUnknown),
+            5 => Some(Self::IsNotUnknown),
+            _ => None,
+        }
+    }
+}
+
 /// Operation selected for one typed range or multirange call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RangeFunctionOperation {
@@ -163,6 +216,7 @@ impl FunctionDispatch {
     pub const fn label(self) -> &'static str {
         match self {
             Self::NumericOperator(operator) => operator.symbol(),
+            Self::BooleanTest(test) => test.label(),
             Self::Collate { .. } => "COLLATE",
             Self::CollationFor { .. } => "pg_catalog.pg_collation_for",
             Self::NamedArgument => "named argument",

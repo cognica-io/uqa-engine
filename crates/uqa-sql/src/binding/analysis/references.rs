@@ -81,6 +81,7 @@ pub(super) fn validate_expression(
         }
         ScalarExpr::Func {
             name,
+            binding,
             args,
             order_by,
             filter,
@@ -93,6 +94,15 @@ pub(super) fn validate_expression(
                 validate_expression(
                     rule_event, routines, argument, schema, None, params, resolver,
                 )?;
+            }
+            if let Some(crate::ast::FunctionDispatch::BooleanTest(test)) =
+                binding.as_ref().and_then(|binding| binding.dispatch)
+            {
+                let [argument] = args.as_slice() else {
+                    return Err(SQLError::Internal("Boolean test takes one input".into()));
+                };
+                require_boolean_condition(argument, test.label(), schema, params, resolver)?;
+                return require_scalar_boolean_test(routines, argument, schema, params, test);
             }
             for order in order_by {
                 validate_expression(
@@ -278,20 +288,25 @@ pub(super) fn require_boolean_condition(
     else {
         return Ok(());
     };
-    let mut base = &ty;
-    while let crate::ast::ColumnType::Domain { base: inner, .. } = base {
-        base = inner;
-    }
-    if matches!(base, crate::ast::ColumnType::Boolean) {
-        Ok(())
-    } else {
+    crate::type_resolution::boolean::require_argument_type(Some(&ty), construct, Some(resolver))
+}
+
+pub(in crate::binding) fn require_scalar_boolean_test(
+    routines: &dyn RoutineResolution,
+    argument: &ScalarExpr,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    test: crate::ast::BooleanTest,
+) -> Result<(), SQLError> {
+    if crate::semantics::sets::validation::expression_may_return_set(
+        routines, routines, argument, schema, params,
+    )? {
         Err(SQLError::Routine {
             sqlstate: "42804".into(),
-            message: format!(
-                "argument of {construct} must be type boolean, not type {}",
-                ty.regtype_name()
-            ),
+            message: format!("argument of {} must not return a set", test.label()),
         })
+    } else {
+        Ok(())
     }
 }
 

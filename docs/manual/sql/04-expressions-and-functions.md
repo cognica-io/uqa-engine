@@ -6,6 +6,14 @@ This chapter is a name-level catalog of built-in expression functions. Most sign
 
 Implemented expression families include arithmetic, comparison, Boolean logic, NULL tests, `BETWEEN`, `IN`, `EXISTS`, `LIKE`, `ILIKE`, regular-expression matching, `SIMILAR TO`, concatenation, array construction and subscripting, casts, and searched or simple `CASE`.
 
+`expression IS [NOT] TRUE`, `expression IS [NOT] FALSE` and `expression IS [NOT] UNKNOWN` accept a Boolean expression, including a Boolean domain, and always return a non-NULL Boolean. Unknown literals and undeclared parameters receive Boolean context; explicitly declared non-Boolean operands and set-valued operands fail with `42804`, and invalid Boolean input fails with `22P02`. Analysis checks these requirements before runtime short circuits. A reached operand evaluates once, preserving its errors and effects. NULL `IS NOT TRUE` and NULL `IS NOT FALSE` are true, while NULL `IS NOT UNKNOWN` is false. Stored views and constraints retain the predicate and its selected operand types across reopening.
+
+```sql execute
+SELECT value, value IS TRUE AS is_true, value IS NOT FALSE AS is_not_false, value IS UNKNOWN AS is_unknown
+FROM (VALUES (true), (false), (NULL::boolean)) AS inputs(value)
+ORDER BY value NULLS LAST;
+```
+
 Range predicates follow PostgreSQL's separate comparison rules: `x BETWEEN lo AND hi` uses `x >= lo AND x <= hi`; `BETWEEN SYMMETRIC` also checks the reversed bounds. Each comparison selects its operand types independently. Volatile expressions and scalar subqueries can therefore run once for each reached comparison, subject to strict-NULL constant folding and Boolean short circuits. Negated range predicates use the corresponding negated comparisons. Initial catalog restoration expands predecessor compound range predicates in views, defaults, CHECK constraints, generated columns, index expressions, partition keys, domain definitions, routines, rules, trigger conditions and foreign-table schemas. Copied operands retain their bound catalog identities and receive independent subquery initialization slots. Schema/procedural execution and view execution optimize private copies; view planning then selects its streaming or materialized path. Rule WHERE conditions use analyzed scalar plans and reject constant UNKNOWN qualifications without executing discarded operands. Scalar values and CHECK constraints retain their distinct three-valued behavior. Required catalog changes commit together during initial open; a failed restoration rolls them back and secondary sessions cannot perform the migration. Eligible volatile view and derived-table projections evaluate rows as their parent requests them, so a parent LIMIT does not exhaust unrelated input rows. Shared CTE materialization remains controlled by the CTE owner.
 
 ```sql

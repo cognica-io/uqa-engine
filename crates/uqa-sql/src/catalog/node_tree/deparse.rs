@@ -119,21 +119,8 @@ impl Renderer<'_> {
                 node.integer("resulttypmod")?,
             ),
             "BOOLEXPR" => self.boolean(node, outer),
-            "NULLTEST" => {
-                let scalar_row_test =
-                    !node.boolean("argisrow")? && self.is_record_argument(node.field("arg")?)?;
-                let operator = match (node.integer("nulltesttype")?, scalar_row_test) {
-                    (0, false) => "IS NULL",
-                    (1, false) => "IS NOT NULL",
-                    (0, true) => "IS NOT DISTINCT FROM NULL",
-                    (1, true) => "IS DISTINCT FROM NULL",
-                    _ => return Err(invalid("invalid null test")),
-                };
-                Ok(parentheses(
-                    format!("{} {operator}", self.field(node.field("arg")?, false)?),
-                    !outer,
-                ))
-            }
+            "BOOLEANTEST" => self.boolean_test(node, outer),
+            "NULLTEST" => self.null_test(node, outer),
             "COALESCEEXPR" | "MINMAXEXPR" => {
                 let name = match node.kind.as_str() {
                     "COALESCEEXPR" => "COALESCE",

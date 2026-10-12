@@ -3489,6 +3489,100 @@
       "capability": "Query record descriptor lifetime",
       "workload": "Independent PostgreSQL static/dynamic INTO, RETURNING, FOR, FETCH, NULL copies, repeated calls, held cursors and transaction rollback on four providers, with fresh-connection references for persistent reopening.",
       "invariant": "Selected field metadata, exact values, diagnostics, row counts and transaction effects survive result and cursor ownership boundaries."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_test_analysis_matches_postgresql_errors_before_evaluation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/boolean_tests.rs",
+      "capability": "Boolean-test input analysis",
+      "workload": "Thirty independent PostgreSQL input, set-returning and unreachable-branch errors are checked before execution.",
+      "invariant": "SQLSTATE and messages preserve the Boolean context and validation order."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_tests_infer_parameters_without_retyping_declared_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/boolean_tests.rs",
+      "capability": "Boolean-test parameter typing",
+      "workload": "All six predicates infer Boolean parameters and reject explicitly declared text parameters.",
+      "invariant": "Unknown parameters receive Boolean context; declared types remain unchanged."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_test_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests.rs",
+      "capability": "Typed Boolean-test catalog nodes",
+      "workload": "Twelve independently captured domain expressions include all six tests and nested Boolean, CASE and COALESCE forms.",
+      "invariant": "Typed nodes and both SQL reconstruction modes match PostgreSQL without replacing node identity with source text."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_tests_match_postgresql_without_allocating_result_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/scalar_postgres/comparison/tests.rs",
+      "capability": "Bounded Boolean-test evaluation",
+      "workload": "All eighteen predicate/operand combinations execute under a zero-byte result-memory allowance.",
+      "invariant": "Results are non-NULL Booleans, match the independent truth table and retain no heap memory."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "boolean_tests_preserve_postgresql_analysis_effects_and_storage",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/boolean_tests/mod.rs",
+      "capability": "Durable Boolean-test SQL semantics",
+      "workload": "Ninety-three independent PostgreSQL observations cover NULLs, analysis, parameters, domains, volatile effects, routine-name collisions, stored views and fresh-connection behavior on four providers.",
+      "invariant": "Values, types, errors, command completions, effects and stored definitions match PostgreSQL before and after reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_test_catalog_validates_operand_types_and_kind_tags",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests.rs",
+      "capability": "Boolean catalog input validation",
+      "workload": "Invalid declared operands and Boolean input are checked before encoding; negative, unknown and overflowing Boolean-test kind tags are rejected in both render modes.",
+      "invariant": "Catalog encoding keeps PostgreSQL errors and reconstruction never silently substitutes a different predicate."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collation_volatility_follows_only_its_operand",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/volatility.rs",
+      "capability": "Structural syntax effect classification",
+      "workload": "Collation and Boolean-test syntax are analyzed beside identically named host/routine registrations and volatile children.",
+      "invariant": "Structural predicates retain their intrinsic immutability while preserving child effects; ordinary named calls retain their own volatility."
     }
   ]
 }
