@@ -1,0 +1,44 @@
+[
+  {
+    "source_check": "ROW(VALUE COLLATE \"C\", COALESCE('a' COLLATE \"C\", 'b' COLLATE \"C\")) < ROW('x' COLLATE \"C\", 'z')",
+    "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 664 664) :opfamilies (o 1994 1994) :inputcollids (o 950 950) :largs ({COLLATEEXPR :arg {COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} :collOid 950 :location -1} {COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]} :collOid 950 :location -1}) :location -1}) :rargs ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]})}",
+    "check": "ROW(VALUE COLLATE \"C\", COALESCE('a' COLLATE \"C\", 'b' COLLATE \"default\")) < ROW('x' COLLATE \"POSIX\", 'z')",
+    "collation_replacements": [
+      [
+        2,
+        100
+      ],
+      [
+        3,
+        951
+      ]
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "source_check": "ROW(VALUE COLLATE \"C\", COALESCE('a' COLLATE \"C\", 'b' COLLATE \"C\")) < ROW(COALESCE('x' COLLATE \"C\", 'y' COLLATE \"C\"), 'z')",
+    "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 664 664) :opfamilies (o 1994 1994) :inputcollids (o 950 950) :largs ({COLLATEEXPR :arg {COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} :collOid 950 :location -1} {COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]} :collOid 950 :location -1}) :location -1}) :rargs ({COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 950 :location -1} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]} :collOid 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]})}",
+    "check": "ROW(VALUE COLLATE \"C\", COALESCE('a' COLLATE \"C\", 'b' COLLATE \"POSIX\")) < ROW(COALESCE('x' COLLATE \"C\", 'y' COLLATE \"default\"), 'z')",
+    "collation_replacements": [
+      [
+        2,
+        951
+      ],
+      [
+        4,
+        100
+      ]
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"default\"",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

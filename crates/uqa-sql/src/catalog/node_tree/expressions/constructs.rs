@@ -109,7 +109,7 @@ impl ExpressionContext<'_> {
                 [
                     ("minmaxtype", pg_type_oid(&ty).into()),
                     ("minmaxcollid", pg_type_collation_oid(&ty).into()),
-                    ("inputcollid", pg_type_collation_oid(&ty).into()),
+                    ("inputcollid", 0.into()),
                     ("op", i64::from(name == "least").into()),
                     ("args", Field::List(arguments)),
                     ("location", (-1).into()),

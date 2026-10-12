@@ -7,6 +7,7 @@
 //! Bind catalog expression nodes to declared column and domain-value types.
 
 mod coercion;
+mod collations;
 mod constructs;
 mod operators;
 mod rows;
@@ -49,8 +50,9 @@ struct TypedNode {
 
 impl ExpressionContext<'_> {
     pub fn check(&self, expression: &Expr) -> Result<Node, SQLError> {
-        self.encode(expression, Some(&ColumnType::Boolean))
-            .map(|value| value.node)
+        let mut value = self.encode(expression, Some(&ColumnType::Boolean))?;
+        collations::assign(&mut value.node)?;
+        Ok(value.node)
     }
 
     fn expression_type(&self, expression: &Expr) -> Result<Option<ColumnType>, SQLError> {
@@ -345,11 +347,6 @@ impl ExpressionContext<'_> {
             .zip(&routine.argument_types)
             .map(|(arg, ty)| self.encode(arg, Some(ty)))
             .collect::<Result<Vec<_>, _>>()?;
-        let collation = arguments
-            .iter()
-            .map(|argument| pg_type_collation_oid(&argument.ty))
-            .find(|oid| *oid != 0)
-            .unwrap_or(0);
         Ok(TypedNode {
             node: Node::new(
                 "FUNCEXPR",
@@ -370,7 +367,7 @@ impl ExpressionContext<'_> {
                         "funccollid",
                         pg_type_collation_oid(&routine.result_type).into(),
                     ),
-                    ("inputcollid", collation.into()),
+                    ("inputcollid", 0.into()),
                     (
                         "args",
                         Field::List(arguments.into_iter().map(|arg| arg.node.into()).collect()),
@@ -390,11 +387,6 @@ fn operator_node(
     result: ColumnType,
 ) -> TypedNode {
     let arguments: Vec<_> = arguments.into_iter().collect();
-    let input_collation = arguments
-        .iter()
-        .map(|argument| pg_type_collation_oid(&argument.ty))
-        .find(|oid| *oid != 0)
-        .unwrap_or(0);
     TypedNode {
         node: Node::new(
             "OPEXPR",
@@ -404,7 +396,7 @@ fn operator_node(
                 ("opresulttype", pg_type_oid(&result).into()),
                 ("opretset", false.into()),
                 ("opcollid", pg_type_collation_oid(&result).into()),
-                ("inputcollid", input_collation.into()),
+                ("inputcollid", 0.into()),
                 (
                     "args",
                     Field::List(arguments.into_iter().map(|arg| arg.node.into()).collect()),

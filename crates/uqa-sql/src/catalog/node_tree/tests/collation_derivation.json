@@ -1,0 +1,667 @@
+[
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 0
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, 'x' COLLATE \"default\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 100
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 0
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, 'x' COLLATE \"default\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 100
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(c, a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(c, b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(c, c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(c, 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 100
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(c, 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 100
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(c, 'x' COLLATE \"default\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 100
+      },
+      {
+        "derivation": "explicit",
+        "oid": 100
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", 'x' COLLATE \"default\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 100
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"default\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"POSIX\", a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"POSIX\", b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"POSIX\", c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"POSIX\", 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"POSIX\" and \"C\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"POSIX\", 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"POSIX\", 'x' COLLATE \"default\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 100
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"POSIX\" and \"default\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"default\" and \"C\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"default\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", 'x' COLLATE \"default\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "explicit",
+        "oid": 100
+      }
+    ],
+    "oid": 100
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, b, 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(b, a, 'x' COLLATE \"POSIX\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      }
+    ],
+    "oid": 951
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, b, c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 0
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE(a, b, a)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      }
+    ],
+    "oid": 0
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", 'x' COLLATE \"POSIX\", 'x' COLLATE \"C\")))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "explicit",
+        "oid": 951
+      },
+      {
+        "derivation": "explicit",
+        "oid": 950
+      }
+    ],
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"C\", a, c)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 100
+      }
+    ],
+    "oid": 950
+  },
+  {
+    "sql": "SELECT (COLLATION FOR (COALESCE('x' COLLATE \"default\", a, b)))::regcollation::oid FROM probe",
+    "inputs": [
+      {
+        "derivation": "explicit",
+        "oid": 100
+      },
+      {
+        "derivation": "implicit",
+        "oid": 950
+      },
+      {
+        "derivation": "implicit",
+        "oid": 951
+      }
+    ],
+    "oid": 100
+  }
+]

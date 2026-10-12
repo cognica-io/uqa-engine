@@ -105,7 +105,6 @@ fn row_ordering_node(
 ) -> Result<TypedNode, SQLError> {
     let mut opnos = Vec::new();
     let mut families = Vec::new();
-    let mut collations = Vec::new();
     let mut left = Vec::new();
     let mut right = Vec::new();
     for (mut operator, options) in operators.into_iter().zip(interpretations) {
@@ -116,7 +115,6 @@ fn row_ordering_node(
                 .find_map(|(candidate, family)| (candidate == comparison).then_some(family))
                 .expect("common comparison interpretation"),
         );
-        collations.push(operator.integer("inputcollid")?);
         let arguments = operator
             .fields
             .iter_mut()
@@ -137,7 +135,7 @@ fn row_ordering_node(
             ("cmptype", comparison.into()),
             ("opnos", oid_list(opnos)),
             ("opfamilies", oid_list(families)),
-            ("inputcollids", oid_list(collations)),
+            ("inputcollids", Field::Null),
             ("largs", Field::List(left)),
             ("rargs", Field::List(right)),
         ],

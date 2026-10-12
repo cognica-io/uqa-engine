@@ -274,11 +274,6 @@ fn cast_function(
     if !(1..=3).contains(&arity) {
         return Err(SQLError::Internal("invalid catalog cast arity".into()));
     }
-    let input_collation = if value.node.kind == "CASETESTEXPR" {
-        value.node.integer("collation")?
-    } else {
-        pg_type_collation_oid(&value.ty)
-    };
     let mut arguments = vec![value.node.into()];
     if arity > 1 {
         arguments.push(
@@ -299,7 +294,7 @@ fn cast_function(
                 ("funcvariadic", false.into()),
                 ("funcformat", format.into()),
                 ("funccollid", pg_type_collation_oid(target).into()),
-                ("inputcollid", input_collation.into()),
+                ("inputcollid", 0.into()),
                 ("args", Field::List(arguments)),
                 ("location", (-1).into()),
             ],
