@@ -93,6 +93,30 @@ impl Preparation<'_> {
             return self.parameters.reference(index);
         }
         self.check_schema_subquery(expression)?;
+        if let ScalarExpr::Func {
+            binding: Some(binding),
+            args,
+            ..
+        } = expression
+        {
+            if let Some(crate::ast::FunctionDispatch::BooleanTest(test)) = binding.dispatch {
+                let [argument] = args.as_slice() else {
+                    return Err(SQLError::Internal("Boolean test takes one input".into()));
+                };
+                let value = self.boolean_expression(argument, input, subqueries, test.label())?;
+                super::super::analysis::require_scalar_boolean_test(
+                    self.routines,
+                    argument,
+                    input,
+                    &self.parameters.values(),
+                    test,
+                )?;
+                return Ok(ExpressionType::independent(
+                    Some(ColumnType::Boolean),
+                    &[value],
+                ));
+            }
+        }
         if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)? {
             let mut value = self.expression(clause.argument, input, subqueries)?;
             let oid = crate::catalog::collations::expression::select(

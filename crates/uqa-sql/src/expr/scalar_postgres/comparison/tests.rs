@@ -12,6 +12,48 @@ fn array(elements: Vec<Value>) -> Value {
 }
 
 #[test]
+fn boolean_tests_match_postgresql_without_allocating_result_memory() {
+    let expected: Vec<Vec<Option<String>>> =
+        serde_json::from_str(include_str!("tests/boolean_tests.json")).unwrap();
+    let tests = [
+        BooleanTest::IsTrue,
+        BooleanTest::IsNotTrue,
+        BooleanTest::IsFalse,
+        BooleanTest::IsNotFalse,
+        BooleanTest::IsUnknown,
+        BooleanTest::IsNotUnknown,
+    ];
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for row in expected {
+        let input = row[0]
+            .as_ref()
+            .map_or(Value::Null, |s| Value::Bool(s == "t"));
+        for (test, expected) in tests.into_iter().zip(&row[1..]) {
+            let result = evaluate(
+                FunctionDispatch::BooleanTest(test),
+                std::slice::from_ref(&input),
+                &control,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(*result, Value::Bool(expected.as_deref() == Some("t")));
+            assert_eq!(budget.used(), 0);
+        }
+    }
+    token.cancel();
+    assert!(evaluate(
+        FunctionDispatch::BooleanTest(BooleanTest::IsUnknown),
+        &[Value::Null],
+        &control
+    )
+    .unwrap()
+    .is_err());
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn outer_null_test_keeps_null_fields_distinct_from_a_null_value() {
     let budget = MemoryBudget::new(0);
     let token = CancellationToken::new();

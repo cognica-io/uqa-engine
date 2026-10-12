@@ -15,6 +15,7 @@ use uqa_core::Value;
 
 mod array_transform;
 pub(crate) mod between;
+pub(crate) mod boolean;
 pub(crate) use array_transform::resolve_array_transform_call;
 mod call;
 mod cast_compatibility;

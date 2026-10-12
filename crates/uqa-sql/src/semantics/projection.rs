@@ -106,6 +106,7 @@ pub fn function_projection_label(
                 | crate::ast::FunctionDispatch::IsDistinct
                 | crate::ast::FunctionDispatch::ValueIsDistinct
                 | crate::ast::FunctionDispatch::ValueNullTest { .. }
+                | crate::ast::FunctionDispatch::BooleanTest(_)
                 | crate::ast::FunctionDispatch::AnyOperator
                 | crate::ast::FunctionDispatch::AllOperator
                 | crate::ast::FunctionDispatch::BetweenSymmetric

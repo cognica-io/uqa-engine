@@ -69,6 +69,7 @@ pub fn function_volatility_with_binding(
         Some(
             crate::ast::FunctionDispatch::NumericOperator(_)
                 | crate::ast::FunctionDispatch::Collate { .. }
+                | crate::ast::FunctionDispatch::BooleanTest(_)
         )
     ) || builtin == FunctionVolatility::Volatile
     {
@@ -100,6 +101,7 @@ pub fn builtin_function_volatility(
         Some(
             crate::ast::FunctionDispatch::NumericOperator(_)
                 | crate::ast::FunctionDispatch::Collate { .. }
+                | crate::ast::FunctionDispatch::BooleanTest(_)
         )
     ) {
         return FunctionVolatility::Immutable;
@@ -616,6 +618,9 @@ mod tests {
             ("'x' COLLATE \"C\"", false),
             ("nextval('effect')::text COLLATE \"C\"", true),
             ("\"COLLATE\"('x')", true),
+            ("true IS TRUE", false),
+            ("(nextval('effect') > 0) IS NOT FALSE", true),
+            ("\"IS TRUE\"(true)", true),
         ] {
             let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {input}"))
                 .unwrap()

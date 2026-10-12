@@ -1,0 +1,86 @@
+[
+  {
+    "base": "boolean",
+    "check": "VALUE IS TRUE",
+    "sql": "(VALUE IS TRUE)",
+    "pretty": "VALUE IS TRUE",
+    "conbin": "{BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 0 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "VALUE IS NOT TRUE",
+    "sql": "(VALUE IS NOT TRUE)",
+    "pretty": "VALUE IS NOT TRUE",
+    "conbin": "{BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 1 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "VALUE IS FALSE",
+    "sql": "(VALUE IS FALSE)",
+    "pretty": "VALUE IS FALSE",
+    "conbin": "{BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 2 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "VALUE IS NOT FALSE",
+    "sql": "(VALUE IS NOT FALSE)",
+    "pretty": "VALUE IS NOT FALSE",
+    "conbin": "{BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 3 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "VALUE IS UNKNOWN",
+    "sql": "(VALUE IS UNKNOWN)",
+    "pretty": "VALUE IS UNKNOWN",
+    "conbin": "{BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 4 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "VALUE IS NOT UNKNOWN",
+    "sql": "(VALUE IS NOT UNKNOWN)",
+    "pretty": "VALUE IS NOT UNKNOWN",
+    "conbin": "{BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 5 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "(VALUE IS TRUE) IS NOT FALSE",
+    "sql": "((VALUE IS TRUE) IS NOT FALSE)",
+    "pretty": "(VALUE IS TRUE) IS NOT FALSE",
+    "conbin": "{BOOLEANTEST :arg {BOOLEANTEST :arg {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :booltesttype 0 :location -1} :booltesttype 3 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "(NOT VALUE) IS UNKNOWN",
+    "sql": "((NOT VALUE) IS UNKNOWN)",
+    "pretty": "(NOT VALUE) IS UNKNOWN",
+    "conbin": "{BOOLEANTEST :arg {BOOLEXPR :boolop not :args ({COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1}) :location -1} :booltesttype 4 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "(VALUE AND NULL) IS NOT UNKNOWN",
+    "sql": "((VALUE AND NULL::boolean) IS NOT UNKNOWN)",
+    "pretty": "(VALUE AND NULL::boolean) IS NOT UNKNOWN",
+    "conbin": "{BOOLEANTEST :arg {BOOLEXPR :boolop and :args ({COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1} :booltesttype 5 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "(VALUE OR false) IS FALSE",
+    "sql": "((VALUE OR false) IS FALSE)",
+    "pretty": "(VALUE OR false) IS FALSE",
+    "conbin": "{BOOLEANTEST :arg {BOOLEXPR :boolop or :args ({COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :booltesttype 2 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "COALESCE(VALUE, false) IS TRUE",
+    "sql": "(COALESCE(VALUE, false) IS TRUE)",
+    "pretty": "COALESCE(VALUE, false) IS TRUE",
+    "conbin": "{BOOLEANTEST :arg {COALESCEEXPR :coalescetype 16 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :booltesttype 0 :location -1}"
+  },
+  {
+    "base": "boolean",
+    "check": "CASE WHEN VALUE THEN false ELSE NULL END IS UNKNOWN",
+    "sql": "(\nCASE\n    WHEN VALUE THEN false\n    ELSE NULL::boolean\nEND IS UNKNOWN)",
+    "pretty": "\nCASE\n    WHEN VALUE THEN false\n    ELSE NULL::boolean\nEND IS UNKNOWN",
+    "conbin": "{BOOLEANTEST :arg {CASEEXPR :casetype 16 :casecollid 0 :arg <> :args ({CASEWHEN :expr {COERCETODOMAINVALUE :typeId 16 :typeMod -1 :collation 0 :location -1} :result {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} :location -1}) :defresult {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull true :location -1 :constvalue <>} :location -1} :booltesttype 4 :location -1}"
+  }
+]

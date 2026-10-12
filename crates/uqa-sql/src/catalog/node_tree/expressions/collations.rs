@@ -114,7 +114,7 @@ fn ordinary(node: &mut Node, case_value: Option<i64>) -> Result<Derivation, SQLE
         "ARRAYEXPR" => Some("array_collid"),
         "COALESCEEXPR" => Some("coalescecollid"),
         "MINMAXEXPR" => Some("minmaxcollid"),
-        "BOOLEXPR" | "NULLTEST" | "SCALARARRAYOPEXPR" => None,
+        "BOOLEXPR" | "BOOLEANTEST" | "NULLTEST" | "SCALARARRAYOPEXPR" => None,
         _ => return Err(super::super::invalid("unknown fresh expression node")),
     };
     let declared = result_field.map_or(Ok(0), |name| node.integer(name))?;

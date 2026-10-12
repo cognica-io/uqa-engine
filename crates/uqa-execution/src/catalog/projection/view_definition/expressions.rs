@@ -392,6 +392,52 @@ impl Deparser<'_> {
         )))
     }
 
+    fn numeric_operator(
+        &self,
+        operator: uqa_sql::ast::NumericOperator,
+        args: &[ScalarExpr],
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let priority = numeric_operator_precedence(operator);
+        let text = match args {
+            [argument] if operator.arity() == 1 => format!(
+                "{} {}",
+                operator.symbol(),
+                self.operand(argument, priority, false, scope, subqueries)?
+            ),
+            [left, right] if operator.arity() == 2 => format!(
+                "{} {} {}",
+                self.operand(left, priority, false, scope, subqueries)?,
+                operator.symbol(),
+                self.operand(right, priority, true, scope, subqueries)?
+            ),
+            _ => {
+                return Err(SQLError::Internal(
+                    "invalid numeric operator operands".into(),
+                ))
+            }
+        };
+        Ok(self.parenthesize(text))
+    }
+
+    fn boolean_test(
+        &self,
+        args: &[ScalarExpr],
+        test: uqa_sql::ast::BooleanTest,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let [argument] = args else {
+            return Err(SQLError::Internal("Boolean test takes one input".into()));
+        };
+        Ok(self.parenthesize(format!(
+            "{} {}",
+            self.operand(argument, 80, false, scope, subqueries)?,
+            test.label(),
+        )))
+    }
+
     pub fn function(
         &self,
         name: &str,
@@ -409,31 +455,15 @@ impl Deparser<'_> {
         if binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::FieldSelect) {
             return self.field_selection(args, scope, subqueries);
         }
-        if let Some(uqa_sql::ast::FunctionDispatch::NumericOperator(operator)) =
+        if let Some(FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
         {
-            let priority = numeric_operator_precedence(operator);
-            let text = match args {
-                [argument] if operator.arity() == 1 => format!(
-                    "{} {}",
-                    operator.symbol(),
-                    self.operand(argument, priority, false, scope, subqueries)?
-                ),
-                [left, right] if operator.arity() == 2 => format!(
-                    "{} {} {}",
-                    self.operand(left, priority, false, scope, subqueries)?,
-                    operator.symbol(),
-                    self.operand(right, priority, true, scope, subqueries)?
-                ),
-                _ => {
-                    return Err(SQLError::Internal(
-                        "invalid numeric operator operands".into(),
-                    ))
-                }
-            };
-            return Ok(self.parenthesize(text));
+            return self.numeric_operator(operator, args, scope, subqueries);
         }
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::BooleanTest(test)) => {
+                return self.boolean_test(args, test, scope, subqueries);
+            }
             Some(FunctionDispatch::ValueNullTest { negated }) => {
                 return self.value_null_test(args, binding, negated, scope, subqueries);
             }
@@ -850,6 +880,7 @@ fn precedence(expression: &ScalarExpr) -> u8 {
                 uqa_sql::ast::FunctionDispatch::IsDistinct
                     | uqa_sql::ast::FunctionDispatch::ValueIsDistinct
                     | uqa_sql::ast::FunctionDispatch::ValueNullTest { .. }
+                    | uqa_sql::ast::FunctionDispatch::BooleanTest(_)
             )
         ) =>
         {

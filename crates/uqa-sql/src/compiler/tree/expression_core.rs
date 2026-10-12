@@ -120,6 +120,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
             filter: None,
         }),
         NodeEnum::BoolExpr(b) => compile_bool_expr(b),
+        NodeEnum::BooleanTest(test) => compile_boolean_test(test),
         NodeEnum::NullTest(n) => compile_null_test(n),
         NodeEnum::CaseExpr(c) => compile_case_expr(c),
         NodeEnum::CoalesceExpr(ce) => {
@@ -170,6 +171,32 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::AIndirection(ind) => compile_indirection(ind),
         other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
     }
+}
+
+fn compile_boolean_test(test: &pg_query::protobuf::BooleanTest) -> Result<Expr> {
+    use crate::ast::BooleanTest;
+    use pg_query::protobuf::BoolTestType;
+    let kind = match test.booltesttype() {
+        BoolTestType::IsTrue => BooleanTest::IsTrue,
+        BoolTestType::IsNotTrue => BooleanTest::IsNotTrue,
+        BoolTestType::IsFalse => BooleanTest::IsFalse,
+        BoolTestType::IsNotFalse => BooleanTest::IsNotFalse,
+        BoolTestType::IsUnknown => BooleanTest::IsUnknown,
+        BoolTestType::IsNotUnknown => BooleanTest::IsNotUnknown,
+        other => {
+            return Err(SQLError::Internal(format!(
+                "invalid Boolean test {other:?}"
+            )))
+        }
+    };
+    let argument = test
+        .arg
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("Boolean test without an argument".into()))?;
+    Ok(dispatched_call(
+        FunctionDispatch::BooleanTest(kind),
+        vec![compile_expr(argument)?],
+    ))
 }
 
 /// `expr[i]`, `expr[lo:hi]`, and chains thereof. The complete array-indirection group is lowered as one operation because `PostgreSQL` resolves all dimensions together and treats every dimension as a slice when any dimension contains a colon.

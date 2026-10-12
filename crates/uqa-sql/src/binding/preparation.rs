@@ -568,21 +568,11 @@ impl Preparation<'_> {
         let mut observed = self.expression(expression, input, subqueries)?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
-        let Some(mut ty) = observed.ty.as_ref() else {
-            return Ok(observed);
-        };
-        while let ColumnType::Domain { base, .. } = ty {
-            ty = base;
-        }
-        if !matches!(ty, ColumnType::Boolean) {
-            return Err(error(
-                "42804",
-                format!(
-                    "argument of {context} must be type boolean, not type {}",
-                    ty.regtype_name()
-                ),
-            ));
-        }
+        crate::type_resolution::boolean::require_argument_type(
+            observed.ty.as_ref(),
+            context,
+            Some(self.routines),
+        )?;
         if let ScalarExpr::Literal(value @ uqa_core::Value::Str(_)) = expression {
             crate::expr::cast_value(value, "boolean")?;
         }
