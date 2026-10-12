@@ -1,0 +1,152 @@
+[
+  {
+    "sql": "SELECT coalesce('x'::d_posix,NULL)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce(NULL,'x'::d_posix)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce('x'::d_posix,'y'::d_posix)",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT CASE WHEN true THEN 'x'::d_posix ELSE NULL END",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "VALUES ('x'::d_posix),(NULL)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT 'x'::d_posix UNION ALL SELECT NULL",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT ARRAY['x'::d_posix,NULL]",
+    "type": "pg_catalog._text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT greatest('x'::d_posix,NULL)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT least(NULL,'x'::d_posix)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce('x'::d_posix,'y')",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT ARRAY['x'::d_posix,'y'::d_posix]",
+    "type": "public._d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "VALUES ('x'::d_posix),('y'::d_posix)",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT 'x'::d_posix UNION ALL SELECT 'y'::d_posix",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT CASE WHEN true THEN 'x'::d_posix END",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT CASE WHEN false THEN 'x'::d_posix ELSE 'y'::d_posix END",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT CASE WHEN true THEN NULL ELSE 'x'::d_posix END",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT CASE WHEN false THEN NULL END",
+    "type": "pg_catalog.text",
+    "collation": 100
+  },
+  {
+    "sql": "SELECT coalesce('x'::d_posix)",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT greatest('x'::d_posix,'y'::d_posix)",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT least('x'::d_posix,'y'::d_posix)",
+    "type": "public.d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce(NULL,NULL,'x'::d_posix)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT ARRAY[NULL,'x'::d_posix]",
+    "type": "pg_catalog._text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT ARRAY[NULL,NULL]",
+    "type": "pg_catalog._text",
+    "collation": 100
+  },
+  {
+    "sql": "VALUES (NULL),('x'::d_posix)",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT NULL UNION ALL SELECT 'x'::d_posix",
+    "type": "pg_catalog.text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce(ARRAY['x'::d_posix],NULL)",
+    "type": "public._d_posix",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce(ARRAY['x']::d_array,NULL)",
+    "type": "pg_catalog._text",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT ARRAY['x']::d_array UNION ALL SELECT NULL",
+    "type": "pg_catalog._text",
+    "collation": 951
+  },
+  {
+    "sql": "VALUES (ARRAY['x']::d_array),(ARRAY['y']::d_array)",
+    "type": "public.d_array",
+    "collation": 951
+  },
+  {
+    "sql": "SELECT coalesce(NULL::d_posix,'x'::d_posix)",
+    "type": "public.d_posix",
+    "collation": 951
+  }
+]

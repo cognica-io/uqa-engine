@@ -298,56 +298,52 @@ pub(super) fn scalar_type_inner_with_control(
                     value, schema, params, resolver, control,
                 )?);
             }
-            if let Some(value) = else_branch {
-                // `transformCaseExpr` selects the result type with the ELSE result first.
-                results.insert(
-                    0,
-                    common::common_context_expression_type_with_control(
-                        value, schema, params, resolver, control,
-                    )?,
-                );
-            }
-            let mut result = None;
-            for ty in results {
-                result = common::merge_value_types_in(
-                    common::CommonTypeContext::Case,
-                    result,
-                    ty,
-                    control,
-                )?;
-            }
-            // `select_common_type` resolves results that are all `unknown` literals to text.
-            if result.is_none()
-                && when
+            // `transformCaseExpr` selects the result type with the ELSE result first, including its implicit NULL.
+            results.insert(
+                0,
+                else_branch
+                    .as_deref()
+                    .map(|value| {
+                        common::common_context_expression_type_with_control(
+                            value, schema, params, resolver, control,
+                        )
+                    })
+                    .transpose()?
+                    .flatten(),
+            );
+            if results.iter().all(Option::is_none)
+                && !when
                     .iter()
                     .map(|(_, value)| value)
                     .chain(else_branch.as_deref())
                     .all(super::is_unknown_literal)
             {
-                result = Some(ColumnType::Text.clone_with_control(control)?);
+                return Ok(None);
             }
-            if let Some(result) = &result {
-                common::read_unknown_literals(
-                    when.iter()
-                        .map(|(_, value)| value)
-                        .chain(else_branch.as_deref()),
-                    result,
-                )?;
+            let mut selection = common::CommonInputType::new();
+            let expressions = std::iter::once(else_branch.as_deref())
+                .chain(when.iter().map(|(_, value)| Some(value)));
+            for (ty, expression) in results.into_iter().zip(expressions) {
+                if ty.is_some() || expression.is_none_or(common::unknown_input) {
+                    selection.include_owned(common::CommonTypeContext::Case, ty, control)?;
+                }
             }
-            match result {
-                Some(result) => common::case::case_output_type_with_control(
-                    expression,
-                    &result,
-                    &mut |expression| {
-                        scalar_type_inner_with_control(
-                            expression, schema, params, resolver, control,
-                        )
-                    },
-                    control,
-                )
-                .map(Some),
-                result => Ok(result),
-            }
+            let result = selection.finish(control)?;
+            common::read_unknown_literals(
+                when.iter()
+                    .map(|(_, value)| value)
+                    .chain(else_branch.as_deref()),
+                &result,
+            )?;
+            common::case::case_output_type_with_control(
+                expression,
+                &result,
+                &mut |expression| {
+                    scalar_type_inner_with_control(expression, schema, params, resolver, control)
+                },
+                control,
+            )
+            .map(Some)
         }
         ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. } => {
             super::function_inputs::call_type_with_control(
@@ -389,18 +385,16 @@ pub(super) fn array_element_type_with_control(
     if items.is_empty() {
         return Ok(None);
     }
-    let mut element = None;
+    let mut selection = common::CommonInputType::new();
     for item in items {
-        element = common::merge_value_types_in(
-            common::CommonTypeContext::Array,
-            element,
-            common::common_context_expression_type_with_control(
-                item, schema, params, resolver, control,
-            )?,
-            control,
+        let ty = common::common_context_expression_type_with_control(
+            item, schema, params, resolver, control,
         )?;
+        if ty.is_some() || common::unknown_input(item) {
+            selection.include_owned(common::CommonTypeContext::Array, ty, control)?;
+        }
     }
-    let element = element.map_or_else(|| ColumnType::Text.clone_with_control(control), Ok)?;
+    let element = selection.finish(control)?;
     common::read_unknown_literals(items.iter(), &element)?;
     Ok(Some(element))
 }

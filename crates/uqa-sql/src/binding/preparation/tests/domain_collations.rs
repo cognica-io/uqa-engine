@@ -152,3 +152,125 @@ fn domain_cast_collations_match_postgresql_for_literals_columns_and_identity_cas
         }
     }
 }
+
+#[test]
+fn domain_and_unknown_common_types_match_postgresql() {
+    #[derive(serde::Deserialize)]
+    struct Case {
+        sql: String,
+        #[serde(rename = "type")]
+        type_name: String,
+        collation: u32,
+    }
+    let cases: Vec<Case> = serde_json::from_str(include_str!("domain_common_types.json")).unwrap();
+    assert_eq!(cases.len(), 30);
+    let binding = crate::binding::fixture::empty_binding_context();
+    for case in cases {
+        let expected = match case.type_name.as_str() {
+            "pg_catalog.text" => ColumnType::Text,
+            "pg_catalog._text" => ColumnType::Array(Box::new(ColumnType::Text)),
+            "public.d_posix" => domain("d_posix"),
+            "public._d_posix" => ColumnType::Array(Box::new(domain("d_posix"))),
+            "public.d_array" => domain("d_array"),
+            name => panic!("unexpected PostgreSQL output {name}"),
+        };
+        let statement = crate::compile(&case.sql).unwrap().remove(0);
+        if let crate::Statement::Select(select) = &statement {
+            if select.set_op.is_none() && !select.projections.is_empty() {
+                let expression =
+                    crate::plan::ExpressionPlan::lower(select.projections[0].expr.clone());
+                assert_eq!(
+                    crate::type_resolution::scalar_type_with_resolver(
+                        &expression.scalar,
+                        &RowSchema::default(),
+                        &[],
+                        &Domains,
+                    )
+                    .unwrap_or_else(|error| panic!("scalar: {}: {error}", case.sql)),
+                    Some(expected.clone()),
+                    "scalar: {}",
+                    case.sql,
+                );
+            }
+        }
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(statement) else {
+            panic!("query")
+        };
+        let mut preparation = Preparation {
+            routines: &Domains,
+            scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
+            parameters: ParameterTypes::new(&[]),
+            schema_expression: None,
+        };
+        for (entry, output) in [
+            ("prepared", preparation.query(&query, None)),
+            (
+                "analyzed",
+                crate::binding::analyze_query_plan_schema(&Domains, &query, &[], &binding, None),
+            ),
+            (
+                "bound",
+                crate::binding::bind_query_plan_schema(&Domains, &query, &[], &binding, None),
+            ),
+        ] {
+            let output = output.unwrap_or_else(|error| panic!("{entry}: {}: {error}", case.sql));
+            assert_eq!(
+                output.column_type(0),
+                Some(&expected),
+                "{entry}: {}",
+                case.sql
+            );
+            assert_eq!(
+                output.column_collation(0),
+                Some(case.collation),
+                "{entry}: {}",
+                case.sql
+            );
+        }
+    }
+}
+
+#[test]
+fn common_type_selection_keeps_native_deferred_outputs_distinct_from_unknown() {
+    let binding = crate::binding::fixture::empty_binding_context();
+    let mut preparation = Preparation {
+        routines: &Domains,
+        scope: &mut SchemaScope::for_analysis(&binding).unwrap(),
+        parameters: ParameterTypes::new(&[]),
+        schema_expression: None,
+    };
+    let known = || ExpressionType::resolved(Some(domain("d_posix")));
+    for (mut inputs, expected) in [
+        (
+            vec![known(), ExpressionType::resolved(None)],
+            Some(domain("d_posix")),
+        ),
+        (
+            vec![ExpressionType::resolved(None), known()],
+            Some(domain("d_posix")),
+        ),
+        (
+            vec![ExpressionType::unknown(), ExpressionType::resolved(None)],
+            None,
+        ),
+        (
+            vec![
+                known(),
+                ExpressionType::unknown(),
+                ExpressionType::resolved(None),
+            ],
+            Some(ColumnType::Text),
+        ),
+    ] {
+        assert_eq!(
+            preparation
+                .common(
+                    crate::type_resolution::CommonTypeContext::Coalesce,
+                    &mut inputs
+                )
+                .unwrap(),
+            expected
+        );
+        assert!(inputs.iter().any(ExpressionType::is_deferred));
+    }
+}

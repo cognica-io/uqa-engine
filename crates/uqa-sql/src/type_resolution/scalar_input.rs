@@ -70,11 +70,13 @@ fn array_element_type_from_bound_inputs(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    let mut element = None;
+    let mut selection = super::common::CommonInputType::new();
+    let mut known = false;
     let mut unresolved = false;
     for item in items {
         control.check()?;
         if super::is_unknown_literal(item) {
+            selection.include(super::common::CommonTypeContext::Array, None, control)?;
             continue;
         }
         let ty = if let ScalarExpr::Array(nested) = item {
@@ -97,17 +99,15 @@ fn array_element_type_from_bound_inputs(
                 .flatten()
         };
         unresolved |= ty.is_none();
-        element = super::common::merge_value_types_in(
-            super::common::CommonTypeContext::Array,
-            element,
-            ty,
-            control,
-        )?;
+        if ty.is_some() || super::common::unknown_input(item) {
+            known |= ty.is_some();
+            selection.include_owned(super::common::CommonTypeContext::Array, ty, control)?;
+        }
     }
-    if element.is_none() && !unresolved {
-        element = Some(ColumnType::Text.clone_with_control(control)?);
+    if !known && unresolved {
+        return Ok(None);
     }
-    Ok(element)
+    selection.finish(control).map(Some)
 }
 
 fn resolve_operand_type(

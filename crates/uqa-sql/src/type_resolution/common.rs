@@ -16,6 +16,11 @@ use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 
 use super::FunctionTypeResolver;
 
+mod inputs;
+pub use inputs::select_common_input_type;
+pub(crate) use inputs::select_common_input_type_in_with_control;
+pub(super) use inputs::{select_common_input_type_with_control, CommonInputType};
+
 /// Inputs whose absent type means `PostgreSQL` `unknown`, rather than an unresolved UQA runtime value.
 pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {
     while let Ok(Some(clause)) = crate::catalog::collations::expression::scalar_clause(expression) {
@@ -126,7 +131,10 @@ pub fn values_column_types(
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
     let width = rows.first().map_or(0, Vec::len);
     let empty = RowSchema::default();
-    let mut types = vec![None; width];
+    let control = ProductionControl::uncontrolled();
+    let mut types = (0..width)
+        .map(|_| CommonInputType::new())
+        .collect::<Vec<_>>();
     for row in rows {
         if row.len() != width {
             return Err(SQLError::TypeMismatch(
@@ -134,17 +142,25 @@ pub fn values_column_types(
             ));
         }
         for (position, expression) in row.iter().enumerate() {
-            types[position] = merge_optional_types_in(
-                CommonTypeContext::Values,
-                types[position].take(),
-                common_context_expression_type(expression, &empty, params, None)?,
+            let ty = common_context_expression_type_with_control(
+                expression, &empty, params, None, &control,
             )?;
+            if ty.is_some() || unknown_input(expression) {
+                types[position].include_owned(CommonTypeContext::Values, ty, &control)?;
+            }
         }
     }
-    Ok(types
+    types
         .into_iter()
-        .map(|ty| ty.or(Some(ColumnType::Text)))
-        .collect())
+        .map(|ty| {
+            ty.finish(&control).map(|ty| {
+                Some(
+                    ty.into_uncontrolled()
+                        .expect("ordinary VALUES type has no reservation"),
+                )
+            })
+        })
+        .collect()
 }
 
 /// Resolve an expression participating in `PostgreSQL`'s common-type selection. Bare string and NULL literals retain the parser's `unknown` type until the surrounding VALUES, set operation, CASE, or array context selects a concrete type.
@@ -426,35 +442,6 @@ pub(super) fn read_unknown_literals<'a>(
     Ok(())
 }
 
-/// The common type of two optional column types for the construct `context`, an absent type being `unknown`.
-pub(super) fn merge_optional_types_in(
-    context: CommonTypeContext,
-    left: Option<ColumnType>,
-    right: Option<ColumnType>,
-) -> Result<Option<ColumnType>, SQLError> {
-    match (left, right) {
-        (None, other) | (other, None) => Ok(other),
-        (Some(left), Some(right)) => common_type_in(context, &left, &right).map(Some),
-    }
-}
-
-/// [`merge_value_types`] reporting a conflict as the construct `context` reports it.
-pub(super) fn merge_value_types_in(
-    context: CommonTypeContext,
-    left: Option<Produced<ColumnType>>,
-    right: Option<Produced<ColumnType>>,
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    control.check()?;
-    match (left, right) {
-        (None, other) | (other, None) => Ok(other),
-        (Some(left), Some(right)) if *left == *right => Ok(Some(left)),
-        (Some(left), Some(right)) => select_pair_with_control(&left, &right, control)
-            .map(Some)
-            .map_err(|failure| failure.in_context(context)),
-    }
-}
-
 pub fn common_type(left: &ColumnType, right: &ColumnType) -> Result<ColumnType, SQLError> {
     common_type_with_control(left, right, &ProductionControl::uncontrolled()).map(|value| {
         value
@@ -590,58 +577,6 @@ impl CommonTypeFailure {
                 right.sql_name()
             )),
         }
-    }
-}
-
-/// `select_common_input_type_with_control` without production limits.
-pub fn select_common_input_type(
-    types: &[Option<&ColumnType>],
-) -> Result<Option<ColumnType>, SQLError> {
-    select_common_input_type_with_control(types, &ProductionControl::uncontrolled()).map(
-        |selected| {
-            selected.map(|value| {
-                value
-                    .into_uncontrolled()
-                    .expect("ordinary common type has no reservation")
-            })
-        },
-    )
-}
-
-/// `select_common_type` over typed and `unknown` (`None`) inputs: only inputs of exactly one type keep that type, which is how a domain survives; otherwise domains are reduced to their base types before the pairwise rules. `unknown` inputs alone resolve to `text`, and `None` means the known types have no common type.
-pub(super) fn select_common_input_type_with_control(
-    types: &[Option<&ColumnType>],
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    control.check()?;
-    if let Some(Some(first)) = types.first() {
-        if types.iter().all(|ty| ty.is_some_and(|ty| ty == *first)) {
-            return first
-                .clone_with_control(control)
-                .map(Some)
-                .map_err(Into::into);
-        }
-    }
-    let mut selected: Option<Produced<ColumnType>> = None;
-    for ty in types.iter().flatten() {
-        let ty = base_type(ty);
-        selected = Some(match selected {
-            None => ty.clone_with_control(control)?,
-            Some(current) => match common_type_with_control(&current, ty, control) {
-                Ok(common) => common,
-                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
-                    return Err(error)
-                }
-                Err(_) => return Ok(None),
-            },
-        });
-    }
-    match selected {
-        Some(selected) => Ok(Some(selected)),
-        None => control
-            .finish(ColumnType::Text, control.empty_reservation())
-            .map(Some)
-            .map_err(Into::into),
     }
 }
 

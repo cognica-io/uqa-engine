@@ -21,6 +21,7 @@ mod cast_compatibility;
 mod checksum;
 mod common;
 pub(crate) use common::literal_input_type_with_control;
+pub(crate) use common::select_common_input_type_in_with_control;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
 pub(crate) use common::{array_element_type, base_type};

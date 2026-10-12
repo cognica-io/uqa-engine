@@ -20,21 +20,21 @@ impl Preparation<'_> {
         context: crate::type_resolution::CommonTypeContext,
         values: &mut [ExpressionType],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let mut common = None;
-        for value in values.iter() {
-            if let Some(ty) = &value.ty {
-                common = Some(match common {
-                    Some(previous) => {
-                        crate::type_resolution::common_type_in(context, &previous, ty)?
-                    }
-                    None => ty.clone(),
-                });
-            }
-        }
-        if common.is_none() && values.iter().any(ExpressionType::is_deferred) {
+        if values.iter().all(|value| value.ty.is_none())
+            && values.iter().any(ExpressionType::is_deferred)
+        {
             return Ok(None);
         }
-        let common = common.unwrap_or(ColumnType::Text);
+        let common = crate::type_resolution::select_common_input_type_in_with_control(
+            context,
+            values
+                .iter()
+                .filter(|value| !value.is_deferred())
+                .map(|value| value.ty.as_ref()),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .into_uncontrolled()
+        .expect("preparation common type has no reservation");
         for value in values {
             self.parameters.coerce_unknown(value, &common)?;
         }

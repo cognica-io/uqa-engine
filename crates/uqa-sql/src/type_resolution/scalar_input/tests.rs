@@ -20,6 +20,27 @@ fn domain(base: ColumnType) -> ColumnType {
 }
 
 #[test]
+fn array_constructor_common_type_includes_unknown_inputs() {
+    let schema = RowSchema::with_types(vec!["domain".into()], vec![Some(domain(ColumnType::Text))]);
+    let known = ScalarExpr::Column("domain".into());
+    let unknown = ScalarExpr::Literal(Value::Null);
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(2048);
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (items, oid) in [
+        (vec![known.clone(), known.clone()], 91_001),
+        (vec![known.clone(), unknown.clone()], 25),
+        (vec![unknown, known], 25),
+    ] {
+        assert_eq!(
+            scalar_array_element_oid_with_control(&items, &schema, &[], None, &control).unwrap(),
+            Some(oid)
+        );
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn constructor_result_inference_retains_catalog_identity_without_a_resolver() {
     let ty = ColumnType::Composite(crate::ast::CompositeTypeReference {
         schema: "app".repeat(100),

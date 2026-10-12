@@ -2681,6 +2681,45 @@
       "capability": "Set-operation column collation preservation",
       "workload": "Sixty-one PostgreSQL observations cover all six UNION/INTERSECT/EXCEPT variants, implicit/explicit conflicts, nested output boundaries, aliases/CTEs, VALUES/arrays, unknown coercions and competing column errors.",
       "invariant": "Prepared and ordinary analysis preserve selected output identities and exact PostgreSQL diagnostics; only UNION ALL admits an implicit conflict, column checks retain PostgreSQL order, and enclosing set operations receive column-strength metadata."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_and_unknown_common_types_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/domain_collations.rs",
+      "capability": "Domain common-type and collation preservation",
+      "workload": "Thirty independent PostgreSQL observations cover COALESCE, GREATEST/LEAST, explicit and implicit CASE defaults, arrays, VALUES and sets with domains and unknown inputs.",
+      "invariant": "Prepared and ordinary result binding and scalar inference match exact PostgreSQL type identities; query outputs retain selected collations, and only identically typed inputs preserve a scalar domain."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "common_input_selection_retains_one_type_and_propagates_resource_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/common/production_tests.rs",
+      "capability": "Bounded common input selection",
+      "workload": "One or 4096 borrowed references to a domain with a long name, with and without a trailing unknown input, under the same 2048-byte allowance.",
+      "invariant": "Selection retains only one result type regardless of input count; domain flattening releases its names, allocation failure remains 53200 and cancellation remains 57014 with no retained memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_constructor_common_type_includes_unknown_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Runtime array domain identity",
+      "workload": "Bound domain columns mixed with unknown NULL before and after a known input, under a fixed 2048-byte allowance.",
+      "invariant": "Runtime ARRAY element identity agrees with SQL common-type selection without evaluating items; identical domains retain their OID and unknown inputs select the base OID, releasing every reservation."
     }
   ]
 }

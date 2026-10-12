@@ -143,14 +143,16 @@ impl Preparation<'_> {
             }
             values.push(self.expression(value, input, subqueries)?);
         }
-        if let Some(other) = else_branch {
-            values.insert(0, self.expression(other, input, subqueries)?);
-        }
+        values.insert(
+            0,
+            else_branch
+                .map(|other| self.expression(other, input, subqueries))
+                .transpose()?
+                .unwrap_or_else(ExpressionType::unknown),
+        );
         let ty = self.common(crate::type_resolution::CommonTypeContext::Case, &mut values)?;
         // ELSE participates first in common-type selection but last in collation assignment.
-        if else_branch.is_some() {
-            values.rotate_left(1);
-        }
+        values.rotate_left(1);
         let mut conditions = conditions.into_iter().peekable();
         let mut selected = base_error;
         for (index, value) in values.iter().enumerate() {

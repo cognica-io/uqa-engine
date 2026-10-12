@@ -174,4 +174,106 @@ fn common_input_type_keeps_a_domain_only_when_every_input_has_it() {
         select(&[Some(&ColumnType::Integer), Some(&ColumnType::Boolean)]),
         None
     );
+    let known = ScalarExpr::Param(1);
+    let unknown = ScalarExpr::Literal(Value::Null);
+    let params = [SQLParam::typed_scalar(Value::Null, domain.clone())];
+    for (items, expected) in [
+        (vec![known.clone(), known.clone()], domain),
+        (vec![known.clone(), unknown.clone()], ColumnType::Integer),
+        (vec![unknown, known], ColumnType::Integer),
+    ] {
+        let rows = items.into_iter().map(|item| vec![item]).collect::<Vec<_>>();
+        assert_eq!(
+            values_column_types(&rows, &params).unwrap(),
+            vec![Some(expected)]
+        );
+    }
+}
+
+#[test]
+fn common_input_selection_retains_one_type_and_propagates_resource_errors() {
+    let domain = ColumnType::Domain {
+        collation_oid: Some(951),
+        schema: "public".into(),
+        name: "nonempty".repeat(128),
+        oid: 50_010,
+        array_oid: Some(50_011),
+        base: Box::new(ColumnType::Text),
+    };
+    let token = CancellationToken::new();
+    // Thousands of inputs borrow one catalog type; the allowance fits only its selected copy.
+    let budget = MemoryBudget::new(2048);
+    let control = ProductionControl::new(&budget, &token, &token);
+    for count in [1, 4096] {
+        let selected = select_common_input_type_in_with_control(
+            CommonTypeContext::Coalesce,
+            std::iter::repeat_n(Some(&domain), count),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(*selected, domain);
+        assert_eq!(budget.used(), selected.reserved_bytes());
+        drop(selected);
+        assert_eq!(budget.used(), 0);
+        let selected = select_common_input_type_in_with_control(
+            CommonTypeContext::Coalesce,
+            std::iter::repeat_n(Some(&domain), count).chain([None]),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(*selected, ColumnType::Text);
+        assert_eq!(budget.used(), 0);
+    }
+    let empty = MemoryBudget::new(0);
+    let control = ProductionControl::new(&empty, &token, &token);
+    for context in [false, true] {
+        let result = if context {
+            select_common_input_type_in_with_control(
+                CommonTypeContext::Array,
+                [Some(&domain)].into_iter(),
+                &control,
+            )
+            .map(Some)
+        } else {
+            select_common_input_type_with_control(&[Some(&domain)], &control)
+        };
+        assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+        assert_eq!(empty.used(), 0);
+    }
+    for inputs in [[Some(&domain), None], [None, Some(&domain)]] {
+        assert_eq!(
+            *select_common_input_type_with_control(&inputs, &control)
+                .unwrap()
+                .unwrap(),
+            ColumnType::Text,
+        );
+        assert_eq!(
+            *select_common_input_type_in_with_control(
+                CommonTypeContext::Coalesce,
+                inputs.into_iter(),
+                &control,
+            )
+            .unwrap(),
+            ColumnType::Text,
+        );
+        assert_eq!(empty.used(), 0);
+    }
+    token.cancel();
+    assert_eq!(
+        select_common_input_type_with_control(&[None, None], &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(
+        select_common_input_type_in_with_control(
+            CommonTypeContext::Array,
+            [None, None].into_iter(),
+            &control
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(empty.used(), 0);
 }
