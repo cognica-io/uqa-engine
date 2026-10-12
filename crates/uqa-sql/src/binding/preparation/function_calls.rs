@@ -156,7 +156,9 @@ impl Preparation<'_> {
             binding.and_then(|binding| binding.dispatch),
             Some(crate::ast::FunctionDispatch::NumericOperator(_))
         ) || binding
-            .is_some_and(FunctionBinding::is_polymorphic_builtin_syntax)
+            .and_then(|binding| binding.dispatch)
+            .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
+            || binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax)
         {
             (None, None)
         } else if let Some(selected) = crate::type_resolution::json_path::resolve_call(
@@ -282,6 +284,33 @@ impl Preparation<'_> {
             return Ok(FunctionResult::Selected(Some(ColumnType::Boolean)));
         }
         let types = arguments.types();
+        if binding
+            .and_then(|binding| binding.dispatch)
+            .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
+        {
+            let [left, right] = types.as_slice() else {
+                return Err(SQLError::Internal("invalid concatenation operands".into()));
+            };
+            if arguments.values.iter().any(ExpressionType::is_deferred) {
+                return Ok(FunctionResult::Selected(None));
+            }
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            let selected = crate::type_resolution::concatenation::select(
+                left.as_ref(),
+                right.as_ref(),
+                &control,
+            )?;
+            for (position, value) in arguments.values.iter_mut().enumerate() {
+                self.parameters
+                    .coerce_unknown(value, selected.argument(position))?;
+            }
+            return Ok(FunctionResult::Selected(Some(
+                selected
+                    .into_result(&control)?
+                    .into_uncontrolled()
+                    .expect("ordinary concatenation selection"),
+            )));
+        }
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
         {

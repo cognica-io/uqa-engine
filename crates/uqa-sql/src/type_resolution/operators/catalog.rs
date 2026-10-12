@@ -17,6 +17,38 @@ pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
 ];
 
 pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
+    (
+        "||",
+        "anycompatiblearray",
+        "anycompatible",
+        "anycompatiblearray",
+        349,
+        378,
+    ),
+    (
+        "||",
+        "anycompatible",
+        "anycompatiblearray",
+        "anycompatiblearray",
+        374,
+        379,
+    ),
+    (
+        "||",
+        "anycompatiblearray",
+        "anycompatiblearray",
+        "anycompatiblearray",
+        375,
+        383,
+    ),
+    ("||", "text", "text", "text", 654, 1258),
+    ("||", "varbit", "varbit", "varbit", 1797, 1679),
+    ("||", "bytea", "bytea", "bytea", 2018, 2011),
+    ("||", "text", "anynonarray", "text", 2779, 2003),
+    ("||", "anynonarray", "text", "text", 2780, 2004),
+    ("||", "jsonb", "jsonb", "jsonb", 3284, 3301),
+    ("||", "tsvector", "tsvector", "tsvector", 3633, 3625),
+    ("||", "tsquery", "tsquery", "tsquery", 3681, 3670),
     ("#>", "json", "_text", "json", 3966, 3951),
     ("#>", "jsonb", "_text", "jsonb", 3213, 3217),
     ("#>>", "json", "_text", "text", 3967, 3953),

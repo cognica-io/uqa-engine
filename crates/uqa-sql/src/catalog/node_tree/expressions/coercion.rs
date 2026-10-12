@@ -117,7 +117,15 @@ impl ExpressionContext<'_> {
             return Self::modify_type(value, target, coercion, false);
         }
         if let ColumnType::Domain { base, .. } = target {
-            let value = Self::coerce_selected(value, base, coercion)?;
+            // The domain node owns the written cast; its base conversion is hidden, while explicit input/typmod semantics remain unchanged.
+            let value = Self::coerce_selected(
+                value,
+                base,
+                Coercion {
+                    format: 2,
+                    ..coercion
+                },
+            )?;
             return Ok(TypedNode {
                 node: Node::new(
                     "COERCETODOMAIN",

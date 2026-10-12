@@ -9,6 +9,7 @@ use super::*;
 mod arrays;
 mod catalog;
 mod collations;
+mod concatenation;
 mod fields;
 mod rows;
 mod scalar;

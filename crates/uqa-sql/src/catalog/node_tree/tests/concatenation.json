@@ -1,0 +1,240 @@
+[
+  {
+    "base": "text",
+    "check": "('a'::text || 'b'::text) = 'ab'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]}) :location -1}",
+    "sql": "(('a'::text || 'b'::text) = 'ab'::text)",
+    "pretty": "('a'::text || 'b'::text) = 'ab'::text"
+  },
+  {
+    "base": "text",
+    "check": "(VALUE || 'b') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((VALUE || 'b'::text) IS NULL)",
+    "pretty": "(VALUE || 'b'::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a' || NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('a'::text || NULL::text) IS NULL)",
+    "pretty": "('a'::text || NULL::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(NULL::text || 'a') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((NULL::text || 'a'::text) IS NULL)",
+    "pretty": "(NULL::text || 'a'::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(1 || 'x') = '1x'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 2780 :opfuncid 2004 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 49 120 ]}) :location -1}",
+    "sql": "((1 || 'x'::text) = '1x'::text)",
+    "pretty": "(1 || 'x'::text) = '1x'::text"
+  },
+  {
+    "base": "text",
+    "check": "('x' || 1) = 'x1'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 120 49 ]}) :location -1}",
+    "sql": "(('x'::text || 1) = 'x1'::text)",
+    "pretty": "('x'::text || 1) = 'x1'::text"
+  },
+  {
+    "base": "text",
+    "check": "(1 || 2) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer || integer",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "(NULL::integer || NULL::integer) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer || integer",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "(('a'::varchar(2) COLLATE \"C\") || 'b'::text) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 950 :inputcollid 950 :args ({COLLATEEXPR :arg {RELABELTYPE :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} :collOid 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(((('a'::character varying(2))::text COLLATE \"C\") || 'b'::text) IS NULL)",
+    "pretty": "(('a'::character varying(2)::text COLLATE \"C\") || 'b'::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::char(2) || 'b'::text) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 401 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 668 :funcresulttype 1042 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1042 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((('a'::character(2))::text || 'b'::text) IS NULL)",
+    "pretty": "('a'::character(2)::text || 'b'::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::name || 'b'::text) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 950 :inputcollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 2 :funccollid 950 :inputcollid 950 :args ({CONST :consttype 19 :consttypmod -1 :constcollid 950 :constlen 64 :constbyval false :constisnull false :location -1 :constvalue 64 [ 97 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((('a'::name)::text || 'b'::text) IS NULL)",
+    "pretty": "('a'::name::text || 'b'::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::text || 1.5::numeric) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('a'::text || 1.5) IS NULL)",
+    "pretty": "('a'::text || 1.5) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::text || DATE '2024-01-02') IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 63 34 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('a'::text || '2024-01-02'::date) IS NULL)",
+    "pretty": "('a'::text || '2024-01-02'::date) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::text || ROW(1,'x')) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 120 0 ]}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('a'::text || ROW(1, 'x')) IS NULL)",
+    "pretty": "('a'::text || ROW(1, 'x')) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::bytea || 'b'::bytea) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 2018 :opfuncid 2011 :opresulttype 17 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('\\x61'::bytea || '\\x62'::bytea) IS NULL)",
+    "pretty": "('\\x61'::bytea || '\\x62'::bytea) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('a'::bytea || NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 2018 :opfuncid 2011 :opresulttype 17 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('\\x61'::bytea || NULL::bytea) IS NULL)",
+    "pretty": "('\\x61'::bytea || NULL::bytea) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('{\"a\":1}'::jsonb || '{\"b\":2}'::jsonb) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3284 :opfuncid 3301 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 28 [ 112 0 0 0 1 0 0 32 1 0 0 128 11 0 0 16 97 0 0 0 32 0 0 0 0 128 1 0 ]} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 28 [ 112 0 0 0 1 0 0 32 1 0 0 128 11 0 0 16 98 0 0 0 32 0 0 0 0 128 2 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(('{\"a\": 1}'::jsonb || '{\"b\": 2}'::jsonb) IS NULL)",
+    "pretty": "('{\"a\": 1}'::jsonb || '{\"b\": 2}'::jsonb) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(NULL || '{}'::jsonb) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 3284 :opfuncid 3301 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 0 0 32 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((NULL::jsonb || '{}'::jsonb) IS NULL)",
+    "pretty": "(NULL::jsonb || '{}'::jsonb) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "('{}'::json || '{}'::json) IS NULL",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: json || json",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY[1,2] || ARRAY[3]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ARRAY[1, 2] || ARRAY[3]) IS NULL)",
+    "pretty": "(ARRAY[1, 2] || ARRAY[3]) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY[1] || 2) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 349 :opfuncid 378 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ARRAY[1] || 2) IS NULL)",
+    "pretty": "(ARRAY[1] || 2) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(1 || ARRAY[2]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 374 :opfuncid 379 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((1 || ARRAY[2]) IS NULL)",
+    "pretty": "(1 || ARRAY[2]) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY[1] || NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ARRAY[1] || NULL::integer[]) IS NULL)",
+    "pretty": "(ARRAY[1] || NULL::integer[]) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY[1] || NULL::integer) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 349 :opfuncid 378 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ARRAY[1] || NULL::integer) IS NULL)",
+    "pretty": "(ARRAY[1] || NULL::integer) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(NULL::integer || ARRAY[1]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 374 :opfuncid 379 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((NULL::integer || ARRAY[1]) IS NULL)",
+    "pretty": "(NULL::integer || ARRAY[1]) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY[1::smallint] || ARRAY[2::integer]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYCOERCEEXPR :arg {ARRAYEXPR :array_typeid 1005 :array_collid 0 :element_typeid 21 :elements ({FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :multidims false :list_start -1 :list_end -1 :location -1} :elemexpr {FUNCEXPR :funcid 313 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CASETESTEXPR :typeId 21 :typeMod -1 :collation 0}) :location -1} :resulttype 1007 :resulttypmod -1 :resultcollid 0 :coerceformat 2 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "(((ARRAY[(1)::smallint])::integer[] || ARRAY[2]) IS NULL)",
+    "pretty": "(ARRAY[1::smallint]::integer[] || ARRAY[2]) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY['a'::text COLLATE \"C\"] || ARRAY['b'::text]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1009 :opretset false :opcollid 950 :inputcollid 950 :args ({ARRAYEXPR :array_typeid 1009 :array_collid 950 :element_typeid 25 :elements ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :collOid 950 :location -1}) :multidims false :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ARRAY[('a'::text COLLATE \"C\")] || ARRAY['b'::text]) IS NULL)",
+    "pretty": "(ARRAY['a'::text COLLATE \"C\"] || ARRAY['b'::text]) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "(ARRAY[ARRAY[1,2]] || ARRAY[3,4]) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :multidims true :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ARRAY[ARRAY[1, 2]] || ARRAY[3, 4]) IS NULL)",
+    "pretty": "(ARRAY[ARRAY[1, 2]] || ARRAY[3, 4]) IS NULL"
+  },
+  {
+    "base": "integer",
+    "check": "(ROW('a'::text || 'b'::text)).f1 IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {FIELDSELECT :arg {ROWEXPR :args ({OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 25 :resulttypmod -1 :resultcollid 0} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((ROW(('a'::text || 'b'::text))).f1 IS NULL)",
+    "pretty": "(ROW('a'::text || 'b'::text)).f1 IS NULL"
+  }
+]

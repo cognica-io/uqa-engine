@@ -55,6 +55,7 @@ mod binary;
 mod casting;
 mod collation_for;
 pub mod composites;
+mod concatenation;
 mod conversion;
 mod current_time;
 pub mod enums;

@@ -70,9 +70,15 @@ impl BinaryOperatorCatalogEntry {
     #[must_use]
     pub fn volatility(&self) -> FunctionVolatility {
         match self.function_oid {
-            1189 | 1190 | 2549 | 2351..=2356 | 2377..=2382 | 2520..=2525 | 2527..=2532 => {
-                FunctionVolatility::Stable
-            }
+            1189
+            | 1190
+            | 2003
+            | 2004
+            | 2549
+            | 2351..=2356
+            | 2377..=2382
+            | 2520..=2525
+            | 2527..=2532 => FunctionVolatility::Stable,
             _ => FunctionVolatility::Immutable,
         }
     }

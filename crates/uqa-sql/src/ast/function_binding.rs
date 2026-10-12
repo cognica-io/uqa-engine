@@ -119,6 +119,10 @@ pub enum FunctionDispatch {
     RandomInt8Range,
     RandomNumericRange,
     ArraySortJson,
+    /// SQL concatenation syntax, with its selected catalog overload after operand analysis.
+    Concat {
+        oid: Option<u32>,
+    },
     /// The selected array `||` overload, retained even when its arguments evaluate to NULL.
     ArrayConcat,
     ArrayAppend,
@@ -218,6 +222,15 @@ pub enum RangeFunctionOperation {
 }
 
 impl FunctionDispatch {
+    /// Whether this expression retains SQL concatenation syntax and operand roles.
+    #[must_use]
+    pub const fn is_concatenation(self) -> bool {
+        matches!(
+            self,
+            Self::Concat { .. } | Self::ArrayConcat | Self::ArrayAppend | Self::ArrayPrepend
+        )
+    }
+
     /// Human-readable expression label used only in diagnostics and serialized plans; dispatch is always selected by the enum variant.
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -244,6 +257,7 @@ impl FunctionDispatch {
                 "pg_catalog.random"
             }
             Self::ArraySortJson => "pg_catalog.array_sort",
+            Self::Concat { .. } => "||",
             Self::ArrayConcat => "pg_catalog.array_cat",
             Self::ArrayAppend => "pg_catalog.array_append",
             Self::ArrayPrepend => "pg_catalog.array_prepend",

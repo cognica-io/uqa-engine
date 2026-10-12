@@ -144,10 +144,13 @@ impl Folding for OperatorCoercions<'_> {
         selected: Option<&crate::ast::FunctionBinding>,
     ) -> bool {
         if stored.as_ref() != selected
-            && matches!(
-                selected.and_then(|binding| binding.dispatch),
-                Some(crate::ast::FunctionDispatch::Collate { oid: Some(_) })
-            )
+            && (selected
+                .and_then(|binding| binding.dispatch)
+                .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
+                || matches!(
+                    selected.and_then(|binding| binding.dispatch),
+                    Some(crate::ast::FunctionDispatch::Collate { oid: Some(_) })
+                ))
         {
             *stored = selected.cloned();
             true

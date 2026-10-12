@@ -9,6 +9,7 @@
 use super::*;
 use crate::{plan::ExpressionPlan, RowSchema};
 
+mod concatenation;
 mod enums;
 
 struct Catalog;

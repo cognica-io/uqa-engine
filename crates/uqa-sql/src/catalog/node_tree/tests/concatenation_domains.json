@@ -1,0 +1,167 @@
+{
+  "catalog": [
+    {
+      "oid": 29360,
+      "name": "concat_int",
+      "kind": "d",
+      "array_oid": 29359,
+      "relation_oid": 0,
+      "base": "integer",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 29362,
+      "name": "concat_text",
+      "kind": "d",
+      "array_oid": 29361,
+      "relation_oid": 0,
+      "base": "character varying(8)",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 29364,
+      "name": "concat_bytes",
+      "kind": "d",
+      "array_oid": 29363,
+      "relation_oid": 0,
+      "base": "bytea",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 29366,
+      "name": "concat_json",
+      "kind": "d",
+      "array_oid": 29365,
+      "relation_oid": 0,
+      "base": "jsonb",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 29368,
+      "name": "concat_array",
+      "kind": "d",
+      "array_oid": 29367,
+      "relation_oid": 0,
+      "base": "integer[]",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 29370,
+      "name": "concat_enum",
+      "kind": "e",
+      "array_oid": 29369,
+      "relation_oid": 0,
+      "base": null,
+      "labels": [
+        {
+          "oid": 29372,
+          "label": "day"
+        }
+      ],
+      "attributes": null
+    },
+    {
+      "oid": 29375,
+      "name": "concat_record",
+      "kind": "c",
+      "array_oid": 29374,
+      "relation_oid": 29373,
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "name": "n",
+          "number": 1,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "check": "('x'::text || 1::concat_int) IS NULL",
+      "name": "concat_check_0",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {COERCETODOMAIN :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} :resulttype 29360 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(('x'::text || (1)::concat_int) IS NULL)",
+      "pretty": "('x'::text || 1::concat_int) IS NULL"
+    },
+    {
+      "check": "(1::concat_int || 'x'::text) IS NULL",
+      "name": "concat_check_1",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 2780 :opfuncid 2004 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({COERCETODOMAIN :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} :resulttype 29360 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((1)::concat_int || 'x'::text) IS NULL)",
+      "pretty": "(1::concat_int || 'x'::text) IS NULL"
+    },
+    {
+      "check": "('x'::concat_text || 'y'::concat_text) IS NULL",
+      "name": "concat_check_2",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 29362 :resulttypmod -1 :resultcollid 100 :coercionformat 1 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {RELABELTYPE :arg {COERCETODOMAIN :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 29362 :resulttypmod -1 :resultcollid 100 :coercionformat 1 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((('x'::character varying)::concat_text)::text || (('y'::character varying)::concat_text)::text) IS NULL)",
+      "pretty": "('x'::character varying::concat_text::text || 'y'::character varying::concat_text::text) IS NULL"
+    },
+    {
+      "check": "('x'::concat_text || NULL) IS NULL",
+      "name": "concat_check_3",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 29362 :resulttypmod -1 :resultcollid 100 :coercionformat 1 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((('x'::character varying)::concat_text)::text || NULL::text) IS NULL)",
+      "pretty": "('x'::character varying::concat_text::text || NULL::text) IS NULL"
+    },
+    {
+      "check": "('x'::text || NULL::concat_int) IS NULL",
+      "name": "concat_check_4",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {COERCETODOMAIN :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull true :location -1 :constvalue <>} :resulttype 29360 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(('x'::text || (NULL::integer)::concat_int) IS NULL)",
+      "pretty": "('x'::text || NULL::integer::concat_int) IS NULL"
+    },
+    {
+      "check": "('x'::concat_bytes || NULL) IS NULL",
+      "name": "concat_check_5",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 2018 :opfuncid 2011 :opresulttype 17 :opretset false :opcollid 0 :inputcollid 0 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :resulttype 29364 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :resulttype 17 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((('\\x78'::bytea)::concat_bytes)::bytea || NULL::bytea) IS NULL)",
+      "pretty": "('\\x78'::bytea::concat_bytes::bytea || NULL::bytea) IS NULL"
+    },
+    {
+      "check": "('{}'::concat_json || NULL) IS NULL",
+      "name": "concat_check_6",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 3284 :opfuncid 3301 :opresulttype 3802 :opretset false :opcollid 0 :inputcollid 0 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 0 0 32 ]} :resulttype 29366 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :resulttype 3802 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1} {CONST :consttype 3802 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((('{}'::jsonb)::concat_json)::jsonb || NULL::jsonb) IS NULL)",
+      "pretty": "('{}'::jsonb::concat_json::jsonb || NULL::jsonb) IS NULL"
+    },
+    {
+      "check": "(ARRAY[1]::concat_array || NULL) IS NULL",
+      "name": "concat_check_7",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} :resulttype 29368 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :resulttype 1007 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1} {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((((ARRAY[1])::concat_array)::integer[] || NULL::integer[]) IS NULL)",
+      "pretty": "(ARRAY[1]::concat_array::integer[] || NULL::integer[]) IS NULL"
+    },
+    {
+      "check": "(ARRAY[1]::concat_array || 2) IS NULL",
+      "name": "concat_check_8",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 349 :opfuncid 378 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} :resulttype 29368 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :resulttype 1007 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((((ARRAY[1])::concat_array)::integer[] || 2) IS NULL)",
+      "pretty": "(ARRAY[1]::concat_array::integer[] || 2) IS NULL"
+    },
+    {
+      "check": "('x'::text || 'day'::concat_enum) IS NULL",
+      "name": "concat_check_9",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 29370 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 188 114 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(('x'::text || 'day'::concat_enum) IS NULL)",
+      "pretty": "('x'::text || 'day'::concat_enum) IS NULL"
+    },
+    {
+      "check": "('x'::text || ROW(1)::concat_record) IS NULL",
+      "name": "concat_check_10",
+      "conbin": "{NULLTEST :arg {OPEXPR :opno 2779 :opfuncid 2003 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {ROWEXPR :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :row_typeid 29375 :row_format 1 :colnames <> :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(('x'::text || ROW(1)::concat_record) IS NULL)",
+      "pretty": "('x'::text || ROW(1)::concat_record) IS NULL"
+    }
+  ]
+}

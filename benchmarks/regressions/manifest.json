@@ -4158,6 +4158,144 @@
       "capability": "Typed composite field catalog nodes",
       "workload": "Dropped and missing attributes, zero/negative/overflow field numbers, invalid result identities and malformed field operands in both SQL modes.",
       "invariant": "Malformed typed nodes fail instead of selecting a different attribute or silently discarding invalid metadata."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concatenation_syntax_retains_identity_separate_from_named_routines",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/functions/concat/tests.rs",
+      "capability": "Concatenation operator identity",
+      "workload": "Parsed operator syntax and ordinary same-name calls.",
+      "invariant": "Only syntax carries structural concatenation dispatch; ordinary routines retain their lookup identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concatenation_nodes_and_both_sql_forms_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/concatenation.rs",
+      "capability": "Typed concatenation catalog nodes",
+      "workload": "Twenty-six independently captured nodes and both SQL forms, including concatenation beneath composite field selection.",
+      "invariant": "Selected operator/function/result identities, input conversions, collations and scalar/array NULL roles match PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invalid_concatenation_catalog_signatures_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/concatenation.rs",
+      "capability": "Concatenation analysis diagnostics",
+      "workload": "Three independently captured invalid operand pairs.",
+      "invariant": "SQLSTATE, message and hint match PostgreSQL before NULL or empty-input shortcuts."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concatenation_keeps_domain_enum_and_composite_argument_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/concatenation.rs",
+      "capability": "Named concatenation operand identity",
+      "workload": "Eleven independently captured domain, enum and composite operand expressions and both SQL forms.",
+      "invariant": "Polymorphic non-array inputs retain their original named type; domain conversion labels and enum physical constants remain exact."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_concatenation_preserves_output_style_volatility_and_null_roles",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/concatenation/tests.rs",
+      "capability": "Concatenation session output and memory",
+      "workload": "Admitted mixed interval/text output under an invoking ISO interval style, plus native scalar/array strictness and volatility.",
+      "invariant": "Output matches PostgreSQL, all retained bytes belong to the result and release on drop, and invoking output style is restored."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concatenation_output_checks_admission_cancellation_and_retained_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/concatenation/tests.rs",
+      "capability": "Concatenation cancellation and admission",
+      "workload": "Output beyond an eight-byte allowance, each independent cancellation owner and malformed retained arity/identity.",
+      "invariant": "Refusal reports 53200, cancellation reports 57014 and malformed metadata reports XX000, with no retained budget leak."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_concatenation_identity_and_input_roles_bind_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/stored_constants/tests/concatenation.rs",
+      "capability": "Stored concatenation binding convergence",
+      "workload": "Six selected text/mixed/array signatures in both parsed and predecessor representations, followed by serialized rebinding.",
+      "invariant": "Stored coercions and native dispatch converge after one binding and a second binding preserves every serialized byte."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "concatenation_keeps_operator_identity_and_named_routines_across_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/concatenation.rs",
+      "capability": "Retained concatenation provider observations",
+      "workload": "Twenty-seven independent PostgreSQL product observations, including prepared calls, named values, live output, reconstructed views and persistent reopen.",
+      "invariant": "All four providers preserve selected operator identity, named routine precedence, exact results, diagnostics and view SQL."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "concatenation_syntax_and_registered_callback_keep_separate_definitions",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/concatenation.rs",
+      "capability": "Concatenation callback view isolation",
+      "workload": "Native and registered same-name callback views on four providers and independent persistent sessions, replaying both reconstructed SQL forms.",
+      "invariant": "Native syntax cannot invoke the callback, and ordinary callback calls retain their arguments and results without false migration."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "previous_native_concatenation_views_restore_identity_once",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/concatenation.rs",
+      "capability": "Predecessor concatenation view restoration",
+      "workload": "Predecessor native view metadata on all three persistent providers, opened twice through the existing catalog restoration transaction.",
+      "invariant": "The first open restores selected operator identity and the second open preserves the complete stored definition and result."
     }
   ]
 }

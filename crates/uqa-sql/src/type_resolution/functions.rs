@@ -88,27 +88,14 @@ pub fn builtin_function_argument_targets(
             });
         }
         "concat_op" if targets.len() == 2 => {
-            if let Ok(Some((dispatch, array))) = array_concat_types(
+            if let Ok(selected) = super::concatenation::select(
                 targets[0].as_ref(),
                 targets[1].as_ref(),
                 &ProductionControl::uncontrolled(),
             ) {
-                let ColumnType::Array(element) = &*array else {
-                    unreachable!("array concatenation result");
-                };
-                for (position, target) in targets.iter_mut().enumerate() {
-                    *target = Some(if array_concat_argument(dispatch, position) {
-                        (*array).clone()
-                    } else {
-                        (**element).clone()
-                    });
-                }
-                return targets;
-            }
-            for position in 0..2 {
-                if targets[position].is_none() {
-                    targets[position] = Some(concat_argument_type(targets[1 - position].as_ref()));
-                }
+                return (0..2)
+                    .map(|index| Some(selected.argument(index).clone()))
+                    .collect();
             }
         }
         _ => {}
@@ -210,14 +197,4 @@ pub(super) fn named_argument(expression: &ScalarExpr) -> (Option<String>, &Scala
 
 pub(super) fn named_argument_value(expression: &ScalarExpr) -> &ScalarExpr {
     scalar_call_argument(expression).map_or(expression, |argument| argument.value)
-}
-
-/// The operand type `||` selects for an `unknown` operand paired with `other`.
-pub(super) fn concat_argument_type(other: Option<&ColumnType>) -> ColumnType {
-    match other {
-        Some(array @ ColumnType::Array(_)) => array.clone(),
-        Some(ColumnType::JsonB) => ColumnType::JsonB,
-        Some(ColumnType::Bytea) => ColumnType::Bytea,
-        _ => ColumnType::Text,
-    }
 }

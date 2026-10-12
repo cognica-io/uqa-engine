@@ -35,6 +35,16 @@ FROM (VALUES ('a_b'), ('axb')) AS candidates(value)
 WHERE value LIKE 'a!_b' ESCAPE '!';
 ```
 
+## Concatenation
+
+`left || right` selects text, bytea, JSONB or compatible-array concatenation from the operands' declared types. A text operand can also concatenate with a non-array value using that value's typed text output; enum and composite inputs retain their catalog identity, and temporal output observes the invoking session settings. The result is text for the text overloads, bytea for bytea inputs, JSONB for JSONB inputs or the selected compatible array type. Array append and prepend preserve element order, selected element conversions and scalar versus array NULL roles.
+
+Scalar concatenation returns NULL if either input is NULL. Array concatenation retains the existing non-strict cat, append and prepend behavior: a scalar NULL can become an element rather than discarding the entire result. An undefined operand pair reports `42883`. The operator evaluates reached operands once in their existing order and introduces no separate state change. Stored expressions and both `pg_get_viewdef` SQL forms retain the selected operator independently of ordinary function lookup; named SQL functions and host callbacks remain ordinary calls.
+
+```sql execute
+SELECT 'value=' || 7 AS label, ARRAY[1, 2] || ARRAY[3] AS items;
+```
+
 ## Row and composite values
 
 `ROW(...)` and a parenthesized list of two or more expressions build an anonymous row; casting it to a [composite type](02-ddl.md#composite-types) or assigning it to a column of one coerces each field to its attribute's type, and a row with a different number of fields reports `42846` with PostgreSQL's detail. Text casts to a composite type as `record_in` reads it, and a composite value casts to text as `record_out` writes it, quoting a field that is empty or contains a separator, parenthesis, quote, backslash or whitespace. `(value).field` selects a field: an attribute of a composite value, the `fN` field of an anonymous row, or a column of a relation through its whole-row reference, which `pg_get_viewdef` prints as the column itself. A missing field reports `42703`, as `column t.missing does not exist`, `column "missing" not found in data type pair` or `could not identify column "f3" in record data type`, and field notation on a value that is not composite reports `42809`.
