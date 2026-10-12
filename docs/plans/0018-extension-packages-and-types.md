@@ -1068,3 +1068,24 @@ The independent PostgreSQL 18.4 Docker reference contains 18 commands in `crates
 - [ ] Verify the delivered commit's actual Linux and macOS bounded-work, memory and output regression results, then merge and close #787.
 
 This correction does not complete #119's remaining typed catalog projection or the inherited extension tasks; all original 80 PR #638 records remain preserved in successor PRs.
+
+## Boolean test expressions
+
+Issue #793 blocks the Boolean-test expression family in #119: the PostgreSQL parser accepts all six tests, but SQL compilation rejects them before binding. This unit adds their structural syntax, Boolean input contract, scalar evaluation and typed catalog nodes, plus the existing Execution view renderer and provider observations. SQL owns the implementation; Engine adds no analysis or evaluation algorithm. The inspected SQL/Execution manifests and dependency policy require no new dependency or feature. General runtime `conbin` projection remains a separate #119 obligation.
+
+- [x] Reproduce all six compiler failures and capture independent PostgreSQL 18.4 truth, error, parameter, domain, state-effect, stored-definition and fresh-connection observations.
+- [x] Inspect compiler, preparation, scalar/type owners, codec, view rendering, manifests, enabled features and dependency direction.
+- [ ] Implement structurally tagged tests, ordered Boolean coercion, scalar-only validation and non-strict once-only evaluation.
+- [ ] Preserve typed node identities, SQL reconstruction and stored view/constraint behavior; add owner and provider regressions.
+- [ ] Verify focused owner/integration tests, strict Clippy, ownership/dependency checks and the manual; update current evidence and PR tasks.
+- [ ] Verify actual Linux/macOS automatic bounded-work, memory and output regression results for the delivered source, merge and close #793, and remove the completed branch.
+
+The reference capture contains 95 observations from Docker image `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25`, using collector SHA-256 `13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec`; each reference connection starts with `SELECT version()`. The raw capture hash is `d567d981032820321bbb8b4121e13ec07c3b1fe32c075e5ecb05f9f0bb37f9e7`. Prepared expected inputs comprise 93 provider observations (`032562c57e84ebd4f2c00fc2dcbcfcb32773069e9ead21687f26adfee8ab8473`) and twelve SQL-owned typed nodes (`9de08d086306d177c81d86f2a3e19ba86dedab3a1c5774ff10961f076a31be49`); raw reports remain outside the repository. Implementation and qualification are pending.
+
+### Boolean test preservation argument
+
+Let the operand carrier be $B_3=\{T,F,U\}$, where $U$ is SQL NULL, and the result carrier be $B_2=\{T,F\}$. For $a\in B_3$, define $P_a(x)=T$ exactly when $x=a$ and $N_a(x)=\neg P_a(x)$. The three positive tests select $P_T,P_F,P_U$ and their negations select $N_T,N_F,N_U$. Each is total on the admitted carrier, closed in the non-null result carrier and exactly the corresponding PostgreSQL truth table; strict equality is not an equivalent implementation.
+
+If evaluating the child produces $(x,s',\tau)$ from state $s$, where $\tau$ is its ordered effect trace, a test returns $(P_a(x),s',\tau)$ or $(N_a(x),s',\tau)$ after one child evaluation. A child error propagates unchanged. The predicate introduces no effect, extra evaluation or state transition; enclosing lazy operators retain their existing reachability rules. Static input analysis precedes evaluation, so invalid declared types or set-valued operands fail even in a branch not reached at runtime. Unknown literals and parameters receive Boolean context, while type diagnostics retain the original domain name.
+
+For pure expressions this is pointwise scalar projection, preserving row multiplicity and concatenation. Stateful operands retain the existing ordered state traversal; this argument permits no reordering, duplication or removal of volatile effects. The operation changes no document support, payload merge, graph carrier, score or ranked fusion. Constant folding remains governed by the existing purity rules and must apply the non-strict predicate to NULL. Structural identity and the analyzed child survive typed encoding and durable storage, so reconstruction selects the same predicate and effectful child independently of routine names. Existing expressions do not acquire this new tag. These are implementation and review obligations, with independent tests providing finite evidence rather than replacing the argument.
