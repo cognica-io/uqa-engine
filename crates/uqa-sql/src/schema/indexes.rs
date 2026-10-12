@@ -99,13 +99,7 @@ pub(super) fn bind_index_expression(
     bind_schema_column_references(expression, &relation.name);
     bind_schema_column_references(expression, table);
     plan.scalar = ExpressionPlan::lower(expression.clone()).scalar;
-    let schema = RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let schema = RowSchema::with_column_definitions(None, &columns);
     if crate::semantics::sets::validation::expression_may_return_set(
         engine,
         engine,
