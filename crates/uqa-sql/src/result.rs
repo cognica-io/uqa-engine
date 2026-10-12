@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 
 use crate::ast::ColumnType;
+use crate::RowSchema;
 
 mod labels;
 mod text;
@@ -41,6 +42,8 @@ pub struct SQLResult {
     /// represents a type that has not yet been resolved, never a type inferred
     /// from the first runtime value.
     pub column_types: Vec<Option<ColumnType>>,
+    /// Complete, densely ordered native output metadata, including selected collations and nested record descriptors. External result sources may omit it.
+    pub row_schema: Option<RowSchema>,
     /// One row per result document, with the named columns in
     /// `columns`. Extra columns from `_score` etc. are included here
     /// too.
@@ -72,6 +75,7 @@ impl SQLResult {
             command_tag: None,
             columns,
             column_types,
+            row_schema: None,
             rows,
             positional_rows: None,
             affected_rows: 0,
@@ -110,10 +114,40 @@ impl SQLResult {
             command_tag: None,
             columns,
             column_types,
+            row_schema: None,
             rows,
             positional_rows,
             affected_rows: 0,
         }
+    }
+
+    /// Retain a native output descriptor independently of whether execution returned any rows.
+    pub fn from_schema_rows_with_positions(
+        schema: RowSchema,
+        rows: Vec<ResultRow>,
+        positional_rows: Option<Vec<Vec<Value>>>,
+    ) -> Self {
+        let mut result = Self::from_typed_rows_with_positions(
+            schema.columns().to_vec(),
+            schema.column_types().to_vec(),
+            rows,
+            positional_rows,
+        );
+        result.row_schema = Some(schema);
+        result
+    }
+
+    /// Borrow the native descriptor, or construct the metadata supplied by a legacy or external result source. Runtime values never determine declared types or collations.
+    pub fn row_schema(&self) -> std::borrow::Cow<'_, RowSchema> {
+        self.row_schema.as_ref().map_or_else(
+            || {
+                std::borrow::Cow::Owned(RowSchema::with_types(
+                    self.columns.clone(),
+                    self.column_types.clone(),
+                ))
+            },
+            std::borrow::Cow::Borrowed,
+        )
     }
 
     /// Return a result value by row and output-column position.
@@ -158,6 +192,35 @@ fn unique_compatibility_labels(columns: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn result_metadata_survives_empty_rows_and_shared_result_clones() {
+        let schema = RowSchema::with_column_metadata(
+            None,
+            [
+                ("value".into(), Some(ColumnType::Text), Some(950)),
+                ("value".into(), Some(ColumnType::Text), Some(951)),
+            ],
+        );
+        for rows in [Vec::new(), vec![vec![Value::Null, Value::Null]]] {
+            let result = SQLResult::from_schema_rows_with_positions(
+                schema.clone(),
+                vec![ResultRow::new(); rows.len()],
+                Some(rows),
+            );
+            let retained = result.row_schema();
+            assert!(std::ptr::eq(retained.columns(), schema.columns()));
+            assert!(matches!(retained, std::borrow::Cow::Borrowed(_)));
+            assert!(std::ptr::eq(
+                retained.as_ref(),
+                result.row_schema.as_ref().unwrap()
+            ));
+            assert_eq!(result.kind, SQLResultKind::Rows);
+            assert_eq!(retained.column_collation(0), Some(950));
+            assert_eq!(retained.column_collation(1), Some(951));
+            assert_eq!(*result.clone().row_schema(), schema);
+        }
+    }
 
     #[test]
     fn repeated_postgresql_labels_keep_unique_named_compatibility_keys() {

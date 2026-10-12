@@ -40,6 +40,7 @@ impl SQLBatchExecution {
                 SQLResult {
                     kind: uqa_sql::SQLResultKind::Unknown,
                     command_tag: None,
+                    row_schema: None,
                     columns: result.columns,
                     column_types,
                     rows: result.rows,

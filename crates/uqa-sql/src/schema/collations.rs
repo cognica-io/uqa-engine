@@ -206,11 +206,18 @@ impl Collations {
 }
 
 impl RowSchema {
-    /// Observe a retained literal or direct logical reference, including static bindings and executor attributes without a visible output position.
+    /// Observe retained expression metadata or a direct logical reference, including selected clauses, static bindings and executor attributes without a visible output position.
     pub fn input_collation(&self, expression: &crate::ScalarExpr) -> Option<u32> {
         match expression {
             crate::ScalarExpr::TypedLiteral { collation_oid, .. } => *collation_oid,
             crate::ScalarExpr::Collated { collation, .. } => Some(collation.oid()),
+            crate::ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } => match binding.dispatch {
+                Some(crate::ast::FunctionDispatch::Collate { oid }) => oid,
+                _ => None,
+            },
             crate::ScalarExpr::Column(name) => self.collation_of(name),
             crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
                 self.qualified_collation(qualifier, column)

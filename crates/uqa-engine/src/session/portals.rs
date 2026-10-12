@@ -56,8 +56,7 @@ impl Engine {
             metadata,
             mut query,
             params,
-            columns,
-            column_types,
+            schema,
         } = declaration;
         let name = metadata.name.clone();
         let scrollable = metadata.is_scrollable;
@@ -106,8 +105,7 @@ impl Engine {
                     catalog_snapshot,
                     restart,
                 },
-                columns,
-                column_types,
+                schema,
                 transaction_origin,
                 position: SessionPortalPosition::BeforeFirst,
                 scrollable,
@@ -128,8 +126,7 @@ impl Engine {
             metadata,
             command,
             params,
-            columns,
-            column_types,
+            schema,
             null_returning_values,
         } = declaration;
         let name = metadata.name.clone();
@@ -145,8 +142,7 @@ impl Engine {
                     params,
                     null_returning_values,
                 },
-                columns,
-                column_types,
+                schema,
                 transaction_origin,
                 position: SessionPortalPosition::BeforeFirst,
                 scrollable,

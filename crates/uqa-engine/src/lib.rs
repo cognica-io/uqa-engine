@@ -472,8 +472,7 @@ enum PinnedPortalTransactionControl {
 
 struct SessionPortalState {
     data: SessionPortalData,
-    columns: Vec<String>,
-    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    schema: uqa_sql::RowSchema,
     transaction_origin: u64,
     position: SessionPortalPosition,
     scrollable: bool,
@@ -524,8 +523,6 @@ struct SessionPortalRestart {
 }
 
 struct SessionPortalMaterialization {
-    columns: Vec<String>,
-    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
     rows: uqa_execution::IndexedSpill,
 }
 

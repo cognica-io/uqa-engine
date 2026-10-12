@@ -37,25 +37,32 @@ fn channels(
 }
 
 #[test]
-fn duplicate_output_names_retain_their_positional_types() {
+fn duplicate_output_names_retain_their_positional_metadata() {
     let (consumer, _requests, responses) = channels(false);
-    let columns = vec!["value".into(), "value".into()];
-    let types = vec![Some(ColumnType::Integer), Some(ColumnType::Text)];
+    let columns = vec!["value".into(), "value".into(), "value".into()];
+    let types = vec![
+        Some(ColumnType::Integer),
+        Some(ColumnType::Text),
+        Some(ColumnType::Text),
+    ];
     consumer
         .begin(
             &columns,
-            &RowSchema::with_types(columns.clone(), types.clone()),
+            &RowSchema::with_types(columns.clone(), types.clone()).with_column_collations([
+                None,
+                Some(950),
+                Some(951),
+            ]),
         )
         .unwrap();
-    let SessionPortalWorkerResponse::Started {
-        columns: actual,
-        column_types,
-    } = responses.recv().unwrap()
-    else {
+    let SessionPortalWorkerResponse::Started { schema } = responses.recv().unwrap() else {
         panic!("metadata must precede rows");
     };
-    assert_eq!(actual, columns);
-    assert_eq!(column_types, types);
+    assert_eq!(schema.columns(), columns);
+    assert_eq!(schema.column_types(), types);
+    assert_eq!(schema.column_collation(0), Some(0));
+    assert_eq!(schema.column_collation(1), Some(950));
+    assert_eq!(schema.column_collation(2), Some(951));
 }
 
 #[test]
@@ -67,14 +74,17 @@ fn reordered_output_names_resolve_types_from_their_schema_positions() {
             &RowSchema::with_types(
                 vec!["internal".into(), "visible".into()],
                 vec![Some(ColumnType::Integer), Some(ColumnType::Text)],
-            ),
+            )
+            .with_column_collations([None, Some(950)]),
         )
         .unwrap();
-    let SessionPortalWorkerResponse::Started { column_types, .. } = responses.recv().unwrap()
-    else {
+    let SessionPortalWorkerResponse::Started { schema } = responses.recv().unwrap() else {
         panic!("expected startup metadata");
     };
-    assert_eq!(column_types, [Some(ColumnType::Text)]);
+    assert_eq!(schema.column_types(), [Some(ColumnType::Text)]);
+    assert_eq!(schema.column_collation(0), Some(950));
+    assert_eq!(schema.physical_width(), 1);
+    assert_eq!(schema.position("internal"), None);
 }
 
 #[test]

@@ -2874,8 +2874,8 @@
       ],
       "source": "crates/uqa-sql/src/schema/record_fields.rs",
       "capability": "Shared selectable record descriptors",
-      "workload": "Record metadata crosses projection, qualification, physical compaction and an outer schema.",
-      "invariant": "Field types and selectable descriptors retain their original Arc identities through slot remapping, without copying field arrays."
+      "workload": "Record metadata crosses projection, qualification, physical compaction, an outer schema and dense public result projection.",
+      "invariant": "Field types and selectable descriptors retain their original Arc identities through slot remapping without copying field arrays or exposing removed source namespaces."
     },
     {
       "package": "uqa-sql",
@@ -3421,6 +3421,74 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_metadata_survives_empty_rows_and_shared_result_clones",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/result.rs",
+      "capability": "Empty result metadata retention",
+      "workload": "Duplicate text labels with C and POSIX selections produce empty and NULL results and remain usable through shared result clones.",
+      "invariant": "Native metadata is borrowed independently of row presence and preserves positional collations and result kind."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "duplicate_output_names_retain_their_positional_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Positional cursor startup metadata",
+      "workload": "Three identically named fields carry distinct integer, C text and POSIX text metadata through the actual worker handshake.",
+      "invariant": "Metadata precedes rows and repeated names cannot overwrite the selected type or collation at another position."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "reordered_output_names_resolve_types_from_their_schema_positions",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Public cursor metadata projection",
+      "workload": "A worker exposes one selected C text column from a wider input schema.",
+      "invariant": "Output metadata is dense and excludes the internal column while preserving its selected type and collation."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "computed_projection_keeps_selected_collations_for_empty_and_appended_results",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/collations.rs",
+      "capability": "Computed output collation retention",
+      "workload": "Ordinary and appending physical projections compute C/POSIX text, NULL and internal columns on populated and empty inputs.",
+      "invariant": "Computed slots retain selected collations and exact values while existing input fragments remain shared."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "query_record_descriptors_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/regcollation/query_records.rs",
+      "capability": "Query record descriptor lifetime",
+      "workload": "Independent PostgreSQL static/dynamic INTO, RETURNING, FOR, FETCH, NULL copies, repeated calls, held cursors and transaction rollback on four providers, with fresh-connection references for persistent reopening.",
+      "invariant": "Selected field metadata, exact values, diagnostics, row counts and transaction effects survive result and cursor ownership boundaries."
     },
     {
       "package": "uqa-sql",

@@ -51,6 +51,7 @@ pub fn show(session: &dyn CatalogSession, name: &str) -> Result<SQLResult, SQLEr
     Ok(SQLResult {
         kind: SQLResultKind::Rows,
         command_tag: None,
+        row_schema: None,
         column_types: vec![Some(ColumnType::Text); columns.len()],
         columns,
         rows,

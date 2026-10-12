@@ -55,13 +55,14 @@ engine.sql(
 
 - `columns`: projected column labels in order
 - `column_types`: SQL types in projection order, including empty results
+- `row_schema`: optional native `RowSchema` containing ordered names, types, selected collations and nested record metadata; `row_schema()` borrows it, or reconstructs the names and types supplied by an external result source
 - `rows`: compatibility rows represented as `BTreeMap<String, Value>`
 - `value_at(row, column)`: positional access that distinguishes repeated labels
 - `affected_rows`: the DML row count
 - `command_tag`: optional PostgreSQL command completion text, such as `SELECT 2`, `INSERT 0 1`, or `CREATE TABLE`
 - `kind`: `SQLResultKind::Command` or `Rows`, distinguishing commands from zero-column queries; clients without descriptor information use `Unknown`
 
-When projected labels repeat, `SQLResult` retains the distinct final values in a positional carrier while keeping `rows` for existing named-map callers. Use `value_at`, a cursor, or the columnar path to address repeated labels by position.
+When projected labels repeat, `SQLResult` retains the distinct final values in a positional carrier while keeping `rows` for existing named-map callers. Use `value_at`, a cursor, or the columnar path to address repeated labels by position. Native query and `RETURNING` results retain their output descriptor even when no rows are returned. SQL FETCH results share the retained descriptor across batches. For custom Rust result producers, use the existing row constructors or `from_schema_rows_with_positions` when a complete dense output descriptor is available; explicit struct literals must also supply the optional `row_schema` field.
 
 `REGTYPE` results, including `pg_typeof`, use `Value::Int` for the catalog OID. Request `pg_typeof(expression)::text` for the visible type name, or use `sql::format_postgres_text(value, column_type, Some(&engine))` with the result's declared type. `sql::postgres_result_type` returns the PostgreSQL type OID, size, and modifier; scalar domain results expose their base type in a PostgreSQL client descriptor.
 

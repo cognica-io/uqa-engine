@@ -91,12 +91,7 @@ impl Interpreter<'_> {
                 .map(|column| result.value_at(0, column).cloned().unwrap_or(Value::Null))
                 .collect::<Vec<_>>()
         });
-        self.assign_into(
-            target,
-            &result.columns,
-            &result.column_types,
-            values.as_deref(),
-        )?;
+        self.assign_into(target, &result.row_schema(), values.as_deref())?;
         let found = !result.rows.is_empty();
         self.last_row_count = i64::from(found);
         self.set_found(found);
@@ -261,9 +256,10 @@ impl Interpreter<'_> {
                 count: fetch_count,
                 move_only: false,
             })?;
+            let schema = result.row_schema();
             if result.rows.is_empty() {
                 if initial_fetch {
-                    self.assign_into(target, &result.columns, &result.column_types, None)?;
+                    self.assign_into(target, &schema, None)?;
                 }
                 break;
             }
@@ -271,12 +267,7 @@ impl Interpreter<'_> {
             iterated = true;
             for row_index in 0..result.rows.len() {
                 let values = result_row_values(&result, row_index);
-                self.assign_into(
-                    target,
-                    &result.columns,
-                    &result.column_types,
-                    values.as_deref(),
-                )?;
+                self.assign_into(target, &schema, values.as_deref())?;
                 match self.exec_loop_body(label, body)? {
                     LoopSignal::Continue => {}
                     LoopSignal::Break => break 'batches,

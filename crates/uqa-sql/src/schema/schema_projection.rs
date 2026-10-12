@@ -120,12 +120,13 @@ impl RowSchema {
             ProjectedSlot::Input(slot) | ProjectedSlot::BoundInput { physical: slot, .. } => {
                 slot.unwrap_or(NULL_SLOT)
             }
-            ProjectedSlot::Computed(position) => input.physical_width() + position,
+            ProjectedSlot::Computed { position, .. } => input.physical_width() + position,
         };
         let source_collation = |source: ProjectedSlot| match source {
             ProjectedSlot::Input(Some(slot)) => input.inherited_physical_collation(slot),
-            ProjectedSlot::BoundInput { collation, .. } => collation,
-            ProjectedSlot::Input(None) | ProjectedSlot::Computed(_) => None,
+            ProjectedSlot::BoundInput { collation, .. }
+            | ProjectedSlot::Computed { collation, .. } => collation,
+            ProjectedSlot::Input(None) => None,
         };
         let physical_width = input.physical_width() + computed_count;
         let mut internal = input.index.executor_attributes.clone();
