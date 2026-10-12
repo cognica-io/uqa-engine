@@ -52,16 +52,14 @@ pub struct SessionPortalDeclaration {
     pub metadata: uqa_sql::catalog::session::CursorMetadata,
     pub query: uqa_sql::plan::QueryPlan,
     pub params: Vec<SQLParam>,
-    pub columns: Vec<String>,
-    pub column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    pub schema: uqa_sql::RowSchema,
 }
 
 pub struct SessionPortalCommandDeclaration {
     pub metadata: uqa_sql::catalog::session::CursorMetadata,
     pub command: Box<uqa_sql::plan::CommandPlan>,
     pub params: Vec<SQLParam>,
-    pub columns: Vec<String>,
-    pub column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    pub schema: uqa_sql::RowSchema,
     /// `PostgreSQL` 18 materializes one `NULL`-filled tuple for each row produced by a modifying command opened with explicit `SCROLL`.
     pub null_returning_values: bool,
 }

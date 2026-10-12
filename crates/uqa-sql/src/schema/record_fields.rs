@@ -181,12 +181,16 @@ mod tests {
         );
         let (compact, _) = qualified.canonical_projection();
         assert_eq!(compact.record_fields(0), Some(&fields));
+        let public = qualified.for_result_columns(qualified.columns());
+        assert_eq!(public.physical_width(), 1);
+        assert_eq!(public.qualified_slot("r", "renamed"), None);
+        assert_eq!(public.position("discard"), None);
         let outer = RowSchema::with_outer_schema(&RowSchema::default(), &compact);
         assert_eq!(
             outer.physical_record_fields(outer.qualified_slot("r", "renamed").unwrap()),
             Some(&fields)
         );
-        for schema in [&selected, &qualified, &compact] {
+        for schema in [&selected, &qualified, &compact, &public] {
             assert!(Arc::ptr_eq(
                 &descriptor,
                 schema

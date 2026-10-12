@@ -99,8 +99,12 @@ fn projection_layout(
             source
         } else {
             let position = computed.len();
+            let collation = input.input_collation(&expression);
             computed.push(expression);
-            ProjectedSlot::Computed(position)
+            ProjectedSlot::Computed {
+                position,
+                collation,
+            }
         };
         match target {
             ProjectionTarget::Column(name) => projected.push((name, ty, source)),

@@ -23,10 +23,7 @@ pub enum SessionPortalWorkerRequest {
 }
 
 pub enum SessionPortalWorkerResponse {
-    Started {
-        columns: Vec<String>,
-        column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    },
+    Started { schema: crate::RowSchema },
     Row(Vec<Value>),
     Eof,
     Rewound,
@@ -95,23 +92,9 @@ impl SessionPortalRowConsumer {
 impl crate::query::consumer::QueryRowConsumer for SessionPortalRowConsumer {
     fn begin(&self, columns: &[String], schema: &crate::RowSchema) -> Result<(), SQLError> {
         self.public_width.set(columns.len());
-        let column_types = columns
-            .iter()
-            .enumerate()
-            .map(|(position, column)| {
-                if schema.columns().get(position) == Some(column) {
-                    schema.column_type(position).cloned()
-                } else {
-                    schema
-                        .position(column)
-                        .and_then(|position| schema.column_type(position).cloned())
-                }
-            })
-            .collect();
         self.responses
             .send(SessionPortalWorkerResponse::Started {
-                columns: columns.to_vec(),
-                column_types,
+                schema: schema.for_result_columns(columns),
             })
             .map_err(|_| SQLError::Internal("cursor consumer disconnected before startup".into()))
     }

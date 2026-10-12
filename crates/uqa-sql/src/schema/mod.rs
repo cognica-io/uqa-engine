@@ -15,6 +15,7 @@ mod name_binding;
 mod open_columns;
 mod outer_scope;
 mod record_fields;
+mod result_columns;
 mod schema_composition;
 mod schema_construction;
 mod schema_layout;
@@ -176,7 +177,10 @@ pub enum ProjectedSlot {
         physical: Option<usize>,
         collation: Option<u32>,
     },
-    Computed(usize),
+    Computed {
+        position: usize,
+        collation: Option<u32>,
+    },
 }
 
 impl RowSchema {

@@ -224,12 +224,7 @@ impl Interpreter<'_> {
                 strict_into_check(row_count)?;
             }
             let values = result_row_values(result, 0);
-            self.assign_into(
-                target,
-                &result.columns,
-                &result.column_types,
-                values.as_deref(),
-            )?;
+            self.assign_into(target, &result.row_schema(), values.as_deref())?;
         }
         // CALL statements leave FOUND untouched.
         if !is_call {

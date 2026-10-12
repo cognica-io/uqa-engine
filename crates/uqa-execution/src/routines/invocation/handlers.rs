@@ -80,20 +80,15 @@ pub fn run_call(
         return Ok(SQLResult::empty());
     };
     let columns = schema.columns().to_vec();
-    let column_types = schema.column_types().to_vec();
     let mut row = ResultRow::new();
     for (column, value) in columns.iter().zip(outcome.out_values.iter()) {
         row.insert(column.clone(), value.clone());
     }
-    Ok(SQLResult {
-        kind: uqa_sql::SQLResultKind::Rows,
-        command_tag: None,
-        column_types,
-        columns,
-        rows: vec![row],
-        positional_rows: None,
-        affected_rows: 0,
-    })
+    Ok(SQLResult::from_schema_rows_with_positions(
+        schema.for_result_columns(&columns),
+        vec![row],
+        None,
+    ))
 }
 
 /// Scalar-context invocation used by the expression evaluator's

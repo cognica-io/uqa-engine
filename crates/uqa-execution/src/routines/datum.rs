@@ -166,14 +166,14 @@ impl Interpreter<'_> {
     pub(super) fn assign_into(
         &mut self,
         target: &IntoTarget,
-        columns: &[String],
-        column_types: &[Option<ColumnType>],
+        schema: &uqa_sql::RowSchema,
         values: Option<&[Value]>,
     ) -> Result<(), SQLError> {
         match target {
             IntoTarget::Rec(dno) => {
                 let value = Value::Record(
-                    columns
+                    schema
+                        .columns()
                         .iter()
                         .enumerate()
                         .map(|(index, column)| {
@@ -189,10 +189,7 @@ impl Interpreter<'_> {
                         .into(),
                 );
                 self.values[*dno] = value;
-                self.record_schemas.insert(
-                    *dno,
-                    uqa_sql::RowSchema::with_types(columns.to_vec(), column_types.to_vec()),
-                );
+                self.record_schemas.insert(*dno, schema.clone());
                 Ok(())
             }
             IntoTarget::Row(fields) => {
@@ -201,12 +198,7 @@ impl Interpreter<'_> {
                         .and_then(|values| values.get(idx))
                         .cloned()
                         .unwrap_or(Value::Null);
-                    self.assign_datum_typed(
-                        field.varno,
-                        value,
-                        column_types.get(idx).and_then(Option::as_ref),
-                        None,
-                    )?;
+                    self.assign_datum_typed(field.varno, value, schema.column_type(idx), None)?;
                 }
                 Ok(())
             }

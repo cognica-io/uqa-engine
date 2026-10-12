@@ -74,7 +74,10 @@ fn selected_collations_follow_alias_projection_join_and_canonical_layout() {
             (
                 "conflict".into(),
                 Some(ColumnType::Text),
-                ProjectedSlot::Computed(0),
+                ProjectedSlot::Computed {
+                    position: 0,
+                    collation: Some(950),
+                },
             ),
         ],
         vec![],
@@ -82,7 +85,7 @@ fn selected_collations_follow_alias_projection_join_and_canonical_layout() {
         true,
     );
     assert_eq!(projected.collation_of("c"), Some(951));
-    assert_eq!(projected.collation_of("conflict"), Some(100));
+    assert_eq!(projected.collation_of("conflict"), Some(950));
 }
 
 #[test]

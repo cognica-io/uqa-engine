@@ -107,6 +107,7 @@ pub fn run_explain_with_physical(
         return Ok(SQLResult {
             kind: uqa_sql::SQLResultKind::Rows,
             command_tag: None,
+            row_schema: None,
             columns: vec!["plan".to_string()],
             column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
@@ -128,6 +129,7 @@ pub fn run_explain_with_physical(
     Ok(SQLResult {
         kind: uqa_sql::SQLResultKind::Rows,
         command_tag: None,
+        row_schema: None,
         columns: vec!["plan".to_string()],
         column_types: vec![Some(uqa_sql::ColumnType::Text)],
         rows,

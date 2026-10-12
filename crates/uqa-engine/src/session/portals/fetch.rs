@@ -44,8 +44,7 @@ fn realize_pending_command(
             if null_returning_values {
                 result = nullify_result_values(result);
             }
-            state.columns.clone_from(&result.columns);
-            state.column_types.clone_from(&result.column_types);
+            state.schema = result.row_schema().into_owned();
             state.data = SessionPortalData::Result(result);
             Ok(())
         }
@@ -76,6 +75,7 @@ fn nullify_result_values(result: SQLResult) -> SQLResult {
         positional_rows: Some(vec![vec![Value::Null; result.columns.len()]; row_count]),
         columns: result.columns,
         column_types: result.column_types,
+        row_schema: result.row_schema,
         rows,
         affected_rows: result.affected_rows,
     }
@@ -145,19 +145,11 @@ fn stream_next_portal_row(
         ));
     loop {
         match worker.responses.recv() {
-            Ok(crate::SessionPortalWorkerResponse::Started {
-                columns,
-                column_types,
-            }) => {
-                let schema =
-                    uqa_execution::RowSchema::with_types(columns.clone(), column_types.clone());
+            Ok(crate::SessionPortalWorkerResponse::Started { schema }) => {
+                state.schema = schema.clone();
                 let rows = uqa_execution::IndexedSpill::new(schema)
                     .map_err(uqa_execution::query::projection::physical_exec_error)?;
-                *materialized = Some(SessionPortalMaterialization {
-                    columns,
-                    column_types,
-                    rows,
-                });
+                *materialized = Some(SessionPortalMaterialization { rows });
             }
             Ok(crate::SessionPortalWorkerResponse::Row(values)) => {
                 let output = materialized.as_mut().ok_or_else(|| {
@@ -219,19 +211,11 @@ fn stream_directional_portal_row(
         .map_err(|_| SQLError::Internal("cursor worker stopped before a row request".into()))?;
     loop {
         match worker.responses.recv() {
-            Ok(crate::SessionPortalWorkerResponse::Started {
-                columns,
-                column_types,
-            }) => {
-                let schema =
-                    uqa_execution::RowSchema::with_types(columns.clone(), column_types.clone());
+            Ok(crate::SessionPortalWorkerResponse::Started { schema }) => {
+                state.schema = schema.clone();
                 let rows = uqa_execution::IndexedSpill::new(schema)
                     .map_err(uqa_execution::query::projection::physical_exec_error)?;
-                *materialized = Some(SessionPortalMaterialization {
-                    columns,
-                    column_types,
-                    rows,
-                });
+                *materialized = Some(SessionPortalMaterialization { rows });
             }
             Ok(crate::SessionPortalWorkerResponse::Row(values)) => return Ok(Some(values)),
             Ok(crate::SessionPortalWorkerResponse::Eof) => return Ok(None),
@@ -314,9 +298,8 @@ fn portal_position(state: &SessionPortalState) -> usize {
 }
 
 fn directional_result(state: &SessionPortalState, rows: Vec<Vec<Value>>) -> SQLResult {
-    SQLResult::from_typed_rows_with_positions(
-        state.columns.clone(),
-        state.column_types.clone(),
+    SQLResult::from_schema_rows_with_positions(
+        state.schema.clone(),
         vec![uqa_sql::ResultRow::new(); rows.len()],
         Some(rows),
     )
@@ -861,12 +844,10 @@ pub(super) fn select_portal_rows(
     state: &mut SessionPortalState,
     indices: &[usize],
 ) -> Result<SQLResult, SQLError> {
-    let empty_columns = state.columns.clone();
-    let empty_column_types = state.column_types.clone();
+    let empty_schema = state.schema.clone();
     let empty = || {
-        SQLResult::from_typed_rows_with_positions(
-            empty_columns.clone(),
-            empty_column_types.clone(),
+        SQLResult::from_schema_rows_with_positions(
+            empty_schema.clone(),
             Vec::new(),
             Some(Vec::new()),
         )
@@ -911,6 +892,7 @@ fn select_result_rows(result: &SQLResult, indices: &[usize]) -> SQLResult {
         command_tag: None,
         columns: result.columns.clone(),
         column_types: result.column_types.clone(),
+        row_schema: result.row_schema.clone(),
         rows,
         positional_rows,
         affected_rows: 0,
@@ -934,14 +916,13 @@ fn select_indexed_rows(
             .map_err(uqa_execution::query::projection::physical_exec_error)?;
         let view = schema.view(&row);
         positional_rows.push(
-            (0..result.columns.len())
+            (0..schema.len())
                 .map(|position| view.value_at(position).cloned().unwrap_or(Value::Null))
                 .collect(),
         );
     }
-    Ok(SQLResult::from_typed_rows_with_positions(
-        result.columns.clone(),
-        result.column_types.clone(),
+    Ok(SQLResult::from_schema_rows_with_positions(
+        schema,
         vec![uqa_sql::ResultRow::new(); positional_rows.len()],
         Some(positional_rows),
     ))

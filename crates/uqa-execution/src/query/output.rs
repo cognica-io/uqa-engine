@@ -58,6 +58,7 @@ impl QueryOutput {
                 ));
             }
         };
+        let schema = self.internal_schema.for_result_columns(&self.columns);
         let batch = crate::Batch::from_physical_rows(self.internal_schema, rows);
         let mut seen = std::collections::BTreeSet::new();
         let positional_rows = self
@@ -68,9 +69,8 @@ impl QueryOutput {
                 crate::ColumnarBatch::from_batch(&self.columns, batch.clone())
                     .into_positional_rows()
             });
-        Ok(SQLResult::from_typed_rows_with_positions(
-            self.columns,
-            self.column_types,
+        Ok(SQLResult::from_schema_rows_with_positions(
+            schema,
             batch.into_result_rows(),
             positional_rows,
         ))
