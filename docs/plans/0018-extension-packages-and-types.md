@@ -2,6 +2,8 @@
 
 Status: Active. Implementation starts from main `8a99d4fd` (0.4.7), inspected on 2026-09-29. The [extension design](../design/data-model-and-type-extensions.md) defines the target contracts, proofs and acceptance criteria; this plan fixes the implementation order, owners, representation decisions and completion ledger. The [manual](../manual/README.md) remains authoritative for public behavior; a unit extends it only when its exit evidence passes.
 
+Current catalog work is delivered through the [catalog extraction ledger](0018-catalog-expression-delivery.md). The oversized PR #774 is preserved as source history; only the anonymous ROW unit is active, with later changes retained for separate PRs. All 80 inherited PR #638 task records and outstanding extension outcomes remain unchanged.
+
 ## Outcome and fixed boundaries
 
 Deliver the required outcomes of the design: user-defined enum, composite, range and base types with their generated arrays and domain composition; host-registered extension packages installed by PostgreSQL 18 `CREATE EXTENSION`, `ALTER EXTENSION` and `DROP EXTENSION`; functions, casts, operators, operator classes and families contributed by those packages; owned data models with generic source and command nodes; optimizer contributions consumed by normal planning; and direct authoring in Rust, Python, Node.js and browser WASM. Ordinary SQL and extension work must compose in the same query and logical transaction, and a second independently authored model or type must not require a new core enum branch or an Engine algorithm.
