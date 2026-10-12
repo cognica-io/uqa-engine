@@ -132,16 +132,24 @@ impl EventAnalysisContext<'_> {
     }
 
     pub fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
+        Ok(self
+            .rule_relation_definitions(name)?
+            .into_iter()
+            .map(|column| (column.name, column.ty))
+            .collect())
+    }
+
+    pub fn rule_relation_definitions(
+        &self,
+        name: &str,
+    ) -> Result<Vec<crate::ast::ColumnDef>, SQLError> {
         if let Some(columns) = self
             .returning
             .catalog
             .try_describe_table_row_type(name)
             .map_err(|error| SQLError::Internal(format!("read rule columns: {error}")))?
         {
-            return Ok(columns
-                .into_iter()
-                .map(|column| (column.name, column.ty))
-                .collect());
+            return Ok(columns);
         }
         let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
             SQLError::Internal(format!("decode rule relation `{name}`: {error}"))
@@ -156,13 +164,15 @@ impl EventAnalysisContext<'_> {
             .iter()
             .enumerate()
             .map(|(index, name)| {
-                (
-                    schema.public_name(index).unwrap_or(name).to_string(),
+                let mut column = crate::ast::ColumnDef::nullable(
+                    schema.public_name(index).unwrap_or(name),
                     schema
                         .column_type(index)
                         .cloned()
                         .unwrap_or(ColumnType::Text),
-                )
+                );
+                column.collation_oid = schema.column_collation(index);
+                column
             })
             .collect())
     }
@@ -214,7 +224,7 @@ impl EventAnalysisContext<'_> {
     fn validate_rule_condition(
         &self,
         condition: &mut Expr,
-        columns: &[(String, ColumnType)],
+        columns: &[crate::ast::ColumnDef],
         event: RuleEvent,
         stored_plan: Option<&crate::plan::ExpressionPlan>,
         stored_binding: Option<&RuleConditionBinding>,
@@ -283,7 +293,7 @@ impl EventAnalysisContext<'_> {
             });
             let column_names = columns
                 .iter()
-                .map(|(name, _)| name.clone())
+                .map(|column| column.name.clone())
                 .collect::<Vec<_>>();
             (
                 plan,
@@ -381,7 +391,7 @@ impl EventAnalysisContext<'_> {
     fn validate_rule_action_definition(
         &self,
         action: &mut Statement,
-        event_columns: &[(String, ColumnType)],
+        event_columns: &[crate::ast::ColumnDef],
         event: RuleEvent,
         lookup_mode: RelationLookupMode,
     ) -> Result<RuleDependencies, SQLError> {
@@ -392,6 +402,10 @@ impl EventAnalysisContext<'_> {
                 action,
                 lookup_mode,
             )?;
+        let event_row_type = event_columns
+            .iter()
+            .map(|column| (column.name.clone(), column.ty.clone()))
+            .collect::<Vec<_>>();
         let action_row_type = self.rule_action_target_row_type(action)?;
         let action_columns: std::collections::BTreeSet<String> = action_row_type
             .iter()
@@ -402,7 +416,7 @@ impl EventAnalysisContext<'_> {
                 self.sources,
                 action,
                 &action_columns,
-                event_columns,
+                &event_row_type,
                 event,
             )?;
             *action = crate::semantics::rules::action_binding::expand_rule_action_returning_stars(
@@ -446,7 +460,7 @@ impl EventAnalysisContext<'_> {
         }
         crate::catalog::stored_ast::bind_stored_statement_sites(action, &bound_routines.sites)?;
         if let Some(schema) = schema {
-            validate_rule_returning_shape(&schema, event_columns)?;
+            validate_rule_returning_shape(&schema, &event_row_type)?;
         }
         Ok(dependencies)
     }
@@ -455,7 +469,7 @@ impl EventAnalysisContext<'_> {
         &self,
         condition: &mut Expr,
         condition_plan: Option<&crate::plan::ExpressionPlan>,
-        columns: &[(String, ColumnType)],
+        columns: &[crate::ast::ColumnDef],
         event: RuleEvent,
         dependencies: &mut RuleDependencies,
     ) -> Result<(), SQLError> {
@@ -536,7 +550,7 @@ impl EventAnalysisContext<'_> {
         }
         let is_view = stored_view_kind == Some(StoredViewKind::View);
         Self::validate_select_rule_contract(definition, is_view)?;
-        let columns = self.rule_relation_columns(&definition.table)?;
+        let columns = self.rule_relation_definitions(&definition.table)?;
         let mut dependencies = RuleDependencies::default();
         if let Some(condition) = &mut definition.condition {
             let condition_dependencies =

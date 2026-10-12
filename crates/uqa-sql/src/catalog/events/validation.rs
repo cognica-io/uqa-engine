@@ -24,12 +24,12 @@ pub struct TriggerConditionTypeResolver<'a> {
 }
 
 pub struct RuleRowTypeResolver<'a> {
-    pub columns: &'a [(String, ColumnType)],
+    pub columns: &'a [crate::ast::ColumnDef],
     pub event: RuleEvent,
 }
 
 pub struct RuleConditionNameResolver<'a> {
-    pub columns: &'a [(String, ColumnType)],
+    pub columns: &'a [crate::ast::ColumnDef],
     pub event: RuleEvent,
 }
 
@@ -51,7 +51,7 @@ impl VariableResolver for RuleConditionNameResolver<'_> {
     }
 
     fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>, SQLError> {
-        if !self.columns.iter().any(|(column, _)| column == name) {
+        if !self.columns.iter().any(|column| column.name == name) {
             if name.eq_ignore_ascii_case("old") || name.eq_ignore_ascii_case("new") {
                 return Ok(None);
             }
@@ -95,27 +95,40 @@ impl RuleRowTypeResolver<'_> {
         Ok(true)
     }
 
-    fn resolve_record_field(
+    fn record_definition(
         &self,
         qualifier: &str,
         column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
+    ) -> Result<Option<&crate::ast::ColumnDef>, SQLError> {
         if !self.validate_row_qualifier(qualifier)? {
             return Ok(None);
         }
-        let (_, ty) = self
+        let definition = self
             .columns
             .iter()
-            .find(|(name, _)| name == column)
+            .find(|definition| definition.name == column)
             .ok_or_else(|| SQLError::UnknownColumn(format!("{qualifier}.{column}")))?;
-        Ok(Some(ResolvedVariable {
-            value: Value::Null,
-            declared_type: Some(ty.catalog_name()),
-        }))
+        Ok(Some(definition))
     }
 }
 
 impl VariableResolver for RuleRowTypeResolver<'_> {
+    fn rewrite_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<Expr>, SQLError> {
+        let Some(definition) = self.record_definition(qualifier, column)? else {
+            return Ok(None);
+        };
+        Ok(Some(Expr::TypedLiteral {
+            value: Value::Null,
+            ty: definition.ty.catalog_name(),
+            collation_oid: definition.collation_oid,
+            composite_source: None,
+        }))
+    }
+
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(self
             .validate_row_qualifier(name)?
@@ -127,7 +140,12 @@ impl VariableResolver for RuleRowTypeResolver<'_> {
         qualifier: &str,
         column: &str,
     ) -> Result<Option<ResolvedVariable>, SQLError> {
-        self.resolve_record_field(qualifier, column)
+        Ok(self
+            .record_definition(qualifier, column)?
+            .map(|definition| ResolvedVariable {
+                value: Value::Null,
+                declared_type: Some(definition.ty.catalog_name()),
+            }))
     }
 
     fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {

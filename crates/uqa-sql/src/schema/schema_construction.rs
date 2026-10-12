@@ -153,25 +153,37 @@ impl RowSchema {
         relation: InternalRelationId,
         types: Vec<Option<ColumnType>>,
     ) -> Self {
-        let internal = (0..types.len())
-            .map(|position| (relation.column(position), position))
-            .collect();
-        let internal_types = types
-            .iter()
-            .enumerate()
-            .map(|(position, ty)| (relation.column(position), ty.clone()))
-            .collect();
+        Self::with_internal_relation_metadata(relation, types.into_iter().map(|ty| (ty, None)))
+    }
+
+    /// Build executor-only inputs with the selected collation of each logical attribute, including NULL values.
+    pub fn with_internal_relation_metadata(
+        relation: InternalRelationId,
+        columns: impl IntoIterator<Item = (Option<ColumnType>, Option<u32>)>,
+    ) -> Self {
+        let mut metadata = SchemaBuildMetadata::default();
+        let mut width = 0;
+        for (position, (ty, oid)) in columns.into_iter().enumerate() {
+            assert!(
+                oid.is_none_or(|oid| oid == 0
+                    || ty
+                        .as_ref()
+                        .is_some_and(super::composites::type_is_collatable)),
+                "collation requires a collatable column type"
+            );
+            let column = relation.column(position);
+            metadata.collations.internal(column, oid, ty.as_ref());
+            metadata.internal.insert(column, position);
+            metadata.internal_types.insert(column, ty);
+            width += 1;
+        }
         Self::from_typed_parts_with_aliases_and_exact_precedence(
             Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            types.len(),
-            SchemaBuildMetadata {
-                internal,
-                internal_types,
-                ..SchemaBuildMetadata::default()
-            },
+            width,
+            metadata,
         )
     }
 

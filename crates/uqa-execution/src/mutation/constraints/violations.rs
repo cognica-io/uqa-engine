@@ -211,7 +211,7 @@ fn view_row_detail(
         target
             .columns
             .iter()
-            .zip(&target.types)
+            .zip(target.schema.column_types())
             .zip(values)
             .map(|((name, ty), value)| DescribedColumn {
                 name,

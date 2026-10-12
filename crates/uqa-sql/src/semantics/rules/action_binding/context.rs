@@ -14,7 +14,8 @@ pub trait RuleSourceCatalog {
         name: &str,
         relations_bound: bool,
     ) -> Result<Option<Vec<String>>, SQLError>;
-    fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError>;
+    fn rule_relation_definitions(&self, name: &str)
+        -> Result<Vec<crate::ast::ColumnDef>, SQLError>;
 }
 
 #[derive(Clone, Default)]
@@ -79,7 +80,11 @@ pub fn rule_action_target_row_type(
         Statement::Delete(statement) => &statement.table,
         _ => return Ok(Vec::new()),
     };
-    catalog.rule_relation_columns(table)
+    Ok(catalog
+        .rule_relation_definitions(table)?
+        .into_iter()
+        .map(|column| (column.name, column.ty))
+        .collect())
 }
 pub fn rule_action_target_columns(
     catalog: &dyn RuleSourceCatalog,

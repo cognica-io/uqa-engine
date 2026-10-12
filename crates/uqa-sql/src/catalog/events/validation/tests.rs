@@ -33,7 +33,7 @@ fn routine_error(error: SQLError, expected_state: &str, expected_message: &str) 
 
 #[test]
 fn unqualified_rule_conditions_bind_to_the_available_event_row() {
-    let columns = vec![("id".into(), ColumnType::Integer)];
+    let columns = vec![crate::ast::ColumnDef::nullable("id", ColumnType::Integer)];
     let input = Expr::Column("id".into());
     let inserted = bind_expr(
         &input,
@@ -72,7 +72,7 @@ fn unavailable_rule_rows_are_rejected_before_column_lookup() {
     assert!(
         matches!(resolver.resolve_qualified("NEW", "missing"), Err(SQLError::UnknownColumn(name)) if name == "NEW.missing")
     );
-    let columns = vec![("id".into(), ColumnType::Integer)];
+    let columns = vec![crate::ast::ColumnDef::nullable("id", ColumnType::Integer)];
     let typed_row = RuleRowTypeResolver {
         columns: &columns,
         event: RuleEvent::Update,
@@ -175,7 +175,7 @@ impl RuleSourceCatalog for UnusedCatalog {
     fn query_source_columns(&self, _: &str, _: bool) -> Result<Option<Vec<String>>, SQLError> {
         panic!("invalid namespaces must fail before relation metadata reads")
     }
-    fn rule_relation_columns(&self, _: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
+    fn rule_relation_definitions(&self, _: &str) -> Result<Vec<crate::ast::ColumnDef>, SQLError> {
         panic!("invalid namespaces must fail before target metadata reads")
     }
 }

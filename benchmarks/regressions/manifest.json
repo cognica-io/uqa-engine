@@ -3097,6 +3097,45 @@
       "capability": "Analyzed selection codec validation",
       "workload": "Implicit, explicit and conflicting selections round-trip; malformed identities and deferred invalid states are rejected.",
       "invariant": "Retained selection strength and pre-assignment field metadata survive restoration without invalid OID conversion or suppressing diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_condition_row_metadata_matches_postgresql_event_variables",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/collations.rs",
+      "capability": "Stored rule condition metadata",
+      "workload": "Sixteen PostgreSQL OLD/NEW attribute observations across INSERT, UPDATE and DELETE conditions, including JSON restoration and rebound identities.",
+      "invariant": "Qualified, private and dummy typed inputs keep the declared type and implicit collation independently of physical values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_rule_input_collations_remain_implicit",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/collations.rs",
+      "capability": "Projected event row coercibility",
+      "workload": "C, POSIX, default and indeterminate event fields substitute an explicitly collated source expression.",
+      "invariant": "The event column boundary preserves its selected identity and implicit strength; a containing explicit selection still wins."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_rule_condition_inputs_preserve_postgresql_collations_and_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/condition_binding/tests.rs",
+      "capability": "Runtime OLD/NEW input metadata",
+      "workload": "The sixteen independent PostgreSQL rule attributes are materialized both with stored values and with absent row images.",
+      "invariant": "Joined private inputs retain each declared collation and exact value or NULL without exposing user-visible wildcard columns."
     }
   ]
 }

@@ -40,6 +40,7 @@ pub(in crate::catalog::events::definition) struct Catalog {
     pub allow_owner: bool,
     pub allow_trigger: bool,
     pub routines: Vec<Arc<SQLUserFunction>>,
+    pub columns: Option<Vec<ColumnDef>>,
 }
 impl Default for Catalog {
     fn default() -> Self {
@@ -49,6 +50,7 @@ impl Default for Catalog {
             allow_owner: true,
             allow_trigger: true,
             routines: vec![routine()],
+            columns: None,
         }
     }
 }
@@ -335,6 +337,9 @@ impl MutationPrivilegeCatalog for Catalog {
 impl ReturningCatalog for Catalog {
     fn try_describe_table_row_type(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         self.record(format!("columns:{table}"));
+        if let Some(columns) = &self.columns {
+            return Ok(Some(columns.clone()));
+        }
         let Statement::CreateTable(table) = crate::compile("CREATE TABLE items (id integer)")
             .unwrap()
             .remove(0)
@@ -364,8 +369,8 @@ impl RuleSourceCatalog for Catalog {
     fn query_source_columns(&self, _: &str, _: bool) -> Result<Option<Vec<String>>, SQLError> {
         panic!("unexpected action source")
     }
-    fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
-        self.context().rule_relation_columns(name)
+    fn rule_relation_definitions(&self, name: &str) -> Result<Vec<ColumnDef>, SQLError> {
+        self.context().rule_relation_definitions(name)
     }
 }
 impl StoredColumnCatalog for Catalog {

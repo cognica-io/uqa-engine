@@ -236,7 +236,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                                 ctes,
                                 crate::mutation::assignment::TypedAssignmentTarget {
                                     target: &columns[input_position],
-                                    ty: target.types[target_position].as_ref(),
+                                    ty: target.schema.column_type(target_position),
                                     current: Some(&new[target_position]),
                                     final_column_write: !columns[input_position + 1..]
                                         .iter()

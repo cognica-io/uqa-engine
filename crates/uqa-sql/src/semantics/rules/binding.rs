@@ -27,8 +27,32 @@ pub use actions::{bind_insert_values_action, bind_set_oriented_action, BoundSetO
 
 pub struct RuleColumnMetadata {
     pub ty: crate::ast::ColumnType,
+    pub collation_oid: Option<u32>,
     pub uses_document_id: bool,
     pub position: usize,
+}
+
+impl RuleColumnMetadata {
+    /// A projected OLD/NEW field is still a column of the event relation. Its source expression cannot export explicit collation strength across that boundary.
+    pub fn bind_input(&self, expression: crate::ScalarExpr) -> crate::ScalarExpr {
+        if !crate::schema::composites::type_is_collatable(&self.ty) {
+            return expression;
+        }
+        let oid = self.collation_oid.unwrap_or_else(|| {
+            u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
+                &self.ty,
+            ))
+            .expect("type collation identity")
+        });
+        crate::ScalarExpr::Collated {
+            expr: Box::new(expression),
+            ty: self.ty.clone(),
+            collation: crate::ir::ResultCollation::new(
+                crate::catalog::collations::derivation::Derivation::implicit(i64::from(oid)),
+                oid,
+            ),
+        }
+    }
 }
 
 pub(super) struct RuntimeRuleResolver<'a> {

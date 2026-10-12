@@ -35,7 +35,7 @@ fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() 
         .bind_rule_condition_object_dependencies(
             &mut condition,
             Some(&plan),
-            &[("id".into(), ColumnType::Integer)],
+            &[crate::ast::ColumnDef::nullable("id", ColumnType::Integer)],
             RuleEvent::Update,
             &mut dependencies,
         )
@@ -45,3 +45,5 @@ fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() 
     )));
     assert!(!condition.any_node(&|node| matches!(node, Expr::Literal(Value::Str(_)))));
 }
+
+mod collations;

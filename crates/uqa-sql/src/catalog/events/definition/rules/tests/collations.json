@@ -1,0 +1,116 @@
+[
+  {
+    "event": "INSERT",
+    "sql": "CREATE RULE rule_insert AS ON INSERT TO items WHERE (NEW.c IS NULL AND NEW.p IS NULL AND NEW.plain IS NULL AND NEW.n IS NULL) DO NOTHING",
+    "variables": [
+      {
+        "side": "new",
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "side": "new",
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "side": "new",
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "side": "new",
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "sql": "CREATE RULE rule_update AS ON UPDATE TO items WHERE (OLD.c IS NULL AND OLD.p IS NULL AND OLD.plain IS NULL AND OLD.n IS NULL AND NEW.c IS NULL AND NEW.p IS NULL AND NEW.plain IS NULL AND NEW.n IS NULL) DO NOTHING",
+    "variables": [
+      {
+        "side": "old",
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "side": "old",
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "side": "old",
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "side": "old",
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "side": "new",
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "side": "new",
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "side": "new",
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "side": "new",
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "DELETE",
+    "sql": "CREATE RULE rule_delete AS ON DELETE TO items WHERE (OLD.c IS NULL AND OLD.p IS NULL AND OLD.plain IS NULL AND OLD.n IS NULL) DO NOTHING",
+    "variables": [
+      {
+        "side": "old",
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "side": "old",
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "side": "old",
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "side": "old",
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  }
+]

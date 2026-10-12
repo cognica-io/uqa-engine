@@ -30,12 +30,14 @@ impl Default for RuleInputProjection {
 }
 
 impl RuleInputProjection {
-    pub fn values(values: impl IntoIterator<Item = (String, Value, Option<ColumnType>)>) -> Self {
+    pub fn values(
+        values: impl IntoIterator<Item = (String, Value, Option<ColumnType>, Option<u32>)>,
+    ) -> Self {
         let relation = InternalRelationId::allocate();
         let mut expressions = BTreeMap::new();
         let mut fields = Vec::new();
         let mut types = Vec::new();
-        for (name, value, ty) in values {
+        for (name, value, ty, collation_oid) in values {
             expressions.insert(
                 name,
                 ExpressionPlan {
@@ -44,12 +46,12 @@ impl RuleInputProjection {
                 },
             );
             fields.push(value);
-            types.push(ty);
+            types.push((ty, collation_oid));
         }
         Self {
             expressions,
             source: OwnedPhysicalRow::new(
-                RowSchema::with_internal_relation_types(relation, types),
+                RowSchema::with_internal_relation_metadata(relation, types),
                 PhysicalRow::from_values(fields),
             ),
         }
@@ -72,11 +74,13 @@ mod tests {
             "guard".into(),
             Value::Bool(true),
             Some(ColumnType::Boolean),
+            None,
         )]);
         let right = RuleInputProjection::values([(
             "divisor".into(),
             Value::Int(0),
             Some(ColumnType::SmallInteger),
+            None,
         )]);
         let mut source = left.source;
         append_source(&mut source, &right.source);

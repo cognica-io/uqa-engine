@@ -120,7 +120,7 @@ impl RuleConditionBinding {
         required
     }
 
-    pub fn row_schema(&self, columns: &[(String, crate::ast::ColumnType)]) -> crate::RowSchema {
+    pub fn row_schema(&self, columns: &[crate::ast::ColumnDef]) -> crate::RowSchema {
         let mut names = Vec::with_capacity(columns.len() * 2);
         let mut identities = Vec::with_capacity(columns.len() * 2);
         let mut types = Vec::with_capacity(columns.len() * 2);
@@ -129,7 +129,8 @@ impl RuleConditionBinding {
             let Some(relation) = relation else {
                 continue;
             };
-            for (attribute, (name, ty)) in columns.iter().enumerate() {
+            for (attribute, column) in columns.iter().enumerate() {
+                let (name, ty) = (&column.name, &column.ty);
                 let slot = names.len();
                 names.push(name.clone());
                 identities.push(crate::ColumnIdentity::qualified(side, name));
@@ -137,7 +138,13 @@ impl RuleConditionBinding {
                 internal.push((relation.column(attribute), slot, Some(ty.clone())));
             }
         }
-        let schema = crate::RowSchema::with_identities(names, identities, types);
+        let schema = crate::RowSchema::with_identities(names, identities, types)
+            .with_column_collations(
+                [self.old_relation(), self.new_relation()]
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|_| columns.iter().map(|column| column.collation_oid)),
+            );
         crate::RowSchema::with_physical_internal_aliases(&schema, &internal)
     }
 

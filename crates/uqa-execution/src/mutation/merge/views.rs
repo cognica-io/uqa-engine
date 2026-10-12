@@ -257,7 +257,7 @@ fn selected_clause_action<S: Clone + 'static>(
                         input.ctes,
                         crate::mutation::assignment::TypedAssignmentTarget {
                             target,
-                            ty: input.target.types[position].as_ref(),
+                            ty: input.target.schema.column_type(position),
                             current: Some(&new[position]),
                             final_column_write: crate::mutation::assignment::final_column_write(
                                 assignments,
@@ -352,7 +352,7 @@ fn evaluate_view_assignment<S: Clone + 'static>(
         ctes,
         crate::mutation::assignment::TypedAssignmentTarget {
             target: assignment_target,
-            ty: target.types[position].as_ref(),
+            ty: target.schema.column_type(position),
             current,
             final_column_write,
         },

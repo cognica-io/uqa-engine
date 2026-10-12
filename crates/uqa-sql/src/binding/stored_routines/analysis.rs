@@ -56,7 +56,7 @@ impl CatalogRoutineAnalysisContext<'_> {
         expression: &mut ExpressionPlan,
         binding: &crate::catalog::events::RuleConditionBinding,
         table: &str,
-        columns: &[(String, ColumnType)],
+        columns: &[crate::ast::ColumnDef],
     ) -> Result<(), SQLError> {
         let schema = binding.row_schema(columns);
         self.with_scope_result(|scope| {
