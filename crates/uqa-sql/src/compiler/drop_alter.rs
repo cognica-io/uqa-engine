@@ -751,7 +751,16 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         )));
                     }
                 };
+                let collation = match def_inner {
+                    NodeEnum::ColumnDef(column) => column
+                        .coll_clause
+                        .as_ref()
+                        .map(|clause| super::domains::qualified_name(&clause.collname))
+                        .transpose()?,
+                    _ => None,
+                };
                 AlterTableAction::AlterColumnType {
+                    collation,
                     name: cmd.name.clone(),
                     ty,
                     using,

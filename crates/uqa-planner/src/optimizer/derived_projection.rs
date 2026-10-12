@@ -74,6 +74,7 @@ pub(super) fn prune(block: &mut QueryBlockPlan, aggregates: &dyn AggregateClassi
             replacements.push((
                 index,
                 ScalarExpr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: Value::Null,
                     ty: ty.catalog_name(),

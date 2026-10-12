@@ -85,6 +85,7 @@ fn column_types_charge_domain_names_and_every_boxed_base() {
     let name = spare_text("domain", 1027);
     let expected = schema.capacity() + name.capacity() + 2 * size_of::<ColumnType>();
     let ty = ColumnType::Domain {
+        collation_oid: None,
         schema,
         name,
         oid: 42,
@@ -343,6 +344,7 @@ fn composite_field_metadata_retains_its_complete_result_type_and_releases_on_fai
     let payload =
         size_of::<crate::ast::CompositeFieldBinding>() + name.capacity() + changed_name.capacity();
     binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+        collation_oid: None,
         type_oid: 20001,
         number: 2,
         result_type: ColumnType::Named(name),

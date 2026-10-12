@@ -130,7 +130,10 @@ pub use transitions::{transition_capture_required, TransitionTables};
 
 mod row_triggers;
 mod rows;
-use rows::{trigger_column_types, trigger_document, trigger_record, TriggerVariableResolver};
+use rows::{
+    trigger_column_metadata, trigger_document, trigger_record, TriggerColumnMetadata,
+    TriggerVariableResolver,
+};
 
 fn operation_name(event: TriggerEvent) -> &'static str {
     match event {
@@ -154,12 +157,15 @@ fn trigger_condition_matches(
     condition: Option<&uqa_sql::ast::Expr>,
     old: &Value,
     new: &Value,
-    types: &BTreeMap<String, String>,
+    columns: &BTreeMap<String, TriggerColumnMetadata>,
 ) -> Result<bool> {
     let Some(condition) = condition else {
         return Ok(true);
     };
-    let condition = bind_expr(condition, &mut TriggerVariableResolver { old, new, types })?;
+    let condition = bind_expr(
+        condition,
+        &mut TriggerVariableResolver { old, new, columns },
+    )?;
     Ok(uqa_sql::expr::truthy(
         &context.expressions.evaluate(&condition)?,
     ))
@@ -428,7 +434,7 @@ pub fn fire_before_row_triggers(
     {
         return Ok(original.cloned());
     }
-    let types = trigger_column_types(context, table)?;
+    let columns = trigger_column_metadata(context.catalog.trigger_relation_definitions(table)?);
     let old = trigger_record(context, table, doc_id, old_document, false)?;
     let mut new = trigger_record(context, table, doc_id, new_document, true)?;
     let mut invoked = false;
@@ -440,7 +446,7 @@ pub fn fire_before_row_triggers(
                 trigger.definition.when.as_ref(),
                 &old,
                 &new,
-                &types,
+                &columns,
             )?
         {
             continue;
@@ -618,7 +624,7 @@ impl AfterRowTriggerEvent {
         {
             return Ok(Self::foreign_key_checks(table, event, foreign_key_checks));
         }
-        let types = trigger_column_types(context, table)?;
+        let columns = trigger_column_metadata(context.catalog.trigger_relation_definitions(table)?);
         let old = trigger_record(context, table, old_doc_id, old_document, false)?;
         let new = trigger_record(context, table, new_doc_id, new_document, false)?;
         let mut matching = Vec::new();
@@ -629,7 +635,7 @@ impl AfterRowTriggerEvent {
                     trigger.definition.when.as_ref(),
                     &old,
                     &new,
-                    &types,
+                    &columns,
                 )?
             {
                 matching.push(trigger.clone());

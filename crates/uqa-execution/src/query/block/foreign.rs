@@ -41,18 +41,8 @@ pub fn run_single_foreign_select_output<'a, S: Clone + Send + Sync + 'static>(
         .foreign_tables
         .scan_foreign_source(table, &predicates)
         .map_err(SQLError::Unsupported)?;
-    let typed_columns = foreign_table
-        .columns
-        .iter()
-        .map(|column| (column.name.clone(), column.ty.clone()))
-        .collect::<Vec<_>>();
-    let source_columns = typed_columns
-        .iter()
-        .map(|(column, _)| column.clone())
-        .collect();
-    let source_types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
     let source_schema =
-        crate::RowSchema::with_qualified_types(qualifier, source_columns, source_types);
+        crate::RowSchema::with_column_definitions(Some(qualifier), &foreign_table.columns);
     let source: Box<dyn crate::PhysicalOperator + '_> =
         Box::new(crate::RowIteratorScan::with_row_schema(
             source_schema,

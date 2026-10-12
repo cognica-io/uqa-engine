@@ -25,6 +25,7 @@ impl RowSchema {
 
     /// Append freshly computed values with static SQL output types.
     pub fn append_typed(input: &Self, names: &[(String, Option<ColumnType>)]) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let mut columns = input.columns().to_vec();
         let mut identities = input.identities().to_vec();
         let mut types = input.column_types().to_vec();
@@ -37,6 +38,7 @@ impl RowSchema {
                 slots[position] = slot;
                 identities[position] = ColumnIdentity::unqualified(name);
                 types[position].clone_from(ty);
+                collations.column(position, None, ty.as_ref());
                 wildcard_hidden.remove(&position);
             } else {
                 columns.push(name.clone());
@@ -52,6 +54,7 @@ impl RowSchema {
             slots,
             base + names.len(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -77,6 +80,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width() + types.len(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -97,10 +101,12 @@ impl RowSchema {
         input: &Self,
         columns: &[(crate::ast::InternalColumnRef, Option<ColumnType>)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let base = input.physical_width();
         let mut internal = input.index.executor_attributes.clone();
         let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (offset, (column, ty)) in columns.iter().enumerate() {
+            collations.internal(*column, None, ty.as_ref());
             internal.insert(*column, base + offset);
             internal_types.insert(*column, ty.clone());
         }
@@ -111,6 +117,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             base + columns.len(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
@@ -133,6 +140,7 @@ impl RowSchema {
         right: &Self,
         extra_columns: impl IntoIterator<Item = String>,
     ) -> Self {
+        let collations = super::Collations::joined(left, right);
         let mut columns = left.columns().to_vec();
         let mut identities = left.identities().to_vec();
         let mut types = left.column_types().to_vec();
@@ -216,6 +224,7 @@ impl RowSchema {
             slots,
             left.physical_width() + right.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: Self::joined_record_fields(left, right, right_base),
                 aliases,
                 alias_types,

@@ -253,6 +253,7 @@ fn column_bounds_skip_unrelated_views_and_unrequested_mutation_analysis() {
                 kind: StoredViewKind::View,
                 materialized_rows: Vec::new(),
                 materialized_column_types: Vec::new(),
+                materialized_column_collations: None,
                 populated: true,
                 catalog_oids: Some(uqa_sql::catalog::relation_oids::RelationCatalogOids {
                     relation: 100_000,

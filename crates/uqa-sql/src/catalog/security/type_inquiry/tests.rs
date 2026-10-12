@@ -89,6 +89,7 @@ fn usage_is_governed_by_the_array_element_or_the_domain_itself() {
         "an array defers to its element type"
     );
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "good_mood".into(),
         oid: 30_000,

@@ -398,7 +398,8 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => collect_pushdown_outer_columns(inner, output),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => collect_pushdown_outer_columns(inner, output),
         ScalarExpr::Between { expr, low, high } => {
             collect_pushdown_outer_columns(expr, output)
                 && collect_pushdown_outer_columns(low, output)
@@ -806,6 +807,15 @@ pub fn rewrite_output_filter(
                 Some(branch) => Some(Box::new(recur(branch, used)?)),
                 None => None,
             },
+        },
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => ScalarExpr::Collated {
+            expr: Box::new(recur(expr, used)?),
+            ty: ty.clone(),
+            collation: *collation,
         },
         ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
             implicit: *implicit,

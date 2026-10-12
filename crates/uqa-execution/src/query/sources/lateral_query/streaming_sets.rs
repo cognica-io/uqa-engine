@@ -106,11 +106,7 @@ pub(super) fn try_stream_union<S: Clone + Send + Sync + 'static>(
     Ok(Some(QueryOutput {
         columns: schema.columns().to_vec(),
         column_types: schema.column_types().to_vec(),
-        internal_columns: schema.columns().to_vec(),
-        internal_types: schema.column_types().to_vec(),
-        rows: QueryRows::Rows {
-            named: Vec::new(),
-            positional: None,
-        },
+        internal_schema: schema,
+        rows: QueryRows::Rows(Vec::new()),
     }))
 }

@@ -11,6 +11,11 @@ use crate::ast::{ColumnDef, ColumnType, InternalColumnRef};
 
 /// Borrowed schema operations used by scalar type propagation and binding. Physical schemas retain their complete alias, ambiguity, open-column and executor-attribute behavior; declared column slices supply an unqualified positional namespace without allocating another schema generation.
 pub trait ScalarTypeSchema {
+    /// Reuse an already analyzed expression occurrence in this scope. `Some(None)` preserves an observed unknown type; `None` asks the caller to infer the expression normally. Borrowed observations must not outlive their original expressions or parameter environment.
+    fn observed_expression_type(&self, _: &crate::ScalarExpr) -> Option<Option<&ColumnType>> {
+        None
+    }
+
     fn has_unqualified_column(&self, name: &str) -> bool;
     fn column_is_ambiguous(&self, name: &str) -> bool;
     fn type_of(&self, name: &str) -> Option<&ColumnType>;
@@ -22,11 +27,42 @@ pub trait ScalarTypeSchema {
     fn qualified_type(&self, qualifier: &str, name: &str) -> Option<&ColumnType>;
     fn columns_are_open(&self, qualifier: Option<&str>) -> bool;
 
+    fn column_collation(&self, position: usize) -> Option<u32> {
+        self.column_type(position).map(default_collation)
+    }
+    fn collation_of(&self, name: &str) -> Option<u32> {
+        self.type_of(name).map(default_collation)
+    }
+    fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
+        self.qualified_type(qualifier, name).map(default_collation)
+    }
+    fn internal_collation(&self, column: InternalColumnRef) -> Option<u32> {
+        self.internal_type(column).map(default_collation)
+    }
+
     /// Preserve the physical outer-row interface used by existing custom scalar-subquery resolvers. Declared column views have no query arena or physical outer row.
     fn physical_schema(&self) -> Option<&RowSchema>;
 }
 
+fn default_collation(ty: &ColumnType) -> u32 {
+    u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(ty))
+        .expect("type collation identity")
+}
+
 impl ScalarTypeSchema for RowSchema {
+    fn column_collation(&self, position: usize) -> Option<u32> {
+        Self::column_collation(self, position)
+    }
+    fn collation_of(&self, name: &str) -> Option<u32> {
+        Self::collation_of(self, name)
+    }
+    fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
+        Self::qualified_collation(self, qualifier, name)
+    }
+    fn internal_collation(&self, column: InternalColumnRef) -> Option<u32> {
+        Self::internal_collation(self, column)
+    }
+
     fn has_unqualified_column(&self, name: &str) -> bool {
         Self::has_unqualified_column(self, name)
     }
@@ -72,9 +108,35 @@ impl<'a> ColumnTypeSchema<'a> {
     pub fn new(columns: &'a [ColumnDef]) -> Self {
         Self { columns }
     }
+
+    /// Original declarations, including stable attribute numbers and selected collations, borrowed from the same catalog generation as type lookup.
+    pub fn columns(&self) -> &'a [ColumnDef] {
+        self.columns
+    }
 }
 
 impl ScalarTypeSchema for ColumnTypeSchema<'_> {
+    fn column_collation(&self, position: usize) -> Option<u32> {
+        self.columns.get(position).map(|column| {
+            column
+                .collation_oid
+                .unwrap_or_else(|| default_collation(&column.ty))
+        })
+    }
+    fn collation_of(&self, name: &str) -> Option<u32> {
+        let mut matching = self
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| column.name == name);
+        let (position, _) = matching.next()?;
+        matching
+            .next()
+            .is_none()
+            .then(|| self.column_collation(position))
+            .flatten()
+    }
+
     fn has_unqualified_column(&self, name: &str) -> bool {
         self.columns.iter().any(|column| column.name == name)
     }

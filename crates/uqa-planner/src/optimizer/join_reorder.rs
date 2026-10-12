@@ -573,7 +573,8 @@ fn collect_resolved_aliases(
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => recur(inner),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => recur(inner),
         ScalarExpr::Between { expr, low, high } => recur(expr) && recur(low) && recur(high),
         ScalarExpr::InList { expr, list, .. } => recur(expr) && list.iter().all(recur),
         ScalarExpr::Case {
@@ -855,7 +856,8 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => collect_scalar_qualifiers(inner, output),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => collect_scalar_qualifiers(inner, output),
         ScalarExpr::Between { expr, low, high } => {
             collect_scalar_qualifiers(expr, output);
             collect_scalar_qualifiers(low, output);

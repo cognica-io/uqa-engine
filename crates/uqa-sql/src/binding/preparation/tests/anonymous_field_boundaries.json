@@ -1,0 +1,101 @@
+[
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT * FROM (SELECT ROW(lower(c)) AS r FROM t) x) y",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f2 FROM (SELECT x.* FROM (SELECT ROW(lower(c),p) AS r FROM t) x) y",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "WITH q(a) AS (SELECT ROW(lower(c)) FROM t) SELECT (a).f1 FROM q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (q.r).f1 FROM (SELECT ROW(lower(c)) AS r FROM t) q CROSS JOIN (SELECT 1 AS n) z",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r).f1 FROM (SELECT ROW(c) AS r FROM t UNION ALL SELECT ROW(n) FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce((ROW(c COLLATE \"POSIX\")).f1,c) FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (v).x FROM (SELECT q AS v FROM (SELECT lower(c) AS x FROM t) q) z",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "WITH d AS (UPDATE t SET n=n RETURNING ROW(lower(c)) AS r) SELECT (r).f1 FROM d",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "WITH d AS (UPDATE t SET n=n RETURNING ROW(c,p) AS r) SELECT (r).f2 FROM d",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "WITH d AS (UPDATE t SET n=n RETURNING ROW(c) AS r), q AS (SELECT * FROM d) SELECT (r).f1 FROM q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r::record).f1 FROM (SELECT ROW(c) AS r FROM t) q",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (r::record).f1 FROM (SELECT CASE WHEN n=1 THEN ROW(c) ELSE ROW(c) END AS r FROM t) q",
+    "error": {
+      "sqlstate": "42809",
+      "message": "record type has not been registered",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT ((ROW(lower(c))::record)::record).f1 FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT (ROW(1+true)::integer).f1",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT (ROW(c)::integer).f1 FROM t",
+    "error": {
+      "sqlstate": "42846",
+      "message": "cannot cast type record to integer",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

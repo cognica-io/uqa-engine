@@ -158,6 +158,7 @@ fn rule_row_source(
 ) -> Result<RuleRowSource, SQLError> {
     let relation = InternalRelationId::allocate();
     let mut internal_column_types = Vec::with_capacity(columns.len() * 2 + 3);
+    let mut internal_column_collations = Vec::with_capacity(columns.len() * 2 + 3);
     let mut old_columns = BTreeMap::new();
     let mut new_columns = BTreeMap::new();
     for (index, (column, metadata)) in columns.iter().enumerate() {
@@ -167,6 +168,7 @@ fn rule_row_source(
         new_columns.insert(column.clone(), new);
         internal_column_types.push(Some(metadata.ty.clone()));
         internal_column_types.push(Some(metadata.ty.clone()));
+        internal_column_collations.extend([metadata.collation_oid; 2]);
     }
     let old_row = relation.column(internal_column_types.len());
     internal_column_types.push(Some(ColumnType::Record));
@@ -174,6 +176,7 @@ fn rule_row_source(
     internal_column_types.push(Some(ColumnType::Record));
     let source_index = relation.column(internal_column_types.len());
     internal_column_types.push(Some(ColumnType::BigInteger));
+    internal_column_collations.extend([None; 3]);
     let values = matching_rows
         .iter()
         .map(|row_index| {
@@ -183,16 +186,8 @@ fn rule_row_source(
             let resolver = runtime_rule_resolver(row, columns);
             let mut values = Vec::with_capacity(internal_column_types.len());
             for column in columns.keys() {
-                values.push(ResolvedVariable::into_expression(resolver.record_field(
-                    row.old_row(),
-                    row.old_doc_id(),
-                    column,
-                )?));
-                values.push(ResolvedVariable::into_expression(resolver.record_field(
-                    row.new_row(),
-                    row.new_doc_id(),
-                    column,
-                )?));
+                values.push(resolver.field_expression(row.old_row(), row.old_doc_id(), column)?);
+                values.push(resolver.field_expression(row.new_row(), row.new_doc_id(), column)?);
             }
             values.push(ResolvedVariable::into_expression(
                 resolver.record(row.old_row(), row.old_doc_id())?,
@@ -214,6 +209,7 @@ fn rule_row_source(
             column_aliases: Vec::new(),
             internal_relation: Some(relation),
             internal_column_types,
+            internal_column_collations,
         },
         relation,
         old_columns,

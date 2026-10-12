@@ -13,16 +13,7 @@ use crate::{
 };
 
 pub(super) fn input_fields(expression: &ScalarExpr, schema: &RowSchema) -> Option<RecordFields> {
-    let slot = match expression {
-        ScalarExpr::Column(name) => schema.column_slot(name),
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            schema.qualified_slot(qualifier, column)
-        }
-        ScalarExpr::InternalColumn(column) => schema.internal_slot(*column),
-        ScalarExpr::Position(position) => schema.slot(*position),
-        _ => None,
-    }?;
-    schema.physical_record_fields(slot).cloned()
+    schema.input_record_metadata(expression)?.types.clone()
 }
 
 pub(super) fn common_fields<'a>(
@@ -35,22 +26,22 @@ pub(super) fn common_fields<'a>(
         .then(|| first.clone())
 }
 
-pub(super) fn star_fields(
+pub(super) fn star_metadata(
     expression: &ScalarExpr,
     schema: &RowSchema,
-) -> Option<Vec<Option<RecordFields>>> {
+) -> Option<Vec<Option<crate::schema::RecordMetadata>>> {
     match expression {
         ScalarExpr::Star => Some(
             (0..schema.len())
                 .filter(|index| schema.wildcard_position_visible(*index))
-                .map(|index| schema.record_fields(index).cloned())
+                .map(|index| schema.record_metadata(index).cloned())
                 .collect(),
         ),
         ScalarExpr::QualifiedStar(qualifier) => Some(
             schema
                 .qualified_star_layout(qualifier)
                 .iter()
-                .map(|(_, slot, _)| schema.physical_record_fields(*slot).cloned())
+                .map(|(_, slot, _)| schema.physical_record_metadata(*slot).cloned())
                 .collect(),
         ),
         _ => None,

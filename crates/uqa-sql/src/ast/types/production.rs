@@ -31,6 +31,7 @@ impl ColumnType {
         name: &str,
         oid: u32,
         array_oid: Option<u32>,
+        collation_oid: Option<u32>,
         base: &Self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
@@ -51,6 +52,7 @@ impl ColumnType {
                 name,
                 oid,
                 array_oid,
+                collation_oid,
                 base: Box::new(base),
             },
             memory,
@@ -84,8 +86,17 @@ impl ColumnType {
                 name,
                 oid,
                 array_oid,
+                collation_oid,
                 base,
-            } => Self::domain_with_control(schema, name, *oid, *array_oid, base, control),
+            } => Self::domain_with_control(
+                schema,
+                name,
+                *oid,
+                *array_oid,
+                *collation_oid,
+                base,
+                control,
+            ),
             Self::SmallInteger
             | Self::Integer
             | Self::BigInteger

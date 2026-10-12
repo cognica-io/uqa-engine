@@ -41,6 +41,7 @@ pub(crate) fn retain_computed_integer(
         uqa_sql::expr::IntegerWidth::BigInt => ColumnType::BigInteger,
     };
     ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: Value::Int(value),
         ty: ty.catalog_name(),
@@ -52,6 +53,7 @@ pub(crate) fn retain_computed_integer(
 pub(super) fn literal_value(expression: &ScalarExpr) -> Option<&Value> {
     match expression {
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value),
+        ScalarExpr::Collated { expr, .. } => literal_value(expr),
         _ => None,
     }
 }
@@ -106,8 +108,15 @@ fn is_constant(
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> bool {
+    // Keep an explicit clause's coercibility; folding its operand must not turn the clause into an implicit constant.
+    if uqa_sql::catalog::collations::expression::scalar_clause(expression)
+        .is_ok_and(|clause| clause.is_some())
+    {
+        return false;
+    }
     let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
     match expression {
+        ScalarExpr::Collated { expr, .. } => constant(expr),
         ScalarExpr::Literal(value) => {
             !uqa_sql::expr::composites::literal::contains_records(value)
                 && !uqa_sql::expr::datums::contains_datum(value)
@@ -256,6 +265,7 @@ pub(super) fn fold_authorized_literal(
             if let Some(target) = constant_cast_type(ty, types) {
                 if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
                     return Ok(ScalarExpr::TypedLiteral {
+                        collation_oid: None,
                         composite_source: None,
                         value: Value::Null,
                         ty: ty.clone(),
@@ -327,6 +337,7 @@ pub(super) fn fold_authorized_literal(
     }
     Ok(match ty {
         Some(ty) => ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value,
             ty: ty.catalog_name(),
@@ -387,6 +398,7 @@ fn composite_constant_field(
             };
         let (_, attribute) = descriptor.attribute(name)?;
         resolved = uqa_sql::ast::CompositeFieldBinding {
+            collation_oid: Some(attribute.collation_oid()),
             type_oid: reference.oid,
             number: attribute.number,
             result_type: attribute.ty.clone(),
@@ -426,6 +438,7 @@ fn composite_constant_field(
         return None;
     }
     Some(Ok(ScalarExpr::TypedLiteral {
+        collation_oid: field.collation_oid,
         composite_source: None,
         value,
         ty: field.result_type.catalog_name(),

@@ -308,7 +308,8 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => contains_retrieval(inner),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => contains_retrieval(inner),
         ScalarExpr::Between { expr, low, high } => {
             contains_retrieval(expr) || contains_retrieval(low) || contains_retrieval(high)
         }

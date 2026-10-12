@@ -37,6 +37,7 @@ impl SQLValueCatalog for Catalog {
                 array_oid: 21_159,
             })),
             21_167 => Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "decode_domain".into(),
                 oid,
@@ -65,11 +66,13 @@ impl SQLValueCatalog for Catalog {
                 dropped: Vec::new(),
                 attributes: vec![
                     CompositeAttribute {
+                        collation_oid: None,
                         name: "n".into(),
                         number: 1,
                         ty: ColumnType::Integer,
                     },
                     CompositeAttribute {
+                        collation_oid: None,
                         name: "t".into(),
                         number: 2,
                         ty: ColumnType::Text,

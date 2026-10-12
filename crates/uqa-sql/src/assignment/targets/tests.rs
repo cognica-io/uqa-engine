@@ -69,11 +69,13 @@ impl crate::expr::composites::CompositeTypeCatalog for PairCatalog {
                 relation_oid: 30_001,
                 attributes: vec![
                     crate::expr::composites::CompositeAttribute {
+                        collation_oid: None,
                         name: "x".into(),
                         ty: ColumnType::Integer,
                         number: 1,
                     },
                     crate::expr::composites::CompositeAttribute {
+                        collation_oid: None,
                         name: "tags".into(),
                         ty: ColumnType::Array(Box::new(ColumnType::Text)),
                         number: 2,

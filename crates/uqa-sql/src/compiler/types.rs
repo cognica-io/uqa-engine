@@ -15,9 +15,12 @@ use crate::error::{Result, SQLError};
 use super::tree::extract_string;
 
 mod declarations;
+mod object_names;
 pub(crate) use declarations::compile_retained_type_declaration;
 pub(crate) use declarations::compile_retained_type_reference;
 pub(super) use declarations::preserve_alter_type_declaration;
+pub use object_names::parse_regobject_name;
+pub(crate) use object_names::parse_regobject_name_with_control;
 
 /// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`. Modifier values do not participate in OID lookup; their presence is retained for declaration validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,87 +37,10 @@ pub struct ParsedRegprocedureName {
     pub argument_types: Option<Vec<ParsedRegtypeName>>,
 }
 
-const POSTGRES_IDENTIFIER_MAX_BYTES: usize = 63;
 const POSTGRES_FUNCTION_MAX_ARGUMENTS: usize = 100;
 
 fn scanner_isspace(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
-}
-
-fn truncate_postgres_identifier(mut identifier: String) -> String {
-    if identifier.len() <= POSTGRES_IDENTIFIER_MAX_BYTES {
-        return identifier;
-    }
-    let mut end = POSTGRES_IDENTIFIER_MAX_BYTES;
-    while !identifier.is_char_boundary(end) {
-        end -= 1;
-    }
-    identifier.truncate(end);
-    identifier
-}
-
-/// Parse the dotted identifier strings consumed by `PostgreSQL`'s `reg*` input functions. This follows `SplitIdentifierString`: surrounding component whitespace is ignored, quoted components collapse doubled quotes without case folding, unquoted components extend to a dot or whitespace and use ASCII case folding, and every component is clipped to `PostgreSQL`'s 63-byte identifier limit.
-#[must_use]
-pub fn parse_regobject_name(input: &str) -> Option<Vec<String>> {
-    let bytes = input.as_bytes();
-    let mut offset = 0usize;
-    while bytes.get(offset).is_some_and(|byte| scanner_isspace(*byte)) {
-        offset += 1;
-    }
-    if offset == bytes.len() {
-        return None;
-    }
-
-    let mut names = Vec::new();
-    loop {
-        let component = if bytes[offset] == b'"' {
-            offset += 1;
-            let mut quoted = String::new();
-            loop {
-                let relative = bytes[offset..].iter().position(|byte| *byte == b'"')?;
-                let quote = offset + relative;
-                quoted.push_str(&input[offset..quote]);
-                offset = quote + 1;
-                if bytes.get(offset) == Some(&b'"') {
-                    quoted.push('"');
-                    offset += 1;
-                    continue;
-                }
-                break;
-            }
-            quoted
-        } else {
-            let start = offset;
-            while bytes
-                .get(offset)
-                .is_some_and(|byte| *byte != b'.' && !scanner_isspace(*byte))
-            {
-                offset += 1;
-            }
-            if offset == start {
-                return None;
-            }
-            input[start..offset].to_ascii_lowercase()
-        };
-        names.push(truncate_postgres_identifier(component));
-
-        while bytes.get(offset).is_some_and(|byte| scanner_isspace(*byte)) {
-            offset += 1;
-        }
-        match bytes.get(offset) {
-            None => return Some(names),
-            Some(b'.') => {
-                offset += 1;
-                while bytes.get(offset).is_some_and(|byte| scanner_isspace(*byte)) {
-                    offset += 1;
-                }
-                if offset == bytes.len() {
-                    return None;
-                }
-            }
-            Some(_) => return None,
-        }
-    }
 }
 
 /// Parse exactly one `PostgreSQL` type-name string without accepting adjacent SQL expressions. `None` is the soft-failure shape used for inputs such as an empty string or `SETOF integer`; lexical and type-name syntax errors are retained for the caller.

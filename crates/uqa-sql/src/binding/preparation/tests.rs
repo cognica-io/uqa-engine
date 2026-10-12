@@ -10,9 +10,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod array_transforms;
 mod body_inputs;
+mod column_collations;
 mod comparison_capabilities;
 mod defaults;
 mod dependencies;
+mod domain_collations;
+mod field_collations;
+mod literal_collations;
 mod operator_joins;
 mod ordered_calls;
 mod stored_inputs;
@@ -260,6 +264,7 @@ fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity()
         (ColumnType::OidVector, "1 2"),
     ] {
         let domain = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "input_domain".into(),
             oid: 16385,

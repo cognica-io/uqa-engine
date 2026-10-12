@@ -293,6 +293,7 @@ fn declared_container_domains_and_resource_errors_keep_original_control() {
     ] {
         assert_eq!(IndexDomain::from_column_type(&ty), Some(domain));
         let alias = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "container_value".into(),
             oid: 42_002,

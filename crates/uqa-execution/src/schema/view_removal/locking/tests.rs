@@ -45,6 +45,7 @@ fn view(id: u8, source: &str) -> StoredView {
             kind: StoredViewKind::View,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }

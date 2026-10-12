@@ -201,6 +201,7 @@ fn retained_field_type_errors_follow_record_nullness_and_release_argument_memory
     let control = ProductionControl::new(&budget, &token, &token);
     let mut binding = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
     binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+        collation_oid: None,
         type_oid: 20_001,
         number: 2,
         result_type: crate::ColumnType::Text,

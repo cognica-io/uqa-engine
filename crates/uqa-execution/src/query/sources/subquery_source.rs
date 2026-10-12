@@ -56,7 +56,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                 ctes,
                 &local_cte_names,
             )?;
-            let source_columns = output.internal_columns.clone();
+            let source_columns = output.internal_schema.columns().to_vec();
             let operator = output.into_operator();
             let qualifier = alias.as_deref().unwrap_or_default();
             let operator = qualify_source_operator_with_columns(

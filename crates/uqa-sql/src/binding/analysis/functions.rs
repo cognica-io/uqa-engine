@@ -9,6 +9,7 @@
 use super::super::{ColumnType, SQLError, SQLParam, ScalarExpr};
 use crate::ast::FunctionBinding;
 use crate::routines::RoutineResolution;
+use crate::schema::ScalarTypeSchema;
 use crate::type_resolution::builtin_function_type_with_resolver;
 use crate::{FunctionTypeResolver, RowSchema, ScalarOrder};
 use std::collections::BTreeSet;
@@ -128,7 +129,7 @@ pub(super) struct ScalarFunctionValidation<'a> {
     pub(super) args: &'a [ScalarExpr],
     pub(super) order_by: &'a [ScalarOrder],
     pub(super) expression: &'a ScalarExpr,
-    pub(super) schema: &'a RowSchema,
+    pub(super) schema: &'a dyn ScalarTypeSchema,
     pub(super) params: &'a [SQLParam],
     pub(super) resolver: &'a dyn FunctionTypeResolver,
 }
@@ -295,7 +296,7 @@ fn validate_fixed_builtin(
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, SQLError> {
@@ -318,7 +319,7 @@ fn validate_fixed_builtin(
 fn sequence_function_signature_matches(
     name: &str,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<bool>, SQLError> {
@@ -350,7 +351,7 @@ fn sequence_function_signature_matches(
 fn validate_uuid_extraction_function(
     name: &str,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
@@ -398,7 +399,7 @@ pub(in crate::binding) fn validate_window_function(
     routines: &dyn RoutineResolution,
     name: &str,
     (args, filtered, modifiers): (&[ScalarExpr], bool, crate::ast::WindowCallModifiers),
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
@@ -481,7 +482,7 @@ fn window_call_kind(
     routines: &dyn RoutineResolution,
     name: &str,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<WindowCallKind>, SQLError> {
@@ -594,7 +595,7 @@ fn resolve_sql_function(
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<std::sync::Arc<crate::routines::SQLUserFunction>>, SQLError> {
@@ -619,6 +620,11 @@ fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
 }
 
 fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
+    if crate::expr::variadic_any::minimum_arguments(name)
+        .is_some_and(|minimum| argument_count < minimum)
+    {
+        return false;
+    }
     if crate::expr::builtin_scalar_function_strictness(name, argument_count).is_some() {
         return true;
     }
@@ -658,7 +664,7 @@ fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
 fn undefined_function(
     name: &str,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> SQLError {

@@ -26,14 +26,17 @@ impl CompositeTypeCatalog for Catalog {
     fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
         assert_eq!(oid, 20_001);
         let mut attributes = vec![CompositeAttribute {
+            collation_oid: None,
             name: "a".into(),
             ty: ColumnType::Integer,
             number: 1,
         }];
         if self.0.get() {
             attributes.push(CompositeAttribute {
+                collation_oid: None,
                 name: "b".into(),
                 ty: ColumnType::Domain {
+                    collation_oid: None,
                     schema: "public".into(),
                     name: "required".into(),
                     oid: 20_010,

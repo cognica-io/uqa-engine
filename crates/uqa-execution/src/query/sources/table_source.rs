@@ -218,12 +218,11 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         name,
                         view.populated,
                     )?;
-                    let columns = view.definition.output_columns.unwrap_or_default();
-                    let types = view.definition.materialized_column_types;
+                    let schema = view.definition.materialized_schema()?;
+                    let columns = schema.columns().to_vec();
                     let rows = view.definition.materialized_rows;
-                    let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
-                        crate::TableScan::from_typed_rows(columns.clone(), types, rows),
-                    );
+                    let scan: Box<dyn PhysicalOperator + 'a> =
+                        Box::new(crate::TableScan::from_rows_with_schema(schema, rows));
                     let aliases = table_source_aliases(&columns, &[], column_aliases);
                     let operator = qualify_source_operator_with_columns(
                         scan, &columns, &qualifier, prune, &aliases, false,
@@ -320,7 +319,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &local_cte_names,
                     )?
                 };
-                let columns = output.internal_columns.clone();
+                let columns = output.internal_schema.columns().to_vec();
                 let shared = query_output_shared(output, "view")?;
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(crate::SharedSpillScan::new(shared));
@@ -410,20 +409,11 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .foreign_tables
                     .scan_foreign_source(&foreign_name, &[])
                     .map_err(SQLError::Unsupported)?;
-                let typed_columns = foreign_table
-                    .columns
-                    .into_iter()
-                    .map(|column| (column.name, column.ty))
-                    .collect::<Vec<_>>();
-                let columns = typed_columns
-                    .iter()
-                    .map(|(column, _)| column.clone())
-                    .collect::<Vec<_>>();
-                let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
+                let schema =
+                    crate::RowSchema::with_column_definitions(None, &foreign_table.columns);
                 let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(crate::RowIteratorScan::with_types(
-                        columns.clone(),
-                        types,
+                    Box::new(crate::RowIteratorScan::with_row_schema(
+                        schema,
                         Box::new(rows.map(|row| {
                             row.map_err(SQLError::Unsupported)
                                 .map_err(crate::ExecError::from)

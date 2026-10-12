@@ -638,7 +638,8 @@ fn collect_expr_prune_columns(
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
             collect_expr_prune_columns(inner, scope, prune, valid);
         }
         ScalarExpr::Between { expr, low, high } => {

@@ -1,0 +1,725 @@
+[
+  {
+    "sql": "SELECT $1 COLLATE \"C\"",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "text"
+    ],
+    "error": null,
+    "result_oids": [
+      25
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" = 1",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ($1 COLLATE \"C\")::integer",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT COALESCE($1 COLLATE \"C\", 1)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        "1"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" IS NULL",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    },
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\")",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    },
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" = 'x'",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "text"
+    ],
+    "error": null,
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\" = 1",
+    "declared": [
+      "integer"
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    },
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE missing = 1",
+    "declared": [
+      "integer"
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    },
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE missing = 1",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"missing\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT $1 COLLATE \"C\"",
+    "declared": [
+      "text"
+    ],
+    "parameter_types": [
+      "text"
+    ],
+    "error": null,
+    "result_oids": [
+      25
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ($1 COLLATE \"C\") = 1, $1",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      16,
+      23
+    ],
+    "rows": [
+      [
+        null,
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT COALESCE($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT GREATEST($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT NULLIF($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT abs($1 COLLATE \"C\")",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "double precision"
+    ],
+    "error": null,
+    "result_oids": [
+      701
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT round($1 COLLATE \"C\", $2::integer)",
+    "declared": [
+      null,
+      null
+    ],
+    "parameter_types": [
+      "numeric",
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      1700
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT mod($1 COLLATE \"C\", $1::integer)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT COALESCE($1 COLLATE \"C\", $1 COLLATE \"POSIX\", 1)",
+    "declared": [
+      null
+    ],
+    "parameter_types": [
+      "integer"
+    ],
+    "error": null,
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        "1"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT COALESCE(($1 COLLATE \"C\")::integer, $1 COLLATE \"C\")",
+    "declared": [
+      null
+    ],
+    "parameter_types": null,
+    "error": {
+      "sqlstate": "42804",
+      "message": "collations are not supported by type integer",
+      "detail": null,
+      "hint": null
+    },
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ($1 COLLATE \"C\") COLLATE \"POSIX\"",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "text"
+    ],
+    "result_oids": [
+      25
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT (($1 COLLATE \"C\") COLLATE \"POSIX\")::integer",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer"
+    ],
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT COALESCE(($1 COLLATE \"C\") COLLATE \"POSIX\", 'x')",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "text"
+    ],
+    "result_oids": [
+      25
+    ],
+    "rows": [
+      [
+        "x"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT 'now' COLLATE \"C\" = NULL::timestamp",
+    "declared": [],
+    "error": null,
+    "parameter_types": [],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT COALESCE('now' COLLATE \"C\", NULL::timestamp)",
+    "declared": [],
+    "error": null,
+    "parameter_types": [],
+    "result_oids": [
+      1114
+    ],
+    "rows": [
+      [
+        "2026-10-12 01:46:45.158662"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ('now' COLLATE \"C\")::timestamp",
+    "declared": [],
+    "error": null,
+    "parameter_types": [],
+    "result_oids": [
+      1114
+    ],
+    "rows": [
+      [
+        "2026-10-12 01:46:45.158662"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT (('x' COLLATE \"C\") COLLATE \"POSIX\")::text",
+    "declared": [],
+    "error": null,
+    "parameter_types": [],
+    "result_oids": [
+      25
+    ],
+    "rows": [
+      [
+        "x"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT 'now' COLLATE \"C\" IN (t, d) FROM (VALUES (NULL::timestamp, NULL::date)) v(t,d)",
+    "declared": [],
+    "error": null,
+    "parameter_types": [],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT '1' COLLATE \"C\" IN (n, i) FROM (VALUES (NULL::numeric, NULL::integer)) v(n,i)",
+    "declared": [],
+    "error": null,
+    "parameter_types": [],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\") = ROW(1)",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer"
+    ],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT CASE WHEN true THEN $1 COLLATE \"C\" ELSE 1 END",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer"
+    ],
+    "result_oids": [
+      23
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ARRAY[$1 COLLATE \"C\", 1]",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer"
+    ],
+    "result_oids": [
+      1007
+    ],
+    "rows": [
+      [
+        "{NULL,1}"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1) = ROW(1)",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer"
+    ],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW(ROW($1 COLLATE \"C\")) = ROW(ROW(1))",
+    "declared": [
+      null
+    ],
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    },
+    "parameter_types": null,
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\")::record = ROW(1)",
+    "declared": [
+      null
+    ],
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    },
+    "parameter_types": null,
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\") = ROW(1)::record",
+    "declared": [
+      null
+    ],
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    },
+    "parameter_types": null,
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT NULLIF(ROW($1 COLLATE \"C\"), ROW(1))",
+    "declared": [
+      null
+    ],
+    "error": {
+      "sqlstate": "42P18",
+      "message": "could not determine data type of parameter $1",
+      "detail": null,
+      "hint": null
+    },
+    "parameter_types": null,
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\") IS DISTINCT FROM ROW(1)",
+    "declared": [
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer"
+    ],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        "t"
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\", $2) < ROW(1, 'x')",
+    "declared": [
+      null,
+      null
+    ],
+    "error": null,
+    "parameter_types": [
+      "integer",
+      "text"
+    ],
+    "result_oids": [
+      16
+    ],
+    "rows": [
+      [
+        null
+      ]
+    ],
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW($1 COLLATE \"C\") = ROW(1, 2)",
+    "declared": [
+      null
+    ],
+    "error": {
+      "sqlstate": "42601",
+      "message": "unequal number of entries in row expressions",
+      "detail": null,
+      "hint": null
+    },
+    "parameter_types": null,
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  },
+  {
+    "sql": "SELECT ROW() = ROW()",
+    "declared": [],
+    "error": {
+      "sqlstate": "0A000",
+      "message": "cannot compare rows of zero length",
+      "detail": null,
+      "hint": null
+    },
+    "parameter_types": null,
+    "result_oids": null,
+    "rows": null,
+    "clock": 1791769605158662
+  }
+]

@@ -149,6 +149,7 @@ impl TypeRewrites {
                 &relation.qualifier,
                 name,
                 target,
+                prepared.collation_oid,
             )?;
             relation.transforms.push(ColumnTransform {
                 name: name.to_string(),

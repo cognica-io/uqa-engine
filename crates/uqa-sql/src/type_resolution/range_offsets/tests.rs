@@ -16,6 +16,7 @@ fn numeric() -> ColumnType {
 
 fn domain(base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "d".into(),
         oid: 16_384,

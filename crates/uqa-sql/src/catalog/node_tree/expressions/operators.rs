@@ -222,7 +222,6 @@ fn scalar_array_node(
     use_or: bool,
 ) -> Result<TypedNode, SQLError> {
     let operator = binary_operator_catalog_entry(op, [&lhs.ty, element])?;
-    let collation = pg_type_collation_oid(&lhs.ty).max(pg_type_collation_oid(element));
     Ok(TypedNode {
         node: Node::new(
             "SCALARARRAYOPEXPR",
@@ -232,7 +231,7 @@ fn scalar_array_node(
                 ("hashfuncid", 0.into()),
                 ("negfuncid", 0.into()),
                 ("useOr", use_or.into()),
-                ("inputcollid", collation.into()),
+                ("inputcollid", 0.into()),
                 ("args", Field::List(vec![lhs.node.into(), rhs.node.into()])),
                 ("location", (-1).into()),
             ],

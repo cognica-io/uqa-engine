@@ -81,15 +81,24 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
     Ok(routines_changed || values_changed)
 }
 
+fn mismatch(what: &str) -> SQLError {
+    SQLError::Internal(format!(
+        "stored catalog binding does not match the {what} of its syntax"
+    ))
+}
+
 fn apply_value_site<'a>(
     node: &mut Expr,
     sites: &mut std::iter::Peekable<impl Iterator<Item = &'a ValueSite>>,
 ) -> Result<bool, SQLError> {
-    let mismatch = |what: &str| {
-        SQLError::Internal(format!(
-            "stored catalog binding does not match the {what} of its syntax"
-        ))
-    };
+    if let Some(ValueSite::DiscardCollation) = sites.peek() {
+        sites.next();
+        if !crate::catalog::collations::expression::discard_ast_clause(node)? {
+            return Err(mismatch("discarded collation"));
+        }
+        apply_value_site(node, sites)?;
+        return Ok(true);
+    }
     if let Some(ValueSite::RowDistinct) = sites.peek() {
         sites.next();
         crate::type_resolution::row_distinct::rewrite_ast(node)?;
@@ -154,6 +163,7 @@ fn apply_value_site<'a>(
             Some(ValueSite::Literal) => Ok(false),
             Some(ValueSite::Constant { value, ty }) => {
                 *node = Expr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: value.clone(),
                     ty: ty.clone(),
@@ -195,10 +205,19 @@ fn bind_composite_constructor(
         return Ok(changed);
     }
     let original = std::mem::replace(node, Expr::Literal(Value::Null));
-    let row = match original {
+    let mut row = match original {
         Expr::Cast { expr, .. } => *expr,
         row => row,
     };
+    while let Expr::Cast { ref ty, .. } = row {
+        if crate::ColumnType::from_sql_name(ty).ok() != Some(crate::ColumnType::Record) {
+            break;
+        }
+        let Expr::Cast { expr, .. } = row else {
+            unreachable!()
+        };
+        row = *expr;
+    }
     let Expr::Row(items) = row else {
         return Err(SQLError::Internal(
             "stored catalog binding does not match the composite constructor of its syntax".into(),
@@ -234,6 +253,7 @@ pub fn fold_assigned_stored_literal(
         return Ok(false);
     };
     *expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: base.catalog_name(),

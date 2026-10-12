@@ -49,7 +49,7 @@ pub(crate) fn prepare_routine_body_inputs(
         .collect::<Vec<_>>();
     let mut analysis = Preparation {
         routines,
-        scope: SchemaScope::for_analysis(binding)?,
+        scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::with_input_constants(
             &declared,
             Some(aliases),
@@ -92,7 +92,7 @@ pub(crate) fn analyze_routine_body_argument(
         .collect::<Vec<_>>();
     let mut analysis = Preparation {
         routines,
-        scope: SchemaScope::for_analysis(binding)?,
+        scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::with_input_constants(
             &declared,
             Some(aliases),
@@ -146,7 +146,7 @@ pub(crate) fn prepare_procedure_call(
         Some(crate::prepared::dependencies::PreparedAnalysisDependencies::default());
     let mut analysis = Preparation {
         routines: context.routines,
-        scope,
+        scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(
             &declared,
             Some(context.aliases),
@@ -182,7 +182,11 @@ pub(crate) fn prepare_procedure_call(
     let constants = analysis.parameters.take_input_constants();
     analysis.parameters.finish()?;
     constants.apply(plan)?;
-    let mut dependencies = analysis.scope.prepared_dependencies.unwrap_or_default();
+    let mut dependencies = analysis
+        .scope
+        .prepared_dependencies
+        .take()
+        .unwrap_or_default();
     if let Some(identity) = resolved.function.def.object_id {
         dependencies.routines.insert(identity);
     }

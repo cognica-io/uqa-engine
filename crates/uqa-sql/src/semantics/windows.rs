@@ -30,7 +30,8 @@ pub fn expr_has_window(expr: &ScalarExpr) -> bool {
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => expr_has_window(inner),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => expr_has_window(inner),
         ScalarExpr::Between { expr, low, high } => {
             expr_has_window(expr) || expr_has_window(low) || expr_has_window(high)
         }

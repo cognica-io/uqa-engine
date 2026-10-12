@@ -63,7 +63,14 @@ impl ExpressionContext<'_> {
                 let [lhs, rhs] = args else {
                     return Err(SQLError::Internal("invalid distinct operands".into()));
                 };
-                let mut value = self.binary(BinaryOp::Equal, lhs, rhs)?;
+                if binding
+                    .is_some_and(|binding| binding.dispatch == Some(FunctionDispatch::IsDistinct))
+                {
+                    if let Some(value) = self.row_distinct(lhs, rhs)? {
+                        return Ok(Some(value));
+                    }
+                }
+                let mut value = self.scalar_binary(BinaryOp::Equal, lhs, rhs)?;
                 value.node.kind = "DISTINCTEXPR".into();
                 return Ok(Some(value));
             }
@@ -102,7 +109,7 @@ impl ExpressionContext<'_> {
                 [
                     ("minmaxtype", pg_type_oid(&ty).into()),
                     ("minmaxcollid", pg_type_collation_oid(&ty).into()),
-                    ("inputcollid", pg_type_collation_oid(&ty).into()),
+                    ("inputcollid", 0.into()),
                     ("op", i64::from(name == "least").into()),
                     ("args", Field::List(arguments)),
                     ("location", (-1).into()),
@@ -116,12 +123,12 @@ impl ExpressionContext<'_> {
         let [argument] = args else {
             return Err(SQLError::Internal("invalid outer NULL test".into()));
         };
-        let argument = self.encode(argument, None)?;
+        let (argument, _) = self.uncoerced_input(argument)?;
         Ok(TypedNode {
             node: Node::new(
                 "NULLTEST",
                 [
-                    ("arg", argument.node.into()),
+                    ("arg", argument.into()),
                     ("nulltesttype", i64::from(negated).into()),
                     ("argisrow", false.into()),
                     ("location", (-1).into()),

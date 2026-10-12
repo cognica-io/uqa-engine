@@ -7,6 +7,53 @@
 use super::*;
 
 mod catalog_types;
+mod collations;
+
+#[test]
+fn constant_folding_retains_selected_collation_metadata() {
+    for coerced_conditionals in [false, true] {
+        let mut config =
+            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        config.coerced_conditionals = coerced_conditionals;
+        for source in [
+            "'x' COLLATE \"C\"",
+            "('x' COLLATE \"C\") COLLATE \"POSIX\"",
+            "upper('x' COLLATE \"C\")",
+            "ARRAY['x' COLLATE \"C\"]",
+        ] {
+            let uqa_sql::Statement::Select(mut query) =
+                uqa_sql::compile(&format!("SELECT {source}"))
+                    .unwrap()
+                    .remove(0)
+            else {
+                panic!("SELECT")
+            };
+            let expression =
+                uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+            let mut expression =
+                uqa_sql::bind_type_introspection(expression, &RowSchema::default(), &[]);
+            let identities = |expression: &ScalarExpr| {
+                let mut identities = Vec::new();
+                expression.visit(&mut |node| {
+                    if let Some(clause) =
+                        uqa_sql::catalog::collations::expression::scalar_clause(node).unwrap()
+                    {
+                        identities.push(clause.oid.expect("selected collation"));
+                    }
+                });
+                identities
+            };
+            let expected = identities(&expression);
+            assert!(!expected.is_empty());
+            crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap();
+            assert_eq!(
+                identities(&expression),
+                expected,
+                "{source}, coerced={coerced_conditionals}"
+            );
+        }
+    }
+}
 
 #[test]
 fn session_dependent_temporal_operators_remain_executable_after_parameter_binding() {
@@ -123,6 +170,7 @@ fn typed_row_constructors_require_the_live_catalog_even_with_constant_arguments(
         bound_type: None,
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: uqa_sql::ast::CompositeRowBinding {
+            layout: None,
             argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
@@ -336,6 +384,7 @@ fn constant_evaluation_checks_selected_permission_after_strict_null_simplificati
     let null = bound_call(
         "lower",
         vec![ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Null,
             ty: "text".into(),
@@ -379,6 +428,7 @@ fn strict_null_simplification_does_not_evaluate_nonconstant_siblings() {
         "replace",
         vec![
             ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Null,
                 ty: "text".into(),
@@ -477,6 +527,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         let expression = ScalarExpr::Cast {
             implicit: false,
             expr: Box::new(ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value,
                 ty: ty.catalog_name(),
@@ -494,6 +545,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
     let integer = ScalarExpr::Cast {
         implicit: false,
         expr: Box::new(ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Int(7),
             ty: "integer".into(),
@@ -566,6 +618,7 @@ fn composites_retained_in_constants_are_not_evaluated_without_the_catalog() {
         relation_oid: 20_003,
     });
     let literal = ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: Value::Record(vec![("a".into(), Value::Int(4))].into()),
         ty: ty.catalog_name(),
@@ -593,6 +646,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         array_oid: 20003,
     });
     let literal = ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: Value::Record(vec![("b".into(), Value::Str("x".into()))].into()),
         ty: ty.catalog_name(),
@@ -617,6 +671,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
     {
         binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
         binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+            collation_oid: None,
             type_oid: 20001,
             number: 2,
             result_type: ColumnType::Text,
@@ -717,6 +772,7 @@ fn strict_null_folding_keeps_the_selected_fixed_return_type() {
                 ty: "catalog_bytea_domain".into(),
                 bound_type: None,
                 parameter_index: None,
+                collation_oid: None,
                 composite_source: None,
             },
             ScalarExpr::Literal(Value::Null),
@@ -775,6 +831,7 @@ fn strict_comparison_null_folding_skips_volatile_operands() {
                 order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
             };
             let null = ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Null,
                 ty: "bigint".into(),
@@ -827,6 +884,7 @@ fn strict_comparison_null_folding_does_not_resolve_discarded_catalog_types() {
 fn physical_record_comparisons_keep_their_runtime_catalog() {
     let value = Value::Datum(uqa_core::DatumValue::new(20_001, 0, vec![0; 24]));
     let literal = ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: value.clone(),
         ty: "composite#20001".into(),

@@ -1,0 +1,30 @@
+[
+  {
+    "field": "c",
+    "null": false,
+    "sql": "SELECT pg_collation_for(('(x,y)'::pair).c)::regcollation::oid,('(x,y)'::pair).c",
+    "collation": 950,
+    "value": "x"
+  },
+  {
+    "field": "c",
+    "null": true,
+    "sql": "SELECT pg_collation_for((NULL::pair).c)::regcollation::oid,(NULL::pair).c",
+    "collation": 950,
+    "value": null
+  },
+  {
+    "field": "p",
+    "null": false,
+    "sql": "SELECT pg_collation_for(('(x,y)'::pair).p)::regcollation::oid,('(x,y)'::pair).p",
+    "collation": 951,
+    "value": "y"
+  },
+  {
+    "field": "p",
+    "null": true,
+    "sql": "SELECT pg_collation_for((NULL::pair).p)::regcollation::oid,(NULL::pair).p",
+    "collation": 951,
+    "value": null
+  }
+]

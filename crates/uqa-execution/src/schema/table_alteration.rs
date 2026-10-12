@@ -80,6 +80,11 @@ fn check_added_column_declaration<S: Clone + 'static>(
         context.hierarchy.partitions.types,
         &column.ty,
     )?;
+    column.collation_oid = Some(uqa_sql::catalog::collations::declarations::select(
+        context.hierarchy.partitions.types,
+        &column.ty,
+        declaration.collation.as_deref(),
+    )?);
     let target = ColumnDeclarationTarget {
         table: qualifier,
         partitioned,

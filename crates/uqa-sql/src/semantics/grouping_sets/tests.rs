@@ -42,6 +42,7 @@ impl FunctionTypeResolver for Catalog {
             "grouping_literal_numeric" | "public.grouping_literal_numeric"
         )
         .then(|| ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "grouping_literal_numeric".into(),
             oid: 50_001,

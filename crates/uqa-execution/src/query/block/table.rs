@@ -297,19 +297,20 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         Some(column) if identities_follow_keys(table_state.as_ref())? => Some(column.name.clone()),
         _ => None,
     };
-    let predicate_schema = crate::RowSchema::with_qualified_types(
-        qualifier,
-        source_schema.clone(),
-        source_schema
+    let column_metadata = |name: &String| {
+        let definition = table_snapshot
+            .columns
             .iter()
-            .map(|name| {
-                table_snapshot
-                    .columns
-                    .iter()
-                    .find(|column| column.name == *name)
-                    .map(|column| column.ty.clone())
-            })
-            .collect(),
+            .find(|column| column.name == *name);
+        (
+            name.clone(),
+            definition.map(|column| column.ty.clone()),
+            definition.and_then(|column| column.collation_oid),
+        )
+    };
+    let predicate_schema = crate::RowSchema::with_column_metadata(
+        Some(qualifier),
+        source_schema.iter().map(column_metadata),
     );
     // A pushed predicate reads the stored fields alone. A column the scan attaches from row metadata is left to the residual filter, which sees the whole row.
     let stored_fields = source_schema
@@ -319,19 +320,9 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let stored_schema = crate::RowSchema::with_qualified_types(
-        qualifier,
-        stored_fields.clone(),
-        stored_fields
-            .iter()
-            .map(|name| {
-                table_snapshot
-                    .columns
-                    .iter()
-                    .find(|column| column.name == *name)
-                    .map(|column| column.ty.clone())
-            })
-            .collect(),
+    let stored_schema = crate::RowSchema::with_column_metadata(
+        Some(qualifier),
+        stored_fields.iter().map(column_metadata),
     );
     let (pushed_predicate, residual_filter) =
         split_projected_filter(physical_filter.take(), &stored_schema, params)?;

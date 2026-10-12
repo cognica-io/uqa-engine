@@ -99,6 +99,7 @@ impl ViewCheckOption {
 #[derive(Debug, Clone)]
 pub struct ViewColumn {
     pub name: String,
+    pub collation_oid: Option<u32>,
     pub expression: ScalarExpr,
     pub writable_source_column: Option<String>,
 }
@@ -492,7 +493,9 @@ fn view_query_shape_from_definition(
     let columns = output_columns
         .into_iter()
         .zip(expressions)
-        .map(|(name, expression)| ViewColumn {
+        .enumerate()
+        .map(|(position, (name, expression))| ViewColumn {
+            collation_oid: schema.column_collation(position),
             writable_source_column: direct_source_column(
                 &expression,
                 &source_qualifier,

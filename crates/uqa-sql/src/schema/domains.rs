@@ -43,11 +43,11 @@ pub fn prepare_domain_definition(
     }
     // DefineDomain requires USAGE on the base type once it is known to be valid for a domain.
     context.catalog.require_type_usage(&definition.base)?;
-    if definition.collation.is_some() {
-        return Err(SQLError::Unsupported(
-            "domain collation binding is not implemented".into(),
-        ));
-    }
+    definition.collation_oid = Some(crate::catalog::collations::declarations::select(
+        context.catalog,
+        &definition.base,
+        definition.collation.as_deref(),
+    )?);
     if let Some(default) = &mut definition.default {
         // `DefineDomain` cooks the default against the base type and names the domain as the column.
         let domain = definition
@@ -141,6 +141,7 @@ impl VariableResolver for DomainValueResolver<'_> {
             return Err(SQLError::UnknownColumn(name.into()));
         }
         Ok(Some(ResolvedVariable {
+            collation_oid: None,
             value: Value::Null,
             declared_type: Some(self.0.catalog_name()),
         }))

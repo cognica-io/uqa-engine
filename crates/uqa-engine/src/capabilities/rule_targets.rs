@@ -37,10 +37,11 @@ impl uqa_sql::semantics::rules::action_binding::RuleSourceCatalog for Engine {
             relations_bound,
         )
     }
-    fn rule_relation_columns(
+    fn rule_relation_definitions(
         &self,
         name: &str,
-    ) -> Result<Vec<(String, uqa_sql::ColumnType)>, SQLError> {
-        self.event_analysis_context().rule_relation_columns(name)
+    ) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
+        self.event_analysis_context()
+            .rule_relation_definitions(name)
     }
 }

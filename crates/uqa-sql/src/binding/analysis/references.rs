@@ -8,9 +8,9 @@
 
 use super::super::{SQLError, SQLParam, ScalarExpr};
 use super::functions::{
-    validate_ordered_function, validate_qualified_column, validate_scalar_function,
-    validate_unqualified_column, validate_window_function, ScalarFunctionValidation,
+    validate_qualified_column, validate_unqualified_column, validate_window_function,
 };
+use crate::ast::RuleEvent;
 use crate::routines::RoutineResolution;
 use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
 
@@ -19,6 +19,7 @@ use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
     reason = "preserves SELECT schema and row identity"
 )]
 pub(super) fn validate_expression(
+    rule_event: Option<RuleEvent>,
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
     schema: &RowSchema,
@@ -47,6 +48,18 @@ pub(super) fn validate_expression(
             }
         }
         ScalarExpr::QualifiedColumn { qualifier, column } => {
+            if !schema.has_qualifier(qualifier)
+                && !fallback.is_some_and(|schema| schema.has_qualifier(qualifier))
+                && rule_event.is_some_and(|event| {
+                    crate::catalog::events::validation::unavailable_rule_row(event, qualifier)
+                })
+            {
+                return Err(
+                    crate::semantics::rules::action_binding::invalid_rule_relation_reference(
+                        qualifier,
+                    ),
+                );
+            }
             validate_qualified_column(schema, fallback, qualifier, column)
         }
         ScalarExpr::QualifiedStar(qualifier) => {
@@ -54,92 +67,49 @@ pub(super) fn validate_expression(
                 || fallback.is_some_and(|fallback| fallback.has_qualifier(qualifier))
             {
                 Ok(())
+            } else if rule_event.is_some_and(|event| {
+                crate::catalog::events::validation::unavailable_rule_row(event, qualifier)
+            }) {
+                Err(
+                    crate::semantics::rules::action_binding::invalid_rule_relation_reference(
+                        qualifier,
+                    ),
+                )
             } else {
                 Err(SQLError::UnknownTable(qualifier.clone()))
             }
         }
         ScalarExpr::Func {
-            order_syntax,
             name,
-            binding,
             args,
-            distinct,
             order_by,
             filter,
+            ..
         } => {
             for (argument_index, argument) in args.iter().enumerate() {
                 if crate::semantics::is_semantic_field_argument(name, args, argument_index)? {
                     continue;
                 }
-                validate_expression(routines, argument, schema, None, params, resolver)?;
+                validate_expression(
+                    rule_event, routines, argument, schema, None, params, resolver,
+                )?;
             }
             for order in order_by {
-                validate_expression(routines, &order.expr, schema, None, params, resolver)?;
-            }
-            if let Some(filter) = filter.as_deref() {
-                validate_expression(routines, filter, schema, None, params, resolver)?;
-                require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
-            }
-            let within_group = super::super::ordered_calls::uses_ordered_arguments(
-                *order_syntax,
-                name,
-                binding.as_ref(),
-                order_by.len(),
-            );
-            if within_group || super::super::ordered_calls::is_ordered_set(name) {
-                return validate_ordered_function(
+                validate_expression(
+                    rule_event,
                     routines,
-                    ScalarFunctionValidation {
-                        name,
-                        binding: binding.as_ref(),
-                        args,
-                        order_by,
-                        expression,
-                        schema,
-                        params,
-                        resolver,
-                    },
-                    within_group,
-                    *distinct,
-                    filter.is_some(),
-                );
-            }
-            validate_scalar_function(
-                routines,
-                ScalarFunctionValidation {
-                    name,
-                    binding: binding.as_ref(),
-                    args,
-                    order_by,
-                    expression,
+                    &order.expr,
                     schema,
+                    None,
                     params,
                     resolver,
-                },
-            )?;
-            if crate::semantics::is_builtin_aggregate(expression)
-                || routines.has_registered_aggregate_function(name)
-            {
-                return Ok(());
+                )?;
             }
-            // `ParseFuncOrColumn` names the first aggregate modifier an ordinary function cannot take.
-            let modifier = if *distinct {
-                Some("DISTINCT")
-            } else if !order_by.is_empty() {
-                Some("ORDER BY")
-            } else if filter.is_some() {
-                Some("FILTER")
-            } else {
-                None
-            };
-            modifier.map_or(Ok(()), |modifier| {
-                Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!(
-                        "{modifier} specified, but {name} is not an aggregate function"
-                    ),
-                })
-            })
+            if let Some(filter) = filter.as_deref() {
+                validate_expression(rule_event, routines, filter, schema, None, params, resolver)?;
+                require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
+            }
+            super::validate_call(routines, expression, schema, params, resolver)
         }
         ScalarExpr::WindowCall {
             name,
@@ -149,24 +119,38 @@ pub(super) fn validate_expression(
             modifiers,
         } => {
             for argument in args {
-                validate_expression(routines, argument, schema, None, params, resolver)?;
+                validate_expression(
+                    rule_event, routines, argument, schema, None, params, resolver,
+                )?;
             }
             if let Some(filter) = filter.as_deref() {
-                validate_expression(routines, filter, schema, None, params, resolver)?;
+                validate_expression(rule_event, routines, filter, schema, None, params, resolver)?;
                 require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
             }
             for expression in &spec.partition_by {
-                validate_expression(routines, expression, schema, None, params, resolver)?;
+                validate_expression(
+                    rule_event, routines, expression, schema, None, params, resolver,
+                )?;
             }
             for order in &spec.order_by {
-                validate_expression(routines, &order.expr, schema, None, params, resolver)?;
+                validate_expression(
+                    rule_event,
+                    routines,
+                    &order.expr,
+                    schema,
+                    None,
+                    params,
+                    resolver,
+                )?;
             }
             if let Some(frame) = &spec.frame {
                 for bound in [&frame.start, &frame.end] {
                     if let ScalarFrameBound::Preceding(expression)
                     | ScalarFrameBound::Following(expression) = bound
                     {
-                        validate_expression(routines, expression, schema, None, params, resolver)?;
+                        validate_expression(
+                            rule_event, routines, expression, schema, None, params, resolver,
+                        )?;
                     }
                 }
             }
@@ -182,7 +166,7 @@ pub(super) fn validate_expression(
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::CompositeRow { items, .. } => {
-            validate_items(routines, items, schema, params, resolver)
+            validate_items(rule_event, routines, items, schema, params, resolver)
         }
         ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             let construct = if matches!(expression, ScalarExpr::And(_)) {
@@ -191,33 +175,34 @@ pub(super) fn validate_expression(
                 "OR"
             };
             for item in items {
-                validate_expression(routines, item, schema, None, params, resolver)?;
+                validate_expression(rule_event, routines, item, schema, None, params, resolver)?;
                 require_boolean_condition(item, construct, schema, params, resolver)?;
             }
             Ok(())
         }
         ScalarExpr::Not(inner) => {
-            validate_expression(routines, inner, schema, None, params, resolver)?;
+            validate_expression(rule_event, routines, inner, schema, None, params, resolver)?;
             require_boolean_condition(inner, "NOT", schema, params, resolver)
         }
         ScalarExpr::Binary { lhs, rhs, .. } => {
-            validate_expression(routines, lhs, schema, None, params, resolver)?;
-            validate_expression(routines, rhs, schema, None, params, resolver)
+            validate_expression(rule_event, routines, lhs, schema, None, params, resolver)?;
+            validate_expression(rule_event, routines, rhs, schema, None, params, resolver)
         }
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
-            validate_expression(routines, inner, schema, None, params, resolver)
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
+            validate_expression(rule_event, routines, inner, schema, None, params, resolver)
         }
         ScalarExpr::Between { expr, low, high } => {
             for item in [expr.as_ref(), low.as_ref(), high.as_ref()] {
-                validate_expression(routines, item, schema, None, params, resolver)?;
+                validate_expression(rule_event, routines, item, schema, None, params, resolver)?;
             }
             Ok(())
         }
         ScalarExpr::InList { expr, list, .. } => {
-            validate_expression(routines, expr, schema, None, params, resolver)?;
-            validate_items(routines, list, schema, params, resolver)
+            validate_expression(rule_event, routines, expr, schema, None, params, resolver)?;
+            validate_items(rule_event, routines, list, schema, params, resolver)
         }
         ScalarExpr::Case {
             base,
@@ -225,18 +210,28 @@ pub(super) fn validate_expression(
             else_branch,
         } => {
             if let Some(base) = base.as_deref() {
-                validate_expression(routines, base, schema, None, params, resolver)?;
+                validate_expression(rule_event, routines, base, schema, None, params, resolver)?;
             }
             for (condition, value) in when {
-                validate_expression(routines, condition, schema, None, params, resolver)?;
+                validate_expression(
+                    rule_event, routines, condition, schema, None, params, resolver,
+                )?;
                 // A searched CASE tests each condition; a simple CASE compares the operand with each value.
                 if base.is_none() {
                     require_boolean_condition(condition, "CASE/WHEN", schema, params, resolver)?;
                 }
-                validate_expression(routines, value, schema, None, params, resolver)?;
+                validate_expression(rule_event, routines, value, schema, None, params, resolver)?;
             }
             if let Some(else_branch) = else_branch.as_deref() {
-                validate_expression(routines, else_branch, schema, None, params, resolver)?;
+                validate_expression(
+                    rule_event,
+                    routines,
+                    else_branch,
+                    schema,
+                    None,
+                    params,
+                    resolver,
+                )?;
             }
             Ok(())
         }
@@ -247,7 +242,7 @@ pub(super) fn validate_expression(
             .resolve_scalar_subquery_type(*index, schema, params)
             .map(drop),
         ScalarExpr::InSubquery { expr, subquery, .. } => {
-            validate_expression(routines, expr, schema, None, params, resolver)?;
+            validate_expression(rule_event, routines, expr, schema, None, params, resolver)?;
             resolver
                 .resolve_scalar_subquery_type(*subquery, schema, params)
                 .map(drop)
@@ -301,6 +296,7 @@ pub(super) fn require_boolean_condition(
 }
 
 fn validate_items(
+    rule_event: Option<RuleEvent>,
     routines: &dyn RoutineResolution,
     items: &[ScalarExpr],
     schema: &RowSchema,
@@ -308,7 +304,7 @@ fn validate_items(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
     for item in items {
-        validate_expression(routines, item, schema, None, params, resolver)?;
+        validate_expression(rule_event, routines, item, schema, None, params, resolver)?;
     }
     Ok(())
 }

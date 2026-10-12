@@ -120,7 +120,7 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
             )));
         }
     }
-    let schema = RowSchema::from_physical_layout(PhysicalLayout {
+    let mut schema = RowSchema::from_physical_layout(PhysicalLayout {
         columns,
         identities,
         types,
@@ -133,12 +133,19 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     })
     .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
     let row_metadata = reader.read_u64("row metadata flags")?;
-    if row_metadata & !ROW_METADATA_LOCK_ORIGINS != 0 {
+    if row_metadata & !(ROW_METADATA_LOCK_ORIGINS | u64::from(super::collations::FLAG)) != 0 {
         return Err(spill_error(format!(
             "unsupported row metadata flags {row_metadata:#x}"
         )));
     }
     let has_lock_origins = row_metadata & ROW_METADATA_LOCK_ORIGINS != 0;
+    if row_metadata & u64::from(super::collations::FLAG) != 0 {
+        let binding_count = column_count
+            .saturating_add(alias_count)
+            .saturating_add(internal_count);
+        schema = super::collations::decode(&mut reader, schema, binding_count)?;
+    }
+
     let row_count = reader.read_count("batch row count", 8)?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(row_count)
@@ -174,13 +181,13 @@ pub(crate) fn decode_document(
     Ok((fields, &bytes[reader.position..]))
 }
 
-struct BinaryReader<'a> {
+pub(super) struct BinaryReader<'a> {
     bytes: &'a [u8],
     position: usize,
 }
 
 impl<'a> BinaryReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
+    pub(super) fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, position: 0 }
     }
 
@@ -207,7 +214,7 @@ impl<'a> BinaryReader<'a> {
         Ok(self.read_exact::<1>(description)?[0])
     }
 
-    fn read_u64(&mut self, description: &str) -> ExecResult<u64> {
+    pub(super) fn read_u64(&mut self, description: &str) -> ExecResult<u64> {
         self.read_exact::<8>(description).map(u64::from_le_bytes)
     }
 
@@ -219,7 +226,11 @@ impl<'a> BinaryReader<'a> {
         self.read_exact::<4>(description).map(i32::from_le_bytes)
     }
 
-    fn read_count(&mut self, description: &str, minimum_item_bytes: usize) -> ExecResult<usize> {
+    pub(super) fn read_count(
+        &mut self,
+        description: &str,
+        minimum_item_bytes: usize,
+    ) -> ExecResult<usize> {
         let count = usize::try_from(self.read_u64(description)?)
             .map_err(|_| spill_error(format!("{description} exceeds address space")))?;
         if count > self.remaining().saturating_div(minimum_item_bytes.max(1)) {
@@ -249,7 +260,7 @@ impl<'a> BinaryReader<'a> {
             .map_err(|error| spill_error(format!("invalid UTF-8 in {description}: {error}")))
     }
 
-    fn read_identity(&mut self, description: &str) -> ExecResult<ColumnIdentity> {
+    pub(super) fn read_identity(&mut self, description: &str) -> ExecResult<ColumnIdentity> {
         let qualifier = self.read_string(description)?;
         let column = self.read_string(description)?;
         if column.is_empty() {

@@ -133,3 +133,44 @@ fn range_fusion_does_not_move_intervening_or_strict_comparisons() {
         assert_eq!(fields.reads.get(), reads, "{source}");
     }
 }
+
+#[test]
+fn catalog_field_predicates_preserve_the_canonical_evaluator_boundary() {
+    let source = [
+        "v=v",
+        "v<>v",
+        "v IS NULL",
+        "v IS NOT NULL",
+        "v BETWEEN v AND v",
+        "v IN (v)",
+    ];
+    for ty in [
+        ColumnType::Record,
+        ColumnType::Array(Box::new(ColumnType::Record)),
+    ] {
+        let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ty)]);
+        for source in source {
+            assert!(
+                ProjectedPredicate::compile_with_schema(&expression(source), &schema, &[])
+                    .unwrap()
+                    .is_none(),
+                "{source}"
+            );
+            assert!(
+                ProjectedPredicate::compile_bound(&expression(source), &schema, &[])
+                    .unwrap()
+                    .is_none(),
+                "{source}"
+            );
+        }
+    }
+    let schema = schema(&["v"]);
+    for source in source {
+        assert!(
+            ProjectedPredicate::compile_with_schema(&expression(source), &schema, &[])
+                .unwrap()
+                .is_some(),
+            "{source}"
+        );
+    }
+}

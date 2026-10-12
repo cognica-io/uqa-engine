@@ -30,6 +30,7 @@ impl CompositeTypeCatalog for Catalog {
                 type_oid: oid,
                 relation_oid: 20_003,
                 attributes: vec![CompositeAttribute {
+                    collation_oid: None,
                     name: "a".into(),
                     ty: ColumnType::Integer,
                     number: 1,
@@ -114,6 +115,7 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
     crate::catalog::stored_ast::visit_stored_statement_expressions(&mut statement, &mut |node| {
         if *node == Expr::Literal(Value::Int(4)) {
             *node = Expr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: value(),
                 ty: pair_type().catalog_name(),
@@ -148,6 +150,7 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
 #[test]
 fn removing_a_field_preserves_its_original_datum_and_descriptor_through_serialization() {
     let mut expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: value(),
         ty: pair_type().catalog_name(),
@@ -160,6 +163,7 @@ fn removing_a_field_preserves_its_original_datum_and_descriptor_through_serializ
     assert_eq!(expression, restored);
     let Expr::TypedLiteral {
         value: projected,
+        collation_oid: None,
         composite_source: Some(source),
         ..
     } = restored
@@ -178,6 +182,7 @@ fn array_constants_keep_bounds_nulls_and_existing_fields() {
     let added = AttributeChange::Add("b".into());
     let change = change(&added);
     let mut expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: Value::Array(
             ArrayValue::with_lower_bounds(vec![value(), Value::Null], vec![-3]).unwrap(),
@@ -206,6 +211,7 @@ fn array_constants_keep_bounds_nulls_and_existing_fields() {
 #[test]
 fn missing_durable_type_identity_is_rejected_without_discarding_the_value() {
     let mut expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: value(),
         ty: "composite#99999".into(),

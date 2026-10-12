@@ -40,6 +40,7 @@ fn definition() -> StoredComposite {
         owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
         usage_acl: None,
         attributes: vec![StoredCompositeAttribute {
+            collation_oid: None,
             name: "a".into(),
             ty: ColumnType::Integer,
             collation: None,
@@ -112,6 +113,7 @@ fn duplicate_name_precedes_type_and_serial_declaration_errors() {
 fn additions_keep_dropped_attribute_numbers_and_reject_recursive_shapes() {
     let mut definition = definition();
     definition.attributes.push(StoredCompositeAttribute {
+        collation_oid: None,
         name: StoredCompositeAttribute::dropped_name(3),
         ty: ColumnType::Text,
         collation: None,

@@ -196,6 +196,7 @@ pub fn rule_columns(
                     column.name,
                     RuleColumnMetadata {
                         ty: column.ty,
+                        collation_oid: column.collation_oid,
                         uses_document_id,
                         position,
                     },
@@ -205,14 +206,15 @@ pub fn rule_columns(
     }
     Ok(context
         .sources
-        .rule_relation_columns(table)?
+        .rule_relation_definitions(table)?
         .into_iter()
         .enumerate()
-        .map(|(position, (name, ty))| {
+        .map(|(position, column)| {
             (
-                name,
+                column.name,
                 RuleColumnMetadata {
-                    ty,
+                    ty: column.ty,
+                    collation_oid: column.collation_oid,
                     uses_document_id: false,
                     position,
                 },
@@ -232,38 +234,5 @@ pub fn rule_returning_columns(
     if let Some(columns) = columns {
         return Ok(columns);
     }
-    Ok(context
-        .sources
-        .rule_relation_columns(table)?
-        .into_iter()
-        .map(|(name, ty)| crate::ast::ColumnDef {
-            name,
-            ty,
-            object_id: None,
-            attribute_number: None,
-            missing_value: None,
-            primary_key: false,
-            not_null: false,
-            not_null_explicit: false,
-            not_null_name: None,
-            not_null_identity: None,
-            not_null_validated: true,
-            not_null_no_inherit: false,
-            not_null_is_local: true,
-            auto_increment: None,
-            unique: false,
-            default: None,
-            generated: None,
-            check: None,
-            check_name: None,
-            check_enforced: true,
-            check_validated: true,
-            check_no_inherit: false,
-            check_is_local: true,
-            check_object_id: None,
-            check_catalog_oid: None,
-            default_catalog_oid: None,
-            references: None,
-        })
-        .collect())
+    context.sources.rule_relation_definitions(table)
 }

@@ -6,9 +6,16 @@
 
 //! Built-in collation identities shared by declarations and OID alias input/output.
 
+pub mod declarations;
+pub(crate) mod derivation;
+pub mod expression;
+
+/// The database-default collation's predefined `PostgreSQL` catalog identity.
+pub const DEFAULT_COLLATION_OID: i64 = 100;
+
 /// Predefined `PostgreSQL` 18 collation names and OIDs.
 const BUILTIN_COLLATIONS: [(&str, i64); 7] = [
-    ("default", 100),
+    ("default", DEFAULT_COLLATION_OID),
     ("pg_c_utf8", 811),
     ("C", 950),
     ("POSIX", 951),

@@ -62,7 +62,7 @@ fn parameter(value: ResolvedVariable, resolver: &dyn VariableResolver) -> SQLPar
 }
 
 pub struct PLpgSQLVariableBindings {
-    pub statement: Statement,
+    pub plan: crate::plan::UnifiedPlan,
     pub references: Vec<PLpgSQLVariableReference>,
     pub parameters: Vec<SQLParam>,
 }
@@ -74,6 +74,7 @@ pub fn parameterize_statement_variables(
     resolver: &mut dyn VariableResolver,
     conflict: VariableConflict,
     resolve_sites: VariableSiteResolver<'_>,
+    aggregates: &dyn crate::plan::AggregateClassifier,
 ) -> Result<PLpgSQLVariableBindings, SQLError> {
     let keep = statement_variable_names(statement, resolver, conflict, resolve_sites)?;
     let mut binding = VariableBindings {
@@ -82,10 +83,38 @@ pub fn parameterize_statement_variables(
         next_name: 0,
         references: Vec::new(),
         parameters: Vec::new(),
+        collations: Vec::new(),
     };
     let statement = bind_statement(statement, &mut binding)?;
+    let mut plan = crate::plan::UnifiedPlan::lower_with(statement, aggregates);
+    // A procedural variable is an implicitly collated input. Retain that
+    // identity on its parameter node before ordinary prepared analysis.
+    plan.rewrite_scalar_expressions(&mut |expression| {
+        let crate::ScalarExpr::Param(number) = expression else {
+            return;
+        };
+        let Some(index) = number.checked_sub(1) else {
+            return;
+        };
+        let Some(oid) = binding.collations.get(index).copied().flatten() else {
+            return;
+        };
+        let Some(ty) = binding.parameters[index].declared_scalar_type() else {
+            return;
+        };
+        if crate::schema::composites::type_is_collatable(ty) {
+            *expression = crate::ScalarExpr::Collated {
+                expr: Box::new(crate::ScalarExpr::Param(*number)),
+                ty: ty.clone(),
+                collation: crate::ir::ResultCollation::new(
+                    crate::catalog::collations::derivation::Derivation::implicit(i64::from(oid)),
+                    oid,
+                ),
+            };
+        }
+    });
     Ok(PLpgSQLVariableBindings {
-        statement,
+        plan,
         references: binding.references,
         parameters: binding.parameters,
     })
@@ -96,6 +125,7 @@ struct VariableBindings<'a> {
     next_name: usize,
     references: Vec<PLpgSQLVariableReference>,
     parameters: Vec<SQLParam>,
+    collations: Vec<Option<u32>>,
 }
 impl VariableBindings<'_> {
     fn mark(
@@ -113,6 +143,7 @@ impl VariableBindings<'_> {
             }
         }
         self.references.push(reference);
+        self.collations.push(value.collation_oid);
         self.parameters.push(parameter(value, self.inner));
         Some(Expr::Param(self.references.len()))
     }

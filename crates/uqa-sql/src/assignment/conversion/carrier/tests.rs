@@ -64,6 +64,7 @@ fn context(base: ColumnType) -> Context {
             identity: uqa_core::RelationIdentity::new("public", "legacy_items"),
             owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
             definition: crate::ast::CreateDomain {
+                collation_oid: None,
                 name: "public.legacy_items".into(),
                 base,
                 collation: None,

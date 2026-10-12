@@ -55,9 +55,20 @@ pub struct CompositeAttributeRemoval {
 pub struct CompositeRowBinding {
     pub ty: String,
     pub attributes: Vec<i16>,
+    /// Physical width and cast syntax captured before the descriptor can change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<CompositeRowLayout>,
     /// Types of the admitted arguments; absent only in predecessor definitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub argument_types: Option<Vec<ColumnType>>,
+}
+
+/// Definition-time layout of a typed ROW, including positions that were already dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositeRowLayout {
+    pub width: i16,
+    pub implicit: bool,
 }
 
 /// A composite type bound by catalog identity: a standalone composite type or the row type of a relation. The schema and name are the catalog's current names; equality compares the type identity only.

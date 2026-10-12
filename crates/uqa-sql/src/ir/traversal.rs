@@ -68,6 +68,7 @@ impl ScalarExpr {
             Self::Not(inner)
             | Self::UnaryMinus(inner)
             | Self::Cast { expr: inner, .. }
+            | Self::Collated { expr: inner, .. }
             | Self::IsNull { expr: inner, .. }
             | Self::InSubquery { expr: inner, .. } => inner.try_visit(visitor)?,
             Self::Binary { lhs, rhs, .. } => {
@@ -180,6 +181,7 @@ impl ScalarExpr {
             Self::Not(inner)
             | Self::UnaryMinus(inner)
             | Self::Cast { expr: inner, .. }
+            | Self::Collated { expr: inner, .. }
             | Self::IsNull { expr: inner, .. }
             | Self::InSubquery { expr: inner, .. } => inner.visit_mut(visitor),
             Self::Binary { lhs, rhs, .. } => {
@@ -307,7 +309,8 @@ impl ScalarExpr {
             Self::UnaryMinus(expr)
             | Self::Not(expr)
             | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. } => expr.try_visit_columns(visitor),
+            | Self::Cast { expr, .. }
+            | Self::Collated { expr, .. } => expr.try_visit_columns(visitor),
             Self::Between { expr, low, high } => Ok(expr.try_visit_columns(visitor)?
                 && low.try_visit_columns(visitor)?
                 && high.try_visit_columns(visitor)?),
@@ -374,6 +377,7 @@ impl ScalarExpr {
             | Self::Not(expr)
             | Self::IsNull { expr, .. }
             | Self::Cast { expr, .. }
+            | Self::Collated { expr, .. }
             | Self::InSubquery { expr, .. } => expr.contains_window(),
             Self::Between { expr, low, high } => {
                 expr.contains_window() || low.contains_window() || high.contains_window()
@@ -430,7 +434,8 @@ impl ScalarExpr {
             Self::UnaryMinus(expr)
             | Self::Not(expr)
             | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. } => expr.contains_subquery(),
+            | Self::Cast { expr, .. }
+            | Self::Collated { expr, .. } => expr.contains_subquery(),
             Self::Between { expr, low, high } => {
                 expr.contains_subquery() || low.contains_subquery() || high.contains_subquery()
             }
@@ -500,6 +505,7 @@ impl ScalarExpr {
             | Self::Not(expr)
             | Self::IsNull { expr, .. }
             | Self::Cast { expr, .. }
+            | Self::Collated { expr, .. }
             | Self::InSubquery { expr, .. } => expr.contains_parameter(),
             Self::Between { expr, low, high } => {
                 expr.contains_parameter() || low.contains_parameter() || high.contains_parameter()
@@ -582,6 +588,7 @@ impl ScalarExpr {
             | Self::Not(expr)
             | Self::IsNull { expr, .. }
             | Self::Cast { expr, .. }
+            | Self::Collated { expr, .. }
             | Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
             Self::Between { expr, low, high } => {
                 expr.contains_aggregate(is_aggregate)

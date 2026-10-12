@@ -1,0 +1,27 @@
+[
+  {
+    "sql": "SELECT * FROM (VALUES ('a'::text COLLATE \"C\",'b'::text COLLATE \"POSIX\"),('c','d')) v(x,x)",
+    "collations": [
+      950,
+      951
+    ],
+    "rows": [
+      [
+        "a",
+        "b"
+      ],
+      [
+        "c",
+        "d"
+      ]
+    ]
+  },
+  {
+    "sql": "SELECT * FROM (VALUES ('a'::text COLLATE \"C\",'b'::text COLLATE \"POSIX\"),('c','d')) v(x,x) WHERE false",
+    "collations": [
+      950,
+      951
+    ],
+    "rows": []
+  }
+]

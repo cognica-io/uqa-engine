@@ -20,6 +20,14 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         self.engine.has_untyped_function(name)
     }
 
+    fn resolve_collation_name(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        uqa_execution::catalog::projection::resolve_expression_collation_oid(
+            &self.catalog_context(),
+            name,
+        )
+        .map(Some)
+    }
+
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         let catalog = self.ctes.catalog_read_view()?;
         uqa_execution::catalog::projection::resolve_catalog_column_type_name(

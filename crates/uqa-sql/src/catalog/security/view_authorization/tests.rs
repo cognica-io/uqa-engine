@@ -108,6 +108,7 @@ fn view(kind: StoredViewKind) -> StoredView {
             kind,
             materialized_rows: vec![],
             materialized_column_types: vec![],
+            materialized_column_collations: None,
             populated: true,
         },
     }

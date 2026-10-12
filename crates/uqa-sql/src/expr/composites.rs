@@ -34,8 +34,23 @@ pub use retained::CompositeConstantSource;
 pub struct CompositeAttribute {
     pub name: String,
     pub ty: ColumnType,
+    /// Selected declaration identity; absent metadata uses the attribute type's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
     /// `pg_attribute.attnum`, which dropped attributes keep occupying.
     pub number: i16,
+}
+
+impl CompositeAttribute {
+    #[must_use]
+    pub fn collation_oid(&self) -> u32 {
+        self.collation_oid.unwrap_or_else(|| {
+            u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
+                &self.ty,
+            ))
+            .expect("type collation identity")
+        })
+    }
 }
 
 /// The live attributes of one composite type in the statement's catalog generation.
@@ -68,6 +83,16 @@ impl DroppedCompositeAttribute {
 }
 
 impl CompositeTypeDescriptor {
+    /// Number of physical positions, including trailing dropped attributes.
+    pub fn physical_width(&self) -> i16 {
+        self.attributes
+            .iter()
+            .map(|attribute| attribute.number)
+            .chain(self.dropped.iter().map(|attribute| attribute.number))
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn attribute(&self, name: &str) -> Option<(usize, &CompositeAttribute)> {
         self.attributes
             .iter()

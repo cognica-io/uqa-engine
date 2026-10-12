@@ -41,6 +41,7 @@ fn array_inspection_keeps_concrete_arguments_and_polymorphic_identity() {
             ColumnType::OidVector,
             ColumnType::AnyArray,
             ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "integer_array".into(),
                 oid: 90_001,

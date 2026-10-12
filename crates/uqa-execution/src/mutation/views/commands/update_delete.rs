@@ -73,7 +73,7 @@ fn evaluate_view_update_assignments<S: Clone + Send + Sync + 'static>(
                 scope,
                 crate::mutation::assignment::TypedAssignmentTarget {
                     target: assignment_target,
-                    ty: target.types[position].as_ref(),
+                    ty: target.schema.column_type(position),
                     current: Some(&pending.new[position]),
                     final_column_write: crate::mutation::assignment::final_column_write(
                         &stmt.assignments,

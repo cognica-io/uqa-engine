@@ -223,10 +223,10 @@ fn project_view_rule_expressions<S: Clone + 'static>(
                         continue;
                     }
                     let value = value.cloned().unwrap_or(Value::Null);
-                    let ty = schema
-                        .unqualified_position(column)
-                        .and_then(|position| schema.column_type(position));
-                    values.push((column.clone(), value, ty.cloned()));
+                    let position = schema.unqualified_position(column);
+                    let ty = position.and_then(|position| schema.column_type(position));
+                    let collation = position.and_then(|position| schema.column_collation(position));
+                    values.push((column.clone(), value, ty.cloned(), collation));
                     required.remove(column);
                 }
             }

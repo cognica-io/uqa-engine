@@ -33,6 +33,8 @@ pub enum Field {
     Null,
     Atom(String),
     String(String),
+    /// A quoted `PostgreSQL` String value in a node list, rather than a bare field token.
+    StringValue(String),
     Node(Node),
     List(Vec<Field>),
     /// `PostgreSQL` writes by-value Datums at machine-word width even when the declared type is narrower.
@@ -115,6 +117,13 @@ impl fmt::Display for Field {
             Self::Null => output.write_str("<>"),
             Self::Atom(value) => output.write_str(value),
             Self::String(value) => write_token(output, value),
+            Self::StringValue(value) => {
+                output.write_str("\"")?;
+                if !value.is_empty() {
+                    write_token(output, value)?;
+                }
+                output.write_str("\"")
+            }
             Self::Node(node) => node.fmt(output),
             Self::List(values) => {
                 output.write_str("(")?;

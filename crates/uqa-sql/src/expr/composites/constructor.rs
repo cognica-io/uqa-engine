@@ -165,6 +165,7 @@ mod tests {
                 attributes: [1, 3, 4]
                     .into_iter()
                     .map(|number| CompositeAttribute {
+                        collation_oid: None,
                         name: format!("a{number}"),
                         ty: ColumnType::Integer,
                         number,
@@ -197,6 +198,7 @@ mod tests {
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
         let binding = CompositeRowBinding {
+            layout: None,
             argument_types: Some(vec![
                 ColumnType::Integer,
                 ColumnType::Text,
@@ -234,6 +236,7 @@ mod tests {
     fn retained_argument_types_are_checked_before_any_argument_effect() {
         let control = ProductionControl::uncontrolled();
         let binding = CompositeRowBinding {
+            layout: None,
             ty: "composite#20001".into(),
             attributes: vec![1, 2, 3],
             argument_types: Some(vec![
@@ -259,6 +262,7 @@ mod tests {
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
         let binding = CompositeRowBinding {
+            layout: None,
             argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],

@@ -28,11 +28,7 @@ pub fn analyze_prepared_command_schema(
     let result = (|| {
         let (target, expression) =
             scope.command_expression_schema(routines, command, params, None)?;
-        let excluded = RowSchema::with_qualified_types(
-            "excluded",
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
-        );
+        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
         let conflict_input = RowSchema::join(&expression, &excluded, std::iter::empty::<String>());
         let conflict_expressions = match command {
             CommandPlan::Insert(insert) => insert
@@ -160,7 +156,10 @@ impl SchemaScope {
             .enumerate()
             .map(|(position, column)| target.public_name(position).unwrap_or(column).to_string())
             .collect();
-        let schema = RowSchema::with_types(columns, target.column_types().to_vec());
+        let schema = RowSchema::with_types(columns, target.column_types().to_vec())
+            .with_column_collations(
+                (0..target.len()).map(|position| target.column_collation(position)),
+            );
         Ok(if target.columns_are_open(None) {
             RowSchema::with_open_columns(&schema, None)
         } else {
@@ -221,10 +220,13 @@ impl SchemaScope {
                     self.bind_query(routines, source, params, None)?;
                 }
             }
-            let returning = command.returning().unwrap_or_default();
-            let labels = projection_columns(returning);
+            let returning =
+                crate::semantics::returning::command_returning_projections(command, &target)?;
+            let labels = projection_columns(&returning);
             let mut columns = Vec::new();
             let mut types: Vec<Option<ColumnType>> = Vec::new();
+            let mut records = Vec::new();
+            let mut collations = super::projection::OutputCollations::default();
             for (position, projection) in returning.iter().enumerate() {
                 let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                     &expression
@@ -232,19 +234,27 @@ impl SchemaScope {
                     &target
                 };
                 if let Some(star) = projection_star_columns(&projection.expr, expansion)? {
-                    for (column, ty) in star {
+                    records.extend(
+                        super::record_fields::star_metadata(&projection.expr, expansion)
+                            .unwrap_or_default(),
+                    );
+                    for (column, ty, collation) in star {
+                        collations.push(types.len(), ty.as_ref(), collation);
                         columns.push(column);
                         types.push(ty);
                     }
                 } else {
                     columns.push(labels[position].clone());
-                    types.push(self.bind_expression_type(
+                    let metadata = self.bind_projection_metadata(
                         routines,
                         &projection.expr,
                         &expression,
                         command.scalar_subqueries(),
                         params,
-                    )?);
+                    )?;
+                    collations.push(types.len(), metadata.ty.as_ref(), metadata.collation);
+                    types.push(metadata.ty);
+                    records.push(metadata.record);
                 }
             }
             if let Some(error) = crate::semantics::virtual_relation_mutation_error(
@@ -254,7 +264,17 @@ impl SchemaScope {
             )? {
                 return Err(error);
             }
-            Ok(RowSchema::with_types(columns, types))
+            for projection in returning.iter() {
+                self.collations.validate_expression(&projection.expr)?;
+            }
+            Ok(collations
+                .apply(RowSchema::with_types(columns, types))
+                .with_record_metadata(
+                    records
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(index, record)| record.map(|record| (index, record))),
+                ))
         })();
         self.restore_cte_schemas(previous);
         result

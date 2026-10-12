@@ -190,11 +190,7 @@ impl SchemaScope {
         if let Some(source) = source {
             self.bind_query_routines_for_storage(routines, source, params, outer)?;
         }
-        let excluded = RowSchema::with_qualified_types(
-            "excluded",
-            scopes.target.columns().to_vec(),
-            scopes.target.column_types().to_vec(),
-        );
+        let excluded = RowSchema::with_relation_qualifier(&scopes.target, "excluded");
         let conflict_update = overlay_outer_schema(
             &RowSchema::join(&scopes.clauses, &excluded, std::iter::empty::<String>()),
             outer,
@@ -259,11 +255,7 @@ impl SchemaScope {
             .as_deref()
             .unwrap_or(&merge.target_qualifier);
         let target = overlay_outer_schema(
-            &RowSchema::with_qualified_types(
-                qualifier,
-                scopes.target.columns().to_vec(),
-                scopes.target.column_types().to_vec(),
-            ),
+            &RowSchema::with_relation_qualifier(&scopes.target, qualifier),
             outer,
         );
         let source = overlay_outer_schema(

@@ -176,6 +176,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(index, ty)| CompositeAttribute {
+                    collation_oid: None,
                     name: char::from(b'a' + index as u8).to_string(),
                     number: index as i16 + 1,
                     ty,
@@ -228,6 +229,7 @@ mod tests {
             relation_oid: 20_001,
             dropped: Vec::new(),
             attributes: vec![CompositeAttribute {
+                collation_oid: None,
                 name: "a".into(),
                 number: 1,
                 ty: ColumnType::Integer,

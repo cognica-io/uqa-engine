@@ -125,6 +125,7 @@ fn add_relations(snapshot: &mut CatalogReadSnapshot, tables: u32) {
                 kind,
                 materialized_rows: Vec::new(),
                 materialized_column_types: Vec::new(),
+                materialized_column_collations: None,
                 populated: true,
             },
         };

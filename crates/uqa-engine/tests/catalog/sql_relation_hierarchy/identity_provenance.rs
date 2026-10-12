@@ -206,6 +206,7 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
     );
 
     let current = ColumnDef {
+        collation_oid: None,
         name: "id".into(),
         ty: ColumnType::Integer,
         object_id: None,

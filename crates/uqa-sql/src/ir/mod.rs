@@ -7,6 +7,8 @@
 //! Serializable scalar SQL IR shared by analysis, planning, and execution.
 
 mod call_arguments;
+mod collation;
+pub use collation::ResultCollation;
 mod traversal;
 pub use call_arguments::{
     analyze_expression_call_arguments, scalar_call_argument, scalar_call_arguments,
@@ -41,6 +43,9 @@ pub enum ScalarExpr {
     TypedLiteral {
         value: Value,
         ty: String,
+        /// Selected implicit result collation; absent metadata retains the declared type default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collation_oid: Option<u32>,
         /// Original composite input retained across non-invertible descriptor changes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         composite_source: Option<Box<crate::expr::composites::CompositeConstantSource>>,
@@ -50,6 +55,12 @@ pub enum ScalarExpr {
         /// Original SQL parameter slot when specialization replaces a bare parameter.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parameter_index: Option<usize>,
+    },
+    /// An analyzed expression's fixed result metadata, retained while optimizations replace or discard its inputs. This is an identity on values, not a new SQL COLLATE clause or cast.
+    Collated {
+        expr: Box<Self>,
+        ty: ColumnType,
+        collation: ResultCollation,
     },
     Param(usize),
     Func {

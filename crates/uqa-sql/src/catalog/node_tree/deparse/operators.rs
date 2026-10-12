@@ -98,7 +98,7 @@ impl Renderer<'_> {
             .join(".");
         let arguments = args
             .iter()
-            .map(|arg| self.field(arg, false))
+            .map(|arg| self.field(arg, self.pretty))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(format!("{name}({})", arguments.join(", ")))
     }
@@ -131,7 +131,15 @@ impl Renderer<'_> {
         let value = match operator {
             "not" if args.len() == 1 => {
                 let grouping = matches!(&args[0], Field::Node(node) if node.kind == "BOOLEXPR");
-                format!("NOT {}", self.field(&args[0], self.pretty && !grouping)?)
+                let row_comparison = self.pretty
+                    && matches!(&args[0], Field::Node(node) if node.kind == "ROWCOMPAREEXPR");
+                format!(
+                    "NOT {}",
+                    parentheses(
+                        self.field(&args[0], self.pretty && !grouping)?,
+                        row_comparison
+                    )
+                )
             }
             "and" | "or" => {
                 let join = if operator == "and" { " AND " } else { " OR " };

@@ -13,6 +13,8 @@ use crate::schema::ScalarTypeSchema;
 use crate::{SQLError, SQLParam, ScalarExpr, ScalarFrameBound};
 use uqa_core::Value;
 
+mod collations;
+
 /// Whether an expression has an `unknown` literal outside its subqueries, the only nodes that binding converts to enum constants.
 #[must_use]
 pub fn contains_unknown_literal(expression: &ScalarExpr) -> bool {
@@ -90,6 +92,13 @@ trait Folding {
     fn array_domain_input(&mut self, _: &mut ScalarExpr) -> Result<bool, SQLError> {
         Ok(false)
     }
+    fn call_identity(
+        &mut self,
+        _: &mut Option<crate::ast::FunctionBinding>,
+        _: Option<&crate::ast::FunctionBinding>,
+    ) -> bool {
+        false
+    }
     /// A stored `unknown` literal and what binding made of it.
     fn literal(&mut self, stored: &mut ScalarExpr, bound: &ScalarExpr) -> Result<bool, SQLError>;
     /// The casts binding added around a node, outermost first, which the stored node may take over.
@@ -129,19 +138,45 @@ struct OperatorCoercions<'a> {
 }
 
 impl Folding for OperatorCoercions<'_> {
+    fn call_identity(
+        &mut self,
+        stored: &mut Option<crate::ast::FunctionBinding>,
+        selected: Option<&crate::ast::FunctionBinding>,
+    ) -> bool {
+        if stored.as_ref() != selected
+            && matches!(
+                selected.and_then(|binding| binding.dispatch),
+                Some(crate::ast::FunctionDispatch::Collate { oid: Some(_) })
+            )
+        {
+            *stored = selected.cloned();
+            true
+        } else {
+            false
+        }
+    }
+
     fn identity_cast(&mut self, stored: &mut ScalarExpr) -> Result<bool, SQLError> {
         if self.preserve_syntax_shape {
             return Ok(false);
         }
+        let normalized = collations::normalize_cast(stored, self.resolver)?;
+        if normalized && crate::catalog::collations::expression::scalar_clause(stored)?.is_some() {
+            let ScalarExpr::Func { args, .. } = stored else {
+                unreachable!("normalized collation clause");
+            };
+            self.identity_cast(&mut args[0])?;
+            return Ok(true);
+        }
         let ScalarExpr::Cast { expr, ty, .. } = stored else {
-            return Ok(false);
+            return Ok(normalized);
         };
         // Retained input constants keep their written coercion boundary and modifier; reconstruction already prints that boundary once.
         if matches!(
             **expr,
             ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
         ) {
-            return Ok(false);
+            return Ok(normalized);
         }
         let target = super::inference::resolved_type_name(
             ty,
@@ -155,7 +190,7 @@ impl Folding for OperatorCoercions<'_> {
             .zip(target.as_deref())
             .is_some_and(|(source, target)| source == target)
         {
-            return Ok(false);
+            return Ok(normalized);
         }
         // Parse analysis keeps the existing expression when its exact selected type and modifier already match the requested coercion.
         let ScalarExpr::Cast { expr, .. } =
@@ -206,6 +241,7 @@ impl Folding for OperatorCoercions<'_> {
         let ScalarExpr::TypedLiteral {
             value,
             composite_source,
+            collation_oid,
             bound_type: Some(target),
             ..
         } = bound
@@ -226,6 +262,7 @@ impl Folding for OperatorCoercions<'_> {
             return Ok(false);
         }
         *stored = ScalarExpr::TypedLiteral {
+            collation_oid: *collation_oid,
             composite_source: composite_source.clone(),
             value: value.clone(),
             ty: target.catalog_name(),
@@ -319,7 +356,13 @@ fn transfer(
         false
     };
     let (bound, added) = split_added_casts(stored, bound);
-    let mut changed = if is_unknown_literal(stored) {
+    let mut changed = if crate::catalog::collations::expression::scalar_clause(stored)?.is_some()
+        && crate::catalog::collations::expression::scalar_clause(bound)?.is_none()
+    {
+        crate::catalog::collations::expression::discard_scalar_clause(stored)?;
+        transfer(stored, bound, folding)?;
+        true
+    } else if is_unknown_literal(stored) {
         folding.literal(stored, bound)?
     } else {
         transfer_children(stored, bound, folding)?
@@ -354,6 +397,7 @@ fn transfer_children(
         (
             ScalarExpr::Func {
                 name,
+                binding,
                 args,
                 order_by,
                 filter,
@@ -383,6 +427,7 @@ fn transfer_children(
             if let (Some(filter), Some(bound)) = (filter, bound_filter) {
                 changed |= transfer(filter, bound, folding)?;
             }
+            changed |= folding.call_identity(binding, bound_binding.as_ref());
             changed
         }
         (ScalarExpr::Array(items), ScalarExpr::Array(bound))
@@ -613,6 +658,7 @@ fn fold_literal(
 #[must_use]
 pub fn stored_enum_constant(value: Value, target: &ColumnType) -> ScalarExpr {
     ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: target.catalog_name(),

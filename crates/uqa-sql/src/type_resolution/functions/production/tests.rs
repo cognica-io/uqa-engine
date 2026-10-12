@@ -37,6 +37,7 @@ fn resolve(
 
 fn domain() -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "app".into(),
         name: "bounded_text".into(),
         oid: 99_999,
@@ -61,6 +62,7 @@ fn function_results_retain_nested_type_payloads_and_release_inference_scratch() 
             "abs",
             1,
             ColumnType::Domain {
+                collation_oid: None,
                 schema: "app".into(),
                 name: "bounded_integer".into(),
                 oid: 99_998,

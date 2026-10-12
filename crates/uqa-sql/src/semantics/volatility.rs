@@ -66,7 +66,10 @@ pub fn function_volatility_with_binding(
     let builtin = builtin_function_volatility(name, binding, argument_count);
     if matches!(
         binding.and_then(|binding| binding.dispatch),
-        Some(crate::ast::FunctionDispatch::NumericOperator(_))
+        Some(
+            crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::Collate { .. }
+        )
     ) || builtin == FunctionVolatility::Volatile
     {
         return builtin;
@@ -94,7 +97,10 @@ pub fn builtin_function_volatility(
 ) -> FunctionVolatility {
     if matches!(
         binding.and_then(|binding| binding.dispatch),
-        Some(crate::ast::FunctionDispatch::NumericOperator(_))
+        Some(
+            crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::Collate { .. }
+        )
     ) {
         return FunctionVolatility::Immutable;
     }
@@ -586,6 +592,51 @@ mod tests {
     }
     use crate::ast::{FrameExclusion, FrameMode};
     use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
+
+    #[test]
+    fn collation_volatility_follows_only_its_operand() {
+        struct Shadowed;
+        impl VolatilityCatalog for Shadowed {
+            fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+                Some(FunctionVolatility::Volatile)
+            }
+            fn routine_volatilities(
+                &self,
+                _: &str,
+                _: Option<&FunctionBinding>,
+            ) -> Option<Vec<FunctionVolatility>> {
+                unreachable!("host function wins ordinary calls")
+            }
+            fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+                unreachable!("no view")
+            }
+        }
+        for (input, expected) in [
+            ("'x' COLLATE \"C\"", false),
+            ("nextval('effect')::text COLLATE \"C\"", true),
+            ("\"COLLATE\"('x')", true),
+        ] {
+            let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {input}"))
+                .unwrap()
+                .remove(0)
+            else {
+                panic!("SELECT")
+            };
+            let scalar =
+                crate::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+            assert_eq!(
+                expr_contains_volatile_function(&Shadowed, &scalar),
+                expected,
+                "{input}"
+            );
+        }
+        let binding =
+            FunctionBinding::dispatched(crate::ast::FunctionDispatch::Collate { oid: Some(950) });
+        assert_eq!(
+            super::builtin_function_volatility("nextval", Some(&binding), 2),
+            FunctionVolatility::Immutable
+        );
+    }
 
     #[test]
     fn builtin_constants_preserve_postgresql_statement_and_session_inputs() {

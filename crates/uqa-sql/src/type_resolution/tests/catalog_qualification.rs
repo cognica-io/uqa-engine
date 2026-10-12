@@ -14,6 +14,7 @@ impl FunctionTypeResolver for Catalog {
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         Ok(
             (name.trim_matches('"') == "text").then(|| ColumnType::Domain {
+                collation_oid: None,
                 schema: "first".into(),
                 name: "text".into(),
                 oid: 50_010,

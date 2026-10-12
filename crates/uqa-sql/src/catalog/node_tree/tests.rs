@@ -7,6 +7,9 @@
 use super::*;
 
 mod arrays;
+mod catalog;
+mod collations;
+mod rows;
 mod scalar;
 
 const DOMAIN_CHECK: &str = "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}";
@@ -184,6 +187,21 @@ fn infinite_temporal_nodes_and_sql_match_postgresql() {
     check_typed_nodes(include_str!("tests/temporal.json"));
 }
 
+#[test]
+fn row_expression_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/rows.json"));
+}
+
+#[test]
+fn implicit_collation_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/implicit_collations.json"));
+}
+
+#[test]
+fn explicit_collation_nodes_and_sql_match_postgresql() {
+    check_typed_nodes(include_str!("tests/explicit_collations.json"));
+}
+
 fn check_typed_nodes(fixtures: &str) {
     #[derive(serde::Deserialize)]
     struct Fixture {
@@ -201,6 +219,7 @@ fn check_typed_nodes(fixtures: &str) {
     for fixture in fixtures {
         let base = if fixture.base == "d_base" {
             crate::ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "d_base".into(),
                 oid: 16385,
@@ -214,8 +233,14 @@ fn check_typed_nodes(fixtures: &str) {
             "CREATE DOMAIN d AS {} CHECK({})",
             fixture.base, fixture.check
         );
-        let crate::Statement::CreateDomain(domain) = crate::compile(&statement).unwrap().remove(0)
-        else {
+        let mut statements = match crate::compile(&statement) {
+            Ok(statements) => statements,
+            Err(error) => {
+                failures.push(format!("{}: compilation: {error}", fixture.check));
+                continue;
+            }
+        };
+        let crate::Statement::CreateDomain(domain) = statements.remove(0) else {
             panic!("domain declaration")
         };
         let schema = crate::RowSchema::with_types(vec!["value".into()], vec![Some(base.clone())]);
@@ -389,6 +414,7 @@ fn domain_integer_check_matches_postgresql_typed_tree() {
 #[test]
 fn nested_domain_value_retains_its_oid_before_base_type_coercion() {
     let base = crate::ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "d".into(),
         oid: 16385,

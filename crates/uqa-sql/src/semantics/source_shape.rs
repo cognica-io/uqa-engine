@@ -122,7 +122,8 @@ pub fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => collect_subquery_ids(inner, output),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => collect_subquery_ids(inner, output),
         ScalarExpr::Between { expr, low, high } => {
             collect_subquery_ids(expr, output);
             collect_subquery_ids(low, output);

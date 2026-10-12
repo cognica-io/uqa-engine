@@ -16,6 +16,7 @@ use fixture::Catalog;
 
 fn integer(value: i64) -> ScalarExpr {
     ScalarExpr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value: Value::Int(value),
         ty: "integer".into(),

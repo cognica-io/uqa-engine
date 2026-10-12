@@ -12,6 +12,7 @@ use crate::SQLError;
 mod bodies;
 mod control;
 mod operators;
+mod rows;
 
 pub use bodies::return_body;
 
@@ -22,6 +23,13 @@ pub trait ExpressionNames {
     fn column(&self, attribute: i64) -> Result<String, SQLError>;
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
+
+    /// Current SQL-visible name of a selected collation identity.
+    fn collation(&self, oid: i64) -> Result<Vec<String>, SQLError> {
+        crate::catalog::collations::builtin_collation_name(oid)
+            .map(|name| vec![name.into()])
+            .ok_or_else(|| invalid("unknown collation identity"))
+    }
 
     /// Type identities and current output metadata for admitted physical constants.
     fn value_catalog(&self) -> Option<&dyn crate::expr::SQLValueCatalog> {
@@ -84,7 +92,10 @@ impl Renderer<'_> {
             }
             "PARAM" => self.parameter(node),
             "CONST" => self.constant(node),
+            "COLLATEEXPR" => self.collate(node, outer),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
+            "ROWEXPR" => self.row(node),
+            "ROWCOMPAREEXPR" => self.row_comparison(node),
             "NULLIFEXPR" => {
                 let [left, right] = list(node, "args")? else {
                     return Err(invalid("invalid NULLIF operands"));
@@ -109,9 +120,13 @@ impl Renderer<'_> {
             ),
             "BOOLEXPR" => self.boolean(node, outer),
             "NULLTEST" => {
-                let operator = match node.integer("nulltesttype")? {
-                    0 => "IS NULL",
-                    1 => "IS NOT NULL",
+                let scalar_row_test =
+                    !node.boolean("argisrow")? && self.is_record_argument(node.field("arg")?)?;
+                let operator = match (node.integer("nulltesttype")?, scalar_row_test) {
+                    (0, false) => "IS NULL",
+                    (1, false) => "IS NOT NULL",
+                    (0, true) => "IS NOT DISTINCT FROM NULL",
+                    (1, true) => "IS DISTINCT FROM NULL",
                     _ => return Err(invalid("invalid null test")),
                 };
                 Ok(parentheses(
@@ -130,7 +145,7 @@ impl Renderer<'_> {
                 };
                 let arguments = list(node, "args")?
                     .iter()
-                    .map(|arg| self.field(arg, false))
+                    .map(|arg| self.field(arg, self.pretty))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!("{name}({})", arguments.join(", ")))
             }
@@ -175,6 +190,20 @@ impl Renderer<'_> {
         self.names.parameter(number)
     }
 
+    fn collate(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
+        let name = self
+            .names
+            .collation(node.integer("collOid")?)?
+            .iter()
+            .map(|name| crate::expr::quote_ident(name))
+            .collect::<Vec<_>>()
+            .join(".");
+        Ok(parentheses(
+            format!("{} COLLATE {name}", self.field(node.field("arg")?, false)?),
+            !outer,
+        ))
+    }
+
     fn cast(&self, argument: &Field, oid: i64, modifier: i64) -> Result<String, SQLError> {
         let argument = implicit_cast_input(argument)?;
         if let Field::Node(node) = argument {
@@ -194,6 +223,7 @@ impl Renderer<'_> {
             node.kind.as_str(),
             "VAR" | "PARAM" | "COERCETODOMAINVALUE" | "CONST" | "FUNCEXPR"
                 | "NULLIFEXPR" | "COALESCEEXPR" | "MINMAXEXPR" | "ARRAYEXPR" | "CASEEXPR"
+                | "ROWEXPR"
         ));
         Ok(format!(
             "{}::{}",
@@ -225,6 +255,7 @@ impl Renderer<'_> {
         }
         let quoted = |value: &str| self.constant_literal(value, node, show_type);
         match oid {
+            705 => self.constant_literal(values::unknown_text(node)?, node, false),
             16 => match bytes.first() {
                 Some(0) => Ok("false".into()),
                 Some(1) => Ok("true".into()),

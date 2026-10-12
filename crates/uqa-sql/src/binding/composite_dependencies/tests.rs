@@ -36,6 +36,7 @@ impl CompositeTypeCatalog for Types {
             type_oid: oid,
             relation_oid: 20_003,
             attributes: vec![CompositeAttribute {
+                collation_oid: None,
                 name: "b".into(),
                 ty: ColumnType::Text,
                 number: 3,
@@ -69,6 +70,7 @@ fn expression(sql: &str) -> ScalarExpr {
 #[test]
 fn named_fields_keep_catalog_attribute_numbers_through_domains_and_array_subscripts() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "wrapped".into(),
         oid: 20_004,

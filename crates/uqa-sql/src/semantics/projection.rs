@@ -36,7 +36,11 @@ pub fn projection_label_at(proj: &ProjectionPlan) -> String {
     if let Some(a) = &proj.alias {
         return a.clone();
     }
-    match &proj.expr {
+    let mut expression = &proj.expr;
+    while let ScalarExpr::Collated { expr, .. } = expression {
+        expression = expr;
+    }
+    match expression {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
@@ -259,15 +263,36 @@ pub fn returning_context_schema(
 ) -> RowSchema {
     let target =
         RowSchema::with_qualified_types(target_qualifier, columns.to_vec(), types.to_vec());
-    let target = RowSchema::with_wildcard_hidden_positions(&target, composite_width..columns.len());
+    returning_schema_for_target(target, composite_width, aliases)
+}
+
+/// Add OLD/NEW image bindings to an already-qualified, positional target schema. Each image retains the target column's selected collation even when the image's value is NULL.
+pub fn returning_schema_for_target(
+    target: RowSchema,
+    composite_width: usize,
+    aliases: &ReturningAliases,
+) -> RowSchema {
+    let width = target.len();
+    assert_eq!(
+        target.physical_width(),
+        width,
+        "RETURNING target must be positional"
+    );
+    assert!(
+        composite_width <= width,
+        "RETURNING user columns must belong to the target"
+    );
+    debug_assert!((0..width).all(|position| target.slot(position) == Some(position)));
+    let target = RowSchema::with_wildcard_hidden_positions(&target, composite_width..width);
+    let types = target.column_types();
     let hidden_types = types
         .iter()
         .cloned()
         .chain(types.iter().cloned())
         .collect::<Vec<_>>();
     let schema = RowSchema::append_hidden_typed(&target, &hidden_types);
-    let width = columns.len();
-    let identity_aliases = columns
+    let identity_aliases = target
+        .columns()
         .iter()
         .enumerate()
         .flat_map(|(position, column)| {
@@ -285,7 +310,19 @@ pub fn returning_context_schema(
             ]
         })
         .collect::<Vec<_>>();
-    RowSchema::with_physical_identity_aliases(&schema, &identity_aliases)
+    let mut schema = RowSchema::with_physical_identity_aliases(&schema, &identity_aliases);
+    for (binding, oid) in target.collation_overrides() {
+        let crate::schema::CollationBinding::Column(position) = binding else {
+            continue;
+        };
+        for qualifier in [&aliases.old, &aliases.new] {
+            let identity = ColumnIdentity::qualified(qualifier, &target.columns()[position]);
+            schema = schema
+                .with_collation_override(crate::schema::CollationBinding::Alias(&identity), oid)
+                .expect("RETURNING image alias retains its target's type");
+        }
+    }
+    schema
 }
 
 pub fn returning_expression_schema(
@@ -296,8 +333,10 @@ pub fn returning_expression_schema(
 ) -> RowSchema {
     let composite_width = target.len();
     let (columns, types) = target_with_system_columns(target);
-    let target =
-        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
+    let width = columns.len();
+    let schema = RowSchema::with_qualified_types(target_qualifier, columns, types)
+        .with_column_collations((0..width).map(|position| target.column_collation(position)));
+    let target = returning_schema_for_target(schema, composite_width, aliases);
     supplemental.map_or(target.clone(), |source| {
         RowSchema::join(&target, source, std::iter::empty())
     })
@@ -314,7 +353,8 @@ pub fn mutation_clause_schema(
     let (columns, types) = target_with_system_columns(target);
     let width = columns.len();
     let target = RowSchema::with_wildcard_hidden_positions(
-        &RowSchema::with_qualified_types(target_qualifier, columns, types),
+        &RowSchema::with_qualified_types(target_qualifier, columns, types)
+            .with_column_collations((0..width).map(|position| target.column_collation(position))),
         composite_width..width,
     );
     supplemental.map_or(target.clone(), |source| {

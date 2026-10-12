@@ -10,11 +10,33 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn domain(base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "app".into(),
         name: "bounded".into(),
         oid: 91_001,
         array_oid: None,
         base: Box::new(base),
+    }
+}
+
+#[test]
+fn array_constructor_common_type_includes_unknown_inputs() {
+    let schema = RowSchema::with_types(vec!["domain".into()], vec![Some(domain(ColumnType::Text))]);
+    let known = ScalarExpr::Column("domain".into());
+    let unknown = ScalarExpr::Literal(Value::Null);
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(2048);
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (items, oid) in [
+        (vec![known.clone(), known.clone()], 91_001),
+        (vec![known.clone(), unknown.clone()], 25),
+        (vec![unknown, known], 25),
+    ] {
+        assert_eq!(
+            scalar_array_element_oid_with_control(&items, &schema, &[], None, &control).unwrap(),
+            Some(oid)
+        );
+        assert_eq!(budget.used(), 0);
     }
 }
 
@@ -30,6 +52,7 @@ fn constructor_result_inference_retains_catalog_identity_without_a_resolver() {
     let row = ScalarExpr::CompositeRow {
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: crate::ast::CompositeRowBinding {
+            layout: None,
             argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
@@ -74,6 +97,7 @@ fn constructor_cast_sources_keep_their_catalog_identity_under_the_output_budget(
         bound_type: None,
         items: vec![ScalarExpr::Literal(Value::Int(1))],
         binding: crate::ast::CompositeRowBinding {
+            layout: None,
             argument_types: None,
             ty: "composite#20001".into(),
             attributes: vec![1],
@@ -246,6 +270,7 @@ fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators(
         ScalarExpr::Position(0),
         ScalarExpr::Param(1),
         ScalarExpr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value: Value::Null,
             ty: "ignored_spelling".into(),
@@ -282,6 +307,7 @@ fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
         ),
         (
             ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Int(1),
                 ty: "ignored_spelling".into(),
@@ -379,6 +405,7 @@ fn optional_operand_inference_does_not_swallow_allocation_failure() {
     let held = control.copy_text("previous result").unwrap();
     let retained = budget.used();
     let ty = ColumnType::Domain {
+        collation_oid: None,
         schema: "app".into(),
         name: "n".repeat(4096),
         oid: 91_002,

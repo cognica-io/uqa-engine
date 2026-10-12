@@ -552,6 +552,7 @@ pub(in crate::compiler) fn compile_column_def_with_type(
         not_null = true;
     }
     let mut column = ColumnDef {
+        collation_oid: None,
         name,
         ty,
         object_id: None,

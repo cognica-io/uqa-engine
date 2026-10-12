@@ -538,3 +538,31 @@ fn drop_identity_sequence<S: Clone + 'static>(
         false,
     )
 }
+
+/// `transformAlterTableStmt` resolves an identity column's sequence type before `ATPrepAlterColumnType` checks inheritance and partition keys.
+pub(super) fn resolve_identity_column_type<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    partition: bool,
+    columns: &[ColumnDef],
+    name: &str,
+    ty: &mut uqa_sql::ColumnType,
+) -> Result<(), SQLError> {
+    if let Some(column) = columns
+        .iter()
+        .find(|column| column.name == name)
+        .filter(|column| {
+            !partition
+                && column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(AutoIncrement::is_identity)
+        })
+    {
+        *ty = uqa_sql::type_resolution::resolve_alter_column_type(
+            context.hierarchy.publication.types,
+            ty,
+        )?;
+        validate_identity_type(&context.identities, column, ty)?;
+    }
+    Ok(())
+}

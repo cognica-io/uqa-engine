@@ -26,8 +26,10 @@ pub fn catalog_type_name(oid: i64) -> &'static str {
         21 => "smallint",
         23 => "integer",
         25 => "text",
+        28 => "xid",
         114 => "json",
         701 => "double precision",
+        705 => "unknown",
         1184 => "timestamp with time zone",
         1186 => "interval",
         1700 => "numeric",
@@ -474,6 +476,10 @@ pub fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
         | ColumnType::Varchar(_)
         | ColumnType::Bpchar
         | ColumnType::Character(_) => 100,
+        ColumnType::Domain {
+            collation_oid: Some(oid),
+            ..
+        } => i64::from(*oid),
         ColumnType::Domain { oid, base, .. } => match oid {
             13_310 | 13_312 | 13_320 => 950,
             _ => pg_type_collation_oid(base),

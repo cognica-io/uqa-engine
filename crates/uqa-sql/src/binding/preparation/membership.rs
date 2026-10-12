@@ -7,6 +7,7 @@
 //! Retain membership analysis at the input-preparation boundary, before planning can duplicate or fold expressions. Each copied left-side subquery receives its own query-arena slot and therefore its own initialization cache.
 
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
+use crate::catalog::collations::derivation::Derivation;
 use crate::{ast::BinaryOp, type_resolution::membership::MembershipShape};
 
 pub(super) struct MembershipAnalysis {
@@ -21,7 +22,7 @@ impl Preparation<'_> {
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<(), SQLError> {
+    ) -> Result<ExpressionType, SQLError> {
         let ScalarExpr::InList {
             expr,
             list,
@@ -36,7 +37,9 @@ impl Preparation<'_> {
             .map(|item| self.expression(item, input, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
         if needle.is_deferred() || values.iter().any(ExpressionType::is_deferred) {
-            return Ok(());
+            let mut output = ExpressionType::independent(Some(ColumnType::Boolean), &values);
+            output.derivation = needle.derivation.error_only().combine(output.derivation);
+            return Ok(output);
         }
         let mut shape = MembershipShape::default();
         for (index, item) in list.iter().enumerate() {
@@ -71,6 +74,7 @@ impl Preparation<'_> {
         } else {
             BinaryOp::Equal
         };
+        let mut selected = Derivation::None;
         if let Some(common) = common {
             for index in &analysis.shape.array_items {
                 let item = &mut values[*index];
@@ -82,7 +86,18 @@ impl Preparation<'_> {
                 self.parameters.coerce_unknown(item, &common)?;
             }
             let mut left = needle.clone();
+            let array = analysis
+                .shape
+                .array_items
+                .iter()
+                .fold(Derivation::None, |state, index| {
+                    state.combine(values[*index].derivation)
+                })
+                .result(crate::catalog::type_metadata::pg_type_collation_oid(
+                    &common,
+                ));
             self.binary(op, &mut left, &mut ExpressionType::resolved(Some(common)))?;
+            selected = selected.combine(left.derivation.combine(array).error_only());
             analysis
                 .left_constants
                 .push(self.parameters.take_literal(expr));
@@ -93,27 +108,40 @@ impl Preparation<'_> {
             }
             let mut left = needle.clone();
             self.binary(op, &mut left, item)?;
-            // PostgreSQL checks each boolean comparison after operator resolution; its array comparison permits set-valued inputs.
-            let params = self.parameters.values();
-            for operand in [expr.as_ref(), &list[index]] {
-                if crate::semantics::sets::validation::expression_may_return_set(
-                    self.routines,
-                    self.routines,
-                    operand,
-                    input,
-                    &params,
-                )? {
-                    return Err(super::parameters::error(
-                        "42804",
-                        "argument of IN must not return a set".into(),
-                    ));
-                }
-            }
+            selected = selected.combine(ExpressionType::comparison(&left, item));
+            self.validate_membership_operands(expr, &list[index], input)?;
             analysis
                 .left_constants
                 .push(self.parameters.take_literal(expr));
         }
         self.parameters.retain_membership(expression, analysis);
+        let mut output = ExpressionType::resolved(Some(ColumnType::Boolean));
+        output.derivation = selected;
+        Ok(output)
+    }
+
+    /// `PostgreSQL` checks each boolean comparison after operator resolution; its array comparison permits set-valued inputs.
+    fn validate_membership_operands(
+        &self,
+        left: &ScalarExpr,
+        right: &ScalarExpr,
+        input: &RowSchema,
+    ) -> Result<(), SQLError> {
+        let params = self.parameters.values();
+        for operand in [left, right] {
+            if crate::semantics::sets::validation::expression_may_return_set(
+                self.routines,
+                self.routines,
+                operand,
+                input,
+                &params,
+            )? {
+                return Err(super::parameters::error(
+                    "42804",
+                    "argument of IN must not return a set".into(),
+                ));
+            }
+        }
         Ok(())
     }
 

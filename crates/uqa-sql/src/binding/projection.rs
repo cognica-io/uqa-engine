@@ -17,7 +17,38 @@ use super::{
 };
 use crate::routines::RoutineResolution;
 
-type ProjectionStarColumn = (String, Option<ColumnType>);
+type ProjectionStarColumn = (String, Option<ColumnType>, Option<u32>);
+
+pub(super) struct ProjectionMetadata {
+    pub ty: Option<ColumnType>,
+    pub collation: Option<u32>,
+    pub record: Option<crate::schema::RecordMetadata>,
+}
+
+/// Keep only selections that differ from their output type's default while the output schema is being assembled.
+#[derive(Default)]
+pub(super) struct OutputCollations(Vec<(usize, u32)>);
+
+impl OutputCollations {
+    pub(super) fn push(&mut self, position: usize, ty: Option<&ColumnType>, oid: Option<u32>) {
+        if let Some((ty, oid)) = ty.zip(oid) {
+            if crate::schema::composites::type_is_collatable(ty)
+                && crate::catalog::type_metadata::pg_type_collation_oid(ty) != i64::from(oid)
+            {
+                self.0.push((position, oid));
+            }
+        }
+    }
+
+    pub(super) fn apply(self, mut schema: RowSchema) -> RowSchema {
+        for (position, oid) in self.0 {
+            schema = schema
+                .with_collation_override(crate::schema::CollationBinding::Column(position), oid)
+                .expect("selected collation belongs to its typed output");
+        }
+        schema
+    }
+}
 
 /// Bind a projection against an already-declared input schema. `star_schema` identifies the relation expanded by bare `*`; `expression_schema` may also contain joined sources and hidden lookup aliases used by scalar expressions.
 pub fn bind_projection_output_schema(
@@ -74,6 +105,7 @@ fn projection_output_schema(
     let mut columns = Vec::new();
     let mut types = Vec::new();
     let mut records = Vec::new();
+    let mut collations = OutputCollations::default();
     for (position, projection) in projections.iter().enumerate() {
         let expansion_schema = match projection.expr {
             ScalarExpr::QualifiedStar(_) => expression_schema,
@@ -81,46 +113,39 @@ fn projection_output_schema(
         };
         if let Some(star_columns) = projection_star_columns(&projection.expr, expansion_schema)? {
             records.extend(
-                super::record_fields::star_fields(&projection.expr, expansion_schema)
+                super::record_fields::star_metadata(&projection.expr, expansion_schema)
                     .unwrap_or_default(),
             );
-            for (column, ty) in star_columns {
+            for (column, ty, collation) in star_columns {
+                collations.push(types.len(), ty.as_ref(), collation);
                 columns.push(column);
                 types.push(ty);
             }
             continue;
         }
         columns.push(labels[position].clone());
-        types.push(scope.bind_expression_type(
+        let metadata = scope.bind_projection_metadata(
             routines,
             &projection.expr,
             expression_schema,
             subqueries,
             params,
-        )?);
-        records.push(
-            if types
-                .last()
-                .is_some_and(|ty| matches!(ty, Some(ColumnType::Record | ColumnType::Composite(_))))
-            {
-                scope.bind_record_fields(
-                    routines,
-                    &projection.expr,
-                    expression_schema,
-                    subqueries,
-                    params,
-                )?
-            } else {
-                None
-            },
-        );
+        )?;
+        collations.push(types.len(), metadata.ty.as_ref(), metadata.collation);
+        types.push(metadata.ty);
+        records.push(metadata.record);
     }
-    Ok(RowSchema::with_types(columns, types).with_record_fields(
-        records
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
-    ))
+    for projection in projections {
+        scope.collations.validate_expression(&projection.expr)?;
+    }
+    Ok(collations
+        .apply(RowSchema::with_types(columns, types))
+        .with_record_metadata(
+            records
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
+        ))
 }
 
 /// Validate every scalar expression in a query block while the physical input still carries declared SQL types. This must precede polymorphic rewrites such as `pg_typeof`, because an invalid common type is an error, not an `unknown` result.
@@ -221,15 +246,22 @@ pub(super) fn projection_star_columns(
                     (
                         schema.public_name(position).unwrap_or(column).to_string(),
                         schema.column_type(position).cloned(),
+                        schema.column_collation(position),
                     )
                 })
                 .collect(),
         )),
         ScalarExpr::QualifiedStar(qualifier) => {
             let columns = schema
-                .qualified_star_layout(qualifier)
+                .qualified_star_position_layout(qualifier)
                 .into_iter()
-                .map(|(column, _, ty)| (column, ty))
+                .map(|(column, logical, _, ty)| {
+                    let collation = logical.map_or_else(
+                        || schema.qualified_collation(qualifier, &column),
+                        |position| schema.column_collation(position),
+                    );
+                    (column, ty, collation)
+                })
                 .collect::<Vec<_>>();
             if columns.is_empty() {
                 return Err(SQLError::UnknownTable(qualifier.clone()));
@@ -262,7 +294,9 @@ pub(super) fn rename_schema(
         }
         None => RowSchema::with_types(columns, schema.column_types().to_vec()),
     };
-    let renamed = renamed.with_record_fields_from(schema);
+    let renamed = renamed
+        .with_column_collations((0..schema.len()).map(|position| schema.column_collation(position)))
+        .with_record_fields_from(schema);
     let renamed = if schema.columns_are_open(None) {
         RowSchema::with_open_columns(&renamed, qualifier)
     } else {

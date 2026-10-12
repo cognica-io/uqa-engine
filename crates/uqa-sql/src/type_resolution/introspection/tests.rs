@@ -32,6 +32,48 @@ fn input(expression: &Expr, budget: &MemoryBudget) -> Produced<ScalarExpr> {
 }
 
 #[test]
+fn controlled_collation_binding_releases_scratch_and_keeps_selected_identity() {
+    let crate::Statement::Select(query) = crate::compile("SELECT 'x' COLLATE \"C\"")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("query")
+    };
+    let expression = &query.projections[0].expr;
+    let budget = MemoryBudget::new(16384);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let original = input(expression, &budget);
+    let output =
+        bind_type_introspection_with_control(original, &RowSchema::default(), &[], &control)
+            .unwrap();
+    assert_eq!(
+        crate::catalog::collations::expression::scalar_clause(&output)
+            .unwrap()
+            .unwrap()
+            .oid,
+        Some(950)
+    );
+    assert_eq!(budget.used(), output.reserved_bytes());
+    let held = budget.used();
+    let other = budget.reserve(budget.limit() - held).unwrap();
+    let output =
+        bind_type_introspection_with_control(output, &RowSchema::default(), &[], &control).unwrap();
+    assert_eq!(output.reserved_bytes(), held);
+    assert_eq!(
+        crate::catalog::collations::expression::scalar_clause(&output)
+            .unwrap()
+            .unwrap()
+            .oid,
+        Some(950)
+    );
+    drop(output);
+    assert_eq!(budget.used(), other.bytes());
+    drop(other);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn typeof_distinguishes_unknown_literals_from_resolved_text_inputs() {
     let schema = RowSchema::with_types(vec!["s".into()], vec![Some(ColumnType::Text)]);
     for (argument, expected) in [
@@ -268,6 +310,7 @@ fn array_common_type_preserves_coercion_origin_through_controlled_binding() {
 #[test]
 fn unknown_common_input_relabels_a_domain_but_identical_domains_survive() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "oid_domain".into(),
         oid: 90_001,

@@ -110,6 +110,7 @@ fn view(catalog: &Catalog, kind: StoredViewKind) -> StoredView {
             kind,
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
             populated: true,
         },
     }

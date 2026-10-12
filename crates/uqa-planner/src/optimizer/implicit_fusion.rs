@@ -379,7 +379,8 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => contains_explicit_fusion(inner),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => contains_explicit_fusion(inner),
         ScalarExpr::Between { expr, low, high } => {
             contains_explicit_fusion(expr)
                 || contains_explicit_fusion(low)

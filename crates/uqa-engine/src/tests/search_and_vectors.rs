@@ -136,6 +136,7 @@ fn run_analyze_populates_column_stats() {
     // don't depend on the SQL DDL path here.
     if let Some(t) = eng.table("docs").unwrap() {
         *t.columns.write() = vec![uqa_sql::ast::ColumnDef {
+            collation_oid: None,
             name: "title".into(),
             ty: uqa_sql::ast::ColumnType::Text,
             object_id: None,

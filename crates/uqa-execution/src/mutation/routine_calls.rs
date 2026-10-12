@@ -252,11 +252,7 @@ fn expression_schemas<S: Clone + Send + Sync + 'static>(
         source.as_ref(),
     );
     let conflict_schema = (!inputs.conflict_update.is_empty()).then(|| {
-        let excluded = RowSchema::with_qualified_types(
-            "excluded",
-            target.columns().to_vec(),
-            target.column_types().to_vec(),
-        );
+        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
         RowSchema::join(&schema, &excluded, std::iter::empty::<String>())
     });
     Ok((schema, conflict_schema))

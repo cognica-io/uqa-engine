@@ -60,6 +60,7 @@ fn jsonb_index_keys_preserve_native_ranges_and_semantic_equality() {
         }
     }
     let alias = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "payload".into(),
         oid: 42002,

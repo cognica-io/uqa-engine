@@ -6,11 +6,13 @@
 
 //! Catalog and name analysis for execution-free query schema binding.
 
+mod calls;
 mod functions;
 mod query_sources;
 mod references;
 mod windows;
 
+pub(super) use calls::validate_call;
 pub(super) use functions::validate_window_function;
 pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
 pub(super) use windows::references_local_column;
@@ -20,16 +22,6 @@ use crate::ast::{ColumnType, FunctionBinding};
 use crate::routines::RoutineResolution;
 use crate::semantics::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
 use crate::{ColumnIdentity, FunctionTypeResolver, RowSchema};
-
-pub(super) struct SetOperationClauses<'a> {
-    pub(super) order_by: &'a [crate::plan::OrderPlan],
-    pub(super) limit: Option<&'a ScalarExpr>,
-    pub(super) offset: Option<&'a ScalarExpr>,
-    pub(super) subqueries: &'a [QueryPlan],
-    pub(super) output: &'a RowSchema,
-    /// The scope of the queries that enclose the set operation, which its LIMIT and OFFSET can name.
-    pub(super) outer: Option<&'a RowSchema>,
-}
 
 pub(super) struct TableFunctionSourceValidation<'a> {
     pub(super) name: &'a str,
@@ -222,37 +214,6 @@ impl SchemaScope {
         Err(error)
     }
 
-    pub(super) fn validate_set_operation_clauses(
-        &mut self,
-        engine: &dyn RoutineResolution,
-        clauses: SetOperationClauses<'_>,
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        for order in clauses.order_by {
-            self.validate_expression_references(
-                engine,
-                &order.expr,
-                clauses.output,
-                None,
-                clauses.subqueries,
-                params,
-            )?;
-        }
-        // The output columns leave the namespace before LIMIT and OFFSET, as `transformSetOperationStmt` restores it.
-        let enclosing = clauses.outer.cloned().unwrap_or_default();
-        for expression in clauses.limit.into_iter().chain(clauses.offset) {
-            self.validate_expression_references(
-                engine,
-                expression,
-                &enclosing,
-                None,
-                clauses.subqueries,
-                params,
-            )?;
-        }
-        Ok(())
-    }
-
     fn validate_alias_reference(
         &mut self,
         engine: &dyn RoutineResolution,
@@ -294,7 +255,13 @@ impl SchemaScope {
         let resolver =
             self.query_function_type_resolver(engine, expression, schema, subqueries, params)?;
         Self::validate_expression_references_with_resolver(
-            engine, expression, schema, fallback, params, &resolver,
+            self.rule_condition_event,
+            engine,
+            expression,
+            schema,
+            fallback,
+            params,
+            &resolver,
         )
     }
 
@@ -309,12 +276,13 @@ impl SchemaScope {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let schema = self.with_stored_outer_internal_aliases(schema);
-        let resolver =
-            self.query_function_type_resolver(engine, condition, &schema, subqueries, params)?;
-        references::require_boolean_condition(condition, construct, &schema, params, &resolver)
+        super::preparation::condition_metadata(
+            self, engine, condition, construct, &schema, subqueries, params,
+        )
     }
 
     pub(super) fn validate_expression_references_with_resolver(
+        rule_event: Option<crate::ast::RuleEvent>,
         engine: &dyn RoutineResolution,
         expression: &ScalarExpr,
         schema: &RowSchema,
@@ -322,7 +290,9 @@ impl SchemaScope {
         params: &[SQLParam],
         resolver: &dyn FunctionTypeResolver,
     ) -> Result<(), SQLError> {
-        references::validate_expression(engine, expression, schema, fallback, params, resolver)
+        references::validate_expression(
+            rule_event, engine, expression, schema, fallback, params, resolver,
+        )
     }
 
     pub(super) fn validate_table_function_source(
@@ -342,7 +312,13 @@ impl SchemaScope {
             .query_function_type_resolver_for_subqueries(engine, args, input, subqueries, params)?;
         for argument in args {
             Self::validate_expression_references_with_resolver(
-                engine, argument, input, None, params, &resolver,
+                self.rule_condition_event,
+                engine,
+                argument,
+                input,
+                None,
+                params,
+                &resolver,
             )?;
         }
         functions::validate_table_function(engine, name, binding, args, input, params, &resolver)

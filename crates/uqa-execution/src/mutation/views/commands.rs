@@ -108,7 +108,7 @@ pub fn target_row(
         ));
     }
     Ok(OwnedPhysicalRow::new(
-        RowSchema::with_qualified_types(qualifier, target.columns.clone(), target.types.clone()),
+        RowSchema::with_relation_qualifier(&target.schema, qualifier),
         PhysicalRow::from_values(values.to_vec()),
     ))
 }
@@ -199,7 +199,7 @@ fn evaluate_insert_rule_column<S: Clone + Send + Sync + 'static>(
             scope,
             crate::mutation::assignment::TypedAssignmentTarget {
                 target: &columns[input_position],
-                ty: target.types[target_position].as_ref(),
+                ty: target.schema.column_type(target_position),
                 current: Some(&value),
                 final_column_write: !columns[input_position + 1..]
                     .iter()
@@ -325,12 +325,12 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
                         &snapshot,
                     )
                     .map(|value| {
-                        let ty = target
-                            .columns
-                            .iter()
-                            .position(|name| name == column)
-                            .and_then(|position| target.types[position].clone());
-                        (column.clone(), value, ty)
+                        let position = target.columns.iter().position(|name| name == column);
+                        let ty = position
+                            .and_then(|position| target.schema.column_type(position).cloned());
+                        let collation =
+                            position.and_then(|position| target.schema.column_collation(position));
+                        (column.clone(), value, ty, collation)
                     })
                 })
                 .collect::<Result<Vec<_>, SQLError>>()?;

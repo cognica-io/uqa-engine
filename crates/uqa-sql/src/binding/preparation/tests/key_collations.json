@@ -1,0 +1,329 @@
+[
+  {
+    "sql": "SELECT coalesce(c,p) FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c,p) FROM t ORDER BY 1",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) AS v FROM t ORDER BY v",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT c FROM t ORDER BY coalesce(c,p)",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) FROM t GROUP BY 1",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT count(*) FROM t GROUP BY coalesce(c,p)",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT DISTINCT coalesce(c,p) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT DISTINCT ON (coalesce(c,p)) c FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT DISTINCT ON (coalesce(c,p)) coalesce(c,p) AS v FROM t ORDER BY v",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT row_number() OVER (ORDER BY coalesce(c,p)) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT row_number() OVER (PARTITION BY coalesce(c,p)) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT row_number() OVER w FROM t WINDOW w AS (ORDER BY coalesce(c,p))",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT 1 FROM t WINDOW unused AS (PARTITION BY coalesce(c,p))",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT array_agg(c ORDER BY coalesce(c,p)) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT array_agg(DISTINCT coalesce(c,p)) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT string_agg(c,coalesce(c,p)) FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c,p) FROM t ORDER BY coalesce(p,c)",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"POSIX\" and \"C\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p),1+true FROM t ORDER BY 1",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) FROM t ORDER BY 1,missing",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) FROM t WHERE 1 ORDER BY 1",
+    "error": {
+      "sqlstate": "42804",
+      "message": "argument of WHERE must be type boolean, not type integer",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) FROM t WHERE coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") IS NULL ORDER BY 1",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p),coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") FROM t ORDER BY 1",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c COLLATE \"C\",p COLLATE \"POSIX\"),coalesce(c,p) FROM t ORDER BY 2",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) COLLATE \"C\" FROM t ORDER BY 1",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c FROM t ORDER BY coalesce(c,p) COLLATE \"POSIX\"",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c,plain) FROM t ORDER BY 1",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c,p) IS NULL FROM t ORDER BY 1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT length(coalesce(c,p)) FROM t ORDER BY 1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT ROW(coalesce(c,p)) FROM t ORDER BY 1",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c,p)::text[] FROM t ORDER BY 1",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p),coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") FROM t ORDER BY coalesce(t.c,t.p)",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) AS k,coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") FROM t ORDER BY k",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT *,coalesce(c,p) AS k,coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") FROM t ORDER BY 5",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT t.*,coalesce(c,p) AS k FROM t ORDER BY 5",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT array_agg(DISTINCT coalesce(c,p)) FILTER (WHERE coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") IS NULL) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT array_agg(c ORDER BY coalesce(c,p)) FILTER (WHERE coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") IS NULL) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT length(array_to_string(array_agg(DISTINCT coalesce(c,p)),',')) FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c,p) AS k FROM t GROUP BY k",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between implicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": "You can choose the collation by applying the COLLATE clause to one or both expressions."
+    }
+  },
+  {
+    "sql": "SELECT row_number() OVER w,coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") FROM t WINDOW w AS (ORDER BY coalesce(c,p))",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

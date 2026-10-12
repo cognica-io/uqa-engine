@@ -21,10 +21,12 @@ pub(super) fn migrate_persisted_views(
     routine_binding_migrations: &BTreeSet<RelationIdentity>,
     missing_output_columns: &[RelationIdentity],
     missing_object_ids: &[RelationIdentity],
+    missing_collations: &BTreeSet<RelationIdentity>,
 ) -> StorageBackendResult<()> {
     if routine_binding_migrations.is_empty()
         && missing_output_columns.is_empty()
         && missing_object_ids.is_empty()
+        && missing_collations.is_empty()
     {
         return Ok(());
     }
@@ -34,26 +36,12 @@ pub(super) fn migrate_persisted_views(
         std::mem::replace(&mut **loaded, views.clone())
     };
     let migration = (|| -> StorageBackendResult<()> {
-        for relation in routine_binding_migrations {
-            let view_name = relation.qualified_name();
-            let view = views.get_mut(relation).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "view `{view_name}` disappeared during routine-binding migration"
-                ))
-            })?;
-            context
-                .bindings
-                .bind_routines(&mut view.query, &[])
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "restore view `{view_name}` routine bindings: {error}"
-                    ))
-                })?;
-            context
-                .registry
-                .views_write()
-                .insert(relation.clone(), view.clone());
-        }
+        migrate_bound_definitions(
+            context,
+            views,
+            routine_binding_migrations,
+            missing_collations,
+        )?;
         for relation in missing_output_columns {
             let view_name = relation.qualified_name();
             let output_columns = {
@@ -84,6 +72,7 @@ pub(super) fn migrate_persisted_views(
             .iter()
             .chain(missing_output_columns)
             .chain(missing_object_ids)
+            .chain(missing_collations)
             .cloned()
             .collect::<BTreeSet<_>>();
         for relation in migrated_views {
@@ -106,6 +95,50 @@ pub(super) fn migrate_persisted_views(
     if let Err(error) = migration {
         **context.registry.views_write() = previous_views;
         return Err(error);
+    }
+    Ok(())
+}
+
+fn migrate_bound_definitions(
+    context: &ViewRestoreContext<'_>,
+    views: &mut BTreeMap<RelationIdentity, StoredView>,
+    routine_binding_migrations: &BTreeSet<RelationIdentity>,
+    missing_collations: &BTreeSet<RelationIdentity>,
+) -> StorageBackendResult<()> {
+    let binding_targets = routine_binding_migrations
+        .union(missing_collations)
+        .cloned()
+        .collect();
+    let ordered = uqa_sql::catalog::stored_view::restoration::view_metadata_dependency_order(
+        views,
+        &binding_targets,
+    )
+    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    for relation in &ordered {
+        let view_name = relation.qualified_name();
+        let view = views.get_mut(relation).ok_or_else(|| {
+            StorageBackendError::Other(format!(
+                "view `{view_name}` disappeared during metadata migration"
+            ))
+        })?;
+        let schema = context
+            .bindings
+            .bind_routines(&mut view.query, &[])
+            .map_err(|error| {
+                StorageBackendError::Other(format!("restore view `{view_name}` bindings: {error}"))
+            })?;
+        if missing_collations.contains(relation) {
+            view.restore_materialized_collations(&schema)
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "restore view `{view_name}` collations: {error}"
+                    ))
+                })?;
+        }
+        context
+            .registry
+            .views_write()
+            .insert(relation.clone(), view.clone());
     }
     Ok(())
 }

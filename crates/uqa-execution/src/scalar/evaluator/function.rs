@@ -12,16 +12,37 @@ use super::{
 };
 use uqa_sql::ast::{FunctionBinding, FunctionDispatch, NumericOperator};
 
-pub(super) fn evaluate_function(
+pub(super) fn evaluate_expression(
+    expression: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let ScalarExpr::Func {
+        name,
+        binding,
+        args,
+        ..
+    } = expression
+    else {
+        unreachable!("function-shaped expression")
+    };
+    let binding = binding.as_ref();
+    if let Some(error) = binding.and_then(|binding| binding.resolution_error.as_ref()) {
+        return Err(error.sql_error());
+    }
+    if let Some(clause) = uqa_sql::catalog::collations::expression::scalar_clause(expression)? {
+        return eval_scalar_inner(clause.argument, context, control);
+    }
+    evaluate_function(name, binding, args, context, control)
+}
+
+fn evaluate_function(
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    if let Some(error) = binding.and_then(|binding| binding.resolution_error.as_ref()) {
-        return Err(error.sql_error());
-    }
     if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
         hook.require_builtin_execute(binding)?;
     }

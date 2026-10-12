@@ -17,6 +17,7 @@ fn admitted_scalar_copy_preserves_window_frames_bindings_and_typed_payloads() {
     let source = ScalarExpr::Row(vec![
         window,
         ScalarExpr::TypedLiteral {
+            collation_oid: Some(950),
             composite_source: None,
             value: Value::Str("retained scalar payload".repeat(100)),
             ty: "character varying[]".into(),
@@ -26,6 +27,10 @@ fn admitted_scalar_copy_preserves_window_frames_bindings_and_typed_payloads() {
         ScalarExpr::CompositeRow {
             items: vec![ScalarExpr::Literal(Value::Int(1))],
             binding: crate::ast::CompositeRowBinding {
+                layout: Some(crate::ast::CompositeRowLayout {
+                    width: 2,
+                    implicit: true,
+                }),
                 argument_types: Some(vec![ColumnType::Integer]),
                 ty: "composite#20001".into(),
                 attributes: vec![1],
@@ -80,11 +85,13 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
             relation_oid: 20_003,
             attributes: vec![
                 CompositeAttribute {
+                    collation_oid: None,
                     name: "a".into(),
                     ty: ColumnType::InternalChar,
                     number: 1,
                 },
                 CompositeAttribute {
+                    collation_oid: Some(951),
                     name: "dropped".into(),
                     ty: ColumnType::Text,
                     number: 2,
@@ -95,6 +102,7 @@ fn composite_original_payload_is_retained_through_json_and_budgeted_plan_copies(
     let expression = crate::ast::Expr::TypedLiteral {
         value: Value::Record(vec![("a".into(), Value::Bool(true))].into()),
         ty: "composite#20001".into(),
+        collation_oid: None,
         composite_source: Some(Box::new(original)),
     };
     let restored: crate::ast::Expr =

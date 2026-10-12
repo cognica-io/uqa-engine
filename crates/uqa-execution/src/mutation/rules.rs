@@ -516,7 +516,12 @@ fn prepare_rule_actions(
         {
             let columns = ordered
                 .into_iter()
-                .map(|(name, column)| (name.clone(), column.ty.clone()))
+                .map(|(name, column)| {
+                    let mut definition =
+                        uqa_sql::ast::ColumnDef::nullable(name.clone(), column.ty.clone());
+                    definition.collation_oid = column.collation_oid;
+                    definition
+                })
                 .collect::<Vec<_>>();
             context
                 .binding

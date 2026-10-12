@@ -117,6 +117,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width() + outer_columns.len(),
             SchemaBuildMetadata {
+                collations: input.index.cold.collations.clone(),
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases,
                 alias_types,
@@ -139,6 +140,7 @@ impl RowSchema {
         reason = "outer-scope merge keeps schema and value precedence aligned"
     )]
     pub fn with_outer_schema(input: &Self, outer: &Self) -> Self {
+        let mut collations = input.index.cold.collations.clone();
         let outer_base = input.physical_width();
         let current_qualifiers = input
             .index
@@ -205,6 +207,11 @@ impl RowSchema {
                 .qualified_slot(qualifier, identity.column())
                 .map_or(NULL_SLOT, shifted_slot);
             let ty = outer.qualified_type(qualifier, identity.column()).cloned();
+            collations.alias(
+                &identity,
+                outer.qualified_collation(qualifier, identity.column()),
+                ty.as_ref(),
+            );
             aliases.insert(identity.clone(), slot);
             alias_types.insert(identity, ty);
         }
@@ -243,6 +250,7 @@ impl RowSchema {
             }
             let slot = outer.column_slot(column).map_or(NULL_SLOT, shifted_slot);
             aliases.insert(identity.clone(), slot);
+            collations.alias(&identity, outer.collation_of(column), outer.type_of(column));
             alias_types.insert(identity, outer.type_of(column).cloned());
         }
 
@@ -252,6 +260,7 @@ impl RowSchema {
             internal.insert(*column, shifted_slot(*slot));
         }
         for (column, ty) in &outer.index.cold.executor_attribute_types {
+            collations.internal(*column, outer.internal_collation(*column), ty.as_ref());
             if let Some(existing) = internal_types.get(column) {
                 assert_eq!(
                     existing, ty,
@@ -285,6 +294,7 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width() + outer.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: Self::joined_record_fields(input, outer, input.physical_width()),
                 aliases,
                 alias_types,
@@ -315,6 +325,20 @@ impl RowSchema {
             })
             .map(|(identity, ty)| (identity.clone(), ty.cloned()))
             .collect::<Vec<_>>();
-        Self::with_typed_virtual_identities(&schema, &virtual_identities)
+        let mut schema = Self::with_typed_virtual_identities(&schema, &virtual_identities);
+        let index = std::sync::Arc::make_mut(&mut schema.index);
+        for (identity, _) in &virtual_identities {
+            if input.index.cold.binding_only.contains_key(identity) {
+                continue;
+            }
+            if let Some(ty) = index.cold.binding_only.get(identity) {
+                index.cold.collations.virtual_column(
+                    identity,
+                    outer.virtual_collation(identity),
+                    ty.as_ref(),
+                );
+            }
+        }
+        schema
     }
 }

@@ -244,9 +244,7 @@ impl SchemaScope {
         }
 
         let set_output = match &*root {
-            RelationalPlan::SetOp { .. } => {
-                Some(self.bind_root(routines, root, params, outer, false)?)
-            }
+            RelationalPlan::SetOp { .. } => Some(self.bind_root(routines, root, params, outer)?),
             RelationalPlan::QueryBlock(_) | RelationalPlan::Values { .. } => None,
         };
         match root {
@@ -457,7 +455,7 @@ impl SchemaScope {
                 }
             }
         }
-        self.bind_root(routines, root, params, outer, false)
+        self.bind_root(routines, root, params, outer)
     }
 
     #[expect(
@@ -802,7 +800,29 @@ pub fn bind_expression_plan_routines_for_storage(
     ctes: &BindingContext,
     schema: &RowSchema,
 ) -> Result<Option<ColumnType>, SQLError> {
+    bind_stored_expression(engine, plan, params, ctes, schema, None)
+}
+
+pub(super) fn bind_rule_condition_routines(
+    engine: &dyn RoutineResolution,
+    plan: &mut ExpressionPlan,
+    ctes: &BindingContext,
+    schema: &RowSchema,
+    event: crate::ast::RuleEvent,
+) -> Result<Option<ColumnType>, SQLError> {
+    bind_stored_expression(engine, plan, &[], ctes, schema, Some(event))
+}
+
+fn bind_stored_expression(
+    engine: &dyn RoutineResolution,
+    plan: &mut ExpressionPlan,
+    params: &[SQLParam],
+    ctes: &BindingContext,
+    schema: &RowSchema,
+    rule_event: Option<crate::ast::RuleEvent>,
+) -> Result<Option<ColumnType>, SQLError> {
     let mut scope = SchemaScope::for_analysis(ctes)?;
+    scope.rule_condition_event = rule_event;
     scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(schema.clone());
     for subquery in &mut plan.subqueries {

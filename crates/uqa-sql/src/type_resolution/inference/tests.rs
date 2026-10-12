@@ -19,6 +19,7 @@ fn infer(
 
 fn domain() -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive_integer".into(),
         oid: 90001,
@@ -203,6 +204,7 @@ fn scalar_inference_preserves_cast_and_comparison_error_states() {
         ScalarExpr::Binary {
             op: BinaryOp::Equal,
             lhs: Box::new(ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Str("{}".into()),
                 ty: "json".into(),
@@ -210,6 +212,7 @@ fn scalar_inference_preserves_cast_and_comparison_error_states() {
                 parameter_index: None,
             }),
             rhs: Box::new(ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Str("{}".into()),
                 ty: "json".into(),

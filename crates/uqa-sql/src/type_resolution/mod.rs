@@ -20,17 +20,20 @@ mod call;
 mod cast_compatibility;
 mod checksum;
 mod common;
-pub(crate) use common::array_element_type;
 pub(crate) use common::literal_input_type_with_control;
+pub(crate) use common::select_common_input_type_in_with_control;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
+pub(crate) use common::{array_element_type, base_type};
 mod containment;
 pub(crate) mod enums;
 mod equality;
 pub(crate) mod field_selection;
 mod fixed_builtin;
 pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
+mod function_inputs;
 mod functions;
+pub(crate) use function_inputs::{call_type_from_observations, CallInputTypes};
 mod gamma;
 mod inference;
 use inference::scalar_type_inner_with_control;
@@ -40,6 +43,7 @@ mod length;
 mod md5;
 pub(crate) mod membership;
 mod operator_errors;
+pub(crate) mod row_comparison;
 pub(crate) mod row_distinct;
 pub use operator_errors::{
     ambiguous_binary_operator, ambiguous_prefix_operator, undefined_binary_operator,
@@ -156,6 +160,11 @@ pub trait FunctionTypeResolver: Send + Sync {
     /// Resolve a catalog-owned SQL type name that is not represented by the
     /// built-in [`ColumnType::from_sql_name`] mapping, such as a domain.
     fn resolve_type_name(&self, _name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+
+    /// Resolve an explicit collation name with the binding catalog's namespace visibility and privileges.
+    fn resolve_collation_name(&self, _name: &str) -> Result<Option<u32>, SQLError> {
         Ok(None)
     }
 
@@ -327,6 +336,22 @@ pub fn catalog_input_type(ty: &ColumnType) -> bool {
         | ColumnType::Tensor(_) => true,
         ColumnType::Array(inner) | ColumnType::Domain { base: inner, .. } => {
             catalog_input_type(inner)
+        }
+        _ => false,
+    }
+}
+
+/// Whether value operations can require live catalog metadata: enum identities, record fields and their array/domain containers cannot be evaluated by a catalog-free scalar implementation. OID aliases have already decoded their names and operate on ordinary integer values.
+#[must_use]
+pub fn catalog_value_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Named(_)
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_)
+        | ColumnType::Record
+        | ColumnType::AnyArray => true,
+        ColumnType::Array(inner) | ColumnType::Domain { base: inner, .. } => {
+            catalog_value_type(inner)
         }
         _ => false,
     }

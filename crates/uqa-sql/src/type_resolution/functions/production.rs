@@ -259,34 +259,20 @@ fn common_argument_type(
     types: &[Option<ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    let mut result: Option<Produced<ColumnType>> = None;
-    for (argument, ty) in args.iter().zip(types) {
-        control.check()?;
-        if matches!(
-            named_argument_value(argument),
-            ScalarExpr::Literal(Value::Str(_) | Value::Null)
-        ) {
-            continue;
+    let inputs = args.iter().zip(types).filter_map(|(argument, ty)| {
+        let argument = named_argument_value(argument);
+        if super::super::is_unknown_literal(argument) {
+            Some(None)
+        } else if ty.is_some() || super::super::common::unknown_input(argument) {
+            Some(ty.as_ref())
+        } else {
+            None
         }
-        if let Some(ty) = ty {
-            result = crate::type_resolution::common::merge_value_types_in(
-                context,
-                result,
-                Some(ty.clone_with_control(control)?),
-                control,
-            )?;
-        }
-    }
-    if let Some(result) = &result {
-        crate::type_resolution::common::read_unknown_literals(
-            args.iter().map(named_argument_value),
-            result,
-        )?;
-    }
-    match result {
-        Some(result) => Ok(Some(result)),
-        None => inline(ColumnType::Text, control),
-    }
+    });
+    let result =
+        super::super::common::select_common_input_type_in_with_control(context, inputs, control)?;
+    super::super::common::read_unknown_literals(args.iter().map(named_argument_value), &result)?;
+    Ok(Some(result))
 }
 
 fn concat_type(
@@ -524,6 +510,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         })
         .collect::<Vec<_>>();
     let effective = |position: usize| effective_types.get(position).copied().flatten();
+    super::signatures::validate_variadic_prefix(original_name, args, &effective_types)?;
     // An explicit VARIADIC argument of a `VARIADIC "any"` built-in must be an array.
     if explicit_variadic && crate::expr::variadic_any::is_variadic_any(name) {
         if let Some(last) = effective_types.len().checked_sub(1).and_then(effective) {
@@ -537,6 +524,19 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         match dispatch {
             FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
+            FunctionDispatch::Collate { oid } => {
+                let [_, ScalarExpr::Literal(Value::Str(name))] = args else {
+                    return Err(SQLError::Internal("invalid COLLATE expression".into()));
+                };
+                crate::catalog::collations::expression::select_with_control(
+                    name,
+                    oid,
+                    effective(0),
+                    resolver,
+                    control,
+                )?;
+                return copy(first(), control);
+            }
             FunctionDispatch::ArrayConcat
             | FunctionDispatch::ArrayAppend
             | FunctionDispatch::ArrayPrepend => {

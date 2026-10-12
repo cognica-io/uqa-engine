@@ -111,14 +111,16 @@ fn analyzed_fixed_calls_retain_their_declaration_before_optimization() {
         read_prepared_inputs(&NoRoutines, &mut plan, &[], &assignment_context(), None).unwrap();
         let mut observed = false;
         plan.visit_scalar_expressions(&mut |expression| {
-            if let ScalarExpr::Func { name, binding, .. } = expression {
-                if name == "lower" {
-                    let binding = binding.as_ref().expect("analyzed fixed declaration");
-                    assert_eq!(binding.name, "pg_catalog.lower");
-                    assert_eq!(binding.argument_types, ["text"]);
-                    observed = true;
+            expression.visit(&mut |expression| {
+                if let ScalarExpr::Func { name, binding, .. } = expression {
+                    if name == "lower" {
+                        let binding = binding.as_ref().expect("analyzed fixed declaration");
+                        assert_eq!(binding.name, "pg_catalog.lower");
+                        assert_eq!(binding.argument_types, ["text"]);
+                        observed = true;
+                    }
                 }
-            }
+            });
         });
         assert!(observed, "{sql}");
     }
@@ -179,4 +181,24 @@ fn preparation_preserves_untyped_callback_identity_and_original_arguments() {
             assert!(binding.as_ref().is_some_and(|binding| binding.builtin));
         }
     });
+}
+
+#[test]
+fn ordered_set_results_substitute_the_observed_element_identity() {
+    for sql in [
+        "SELECT mode() WITHIN GROUP (ORDER BY 1) = 1",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY 1) = 1",
+        "SELECT mode() WITHIN GROUP (ORDER BY ARRAY[1]) = ARRAY[1]",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY ARRAY[1]) = ARRAY[1]",
+        "SELECT mode() WITHIN GROUP (ORDER BY 'x'::text) = 'x'::text",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY 'x'::text) = 'x'::text",
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        assert!(
+            infer_prepared_parameter_types(&NoRoutines, &plan, &[], &assignment_context())
+                .unwrap()
+                .is_empty(),
+            "{sql}"
+        );
+    }
 }

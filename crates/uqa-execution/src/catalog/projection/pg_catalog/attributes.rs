@@ -19,8 +19,7 @@ use super::super::helpers::rows::{
     bool_value, catalog_ordinal, catalog_usize, column_ordinal, int_value, row, str_value,
 };
 use super::super::helpers::type_metadata::{
-    pg_type_align, pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier,
-    pg_type_oid, pg_type_storage,
+    pg_type_align, pg_type_by_value, pg_type_len, pg_type_modifier, pg_type_oid, pg_type_storage,
 };
 use super::super::helpers::views::view_columns_for;
 use super::table_relation_oid_from;
@@ -210,6 +209,7 @@ fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
 /// A column that has only a name, a type and its nullability, as the attributes of sequences and composite types have.
 pub(super) fn attribute_column(name: &str, ty: ColumnType, not_null: bool) -> SQLColumnDef {
     SQLColumnDef {
+        collation_oid: None,
         name: name.into(),
         ty,
         object_id: None,
@@ -298,7 +298,10 @@ pub fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRo
         ("attisdropped", bool_value(false)),
         ("attislocal", bool_value(true)),
         ("attinhcount", int_value(0)),
-        ("attcollation", int_value(pg_type_collation_oid(&col.ty))),
+        (
+            "attcollation",
+            int_value(uqa_sql::catalog::collations::declarations::column_oid(col)),
+        ),
         ("attacl", Value::Null),
         ("attoptions", Value::Null),
         ("attfdwoptions", Value::Null),

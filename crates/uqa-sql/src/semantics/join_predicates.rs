@@ -77,6 +77,7 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
         | ScalarExpr::Not(expr)
         | ScalarExpr::IsNull { expr, .. }
         | ScalarExpr::Cast { expr, .. }
+        | ScalarExpr::Collated { expr, .. }
         | ScalarExpr::InSubquery { expr, .. } => expression_binding(expr, schema),
         ScalarExpr::Between { expr, low, high } => {
             combine_bindings([expr.as_ref(), low.as_ref(), high.as_ref()], schema)

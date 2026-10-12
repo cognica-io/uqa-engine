@@ -94,13 +94,10 @@ pub(super) fn composite_attribute_rows(catalog: &CatalogReadView) -> Vec<ResultR
 fn composite_attribute_row(relid: i64, attribute: &StoredCompositeAttribute) -> ResultRow {
     let column = attribute_column(&attribute.name, attribute.ty.clone(), false);
     let mut row = pg_attribute_row(relid, i64::from(attribute.number), &column);
-    if let Some(collation) = attribute
-        .collation
-        .as_deref()
-        .and_then(uqa_sql::schema::composites::builtin_collation_oid)
-    {
-        row.insert("attcollation".into(), int_value(collation));
-    }
+    row.insert(
+        "attcollation".into(),
+        int_value(i64::from(attribute.collation_oid())),
+    );
     if attribute.dropped {
         row.insert(
             "attname".into(),

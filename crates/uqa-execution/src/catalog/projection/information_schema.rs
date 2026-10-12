@@ -257,6 +257,10 @@ fn information_schema_column_row(
     COLUMN_ROWS.set(COLUMN_ROWS.get() + 1);
     let description = describe_column_type(catalog, &column.ty);
     let identity = IdentityAttributes::of(column, sequence);
+    let collation_oid = uqa_sql::catalog::collations::declarations::column_oid(column);
+    let collation = (collation_oid != uqa_sql::catalog::collations::DEFAULT_COLLATION_OID)
+        .then(|| uqa_sql::catalog::collations::builtin_collation_name(collation_oid))
+        .flatten();
     Ok(row([
         ("table_catalog", catalog_name()),
         ("table_schema", str_value(schema)),
@@ -305,9 +309,15 @@ fn information_schema_column_row(
         ("character_set_catalog", Value::Null),
         ("character_set_schema", Value::Null),
         ("character_set_name", Value::Null),
-        ("collation_catalog", Value::Null),
-        ("collation_schema", Value::Null),
-        ("collation_name", Value::Null),
+        (
+            "collation_catalog",
+            collation.map_or(Value::Null, |_| catalog_name()),
+        ),
+        (
+            "collation_schema",
+            collation.map_or(Value::Null, |_| str_value("pg_catalog")),
+        ),
+        ("collation_name", collation.map_or(Value::Null, str_value)),
         (
             "domain_catalog",
             description

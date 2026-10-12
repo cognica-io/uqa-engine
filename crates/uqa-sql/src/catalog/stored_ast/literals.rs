@@ -60,6 +60,7 @@ pub fn read_unknown_stored_literal(
     };
     let ty = if keep_modifier { base } else { &input_type };
     *expression = Expr::TypedLiteral {
+        collation_oid: None,
         composite_source: None,
         value,
         ty: ty.catalog_name(),
@@ -92,6 +93,7 @@ mod tests {
     #[test]
     fn unknown_assignment_reads_base_input_and_keeps_null_default() {
         let domain = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "positive".into(),
             oid: 16384,

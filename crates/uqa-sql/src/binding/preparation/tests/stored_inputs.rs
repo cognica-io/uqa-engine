@@ -70,7 +70,8 @@ fn rule_whole_inputs_expand_only_in_the_event_namespace() {
             &["id".into()],
             crate::ast::RuleEvent::Update,
         );
-        let schema = binding.row_schema(&[("id".into(), ColumnType::Integer)]);
+        let schema =
+            binding.row_schema(&[crate::ast::ColumnDef::nullable("id", ColumnType::Integer)]);
         let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(
             crate::compile(&format!("SELECT {local} OR NEW IS NULL"))
                 .unwrap()

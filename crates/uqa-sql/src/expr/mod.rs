@@ -118,7 +118,7 @@ pub use floating::{
 pub use in_range::{in_range, in_range_with_engine};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
-pub(crate) use scalar_helpers::append_sql_literal;
+pub(crate) use scalar_helpers::{append_sql_literal, quote_ident_with_control};
 use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 pub use temporal_input::{

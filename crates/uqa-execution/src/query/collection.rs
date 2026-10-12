@@ -25,8 +25,6 @@ pub fn collect_query_operator<'a>(
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
     let internal_schema = operator.row_schema().clone();
-    let internal_columns = internal_schema.columns().to_vec();
-    let internal_types = internal_schema.column_types().to_vec();
     let column_types = columns
         .iter()
         .enumerate()
@@ -41,9 +39,9 @@ pub fn collect_query_operator<'a>(
         })
         .collect();
     let rows = match output_mode {
-        QueryOutputMode::Rows => collect_materialized_rows(&columns, operator.as_mut())?,
+        QueryOutputMode::Rows => collect_materialized_rows(operator.as_mut())?,
         QueryOutputMode::SharedSpill => {
-            collect_spilled_rows(runtime, operator.as_mut(), internal_schema)?
+            collect_spilled_rows(runtime, operator.as_mut(), internal_schema.clone())?
         }
         QueryOutputMode::ExistsKeySet(catalog) => {
             collect_exists_keys(&columns, operator.as_mut(), catalog)?
@@ -55,41 +53,18 @@ pub fn collect_query_operator<'a>(
     Ok(QueryOutput {
         columns,
         column_types,
-        internal_columns,
-        internal_types,
+        internal_schema,
         rows,
     })
 }
 
 fn collect_materialized_rows(
-    columns: &[String],
     operator: &mut dyn crate::PhysicalOperator,
 ) -> Result<QueryRows, SQLError> {
-    let has_duplicate_labels = {
-        let mut seen = std::collections::BTreeSet::new();
-        columns.iter().any(|column| !seen.insert(column))
-    };
-    Ok(if has_duplicate_labels {
-        let batches = crate::physical::run_to_batches(operator).map_err(physical_exec_error)?;
-        let mut named = Vec::new();
-        let mut positional = Vec::new();
-        for batch in batches {
-            let columnar = crate::ColumnarBatch::from_batch(columns, batch.clone());
-            positional.extend(columnar.into_positional_rows());
-            named.extend(batch.into_result_rows());
-        }
-        QueryRows::Rows {
-            named,
-            positional: Some(positional),
-        }
-    } else {
-        QueryRows::Rows {
-            named: crate::physical::run_to_rows(operator)
-                .map_err(physical_exec_error)?
-                .1,
-            positional: None,
-        }
-    })
+    let batches = crate::physical::run_to_batches(operator).map_err(physical_exec_error)?;
+    Ok(QueryRows::Rows(
+        batches.into_iter().flat_map(|batch| batch.rows).collect(),
+    ))
 }
 
 fn collect_spilled_rows(
@@ -200,10 +175,7 @@ fn collect_consumed_rows(
 ) -> Result<QueryRows, SQLError> {
     if consumer.uses_directional_scan() {
         collect_directional_query_operator(columns, operator, consumer)?;
-        return Ok(QueryRows::Rows {
-            named: Vec::new(),
-            positional: None,
-        });
+        return Ok(QueryRows::Rows(Vec::new()));
     }
     consumer.begin(columns, internal_schema)?;
     if let Err(error) = operator.open() {
@@ -253,10 +225,7 @@ fn collect_consumed_rows(
         }
     }
     operator.close().map_err(physical_exec_error)?;
-    Ok(QueryRows::Rows {
-        named: Vec::new(),
-        positional: None,
-    })
+    Ok(QueryRows::Rows(Vec::new()))
 }
 
 fn collect_directional_query_operator(

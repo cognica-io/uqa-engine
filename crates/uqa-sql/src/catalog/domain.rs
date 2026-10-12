@@ -41,6 +41,7 @@ impl<Owner> StoredDomain<Owner> {
             name: self.identity.name.clone(),
             oid: self.oid,
             array_oid: self.array_oid,
+            collation_oid: self.definition.collation_oid,
             base: Box::new(self.definition.base.clone()),
         }
     }

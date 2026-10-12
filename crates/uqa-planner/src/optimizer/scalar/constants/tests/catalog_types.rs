@@ -26,6 +26,7 @@ impl RoutineTypeCatalog for Catalog {
             }))
         } else if name == "text" {
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "first".into(),
                 name: "text".into(),
                 oid: 50_010,
@@ -130,6 +131,7 @@ fn retained_enum_constants_use_the_same_catalog_during_inference_and_coercion() 
         ty: "enum#50020".into(),
         bound_type: None,
         parameter_index: None,
+        collation_oid: None,
         composite_source: None,
     };
     for key in [1, 2] {

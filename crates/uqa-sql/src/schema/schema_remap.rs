@@ -21,6 +21,15 @@ impl RowSchema {
         columns: &[(String, ColumnIdentity, usize, Option<ColumnType>)],
         aliases: &[(ColumnIdentity, usize, Option<ColumnType>)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
+        collations.clear_columns();
+        for (position, (_, _, source, ty)) in columns.iter().enumerate() {
+            collations.column(
+                position,
+                input.inherited_physical_collation(*source),
+                ty.as_ref(),
+            );
+        }
         let output_names = columns
             .iter()
             .map(|(output, _, _, _)| output.clone())
@@ -56,6 +65,11 @@ impl RowSchema {
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, physical, ty) in aliases {
+            collations.alias(
+                identity,
+                input.inherited_physical_collation(*physical),
+                ty.as_ref(),
+            );
             lookup_aliases.insert(
                 identity.clone(),
                 if *physical < input.physical_width() {
@@ -73,6 +87,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,
@@ -93,6 +108,15 @@ impl RowSchema {
         columns: &[(String, ColumnIdentity, usize, Option<ColumnType>)],
         aliases: &[(ColumnIdentity, usize)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
+        collations.clear_columns();
+        for (position, (_, _, source, ty)) in columns.iter().enumerate() {
+            collations.column(
+                position,
+                input.inherited_column_collation(*source),
+                ty.as_ref(),
+            );
+        }
         let output_names = columns
             .iter()
             .map(|(output, _, _, _)| output.clone())
@@ -121,6 +145,11 @@ impl RowSchema {
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, logical) in aliases {
+            collations.alias(
+                identity,
+                input.inherited_column_collation(*logical),
+                input.column_type(*logical),
+            );
             lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
             alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
         }
@@ -131,6 +160,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: lookup_aliases,
                 alias_types,
@@ -150,6 +180,15 @@ impl RowSchema {
         input: &Self,
         columns: &[(String, ColumnIdentity, usize, Option<ColumnType>)],
     ) -> Self {
+        let mut collations = input.index.cold.collations.clone();
+        collations.clear_columns();
+        for (position, (_, _, source, ty)) in columns.iter().enumerate() {
+            collations.column(
+                position,
+                input.inherited_column_collation(*source),
+                ty.as_ref(),
+            );
+        }
         let output_names = columns
             .iter()
             .map(|(output, _, _, _)| output.clone())
@@ -182,6 +221,7 @@ impl RowSchema {
             slots,
             input.physical_width(),
             SchemaBuildMetadata {
+                collations,
                 record_fields: input.index.cold.record_fields.clone(),
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),

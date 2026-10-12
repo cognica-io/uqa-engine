@@ -110,6 +110,7 @@ mod tests {
             ),
         ] {
             let ty = ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "array_element".into(),
                 oid: 16_500,

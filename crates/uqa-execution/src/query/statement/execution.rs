@@ -327,14 +327,10 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             }
         }
         return Ok(QueryOutput {
-            columns: columns.clone(),
-            column_types: column_types.clone(),
-            internal_columns: columns,
-            internal_types: column_types,
-            rows: QueryRows::Rows {
-                named: Vec::new(),
-                positional: None,
-            },
+            columns,
+            column_types,
+            internal_schema: set_schema,
+            rows: QueryRows::Rows(Vec::new()),
         });
     }
     // Materialize each child directly into a disk-backed, repeatable stream before starting the next child. A nested set operation therefore never owns two cardinality-sized `SQLResult.rows` vectors, and its external merge consumes batches under `work_mem`.

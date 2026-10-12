@@ -110,8 +110,9 @@ fn alter_column_type_preserves_the_using_expression() {
     else {
         panic!("not ALTER TABLE ALTER COLUMN TYPE");
     };
-    let [crate::ast::AlterTableAction::AlterColumnType { name, ty, using }] =
-        alter.actions.as_slice()
+    let [crate::ast::AlterTableAction::AlterColumnType {
+        name, ty, using, ..
+    }] = alter.actions.as_slice()
     else {
         panic!("not ALTER COLUMN TYPE");
     };

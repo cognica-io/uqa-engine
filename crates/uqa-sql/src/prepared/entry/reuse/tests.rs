@@ -40,6 +40,7 @@ fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
 
 fn domain() -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "guarded".into(),
         oid: 20_001,
@@ -106,6 +107,7 @@ fn catalog_descriptors_and_input_identities_keep_conservative_invalidation() {
     Arc::make_mut(&mut converted.logical_plan).rewrite_scalar_expressions(&mut |expression| {
         if matches!(expression, ScalarExpr::Literal(_)) {
             *expression = ScalarExpr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: uqa_core::Value::Str("HELLO".into()),
                 ty: "text".into(),
@@ -239,6 +241,7 @@ fn missing_and_specialized_descriptors_are_not_catalog_independent() {
         .rewrite_scalar_expressions(&mut |expression| {
             if matches!(expression, ScalarExpr::Param(_)) {
                 *expression = ScalarExpr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: uqa_core::Value::Str("first".into()),
                     ty: "text".into(),

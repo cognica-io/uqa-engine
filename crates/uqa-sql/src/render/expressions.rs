@@ -27,6 +27,13 @@ pub(super) fn render_expr_in(
     let render_expr = |expression| render_expr_in(expression, windows);
     let expr_list = |expressions: &[Expr]| expr_list_in(expressions, windows);
     let order_by_sql = |orders: &[OrderBy]| order_by_sql_in(orders, windows);
+    if let Some(clause) = crate::catalog::collations::expression::ast_clause(expression)? {
+        return Ok(format!(
+            "({} COLLATE {})",
+            render_expr(clause.argument)?,
+            clause.executable_name()?
+        ));
+    }
     Ok(match expression {
         Expr::Star => "*".into(),
         Expr::QualifiedStar(qualifier) => format!("{}.*", ident(qualifier)),

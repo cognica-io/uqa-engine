@@ -1,0 +1,58 @@
+[
+  {
+    "base": "integer",
+    "check": "ROW(VALUE) < ROW(1, 2)",
+    "sqlstate": "42601",
+    "message": "unequal number of entries in row expressions",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 1) IS DISTINCT FROM ROW(2)",
+    "sqlstate": "42601",
+    "message": "unequal number of entries in row expressions",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW() = ROW()",
+    "sqlstate": "0A000",
+    "message": "cannot compare rows of zero length",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW() < ROW()",
+    "sqlstate": "0A000",
+    "message": "cannot compare rows of zero length",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "integer",
+    "check": "ROW(VALUE, 1) + ROW(2, 3)",
+    "sqlstate": "42804",
+    "message": "row comparison operator must yield type boolean, not type integer",
+    "detail": null,
+    "hint": null
+  },
+  {
+    "base": "xid",
+    "check": "ROW(VALUE, '1'::xid) = ROW('1'::xid, '2'::xid)",
+    "sqlstate": "0A000",
+    "message": "could not determine interpretation of row comparison operator =",
+    "detail": null,
+    "hint": "Row comparison operators must be associated with btree operator families."
+  },
+  {
+    "base": "xid",
+    "check": "ROW(VALUE, '1'::xid) <> ROW('1'::xid, '2'::xid)",
+    "sqlstate": "0A000",
+    "message": "could not determine interpretation of row comparison operator <>",
+    "detail": null,
+    "hint": "Row comparison operators must be associated with btree operator families."
+  }
+]

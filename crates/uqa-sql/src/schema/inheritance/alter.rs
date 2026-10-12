@@ -109,6 +109,18 @@ fn validate_inherited_column(
             ),
         ));
     }
+    if crate::catalog::collations::declarations::column_oid(parent_column)
+        != crate::catalog::collations::declarations::column_oid(child_column)
+    {
+        return Err(routine(
+            "42P21",
+            format!(
+                "child table \"{}\" has different collation for column \"{}\"",
+                local_relation_name(child),
+                parent_column.name
+            ),
+        ));
+    }
     if parent_column.not_null && !child_column.not_null {
         return Err(routine(
             "42804",

@@ -20,8 +20,7 @@ pub fn collect_exists_key_operator<'a>(
     projections: &[ProjectionPlan],
     evaluator: SharedExpressionEvaluator<'a>,
 ) -> Result<QueryOutput, SQLError> {
-    let internal_columns = operator.schema().to_vec();
-    let internal_types = operator.row_schema().column_types().to_vec();
+    let internal_schema = operator.row_schema().clone();
     let column_types = projections
         .iter()
         .map(|projection| {
@@ -102,8 +101,7 @@ pub fn collect_exists_key_operator<'a>(
     }
     operator.close().map_err(physical_exec_error)?;
     Ok(QueryOutput {
-        internal_columns,
-        internal_types,
+        internal_schema,
         column_types,
         columns,
         rows: QueryRows::ExistsKeySet(keys),

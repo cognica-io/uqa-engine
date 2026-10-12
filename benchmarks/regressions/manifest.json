@@ -2434,6 +2434,864 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regobject_identifier_clipping_never_retains_the_discarded_suffix",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/types/object_names/tests.rs",
+      "capability": "Identifier normalization memory",
+      "workload": "32 KiB identifiers, multibyte characters at the 63-byte limit and doubled quotes after truncation under 256 bytes.",
+      "invariant": "Only the PostgreSQL identifier prefix is retained; normalized results match and all charged memory is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "regobject_name_admission_releases_partial_components_on_failure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/types/object_names/tests.rs",
+      "capability": "Identifier normalization admission",
+      "workload": "A three-component quoted name under 0, 8, 32, 64, 128, 256 and 512 byte allowances.",
+      "invariant": "Partial strings and container capacities never exceed the allowance; failures return 53200 and every path releases its reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collation_name_selection_admits_scratch_but_reuses_selected_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/collations/expression/tests.rs",
+      "capability": "Collation selection memory",
+      "workload": "Selected and unselected C/POSIX clauses under zero and 1024 byte allowances.",
+      "invariant": "Selected OIDs require no scratch allocation or name lookup; new selection admits its names and releases scratch."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collated_unknown_inputs_charge_name_selection_to_common_type_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/common/production_tests.rs",
+      "capability": "Common-type collation admission",
+      "workload": "An unknown text literal with explicit C collation under zero and 1024 byte allowances.",
+      "invariant": "The common-type path propagates 53200 rather than bypassing its allowance; successful resolution preserves unknown identity and releases scratch."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_collation_binding_releases_scratch_and_keeps_selected_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/introspection/tests.rs",
+      "capability": "Retained collation binding",
+      "workload": "Bind an admitted explicit C expression, occupy all remaining allowance and bind the selected expression again.",
+      "invariant": "Selection preserves OID 950 without growing the retained tree; rebinding requires no additional space and all reservations are released."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "collation_clauses_forward_one_admitted_operand",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/scalar/evaluator/collation_tests.rs",
+      "capability": "Collation operand retention",
+      "workload": "Thirty-two nested C collation clauses around a 4096-byte row field, exact and insufficient allowances, and both cancellation owners.",
+      "invariant": "Only one operand payload is admitted and retained; 4095 bytes fails with 53200, either cancellation fails with 57014, and all reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_collation_copies_preserve_identity_with_exact_admission",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/collations/declarations/tests.rs",
+      "capability": "Declared domain collation retention",
+      "workload": "Sixteen nested domains with alternating C/POSIX identities inside an array, exact and one-byte-insufficient copy allowances.",
+      "invariant": "Copying retains every selected identity and charges exactly the owned names and boxed types; insufficient admission returns 53200 and releases all partial reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_defaults_need_no_collation_payload_and_replacement_discards_old_selection",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/collations/tests.rs",
+      "capability": "Row schema collation retention",
+      "workload": "Default and explicitly collated schemas, resetting selections, and remapping between collatable and noncollatable types.",
+      "invariant": "Type-default schemas allocate no selected-collation payload; replacing the last selection releases it, and type remapping preserves only applicable identities."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_collations_survive_spill_with_exact_record_accounting",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/collations.rs",
+      "capability": "Spilled collation metadata",
+      "workload": "A zero-buffer spill with selected C/POSIX and indeterminate collations, hidden aliases and an internal attribute, plus every truncated record prefix.",
+      "invariant": "The exact encoded size equals spill accounting; selected identities and original values survive decoding, and truncated records fail."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "collation_projection_shares_payloads_and_preserves_each_bound_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/relational/tests/collations.rs",
+      "capability": "Collated projection payload sharing",
+      "workload": "Two SQL identities with different collations share one 4096-byte physical value, projected through direct columns, stars and hidden aliases.",
+      "invariant": "Every selected collation survives projection while the original physical value and fragment remain shared; no computed payload slot is added."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_scored_sources_retain_selected_collations_without_reading_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/table_sources/scan/tests.rs",
+      "capability": "Declared scan metadata without document reads",
+      "workload": "An empty scored source with selected C/POSIX, a default text field and noncollatable system columns.",
+      "invariant": "Schema construction preserves declared collation identities and never opens the document store; the fixture rejects any value read."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "computed_collations_and_deferred_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Prepared and ordinary computed collation outputs",
+      "workload": "Thirty-eight PostgreSQL references for computed output selections, independent ROW fields, NULL/unknown coercion and type-versus-collation diagnostic ordering.",
+      "invariant": "Prepared and ordinary analysis preserve selected output identities and the PostgreSQL SQLSTATE, message, detail and hint of every rejected query; ordinary binding preserves all valid output observations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_cast_collations_match_postgresql_for_literals_columns_and_identity_casts",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/domain_collations.rs",
+      "capability": "Domain and array coercion collations",
+      "workload": "Thirty PostgreSQL references for direct and inherited COLLATE clauses, domain identity casts, array literals and columns, nested and empty arrays, and domains over arrays.",
+      "invariant": "Prepared and ordinary binding preserve the selected output OID of every valid coercion and analysis preserves the complete explicit-conflict diagnostic without changing existing limits."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_collations_and_independent_filters_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Window result collations and independent filters",
+      "workload": "Nineteen PostgreSQL observations cover first/last/nth value, lead/lag defaults, window aggregates, independent FILTER/order/partition metadata and diagnostic priority.",
+      "invariant": "Prepared and ordinary window result metadata derive from analyzed call arguments, while independent clauses retain their own diagnostics and query type errors keep PostgreSQL precedence."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_metadata_visits_nested_call_arguments_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Bounded ordinary result inference",
+      "workload": "Sixteen nested built-in calls over a catalog function and seventeen nested catalog calls, as SELECT outputs, ORDER BY aliases/ordinals, DISTINCT/DISTINCT ON, two VALUES rows and set-operation trees with two or three leaves.",
+      "invariant": "Per original expression occurrence, result binding performs 1 or 17 catalog lookups and strict analysis performs 2 or 34; output-key references do not repeat them, while VALUES rows and set leaves scale those counts linearly without resolving already analyzed children again."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "computed_returning_collations_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Computed DML output collations",
+      "workload": "Six independent PostgreSQL references for computed INSERT, UPDATE, DELETE and MERGE RETURNING and command-CTE outputs, including NULL row images.",
+      "invariant": "Both result-analysis paths and ordinary command-CTE binding preserve every selected output collation independently of row-image values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "observed_call_types_preserve_reference_validation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Observed function input diagnostic preservation",
+      "workload": "Twenty-four independent PostgreSQL errors for missing/invalid arguments, fixed and variadic signatures, and aggregate/window modifiers.",
+      "invariant": "Prepared and ordinary analysis reuse the original argument observations while retaining PostgreSQL SQLSTATE, message, detail and hint, including signature errors before modifier errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "values_collations_and_column_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "VALUES output collation and diagnostic preservation",
+      "workload": "Nineteen PostgreSQL observations cover top-level/lateral/CTE VALUES, aliases, arrays and NULLs, explicit and implicit conflicts and row/column diagnostic order.",
+      "invariant": "Prepared and ordinary VALUES analysis select the same column collations and exact errors as PostgreSQL; row expression errors precede row-width errors, and column collation errors precede later column common-type errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_collations_and_column_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Set-operation column collation preservation",
+      "workload": "Sixty-one PostgreSQL observations cover all six UNION/INTERSECT/EXCEPT variants, implicit/explicit conflicts, nested output boundaries, aliases/CTEs, VALUES/arrays, unknown coercions and competing column errors.",
+      "invariant": "Prepared and ordinary analysis preserve selected output identities and exact PostgreSQL diagnostics; only UNION ALL admits an implicit conflict, column checks retain PostgreSQL order, and enclosing set operations receive column-strength metadata."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_and_unknown_common_types_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/domain_collations.rs",
+      "capability": "Domain common-type and collation preservation",
+      "workload": "Thirty independent PostgreSQL observations cover COALESCE, GREATEST/LEAST, explicit and implicit CASE defaults, arrays, VALUES and sets with domains and unknown inputs.",
+      "invariant": "Prepared and ordinary result binding and scalar inference match exact PostgreSQL type identities; query outputs retain selected collations, and only identically typed inputs preserve a scalar domain."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "common_input_selection_retains_one_type_and_propagates_resource_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/common/production_tests.rs",
+      "capability": "Bounded common input selection",
+      "workload": "One or 4096 borrowed references to a domain with a long name, with and without a trailing unknown input, under the same 2048-byte allowance.",
+      "invariant": "Selection retains only one result type regardless of input count; domain flattening releases its names, allocation failure remains 53200 and cancellation remains 57014 with no retained memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "array_constructor_common_type_includes_unknown_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Runtime array domain identity",
+      "workload": "Bound domain columns mixed with unknown NULL before and after a known input, under a fixed 2048-byte allowance.",
+      "invariant": "Runtime ARRAY element identity agrees with SQL common-type selection without evaluating items; identical domains retain their OID and unknown inputs select the base OID, releasing every reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sort_group_key_collations_and_diagnostic_order_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Determinate sort and group key collations",
+      "workload": "Thirty-nine independent PostgreSQL observations cover output ordinals and aliases, expanded stars, qualified-equivalent expressions, GROUP BY, DISTINCT, aggregate keys and window keys, with competing type and explicit-collation errors.",
+      "invariant": "Prepared and ordinary analysis reject indeterminate keys with the same SQLSTATE, message, detail and hint as PostgreSQL, preserving original target-list diagnostic order; valid outputs keep their selected collations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_query_outputs_preserve_named_composite_field_descriptors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/comparison_capabilities.rs",
+      "capability": "Named composite output metadata preservation",
+      "workload": "A two-field named composite projected through a typed NULL, CTE, derived table, DISTINCT and COALESCE.",
+      "invariant": "Prepared analysis and both ordinary output paths retain the named type and its ordered field descriptors without inferring them from a runtime value."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_field_collations_and_descriptor_errors_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Anonymous record field selection",
+      "workload": "Sixty-five independent PostgreSQL observations cover direct ROW fields, query and RETURNING boundaries, computed inputs, casts, set operands, unregistered descriptors and unknown fields.",
+      "invariant": "Parse-time fields and derived columns retain their distinct collation selections; prepared and ordinary analysis agree with PostgreSQL, including complete errors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_field_collations_and_diagnostic_order_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Declared field collation selection",
+      "workload": "Twenty-two independent PostgreSQL observations cover relation fields, named composites, domains, arrays, derived sources, explicit overrides and competing errors.",
+      "invariant": "Prepared and ordinary output paths retain the declaration collation independently of unrelated fields; complete diagnostics match PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_field_metadata_reuses_each_observed_call_argument",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Bounded field argument analysis",
+      "workload": "One or seventeen nested composite-returning calls, followed by named field projection and an ORDER BY output alias.",
+      "invariant": "Field metadata reuses original child observations: one result lookup per call in binding and two per call in strict analysis, with the selected field type and collation preserved."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_descriptors_keep_selected_legacy_and_type_default_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Retained declared attribute metadata",
+      "workload": "Composite declarations with selected identities, legacy written collations and older serialized descriptors.",
+      "invariant": "Declaration and descriptor codecs preserve selected identities; legacy declarations retain written names and descriptors without a selection preserve their original type default."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "relation_descriptors_preserve_selected_collations_and_attribute_numbers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/composite_type/relations/tests.rs",
+      "capability": "Relation field catalog metadata",
+      "workload": "Native and foreign relation descriptors with a dropped physical slot, two selected collations, a type-default text column and a noncollatable integer.",
+      "invariant": "Both relation kinds preserve attribute identities and collations without reading table values; repeated lookups reuse the retained descriptor."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "view_descriptors_preserve_analyzed_output_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/composite_type/relations/tests.rs",
+      "capability": "View field catalog metadata",
+      "workload": "A view with two explicitly collated NULL output columns.",
+      "invariant": "Named view descriptors retain the analyzed output collations without executing the query or consulting a runtime row."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_view_schemas_preserve_collations_and_shared_composite_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/view/tests.rs",
+      "capability": "Named view output metadata",
+      "workload": "Renamed outputs with a selected collation, an indeterminate collation and a named composite descriptor.",
+      "invariant": "Publishing fixed view column names preserves selected and indeterminate collations and shares the original field descriptor without copying values or widening the row."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_fields_distinguish_parameter_assignment_from_casts",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Anonymous parameter field collation",
+      "workload": "Four PostgreSQL PREPARE observations distinguish inferred text/domain parameters, typmod conversion and a declared text parameter cast to a domain.",
+      "invariant": "Direct ROW fields preserve the parse-time collation of typed parameters independently of later cast collation assignment."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "anonymous_field_metadata_observes_each_call_once_per_analysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/field_collations.rs",
+      "capability": "Bounded anonymous record field analysis",
+      "workload": "One and seventeen nested calls selected from ROW, repeated record casts or a derived column, with an ORDER BY output alias.",
+      "invariant": "Each call is resolved once in pure inference or binding and twice in strict analysis; fields retain distinct direct and derived collations without reanalyzing the ROW inputs."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_alias_join_and_compaction_preserve_record_field_slots",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/record_fields.rs",
+      "capability": "Shared selectable record descriptors",
+      "workload": "Record metadata crosses projection, qualification, physical compaction and an outer schema.",
+      "invariant": "Field types and selectable descriptors retain their original Arc identities through slot remapping, without copying field arrays."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_defined_column_collations_and_errors_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/table_creation/tests/collations.rs",
+      "capability": "Query-defined relation collations",
+      "workload": "Sixty-eight PostgreSQL CREATE TABLE AS and materialized-view observations cover populated and unpopulated definitions, aliases, domains, record fields and competing errors.",
+      "invariant": "The SQL owner preserves selected column collations and rejects indeterminate collatable columns in PostgreSQL diagnostic order."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_collations_survive_codecs_and_reject_missing_or_malformed_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/stored_view/restoration/tests.rs",
+      "capability": "Durable materialized column identity",
+      "workload": "Selected C/POSIX and noncollatable columns pass the stored-definition codec; legacy, short and type-inconsistent metadata is checked.",
+      "invariant": "Current readers preserve recorded selections, missing selections require migration, and inconsistent metadata cannot silently become a default collation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_migration_orders_view_dependencies_without_copying_queries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/stored_view/restoration/tests.rs",
+      "capability": "View metadata dependency order",
+      "workload": "Reverse-name dependencies connected by an ordinary view and an unrelated cycle.",
+      "invariant": "Only reachable queries are inspected, dependencies precede targets, unrelated definitions remain untouched and a reachable cycle fails."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_collation_migration_orders_dependencies_preserves_rows_and_reopens_without_reanalysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests/collations.rs",
+      "capability": "Materialized metadata restoration",
+      "workload": "Two persisted snapshots require missing collation recovery in reverse lexical dependency order and then load-only reopen.",
+      "invariant": "Each definition is analyzed once after its source is ready; rows and identities remain unchanged and current reopen performs no analysis or catalog writes."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_collation_migration_rejects_load_only_and_restores_registry_on_failure",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests/collations.rs",
+      "capability": "Materialized metadata migration failures",
+      "workload": "Load-only restoration, dependent binding failure and catalog persistence failure.",
+      "invariant": "Load-only restore cannot publish a partial migration; binding or persistence failures restore the previous registry and retained snapshots."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_refresh_keeps_created_types_collations_and_atomic_population_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/view_creation/materialized/tests.rs",
+      "capability": "Materialized refresh metadata",
+      "workload": "Populating, invalid-width and WITH NO DATA row replacements for a renamed collated column.",
+      "invariant": "Refresh changes rows and population only; creation-time types and collations survive and a failed replacement leaves the snapshot intact."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_metadata_preserves_native_deferred_columns_and_existing_selections",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/stored_view/restoration/tests.rs",
+      "capability": "Native deferred materialized metadata",
+      "workload": "A native undeclared column undergoes initial collation recovery and a repeated request using different analyzed metadata.",
+      "invariant": "Native deferred types remain unresolved with no collation, and existing recorded selections cannot be overwritten by another analysis."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_constant_fields_retain_postgresql_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "capability": "Folded composite field metadata",
+      "workload": "Four independent PostgreSQL constant-field observations, including NULL inputs.",
+      "invariant": "Field folding retains selected implicit collations, declared types and values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_collations_remain_implicit_across_expression_analysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/literal_collations.rs",
+      "capability": "Retained literal coercibility",
+      "workload": "Eighteen independent PostgreSQL observations across calls, casts, arrays, ROW fields and conflicting selections.",
+      "invariant": "Prepared and ordinary analysis preserve implicit selections through JSON restoration; explicit COLLATE overrides them without a false explicit conflict."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "literal_lowering_and_legacy_codecs_preserve_selected_or_default_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/literal_collations.rs",
+      "capability": "Literal metadata retention",
+      "workload": "Owned/borrowed AST lowering, JSON restoration and admitted copying of legacy, default, indeterminate and selected collations.",
+      "invariant": "Selections survive copying under the fixed 4096-byte allowance and reservations are fully released; absent legacy metadata retains the type default."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "literal_analysis_rejects_collations_on_noncollatable_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/literal_collations.rs",
+      "capability": "Typed literal metadata validation",
+      "workload": "A retained integer literal carries a nonzero text collation.",
+      "invariant": "Analysis rejects inconsistent retained metadata before treating it as an expression selection."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constant_nodes_encode_selected_implicit_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/collations/literals.rs",
+      "capability": "Catalog constant collation",
+      "workload": "Legacy, indeterminate, default, C and POSIX constants and an invalid integer selection.",
+      "invariant": "CONST records retain their selected constcollid without an explicit COLLATEEXPR; invalid type metadata is rejected."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_literal_identity_preserves_selected_collation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/aggregates/tests.rs",
+      "capability": "Typed constant semantic identity",
+      "workload": "The same text datum and type have equal or different selected collations.",
+      "invariant": "Expression matching does not conflate C and POSIX constants."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folding_constant_expressions_preserves_selected_output_collation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "capability": "Computed expression collation retention",
+      "workload": "Forty independent PostgreSQL observations of computed constants, discarded CASE/COALESCE arms, explicit precedence, conflicts and anonymous ROW fields.",
+      "invariant": "Analysis, optimization, JSON restoration and repeated analysis preserve values and complete output schemas; admitted copies fit 8192 bytes and release all reservations on success or cancellation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_collation_selections_survive_reanalysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Analyzed query result selections",
+      "workload": "Existing PostgreSQL direct and derived output references undergo executable input retention and repeated analysis.",
+      "invariant": "Query/CTE result collations survive mutation of original expressions without unmatched addresses or accumulating wrappers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "returning_collation_selections_keep_original_plan_addresses",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Analyzed RETURNING selections",
+      "workload": "Existing PostgreSQL ordinary and computed DML/CTE output references undergo executable input retention and repeated analysis.",
+      "invariant": "RETURNING collations remain selected in the original statement scope and every retained expression identity is consumed."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "result_collation_codec_preserves_coercibility_and_rejects_invalid_identities",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ir/collation.rs",
+      "capability": "Analyzed selection codec validation",
+      "workload": "Implicit, explicit and conflicting selections round-trip; malformed identities and deferred invalid states are rejected.",
+      "invariant": "Retained selection strength and pre-assignment field metadata survive restoration without invalid OID conversion or suppressing diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_condition_row_metadata_matches_postgresql_event_variables",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/collations.rs",
+      "capability": "Stored rule condition metadata",
+      "workload": "Sixteen PostgreSQL OLD/NEW attribute observations across INSERT, UPDATE and DELETE conditions, including JSON restoration and rebound identities.",
+      "invariant": "Qualified, private and dummy typed inputs keep the declared type and implicit collation independently of physical values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_rule_input_collations_remain_implicit",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/collations.rs",
+      "capability": "Projected event row coercibility",
+      "workload": "C, POSIX, default and indeterminate event fields substitute an explicitly collated source expression.",
+      "invariant": "The event column boundary preserves its selected identity and implicit strength; a containing explicit selection still wins."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_rule_condition_inputs_preserve_postgresql_collations_and_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/rules/condition_binding/tests.rs",
+      "capability": "Runtime OLD/NEW input metadata",
+      "workload": "The sixteen independent PostgreSQL rule attributes are materialized both with stored values and with absent row images.",
+      "invariant": "Joined private inputs retain each declared collation and exact value or NULL without exposing user-visible wildcard columns."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_event_namespaces_match_postgresql_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/diagnostics.rs",
+      "capability": "Rule condition and action namespaces",
+      "workload": "Thirty-three PostgreSQL condition/action cases cover unavailable event rows, direct and parenthesized missing fields, invalid operators, correlated subqueries and local OLD/NEW aliases and columns.",
+      "invariant": "Lexical condition lookup and final action event validation retain PostgreSQL SQLSTATE, primary text, DETAIL, HINT and diagnostic order without executing expressions."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_values_actions_preserve_postgresql_event_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations.rs",
+      "capability": "Runtime rule VALUES collation",
+      "workload": "Sixteen PostgreSQL VAR observations across INSERT, UPDATE and DELETE rules substitute actual event values and NULL fields.",
+      "invariant": "Typed value substitution preserves exact values, declared SQL types and implicit collation through AST and plan restoration."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_set_actions_preserve_postgresql_event_collations_with_empty_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations.rs",
+      "capability": "Set-oriented rule input metadata",
+      "workload": "Thirty-two PostgreSQL VAR observations cover source and action-result fields with both populated and empty private VALUES carriers.",
+      "invariant": "The declared collation and type survive runtime source binding and AST/plan restoration independently of input cardinality."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "internal_values_metadata_restores_legacy_defaults_and_rejects_invalid_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/source_metadata/tests.rs",
+      "capability": "Private VALUES metadata restoration",
+      "workload": "Empty carriers restore explicit and indeterminate collations, legacy missing metadata, invalid widths and noncollatable attributes.",
+      "invariant": "Private attributes stay invisible to SQL wildcard lookup; legacy defaults remain readable and malformed metadata returns errors before schema construction."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_condition_input_collations_match_postgresql_event_variables",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/triggers/tests.rs",
+      "capability": "Trigger condition declaration metadata",
+      "workload": "Sixteen independent PostgreSQL OLD/NEW VAR observations cover INSERT, UPDATE and DELETE conditions; native and foreign definitions retain their declared attributes.",
+      "invariant": "Condition analysis preserves each declared type and implicit collation instead of replacing explicit column selections with type defaults."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "trigger_when_values_retain_postgresql_types_and_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/mutation/triggers/tests/collations.rs",
+      "capability": "Runtime trigger field metadata",
+      "workload": "The sixteen independent trigger attributes bind real and absent row images through AST restoration, physical lowering and scalar evaluation.",
+      "invariant": "Trigger WHEN evaluation and field values remain exact while types and selected implicit collations survive substitution, including NULL inputs."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "expanded_rule_fields_keep_postgresql_event_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations/expanded.rs",
+      "capability": "Expanded event-field identity and scope",
+      "workload": "Eighty independent PostgreSQL VAR observations cover parenthesized event fields, whole-row star expansion and a locally shadowing NEW relation with different collations.",
+      "invariant": "Scope-aware binding retains declared field types and implicit collations through actual and empty rule inputs and AST/plan restoration without replacing local bindings."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_delivery_keeps_postgresql_collations_and_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/relational/values/tests.rs",
+      "capability": "VALUES physical output metadata",
+      "workload": "Twelve independent PostgreSQL VALUES references run through normal statement analysis followed by forward row delivery, directional delivery or spill-backed output with a one-byte work_mem allowance.",
+      "invariant": "Selected collations, exact scalar/NULL/array values and full diagnostics survive physical delivery; rejected statements publish no schema or rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "values_from_sources_preserve_postgresql_collations_through_qualification",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/values_source/tests.rs",
+      "capability": "VALUES source qualification",
+      "workload": "Four independently captured valid VALUES selections build actual source operators with and without a relation and column alias.",
+      "invariant": "Physical source binding and qualification retain declared implicit collations and exact values without reconstructing metadata from types alone."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_values_retain_metadata_at_query_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/relational/values/tests.rs",
+      "capability": "Materialized VALUES child metadata",
+      "workload": "Four independent PostgreSQL VALUES selections materialize and reopen as physical operators and scalar-subquery inputs.",
+      "invariant": "Selected collations, field positions and exact scalar/NULL/array values remain intact across the shared result carrier."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "materialized_query_outputs_preserve_postgresql_slots_and_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/output/tests.rs",
+      "capability": "Query result slots and retained schema",
+      "workload": "Independent populated and empty PostgreSQL duplicate-label outputs pass through memory and forced-disk materialization, child/public operators, scalar subqueries and public SQL results.",
+      "invariant": "Duplicate labels cannot replace or erase positional values; selected collations and zero-row metadata survive every result boundary, and public positional results preserve both fields."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "procedural_parameters_preserve_postgresql_implicit_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plpgsql/parameters/tests/collations.rs",
+      "capability": "Procedural parameter collation identity",
+      "workload": "Eighteen independent PostgreSQL record-field observations pass through PL/pgSQL parameterization, preparation, codec restoration and fresh variable reads.",
+      "invariant": "Parameters retain implicit C/POSIX/default selections and conflicts without capturing invocation values or promoting the selection to explicit strength."
     }
   ]
 }

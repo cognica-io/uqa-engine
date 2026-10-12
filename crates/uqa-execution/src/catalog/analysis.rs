@@ -79,6 +79,7 @@ impl AnalysisCatalog for CatalogReadView {
                 output_columns: view.output_columns.clone(),
                 materialized: view.kind == crate::catalog::view::StoredViewKind::Materialized,
                 materialized_column_types: view.materialized_column_types.clone(),
+                materialized_column_collations: view.materialized_column_collations.clone(),
             })
         })
     }

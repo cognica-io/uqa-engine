@@ -37,6 +37,9 @@ pub struct CompositeFieldBinding {
     pub type_oid: u32,
     pub number: i16,
     pub result_type: super::ColumnType,
+    /// The field's declaration at preparation, independently of the argument's collation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
     pub dropped: bool,
     /// The live attribute type in an executable copy, when it differs from the original type OID. Type modifiers do not change `FieldSelect`'s result contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,6 +78,10 @@ impl FunctionResolutionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionDispatch {
     NumericOperator(NumericOperator),
+    /// A collation clause, retaining its selected identity independently of its written name.
+    Collate {
+        oid: Option<u32>,
+    },
     NamedArgument,
     VariadicArgument,
     ArraySubscripts,
@@ -151,6 +158,7 @@ impl FunctionDispatch {
     pub const fn label(self) -> &'static str {
         match self {
             Self::NumericOperator(operator) => operator.symbol(),
+            Self::Collate { .. } => "COLLATE",
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",

@@ -78,6 +78,7 @@ fn project<S: Clone + 'static>(
                     column.name.clone(),
                     value,
                     types.remove(&column.name).flatten(),
+                    column.collation_oid,
                 ))
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
@@ -205,6 +206,7 @@ fn project_source<S: Clone + 'static>(
                     name.to_string(),
                     row.view().column(name).cloned().unwrap_or(Value::Null),
                     layer.source_schema.column_types()[position].clone(),
+                    layer.source_schema.column_collation(position),
                 )
             }),
     ))

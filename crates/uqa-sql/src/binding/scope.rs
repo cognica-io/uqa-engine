@@ -96,17 +96,14 @@ pub fn values_types_in_scope(
     SchemaScope::from_context(ctes)?.bind_values_types(routines, rows, subqueries, schema, params)
 }
 
-/// The common type of two columns of the construct `context`, as `select_common_type` chooses it over typed and `unknown` (`None`) inputs; two unknown inputs stay unknown for the caller to resolve.
-pub(super) fn merge_types(
-    context: crate::type_resolution::CommonTypeContext,
-    left: Option<&ColumnType>,
-    right: Option<&ColumnType>,
-) -> Result<Option<ColumnType>, SQLError> {
-    match (left, right) {
-        (None, None) => Ok(None),
-        (Some(ty), None) | (None, Some(ty)) => Ok(Some(ty.clone())),
-        (Some(left), Some(right)) => {
-            crate::type_resolution::common_type_in(context, left, right).map(Some)
-        }
-    }
+/// Preserve the complete analyzed VALUES output metadata for physical execution.
+pub fn values_schema_in_scope(
+    routines: &dyn RoutineResolution,
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
+    schema: Option<&RowSchema>,
+    params: &[SQLParam],
+    ctes: &BindingContext,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::from_context(ctes)?.bind_values_schema(routines, rows, subqueries, schema, params)
 }

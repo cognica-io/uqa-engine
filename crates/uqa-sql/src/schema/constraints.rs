@@ -26,6 +26,7 @@ impl CheckConditionTypeResolver<'_> {
             .find(|column| column.name == name)
             .ok_or_else(|| SQLError::UnknownColumn(name.to_string()))?;
         Ok(ResolvedVariable {
+            collation_oid: None,
             value: Value::Null,
             declared_type: Some(definition.ty.catalog_name()),
         })

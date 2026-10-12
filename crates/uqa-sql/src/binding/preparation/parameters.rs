@@ -6,61 +6,146 @@
 
 //! Ordered parameter occurrences and their independently resolved SQL types.
 
+use crate::catalog::collations::derivation::Derivation;
 use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
-use std::{collections::BTreeMap, ptr::NonNull};
+use std::{borrow::Cow, collections::BTreeMap, ptr::NonNull};
 use uqa_core::Value;
+
+mod collations;
+mod results;
 
 #[derive(Clone)]
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
+    /// Selected output and deferred collation diagnostics from the same typed children.
+    pub(super) derivation: Derivation,
+    /// Field selection observes a ROW input before the enclosing expression's collation assignment.
+    pub(super) initial_collation: u32,
     pub(super) record_fields: Option<crate::schema::RecordFields>,
+    pub(super) record_descriptor: Option<std::sync::Arc<crate::schema::RecordDescriptor>>,
+    /// A record variable without a registered descriptor has a different field diagnostic from a computed record.
+    pub(super) record_variable: bool,
+    /// An anonymous ROW retains each analyzed input until a named cast selects its field coercions.
+    pub(super) row_constructor: Option<Vec<Self>>,
     occurrence: Option<usize>,
     // SQL unknown literals and parameters accept context coercion. Native
     // callbacks with no declared result type stay unresolved until execution.
-    coercible_unknown: bool,
+    unknown: UnknownOrigin,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
     literal: Option<(NonNull<ScalarExpr>, String)>,
+    collation: Option<NonNull<ScalarExpr>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UnknownOrigin {
+    Deferred,
+    Literal,
+    Parameter,
+    Field,
 }
 
 impl ExpressionType {
+    pub(super) fn default_collation(ty: Option<&ColumnType>) -> Derivation {
+        Derivation::implicit(ty.map_or(0, crate::catalog::type_metadata::pg_type_collation_oid))
+    }
+
+    pub(super) fn combined(ty: Option<ColumnType>, values: &[Self]) -> Self {
+        let selected = values.iter().fold(Derivation::None, |state, value| {
+            state.combine(value.derivation)
+        });
+        let mut result = Self::resolved(ty);
+        result.derivation = selected.result(result.derivation.oid());
+        result
+    }
+
+    pub(super) fn comparison(left: &Self, right: &Self) -> Derivation {
+        if let (Some(left), Some(right)) = (&left.row_constructor, &right.row_constructor) {
+            left.iter()
+                .zip(right)
+                .fold(Derivation::None, |state, (left, right)| {
+                    state.combine(left.derivation.combine(right.derivation).error_only())
+                })
+        } else {
+            left.derivation.combine(right.derivation).error_only()
+        }
+    }
+
+    pub(super) fn independent(ty: Option<ColumnType>, values: &[Self]) -> Self {
+        let mut result = Self::resolved(ty);
+        result.derivation = values.iter().fold(result.derivation, |state, value| {
+            state.combine(value.derivation.error_only())
+        });
+        result
+    }
+
     pub(super) fn resolved(ty: Option<ColumnType>) -> Self {
         Self {
+            derivation: Self::default_collation(ty.as_ref()),
+            initial_collation: 0,
             ty,
             record_fields: None,
+            record_descriptor: None,
+            record_variable: false,
+            row_constructor: None,
             occurrence: None,
-            coercible_unknown: false,
+            unknown: UnknownOrigin::Deferred,
             literal: None,
+            collation: None,
         }
     }
 
     pub(super) fn unknown() -> Self {
         Self {
-            ty: None,
-            record_fields: None,
-            occurrence: None,
-            coercible_unknown: true,
-            literal: None,
+            unknown: UnknownOrigin::Literal,
+            ..Self::resolved(None)
         }
     }
 
     /// A bare string literal, `unknown` until its context selects a type that reads it.
     pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
         Self {
-            ty: None,
-            record_fields: None,
-            occurrence: None,
-            coercible_unknown: true,
             literal: Some((NonNull::from(expression), text)),
+            ..Self::unknown()
         }
     }
 
     pub(super) fn is_deferred(&self) -> bool {
-        self.ty.is_none() && !self.coercible_unknown
+        self.ty.is_none() && self.unknown == UnknownOrigin::Deferred
+    }
+
+    pub(super) fn is_sql_unknown(&self) -> bool {
+        self.ty.is_none() && self.unknown != UnknownOrigin::Deferred
+    }
+
+    pub(super) fn is_unknown_parameter(&self) -> bool {
+        self.ty.is_none() && self.unknown == UnknownOrigin::Parameter
+    }
+
+    pub(super) fn mark_unknown_field(&mut self) {
+        self.unknown = UnknownOrigin::Field;
+    }
+
+    pub(super) fn leaf(ty: Option<ColumnType>) -> Self {
+        let mut value = Self::resolved(ty);
+        value.initial_collation =
+            u32::try_from(value.derivation.oid()).expect("type collation OID");
+        value
+    }
+
+    pub(super) fn record_metadata(&self) -> Option<crate::schema::RecordMetadata> {
+        (self.record_fields.is_some() || self.record_descriptor.is_some()).then(|| {
+            crate::schema::RecordMetadata {
+                types: self.record_fields.clone(),
+                descriptor: self.record_descriptor.clone(),
+            }
+        })
     }
 }
 
 pub(super) struct ParameterTypes<'a> {
+    pub(super) collations: super::collations::PendingCollations,
     types: Vec<Option<ColumnType>>,
+    fixed_values: Option<&'a [SQLParam]>,
     occurrences: Vec<(usize, Option<ColumnType>)>,
     input_constants: Option<InputConstants>,
     aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
@@ -74,6 +159,8 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<ScalarExpr>, ScalarExpr>,
     BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
     BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
+    collations::CollationInputs,
+    results::CollationResults,
 );
 
 impl InputConstants {
@@ -87,7 +174,14 @@ impl InputConstants {
                     .values()
                     .flat_map(|membership| membership.left_constants.iter().flatten()),
             )
-            .all(|expression| {
+            .all(|mut expression| {
+                loop {
+                    match crate::catalog::collations::expression::scalar_clause(expression) {
+                        Ok(Some(clause)) => expression = clause.argument,
+                        Ok(None) => break,
+                        Err(_) => return false,
+                    }
+                }
                 let ScalarExpr::TypedLiteral {
                     bound_type: Some(ty),
                     ..
@@ -102,7 +196,7 @@ impl InputConstants {
             })
     }
 
-    fn apply_node(&mut self, expression: &mut ScalarExpr) {
+    fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         let identity = NonNull::from(&*expression);
         if let Some(selected) = self.1.remove(&identity) {
             if let ScalarExpr::Func { binding, .. } = expression {
@@ -112,6 +206,8 @@ impl InputConstants {
         if let Some(constant) = self.0.remove(&identity) {
             *expression = constant;
         }
+        self.3.apply(identity, expression)?;
+        self.4.apply(identity, expression)
     }
 
     #[cfg(test)]
@@ -124,12 +220,17 @@ impl InputConstants {
         expression: &mut ScalarExpr,
         subqueries: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
-        crate::plan::rewrite_scalar_expression(expression, &mut |node| {
-            self.apply_node(node);
-        });
+        let mut result = Ok(());
+        let mut apply = |node: &mut ScalarExpr| {
+            if result.is_ok() {
+                result = self.apply_node(node);
+            }
+        };
+        crate::plan::rewrite_scalar_expression(expression, &mut apply);
         for query in subqueries.iter_mut() {
-            query.rewrite_scalar_expressions(&mut |node| self.apply_node(node));
+            query.rewrite_scalar_expressions(&mut apply);
         }
+        result?;
         if !self.2.is_empty() {
             crate::plan::subqueries::rewrite_expression_with_arena(
                 expression,
@@ -137,7 +238,12 @@ impl InputConstants {
                 &mut |node, arena| self.apply_membership(node, arena),
             )?;
         }
-        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() {
+        if self.0.is_empty()
+            && self.1.is_empty()
+            && self.2.is_empty()
+            && self.3.is_empty()
+            && self.4.is_empty()
+        {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -147,16 +253,25 @@ impl InputConstants {
     }
 
     pub(super) fn apply(mut self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
-        // Replacing leaves preserves every other node's address; the plan is neither cloned nor moved between analysis and this walk.
+        // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
+        let mut result = Ok(());
         plan.rewrite_scalar_expressions(&mut |expression| {
-            self.apply_node(expression);
+            if result.is_ok() {
+                result = self.apply_node(expression);
+            }
         });
+        result?;
         if !self.2.is_empty() {
             crate::plan::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
                 self.apply_membership(node, arena)
             })?;
         }
-        if self.0.is_empty() && self.1.is_empty() && self.2.is_empty() {
+        if self.0.is_empty()
+            && self.1.is_empty()
+            && self.2.is_empty()
+            && self.3.is_empty()
+            && self.4.is_empty()
+        {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -178,11 +293,42 @@ impl InputConstants {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn retain_result_collations(mut self) -> Self {
+        if let Some(constants) = &mut self.input_constants {
+            constants.4.enabled = true;
+        }
+        self
+    }
+
+    pub(super) fn retain_result_collation(
+        &mut self,
+        expression: &ScalarExpr,
+        value: &ExpressionType,
+    ) -> Result<(), SQLError> {
+        if let Some(constants) = &mut self.input_constants {
+            constants.4.record(expression, value)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ScalarExpr> {
-        self.input_constants
-            .as_mut()?
-            .0
-            .remove(&NonNull::from(expression))
+        let constants = self.input_constants.as_mut()?;
+        constants.3.take_literal(expression, &mut constants.0)
+    }
+
+    pub(super) fn retain_collation(
+        &mut self,
+        expression: &ScalarExpr,
+        value: &mut ExpressionType,
+        oid: u32,
+    ) {
+        let origin = NonNull::from(expression);
+        if let Some(constants) = &mut self.input_constants {
+            constants.3.select(origin, value.collation, oid);
+        }
+        value.collation = Some(origin);
+        value.derivation = value.derivation.explicit(i64::from(oid));
+        value.initial_collation = oid;
     }
 
     pub(super) fn retain_membership(
@@ -198,11 +344,21 @@ impl<'a> ParameterTypes<'a> {
     pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
         Self {
             types: types.to_vec(),
+            fixed_values: None,
             occurrences: Vec::new(),
             input_constants: None,
+            collations: super::collations::PendingCollations::default(),
             aliases: None,
             enum_labels: None,
             catalog_inputs: None,
+        }
+    }
+
+    /// Output binding borrows values whose input types have already been selected.
+    pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
+        Self {
+            fixed_values: Some(values),
+            ..Self::new(&[])
         }
     }
 
@@ -242,6 +398,21 @@ impl<'a> ParameterTypes<'a> {
     }
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {
+        if let Some(values) = self.fixed_values {
+            let ty = crate::scalar_type(
+                &ScalarExpr::Param(number),
+                &crate::RowSchema::default(),
+                values,
+            )?;
+            let mut value = ExpressionType::leaf(ty);
+            if number
+                .checked_sub(1)
+                .is_some_and(|index| index < values.len())
+            {
+                value.unknown = UnknownOrigin::Parameter;
+            }
+            return Ok(value);
+        }
         let index = number
             .checked_sub(1)
             .filter(|index| *index < self.types.len())
@@ -250,11 +421,9 @@ impl<'a> ParameterTypes<'a> {
         let occurrence = self.occurrences.len();
         self.occurrences.push((index, ty.clone()));
         Ok(ExpressionType {
-            ty,
-            record_fields: None,
             occurrence: Some(occurrence),
-            coercible_unknown: true,
-            literal: None,
+            unknown: UnknownOrigin::Parameter,
+            ..ExpressionType::leaf(ty)
         })
     }
 
@@ -263,13 +432,25 @@ impl<'a> ParameterTypes<'a> {
         expression: &mut ExpressionType,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
-        if expression.ty.is_some() || !expression.coercible_unknown {
+        if !expression.is_sql_unknown() {
             return Ok(());
+        }
+        if expression.unknown == UnknownOrigin::Field {
+            return Err(error(
+                "XX000",
+                format!(
+                    "failed to find conversion function from unknown to {}",
+                    crate::type_resolution::base_type(target).display_name()
+                ),
+            ));
         }
         if let Some((origin, text)) = &expression.literal {
             self.read_literal(*origin, text, target)?;
         }
         let target = target.without_type_modifiers();
+        if let Some(constants) = &mut self.input_constants {
+            constants.3.coerce(expression.collation, &target)?;
+        }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];
             if self.types[*index].as_ref().is_some_and(|ty| *ty != target) {
@@ -281,7 +462,15 @@ impl<'a> ParameterTypes<'a> {
             self.types[*index] = Some(target.clone());
             *observed = Some(target.clone());
         }
+        expression.derivation =
+            expression
+                .derivation
+                .result(crate::catalog::type_metadata::pg_type_collation_oid(
+                    &target,
+                ));
         expression.ty = Some(target);
+        expression.initial_collation =
+            u32::try_from(expression.derivation.oid()).expect("coerced collation OID");
         Ok(())
     }
 
@@ -307,6 +496,7 @@ impl<'a> ParameterTypes<'a> {
                 constants.0.insert(
                     origin,
                     ScalarExpr::TypedLiteral {
+                        collation_oid: None,
                         composite_source: None,
                         value,
                         ty: input_type.catalog_name(),
@@ -352,14 +542,19 @@ impl<'a> ParameterTypes<'a> {
             .map(Some)
     }
 
-    pub(super) fn values(&self) -> Vec<SQLParam> {
-        self.types
-            .iter()
-            .map(|ty| match ty {
-                Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
-                None => SQLParam::Scalar(Value::Null),
-            })
-            .collect()
+    pub(super) fn values(&self) -> Cow<'_, [SQLParam]> {
+        if let Some(values) = self.fixed_values {
+            return Cow::Borrowed(values);
+        }
+        Cow::Owned(
+            self.types
+                .iter()
+                .map(|ty| match ty {
+                    Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
+                    None => SQLParam::Scalar(Value::Null),
+                })
+                .collect(),
+        )
     }
 
     pub(super) fn finish(self) -> Result<Vec<Option<ColumnType>>, SQLError> {

@@ -26,6 +26,7 @@ fn descriptor(oid: u32, fields: &[(&str, ColumnType)]) -> Arc<CompositeTypeDescr
             .iter()
             .enumerate()
             .map(|(index, (name, ty))| CompositeAttribute {
+                collation_oid: None,
                 name: (*name).into(),
                 ty: ty.clone(),
                 number: index as i16 + 1,

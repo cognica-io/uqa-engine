@@ -1,0 +1,218 @@
+[
+  {
+    "sql": "SELECT currval(n,n) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function currval(integer, integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT nextval(n,n) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function nextval(integer, integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT setval(n,n,n,n) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function setval(integer, integer, integer, integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT uuid_extract_version(c) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function uuid_extract_version(text) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT uuid_extract_timestamp(n) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function uuid_extract_timestamp(integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT concat_ws()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function concat_ws() does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT gen_random_uuid(1)",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function gen_random_uuid(integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT current_schema(1)",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function current_schema(integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT length(c,c) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function length(text, text) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT row_number(1) OVER ()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function row_number(integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT format()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function format() does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT pg_catalog.concat_ws()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function pg_catalog.concat_ws() does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(DISTINCT c) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function concat_ws(text) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(c ORDER BY p) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function concat_ws(text) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(c) FILTER (WHERE true) FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function concat_ws(text) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT upper(c) OVER () FROM t",
+    "error": {
+      "sqlstate": "42809",
+      "message": "OVER specified, but upper is not a window function nor an aggregate function",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(c) OVER () FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function concat_ws(text) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT concat()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function concat() does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT num_nulls()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function num_nulls() does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT num_nonnulls()",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function num_nonnulls() does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(DISTINCT c,p) FROM t",
+    "error": {
+      "sqlstate": "42809",
+      "message": "DISTINCT specified, but concat_ws is not an aggregate function",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(c,p ORDER BY p) FROM t",
+    "error": {
+      "sqlstate": "42809",
+      "message": "ORDER BY specified, but concat_ws is not an aggregate function",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(c,p) FILTER (WHERE true) FROM t",
+    "error": {
+      "sqlstate": "42809",
+      "message": "FILTER specified, but concat_ws is not an aggregate function",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT concat_ws(c,p) OVER () FROM t",
+    "error": {
+      "sqlstate": "42809",
+      "message": "OVER specified, but concat_ws is not a window function nor an aggregate function",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

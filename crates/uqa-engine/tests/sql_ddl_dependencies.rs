@@ -10,6 +10,7 @@ use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 
 fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
     ColumnDef {
+        collation_oid: None,
         name: name.to_string(),
         ty: ColumnType::Integer,
         object_id: None,

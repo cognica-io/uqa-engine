@@ -69,7 +69,7 @@ fn grouping_set_identity(
     Ok(identity)
 }
 
-fn expression_identity(
+pub(crate) fn expression_identity(
     engine: &dyn FunctionTypeResolver,
     expression: &ScalarExpr,
     schema: &RowSchema,
@@ -292,6 +292,15 @@ fn normalize_expression(
                 })
                 .transpose()?,
         },
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => ScalarExpr::Collated {
+            expr: Box::new(normalize_expression(engine, *expr, schema, params)?),
+            ty,
+            collation,
+        },
         ScalarExpr::Cast { expr, ty, .. } => {
             let source_type = expression_type(engine, &expr, schema, params)?;
             let target_type = crate::type_resolution::resolve_declared_column_type(
@@ -320,6 +329,7 @@ fn normalize_expression(
                 let input = normalize_expression(
                     engine,
                     ScalarExpr::TypedLiteral {
+                        collation_oid: None,
                         composite_source: None,
                         value,
                         ty: input_type.catalog_name(),
@@ -340,6 +350,7 @@ fn normalize_expression(
                 }
             } else if let ScalarExpr::Literal(Value::Null) = expression {
                 ScalarExpr::TypedLiteral {
+                    collation_oid: None,
                     composite_source: None,
                     value: Value::Null,
                     ty: target_type.catalog_name(),
@@ -368,6 +379,7 @@ fn normalize_expression(
             ty,
             bound_type,
             parameter_index,
+            collation_oid,
             composite_source,
         } => {
             let literal = ScalarExpr::Literal(value.clone());
@@ -380,11 +392,13 @@ fn normalize_expression(
             };
             if parameter_index.is_none()
                 && composite_source.is_none()
+                && collation_oid.is_none()
                 && expression_type(engine, &literal, schema, params)?.as_ref() == Some(&declared)
             {
                 literal
             } else {
                 ScalarExpr::TypedLiteral {
+                    collation_oid,
                     composite_source,
                     value,
                     ty: declared.catalog_name(),

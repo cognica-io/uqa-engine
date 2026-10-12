@@ -93,6 +93,7 @@ impl CompositeConstantChange<'_> {
                 value,
                 ty,
                 composite_source,
+                ..
             } => self.typed_value(value, ty, composite_source),
             _ => Ok(false),
         }

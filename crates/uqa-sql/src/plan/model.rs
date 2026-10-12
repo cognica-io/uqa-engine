@@ -272,6 +272,8 @@ pub enum SourcePlan {
         internal_relation: Option<crate::ast::InternalRelationId>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         internal_column_types: Vec<Option<crate::ast::ColumnType>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        internal_column_collations: Vec<Option<u32>>,
     },
     Function {
         name: String,

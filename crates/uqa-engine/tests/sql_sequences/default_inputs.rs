@@ -43,6 +43,7 @@ fn assert_stored_identity(engine: &Engine, columns: &[&str]) {
         assert_eq!(
             args[0],
             Expr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: oid.clone(),
                 ty: "regclass".into()

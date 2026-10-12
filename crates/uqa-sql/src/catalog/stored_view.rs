@@ -36,6 +36,8 @@ pub struct StoredViewDefinition {
     pub materialized_rows: Vec<crate::ResultRow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materialized_column_types: Vec<Option<crate::ast::ColumnType>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub materialized_column_collations: Option<Vec<u32>>,
     #[serde(default = "default_view_populated")]
     pub populated: bool,
     /// The view's public OIDs, allocated when it was created; replacement keeps them. Views created before OIDs were recorded derive them from their identity.
@@ -46,6 +48,41 @@ pub struct StoredViewDefinition {
 }
 
 impl StoredViewDefinition {
+    /// Initial-open migration recovers missing collations from the stored query without changing its fixed column types or values.
+    pub fn restore_materialized_collations(
+        &mut self,
+        query_schema: &crate::RowSchema,
+    ) -> Result<(), crate::SQLError> {
+        if self.materialized_column_collations.is_some() {
+            return self.materialized_schema().map(|_| ());
+        }
+        if query_schema.column_types() != self.materialized_column_types {
+            return Err(crate::SQLError::Internal("materialized view query types differ from its stored column types during migration".into()));
+        }
+        crate::schema::table_creation::create_table_as_columns(
+            query_schema,
+            self.output_columns.as_deref().unwrap_or_default(),
+        )?;
+        let collations = (0..query_schema.len())
+            .map(|index| query_schema.column_collation(index).unwrap_or(0))
+            .collect::<Vec<_>>();
+        super::view::materialized_view_schema(
+            self.output_columns.as_deref().unwrap_or_default(),
+            &self.materialized_column_types,
+            Some(&collations),
+        )?;
+        self.materialized_column_collations = Some(collations);
+        Ok(())
+    }
+
+    pub fn materialized_schema(&self) -> Result<crate::RowSchema, crate::SQLError> {
+        super::view::materialized_view_schema(
+            self.output_columns.as_deref().unwrap_or_default(),
+            &self.materialized_column_types,
+            self.materialized_column_collations.as_deref(),
+        )
+    }
+
     /// The view's public OIDs: the recorded ones, or those its identity derives.
     #[must_use]
     pub fn relation_oids(&self) -> super::relation_oids::RelationCatalogOids {
@@ -101,6 +138,7 @@ impl StoredView {
             options: self.options.clone(),
             kind: self.kind,
             materialized_column_types: self.materialized_column_types.clone(),
+            materialized_column_collations: self.materialized_column_collations.clone(),
         }
     }
     pub fn row_schema(

@@ -23,7 +23,7 @@ use uqa_sql::{
     semantics::{
         doc_id_value,
         returning::{expanded_returning_projections, returning_target_schema, ReturningCatalog},
-        returning_context_schema, returning_expression_schema, DOC_ID_COLUMN, TABLE_OID_COLUMN,
+        returning_expression_schema, returning_schema_for_target, DOC_ID_COLUMN, TABLE_OID_COLUMN,
     },
     SQLError, SQLParam, SQLResult,
 };
@@ -186,13 +186,11 @@ pub fn returning_value_context<S: Clone + 'static>(
     if append_doc_id {
         current.push(Value::Null);
     }
-    let schema = returning_context_schema(
-        &columns,
-        &types,
-        width,
-        input.target_qualifier,
-        input.aliases,
-    );
+    let schema = RowSchema::with_qualified_types(input.target_qualifier, columns.clone(), types)
+        .with_column_collations(
+            (0..columns.len()).map(|position| target.column_collation(position)),
+        );
+    let schema = returning_schema_for_target(schema, width, input.aliases);
     let values = current
         .into_iter()
         .chain(image(input.old))
@@ -316,8 +314,11 @@ pub fn returning_row_context<S: Clone + 'static>(
     types.push(Some(uqa_sql::ast::ColumnType::Oid));
     columns.push(uqa_sql::semantics::XMIN_COLUMN.into());
     types.push(Some(uqa_sql::ast::ColumnType::Xid));
-    let schema =
-        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
+    let schema = RowSchema::with_qualified_types(target_qualifier, columns.clone(), types)
+        .with_column_collations(
+            (0..columns.len()).map(|position| target.column_collation(position)),
+        );
+    let schema = returning_schema_for_target(schema, composite_width, aliases);
     let current_values = returning_image_values(services, Some(current), &columns, &definitions)?;
     let old_values = returning_image_values(services, images.old.as_ref(), &columns, &definitions)?;
     let new_values = returning_image_values(services, images.new.as_ref(), &columns, &definitions)?;

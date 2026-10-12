@@ -35,6 +35,7 @@ fn named_argument(name: &str, value: ScalarExpr) -> ScalarExpr {
 #[test]
 fn typed_scalar_parameters_preserve_declared_width_domain_and_text_identity() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive_int".into(),
         oid: 90_001,
@@ -217,6 +218,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
     assert_eq!(resolved.binding.argument_types, ["json", "boolean"]);
     assert!(resolved.binding.builtin);
     let json_domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "json_document".into(),
         oid: 99_997,
@@ -224,6 +226,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
         base: Box::new(ColumnType::Json),
     };
     let boolean_domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "boolean_flag".into(),
         oid: 99_996,
@@ -658,6 +661,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
             Some(ColumnType::Array(Box::new(ColumnType::Integer))),
             Some(ColumnType::Array(Box::new(ColumnType::Json))),
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "integer_array_domain".into(),
                 oid: 99_999,
@@ -851,6 +855,7 @@ fn text_cast_binding_preserves_only_legacy_vector_identity() {
         vec!["domain_value".into(), "arguments".into()],
         vec![
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "text_domain".into(),
                 oid: 99_998,

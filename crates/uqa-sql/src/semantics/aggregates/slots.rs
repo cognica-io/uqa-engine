@@ -242,6 +242,15 @@ fn rewrite_selected(
                 .map(|branch| rewrite_selected(branch, replace).map(Box::new))
                 .transpose()?,
         }),
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => Ok(ScalarExpr::Collated {
+            expr: Box::new(rewrite_selected(expr, replace)?),
+            ty: ty.clone(),
+            collation: *collation,
+        }),
         ScalarExpr::Cast { expr, ty, implicit } => Ok(ScalarExpr::Cast {
             implicit: *implicit,
             expr: Box::new(rewrite_selected(expr, replace)?),

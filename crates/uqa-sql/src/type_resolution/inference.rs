@@ -6,9 +6,7 @@
 
 //! Ordinary and retained callers share scalar inference while every synthesized type keeps its constructor lease.
 
-use super::{
-    cast_compatibility, common, functions, operators, qualified_column, FunctionTypeResolver,
-};
+use super::{cast_compatibility, common, operators, qualified_column, FunctionTypeResolver};
 use crate::{ast::ColumnType, schema::ScalarTypeSchema, SQLError, SQLParam, ScalarExpr};
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::Value;
@@ -29,6 +27,9 @@ pub(super) fn scalar_type_inner_with_control(
         "controlled type inference cannot invoke an unowned catalog resolver"
     );
     control.check()?;
+    if let Some(ty) = schema.observed_expression_type(expression) {
+        return copy_type(ty, control);
+    }
     if matches!(
         expression,
         ScalarExpr::Func { binding, .. }
@@ -55,6 +56,7 @@ pub(super) fn scalar_type_inner_with_control(
             qualified_column::resolve_with_control(schema, qualifier, column, control)
         }
         ScalarExpr::Literal(value) => common::value_type_with_control(value, control),
+        ScalarExpr::Collated { ty, .. } => copy_type(Some(ty), control),
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..
@@ -297,180 +299,64 @@ pub(super) fn scalar_type_inner_with_control(
                     value, schema, params, resolver, control,
                 )?);
             }
-            if let Some(value) = else_branch {
-                // `transformCaseExpr` selects the result type with the ELSE result first.
-                results.insert(
-                    0,
-                    common::common_context_expression_type_with_control(
-                        value, schema, params, resolver, control,
-                    )?,
-                );
-            }
-            let mut result = None;
-            for ty in results {
-                result = common::merge_value_types_in(
-                    common::CommonTypeContext::Case,
-                    result,
-                    ty,
-                    control,
-                )?;
-            }
-            // `select_common_type` resolves results that are all `unknown` literals to text.
-            if result.is_none()
-                && when
+            // `transformCaseExpr` selects the result type with the ELSE result first, including its implicit NULL.
+            results.insert(
+                0,
+                else_branch
+                    .as_deref()
+                    .map(|value| {
+                        common::common_context_expression_type_with_control(
+                            value, schema, params, resolver, control,
+                        )
+                    })
+                    .transpose()?
+                    .flatten(),
+            );
+            if results.iter().all(Option::is_none)
+                && !when
                     .iter()
                     .map(|(_, value)| value)
                     .chain(else_branch.as_deref())
                     .all(super::is_unknown_literal)
             {
-                result = Some(ColumnType::Text.clone_with_control(control)?);
+                return Ok(None);
             }
-            if let Some(result) = &result {
-                common::read_unknown_literals(
-                    when.iter()
-                        .map(|(_, value)| value)
-                        .chain(else_branch.as_deref()),
-                    result,
-                )?;
-            }
-            match result {
-                Some(result) => common::case::case_output_type_with_control(
-                    expression,
-                    &result,
-                    &mut |expression| {
-                        scalar_type_inner_with_control(
-                            expression, schema, params, resolver, control,
-                        )
-                    },
-                    control,
-                )
-                .map(Some),
-                result => Ok(result),
-            }
-        }
-        ScalarExpr::Func {
-            order_syntax: _,
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => {
-            if let Some(error) = binding
-                .as_ref()
-                .and_then(|binding| binding.resolution_error.as_ref())
-            {
-                return Err(error.sql_error());
-            }
-            if binding.as_ref().and_then(|binding| binding.dispatch)
-                == Some(crate::ast::FunctionDispatch::FieldSelect)
-            {
-                if let Some(field) = binding
-                    .as_ref()
-                    .and_then(|binding| binding.composite_field.as_ref())
-                {
-                    return copy_type(Some(&field.result_type), control);
-                }
-                return field_selection_type(args, schema, params, resolver, control);
-            }
-            if let Some(filter) = filter {
-                scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
-            }
-            if *distinct {
-                for argument in args {
-                    if let Some(ty) =
-                        scalar_type_inner_with_control(argument, schema, params, resolver, control)?
-                    {
-                        super::ComparisonSupport::Equality.require(&ty, resolver, control)?;
-                    }
+            let mut selection = common::CommonInputType::new();
+            let expressions = std::iter::once(else_branch.as_deref())
+                .chain(when.iter().map(|(_, value)| Some(value)));
+            for (ty, expression) in results.into_iter().zip(expressions) {
+                if ty.is_some() || expression.is_none_or(common::unknown_input) {
+                    selection.include_owned(common::CommonTypeContext::Case, ty, control)?;
                 }
             }
-            for order in order_by {
-                if let Some(ty) =
-                    scalar_type_inner_with_control(&order.expr, schema, params, resolver, control)?
-                {
-                    super::ComparisonSupport::Ordering.require(&ty, resolver, control)?;
-                }
-            }
-            if *distinct {
-                for argument in args {
-                    if let Some(ty) =
-                        scalar_type_inner_with_control(argument, schema, params, resolver, control)?
-                    {
-                        super::ComparisonSupport::require_aggregate_ordering(
-                            &ty, resolver, control,
-                        )?;
-                    }
-                }
-            }
-            functions::builtin_function_type_with_control(
-                functions::FunctionTypeCall {
-                    name,
-                    binding: binding.as_ref(),
-                    args,
-                },
-                order_by,
-                params,
-                resolver,
+            let result = selection.finish(control)?;
+            common::read_unknown_literals(
+                when.iter()
+                    .map(|(_, value)| value)
+                    .chain(else_branch.as_deref()),
+                &result,
+            )?;
+            common::case::case_output_type_with_control(
+                expression,
+                &result,
                 &mut |expression| {
                     scalar_type_inner_with_control(expression, schema, params, resolver, control)
                 },
                 control,
             )
+            .map(Some)
         }
-        ScalarExpr::WindowCall {
-            name,
-            args,
-            spec,
-            filter,
-            ..
-        } => {
-            if let Some(filter) = filter {
-                scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
-            }
-            for expression in &spec.partition_by {
-                if let Some(ty) =
-                    scalar_type_inner_with_control(expression, schema, params, resolver, control)?
-                {
-                    super::ComparisonSupport::Equality.require(&ty, resolver, control)?;
-                }
-            }
-            for order in &spec.order_by {
-                if let Some(ty) =
-                    scalar_type_inner_with_control(&order.expr, schema, params, resolver, control)?
-                {
-                    super::ComparisonSupport::Ordering.require(&ty, resolver, control)?;
-                }
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    match bound {
-                        crate::ScalarFrameBound::Preceding(expression)
-                        | crate::ScalarFrameBound::Following(expression) => {
-                            scalar_type_inner_with_control(
-                                expression, schema, params, resolver, control,
-                            )?;
-                        }
-                        crate::ScalarFrameBound::UnboundedPreceding
-                        | crate::ScalarFrameBound::UnboundedFollowing
-                        | crate::ScalarFrameBound::CurrentRow => {}
-                    }
-                }
-            }
-            functions::builtin_function_type_with_control(
-                functions::FunctionTypeCall {
-                    name,
-                    binding: None,
-                    args,
-                },
-                &[],
+        ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. } => {
+            super::function_inputs::call_type_with_control(
+                expression,
+                schema,
                 params,
                 resolver,
                 &mut |expression| {
                     scalar_type_inner_with_control(expression, schema, params, resolver, control)
                 },
                 control,
+                true,
             )
         }
         ScalarExpr::ScalarSubquery(subquery) => {
@@ -500,18 +386,16 @@ pub(super) fn array_element_type_with_control(
     if items.is_empty() {
         return Ok(None);
     }
-    let mut element = None;
+    let mut selection = common::CommonInputType::new();
     for item in items {
-        element = common::merge_value_types_in(
-            common::CommonTypeContext::Array,
-            element,
-            common::common_context_expression_type_with_control(
-                item, schema, params, resolver, control,
-            )?,
-            control,
+        let ty = common::common_context_expression_type_with_control(
+            item, schema, params, resolver, control,
         )?;
+        if ty.is_some() || common::unknown_input(item) {
+            selection.include_owned(common::CommonTypeContext::Array, ty, control)?;
+        }
     }
-    let element = element.map_or_else(|| ColumnType::Text.clone_with_control(control), Ok)?;
+    let element = selection.finish(control)?;
     common::read_unknown_literals(items.iter(), &element)?;
     Ok(Some(element))
 }
@@ -530,31 +414,42 @@ pub(super) fn field_selection_type(
             "field selection takes an expression and a field name".into(),
         ));
     };
-    let whole_row = match base {
-        ScalarExpr::Column(qualifier)
-            if !schema.has_unqualified_column(qualifier)
-                && !schema.column_is_ambiguous(qualifier)
-                && schema.has_qualifier(qualifier) =>
-        {
-            Some(qualifier)
-        }
-        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => Some(qualifier),
-        _ => None,
-    };
-    if let Some(qualifier) = whole_row {
+    if let Some(qualifier) = field_selection::whole_row_qualifier(base, schema) {
         if !schema.has_qualified_column(qualifier, field) {
             return Err(field_selection::missing_relation_column(qualifier, field));
         }
         return copy_type(schema.qualified_type(qualifier, field), control);
     }
-    if let ScalarExpr::Row(items) = base {
-        let items = items
+    let mut origin = base;
+    while let ScalarExpr::Cast { expr, .. } = origin {
+        origin = expr;
+    }
+    if let ScalarExpr::Row(expressions) = origin {
+        let items = expressions
             .iter()
             .map(|item| {
                 scalar_type_inner_with_control(item, schema, params, resolver, control)
                     .map(|ty| ty.map(|ty| (*ty).clone()))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if !std::ptr::eq(origin, base) {
+            let observed = super::function_inputs::CallInputTypes::new(
+                schema,
+                expressions
+                    .iter()
+                    .zip(&items)
+                    .map(|(item, ty)| (item, ty.as_ref()))
+                    .collect(),
+            );
+            // Validate casts in their original inner-to-outer order using the field types already observed above.
+            let ty = scalar_type_inner_with_control(base, &observed, params, resolver, control)?;
+            if ty.as_deref() != Some(&ColumnType::Record) {
+                return copy_type(
+                    field_selection::value_field_type(ty.as_deref(), field, resolver)?.as_ref(),
+                    control,
+                );
+            }
+        }
         return copy_type(
             field_selection::row_field_type(&items, field)?.as_ref(),
             control,
@@ -565,9 +460,33 @@ pub(super) fn field_selection_type(
             return copy_type(field_type?.as_ref(), control);
         }
     }
-    let base = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
+    let ty = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
+    let record = ty.as_deref() == Some(&ColumnType::Record);
+    let reference = if record
+        && !std::ptr::eq(origin, base)
+        && field_selection::is_column_reference(origin)
+        && scalar_type_inner_with_control(origin, schema, params, resolver, control)?.as_deref()
+            == Some(&ColumnType::Record)
+    {
+        origin
+    } else {
+        base
+    };
+    if let Some(descriptor) = schema
+        .physical_schema()
+        .and_then(|schema| schema.input_record_metadata(reference))
+        .and_then(|metadata| metadata.descriptor.as_ref())
+    {
+        let position = descriptor
+            .position(field)
+            .ok_or_else(|| field_selection::undefined_record_field(field))?;
+        return copy_type(descriptor.types[position].as_ref(), control);
+    }
+    if record && field_selection::is_column_reference(reference) {
+        return Err(field_selection::unregistered_record());
+    }
     copy_type(
-        field_selection::value_field_type(base.as_deref(), field, resolver)?.as_ref(),
+        field_selection::value_field_type(ty.as_deref(), field, resolver)?.as_ref(),
         control,
     )
 }
@@ -587,7 +506,7 @@ pub(super) fn resolved_type_name(
     ColumnType::from_sql_name_with_control(name, control).map(Some)
 }
 
-fn copy_type(
+pub(super) fn copy_type(
     ty: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {

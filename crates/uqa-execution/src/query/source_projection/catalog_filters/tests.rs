@@ -57,6 +57,7 @@ fn identifier_bounds_follow_aliases_conjunctions_and_commuted_equalities() {
             ScalarExpr::TypedLiteral {
                 value: Value::Str("wanted".into()),
                 ty: "name".into(),
+                collation_oid: None,
                 composite_source: None,
                 bound_type: Some(ColumnType::Name),
                 parameter_index: Some(0),
@@ -102,6 +103,7 @@ fn unsupported_or_ambiguous_predicates_cannot_remove_catalog_rows() {
             ScalarExpr::TypedLiteral {
                 value: Value::Str("wanted".into()),
                 ty: "character(6)".into(),
+                collation_oid: None,
                 composite_source: None,
                 bound_type: None,
                 parameter_index: None,

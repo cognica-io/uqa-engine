@@ -30,6 +30,7 @@ impl CompositeTypeCatalog for Catalog {
             relation_oid: 42_002,
             dropped: Vec::new(),
             attributes: vec![CompositeAttribute {
+                collation_oid: None,
                 name: "n".into(),
                 ty: self.0.clone(),
                 number: 1,

@@ -200,7 +200,9 @@ fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Opti
                 Some(ColumnScope::Outer)
             }
         }
-        ScalarExpr::Cast { expr, .. } => correlation_column_scope(expr, scope),
+        ScalarExpr::Cast { expr, .. } | ScalarExpr::Collated { expr, .. } => {
+            correlation_column_scope(expr, scope)
+        }
         _ => None,
     }
 }
@@ -730,7 +732,10 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => expression_has_external_reference(inner, scopes),
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::Collated { expr: inner, .. } => {
+            expression_has_external_reference(inner, scopes)
+        }
         ScalarExpr::Between { expr, low, high } => {
             expression_has_external_reference(expr, scopes)
                 || expression_has_external_reference(low, scopes)

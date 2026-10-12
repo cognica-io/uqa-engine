@@ -12,16 +12,16 @@ use super::{
 use crate::{
     catalog::stored_view::StoredView,
     plan::{DeletePlan, MergePlan, MergeWhenPlan, UpdatePlan},
-    ColumnType, SQLError, ScalarExpr,
+    SQLError, ScalarExpr,
 };
 use std::collections::BTreeSet;
 use uqa_core::Value;
 
 pub struct ViewMutationTarget {
+    pub schema: crate::RowSchema,
     pub canonical_name: String,
     pub definition: StoredView,
     pub columns: Vec<String>,
-    pub types: Vec<Option<ColumnType>>,
 }
 
 pub fn resolve_view_target(
@@ -50,14 +50,11 @@ pub fn resolve_view_target(
         .enumerate()
         .map(|(position, column)| schema.public_name(position).unwrap_or(column).to_string())
         .collect::<Vec<_>>();
-    let types = (0..columns.len())
-        .map(|position| schema.column_type(position).cloned())
-        .collect();
     Ok(ViewMutationTarget {
+        schema,
         canonical_name,
         definition,
         columns,
-        types,
     })
 }
 
@@ -183,7 +180,7 @@ pub fn coerce_view_value(
     position: usize,
     value: Value,
 ) -> Result<Value, SQLError> {
-    match target.types[position].as_ref() {
+    match target.schema.column_type(position) {
         Some(ty) => crate::assignment::conversion::convert_value_to_column_type_with_context(
             assignment, value, ty,
         ),
@@ -246,11 +243,8 @@ pub fn validate_view_merge_contract(
         &plan.returning_aliases,
         Some(&source),
     )?;
-    let target_schema = crate::RowSchema::with_qualified_types(
-        &plan.target_qualifier,
-        target.columns.clone(),
-        target.types.clone(),
-    );
+    let target_schema =
+        crate::RowSchema::with_relation_qualifier(&target.schema, &plan.target_qualifier);
     super::merge::validate_merge_action_scopes(
         rewrite.routines,
         plan,

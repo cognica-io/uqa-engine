@@ -28,6 +28,7 @@ fn argument(sql: &str) -> ExpressionPlan {
 }
 fn domain(oid: u32, name: &str) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: name.into(),
         oid,

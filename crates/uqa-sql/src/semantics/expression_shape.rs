@@ -203,6 +203,15 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
                 .as_ref()
                 .map(|expr| Box::new(qualify_unqualified_columns(expr, qualifier))),
         },
+        ScalarExpr::Collated {
+            expr,
+            ty,
+            collation,
+        } => ScalarExpr::Collated {
+            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
+            ty: ty.clone(),
+            collation: *collation,
+        },
         ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
             implicit: *implicit,
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),

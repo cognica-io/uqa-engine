@@ -18,6 +18,9 @@ use super::{
 pub struct ColumnDef {
     pub name: String,
     pub ty: ColumnType,
+    /// The selected collation of the physical attribute. Legacy definitions use their type's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
     /// Durable identity of this catalog column. Logical names can change while a fixed transaction snapshot continues to address the same column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
@@ -109,6 +112,7 @@ impl ColumnDef {
         Self {
             name: name.into(),
             ty,
+            collation_oid: None,
             object_id: None,
             attribute_number: None,
             missing_value: None,
@@ -264,6 +268,9 @@ pub struct NotNullDeclaration {
 /// The clauses a column definition writes, in written order, which `transformColumnDefinition` checks against each other.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnDeclaration {
+    /// The written name, resolved before column constraints are examined.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
     /// The column's type is SERIAL, SMALLSERIAL or BIGSERIAL, which adds a default after the written clauses.
     pub serial: bool,
     /// The column's type is an array of a SERIAL type.

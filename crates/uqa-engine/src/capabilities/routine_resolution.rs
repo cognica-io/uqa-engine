@@ -188,6 +188,14 @@ impl FunctionTypeResolver for Engine {
         self.routine_overload_context().resolve_type_name(name)
     }
 
+    fn resolve_collation_name(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        uqa_execution::catalog::projection::resolve_expression_collation_oid(
+            &self.catalog_execution(),
+            name,
+        )
+        .map(Some)
+    }
+
     fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
         Some(self)
     }

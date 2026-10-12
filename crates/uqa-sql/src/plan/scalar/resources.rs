@@ -126,6 +126,7 @@ impl Lowering<'_> {
         match binding {
             Source::Owned(binding) => Ok(binding),
             Source::Borrowed(binding) => Ok(crate::ast::CompositeRowBinding {
+                layout: binding.layout,
                 ty: self.copy_text(&binding.ty)?,
                 attributes: self.map(binding.attributes.iter(), |_, number| Ok(*number))?,
                 argument_types: binding
@@ -167,6 +168,7 @@ impl Lowering<'_> {
                                     descriptor.attributes.iter(),
                                     |this, attribute| {
                                         Ok(CompositeAttribute {
+                                            collation_oid: attribute.collation_oid,
                                             name: this.copy_text(&attribute.name)?,
                                             ty: this
                                                 .scalar_type_copy(Some(&attribute.ty))?

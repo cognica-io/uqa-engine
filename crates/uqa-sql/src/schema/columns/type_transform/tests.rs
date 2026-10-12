@@ -437,6 +437,7 @@ fn analysis_leaves_constant_evaluation_until_after_target_checks() {
 fn planned_constant(value: Value, source: ColumnType) -> AnalyzedTypeTransform {
     AnalyzedTypeTransform {
         plan: ExpressionPlan::lower(Expr::TypedLiteral {
+            collation_oid: None,
             composite_source: None,
             value,
             ty: source.sql_name(),
@@ -448,6 +449,7 @@ fn planned_constant(value: Value, source: ColumnType) -> AnalyzedTypeTransform {
 
 fn domain(base: ColumnType) -> ColumnType {
     ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "checked_value".into(),
         oid: 16384,

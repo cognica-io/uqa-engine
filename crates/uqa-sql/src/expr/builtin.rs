@@ -228,6 +228,7 @@ pub fn bound_scalar_function_strictness(
     if let Some(dispatch) = binding.dispatch {
         return match dispatch {
             FunctionDispatch::NumericOperator(_) => Some(true),
+            FunctionDispatch::Collate { .. } => None,
             FunctionDispatch::ArraySubscripts
             | FunctionDispatch::Subscript
             | FunctionDispatch::FieldSelect

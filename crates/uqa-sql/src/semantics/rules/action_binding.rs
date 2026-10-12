@@ -315,6 +315,11 @@ fn bind_rule_function_expression(
     scope: &RuleBindingScope,
     context: &RuleBindingContext<'_>,
 ) -> Result<Expr, SQLError> {
+    if let Some((qualifier, column)) = namespace::event_field_reference(expr, scope) {
+        return Ok(resolver
+            .rewrite_qualified(qualifier, column)?
+            .unwrap_or_else(|| Expr::qualified_column(qualifier, column)));
+    }
     let Expr::Func {
         order_syntax,
         name,
@@ -667,6 +672,7 @@ fn bind_from(
             column_aliases,
             internal_relation,
             internal_column_types,
+            internal_column_collations,
         } => FromClause::Values {
             rows: rows
                 .iter()
@@ -676,6 +682,7 @@ fn bind_from(
             column_aliases: column_aliases.clone(),
             internal_relation: *internal_relation,
             internal_column_types: internal_column_types.clone(),
+            internal_column_collations: internal_column_collations.clone(),
         },
         FromClause::Function {
             name,
@@ -959,7 +966,7 @@ fn bind_orders(
         .collect()
 }
 
-pub fn invalid_rule_action_reference(qualifier: &str) -> SQLError {
+pub fn invalid_rule_relation_reference(qualifier: &str) -> SQLError {
     SQLError::Diagnostic {
         sqlstate: "42P01".into(),
         message: format!("invalid reference to FROM-clause entry for table \"{qualifier}\""),

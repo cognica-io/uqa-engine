@@ -30,6 +30,7 @@ pub use optimization::ExecutablePlanOptimizer;
 mod query;
 mod rewrite;
 mod scalar;
+mod source_metadata;
 mod statement;
 pub mod subqueries;
 mod visit;

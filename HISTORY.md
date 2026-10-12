@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain declared field collations in rule/trigger inputs, procedural parameter binding and VALUES execution. Preserve column positions and exact values across materialized query results, including repeated column names, empty outputs, subqueries and disk spill.
+
 - Preserve PostgreSQL infinite date, timestamp and interval values through input/output, casts, arithmetic, comparisons, ranges, window frames, aggregates and persistent storage. Keep finite interval overflow and mixed-infinity diagnostics, validate range bounds before canonicalization, and preserve empty containment.
 
 - Preserve physical array constants in the typed catalog expression codec, including dimensions, lower bounds, NULLs, element modifiers and domain/enum/composite identities across catalog changes. Share typed output through borrowed metadata while retaining live interval formatting.

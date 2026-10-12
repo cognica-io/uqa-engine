@@ -172,6 +172,11 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
     }
     let has_lock_origins = rows.iter().any(|row| !row.lock_origins().is_empty());
     add_size(&mut bytes, 8, "row metadata flags")?;
+    add_size(
+        &mut bytes,
+        super::collations::encoded_size(schema)?,
+        "schema collations",
+    )?;
     add_size(&mut bytes, 8, "batch row count")?;
     for row in rows {
         let mut row_bytes = encoded_physical_row_record_size(row, schema.physical_width())?;
@@ -183,7 +188,7 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
     Ok(bytes)
 }
 
-fn add_size(total: &mut usize, bytes: usize, description: &str) -> ExecResult<()> {
+pub(super) fn add_size(total: &mut usize, bytes: usize, description: &str) -> ExecResult<()> {
     *total = total
         .checked_add(bytes)
         .ok_or_else(|| spill_error(format!("{description} size overflow")))?;
@@ -195,7 +200,7 @@ fn add_string_size(total: &mut usize, value: &str, description: &str) -> ExecRes
     add_size(total, value.len(), description)
 }
 
-fn add_identity_size(
+pub(super) fn add_identity_size(
     total: &mut usize,
     identity: &ColumnIdentity,
     description: &str,
@@ -437,14 +442,20 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
         write_u64(writer, position)?;
     }
     let has_lock_origins = batch.rows.iter().any(|row| !row.lock_origins().is_empty());
-    write_u64(
-        writer,
-        if has_lock_origins {
-            ROW_METADATA_LOCK_ORIGINS
-        } else {
-            0
-        },
-    )?;
+    let has_collations = batch.schema.collation_overrides().next().is_some();
+    let flags = if has_lock_origins {
+        ROW_METADATA_LOCK_ORIGINS
+    } else {
+        0
+    } | if has_collations {
+        usize::from(super::collations::FLAG)
+    } else {
+        0
+    };
+    write_u64(writer, flags)?;
+    if has_collations {
+        super::collations::encode(writer, &batch.schema)?;
+    }
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
         write_u64(writer, batch.schema.physical_width())?;
@@ -490,7 +501,7 @@ fn add_lock_origins_size(bytes: &mut usize, row: &PhysicalRow) -> ExecResult<()>
     Ok(())
 }
 
-fn write_identity(writer: &mut impl Write, identity: &ColumnIdentity) -> ExecResult<()> {
+pub(super) fn write_identity(writer: &mut impl Write, identity: &ColumnIdentity) -> ExecResult<()> {
     write_bytes(writer, identity.qualifier().unwrap_or("").as_bytes())?;
     write_bytes(writer, identity.column().as_bytes())
 }
@@ -714,7 +725,7 @@ fn write_tag(writer: &mut impl Write, tag: u8) -> ExecResult<()> {
     write_raw(writer, &[tag], "value tag")
 }
 
-fn write_u64(writer: &mut impl Write, value: usize) -> ExecResult<()> {
+pub(super) fn write_u64(writer: &mut impl Write, value: usize) -> ExecResult<()> {
     let value = u64::try_from(value).map_err(|_| spill_error("spill length exceeds u64"))?;
     write_raw(writer, &value.to_le_bytes(), "length")
 }

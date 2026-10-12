@@ -15,6 +15,7 @@ impl<'a> Walker<'a> {
         let ColumnDef {
             name,
             ty,
+            collation_oid: _,
             object_id: _,
             attribute_number: _,
             missing_value,
@@ -123,6 +124,7 @@ impl<'a> Walker<'a> {
                 name,
                 oid: _,
                 array_oid: _,
+                collation_oid: _,
                 base,
             } => {
                 self.text(schema)?;

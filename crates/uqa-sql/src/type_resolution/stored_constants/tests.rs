@@ -22,6 +22,7 @@ impl FunctionTypeResolver for Catalog {
             _ => return Ok(None),
         };
         Ok(Some(ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: name.into(),
             oid,
@@ -66,6 +67,7 @@ fn schema() -> RowSchema {
             Some(ColumnType::Real),
             Some(ColumnType::DoublePrecision),
             Some(ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "operand_numeric".into(),
                 oid: 50_001,
@@ -74,6 +76,53 @@ fn schema() -> RowSchema {
             }),
         ],
     )
+}
+
+#[test]
+fn stored_collation_casts_keep_only_the_selected_outer_identity() {
+    let schema = RowSchema::with_types(vec!["source".into()], vec![Some(ColumnType::Text)]);
+    for (input, oid, has_cast) in [
+        ("(source COLLATE \"C\")::varchar(5)", Some(950), true),
+        (
+            "((source COLLATE \"C\") COLLATE \"POSIX\")::varchar(5)",
+            Some(951),
+            true,
+        ),
+        (
+            "((source COLLATE \"C\") COLLATE \"POSIX\")::text",
+            Some(951),
+            false,
+        ),
+        ("(source COLLATE \"C\")::integer", None, true),
+    ] {
+        let mut stored = expression(input);
+        store_operand_coercions(&mut stored, &schema, &[], &Catalog).unwrap();
+        let clause = crate::catalog::collations::expression::scalar_clause(&stored).unwrap();
+        assert_eq!(
+            clause.as_ref().and_then(|clause| clause.oid),
+            oid,
+            "{input}"
+        );
+        let operand = clause.map_or(&stored, |clause| clause.argument);
+        assert_eq!(
+            matches!(operand, ScalarExpr::Cast { .. }),
+            has_cast,
+            "{input}"
+        );
+        let mut clauses = 0;
+        operand.visit(&mut |node| {
+            clauses += usize::from(
+                crate::catalog::collations::expression::scalar_clause(node)
+                    .unwrap()
+                    .is_some(),
+            );
+        });
+        assert_eq!(clauses, 0, "{input}");
+        let once = stored.clone();
+        let mut restored = serde_json::from_slice(&serde_json::to_vec(&stored).unwrap()).unwrap();
+        assert!(!store_operand_coercions(&mut restored, &schema, &[], &Catalog).unwrap());
+        assert_eq!(restored, once, "{input}");
+    }
 }
 
 #[test]
@@ -208,6 +257,7 @@ fn stored_domain_inputs_are_read_once_without_invoking_checks_during_introspecti
     impl FunctionTypeResolver for Inputs {
         fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
             let day = ColumnType::Domain {
+                collation_oid: None,
                 schema: "public".into(),
                 name: "day".into(),
                 oid: 50_020,
@@ -217,6 +267,10 @@ fn stored_domain_inputs_are_read_once_without_invoking_checks_during_introspecti
             Ok(match name.replace('"', "").as_str() {
                 "day" => Some(day),
                 "day[]" => Some(ColumnType::Array(Box::new(day))),
+                name if name == day.catalog_name() => Some(day),
+                name if name == ColumnType::Array(Box::new(day.clone())).catalog_name() => {
+                    Some(ColumnType::Array(Box::new(day)))
+                }
                 _ => None,
             })
         }

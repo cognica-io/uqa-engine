@@ -73,6 +73,7 @@ fn custom_plan_selection_respects_parameterless_queries_sampling_and_cost_ties()
 #[test]
 fn specialization_preserves_bound_domain_and_parameter_provenance() {
     let domain = ColumnType::Domain {
+        collation_oid: None,
         schema: "public".into(),
         name: "positive".into(),
         oid: 90_001,

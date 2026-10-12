@@ -5,7 +5,189 @@
 //
 
 use super::*;
+use crate::PhysicalOperator;
 use std::cell::Cell;
+use uqa_sql::catalog::analysis::AnalysisCatalog;
+
+#[test]
+fn relation_descriptors_preserve_selected_collations_and_attribute_numbers() {
+    let uqa_sql::Statement::CreateTable(mut table) =
+        uqa_sql::compile("CREATE TABLE t(c text,removed integer,p text,plain text,n integer)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("table");
+    };
+    table.columns[0].collation_oid = Some(950);
+    for (index, column) in table.columns.iter_mut().enumerate() {
+        column.attribute_number = Some(i16::try_from(index + 1).unwrap());
+    }
+    let removed = table.columns.remove(1);
+    table.columns[1].collation_oid = Some(951);
+    let mut constraints = uqa_sql::ast::TableConstraintSet::default();
+    constraints.dropped_attributes.push(
+        uqa_sql::catalog::relation_attributes::DroppedAttribute::from_column(&removed, 1, true, 0)
+            .unwrap(),
+    );
+    let mut snapshot = crate::catalog::test_support::empty_catalog()
+        .snapshot()
+        .clone();
+    let table = crate::catalog::test_support::table_snapshot([1; 16], table.columns, constraints);
+    let oid = table.catalog_oids.row_type.unwrap();
+    let foreign = crate::catalog::foreign::StoredForeignTable {
+        name: "f".into(),
+        persistence: uqa_sql::ast::RelationPersistence::Permanent,
+        object_id: [2; 16],
+        catalog_oids: None,
+        row_type_array_name: None,
+        server_name: "fixture".into(),
+        server_reference: None,
+        columns: table.columns.to_vec(),
+        dropped_attributes: table.dropped_attributes.to_vec(),
+        checks: Vec::new(),
+        options: BTreeMap::new(),
+        option_order: Vec::new(),
+    };
+    let foreign_oid = foreign.relation_oids().row_type.unwrap();
+    Arc::make_mut(&mut snapshot.definitions.foreign_tables)
+        .insert(RelationIdentity::new("public", "f"), foreign);
+    snapshot
+        .tables
+        .insert(RelationIdentity::new("public", "t"), table);
+    let catalog = CatalogReadView::new(snapshot);
+    let services = crate::catalog::test_support::CatalogServices::default();
+    let cache = crate::catalog::cache::RegtypeOutputCache::default();
+    let context = services.context(&catalog, &cache);
+    let selected = descriptor(&context, oid).unwrap().unwrap();
+    assert_eq!(
+        selected
+            .attributes
+            .iter()
+            .map(CompositeAttribute::collation_oid)
+            .collect::<Vec<_>>(),
+        [950, 951, 100, 0]
+    );
+    assert_eq!(selected.attributes[1].number, 3);
+    assert_eq!(
+        descriptor(&context, foreign_oid)
+            .unwrap()
+            .unwrap()
+            .attributes,
+        selected.attributes
+    );
+    assert!(Arc::ptr_eq(
+        &selected,
+        &descriptor(&context, oid).unwrap().unwrap()
+    ));
+}
+
+#[test]
+fn view_descriptors_preserve_analyzed_output_collations() {
+    let view = collated_view();
+    for materialized in [false, true] {
+        let mut view = view.clone();
+        if materialized {
+            view.kind = uqa_sql::catalog::view::StoredViewKind::Materialized;
+            view.materialized_column_types = vec![Some(uqa_sql::ColumnType::Text); 2];
+            view.materialized_column_collations = Some(vec![950, 951]);
+            view.definition = serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
+            let scan = crate::TableScan::from_rows_with_schema(
+                view.materialized_schema().unwrap(),
+                Vec::new(),
+            );
+            assert_eq!(scan.row_schema().column_collation(0), Some(950));
+            assert_eq!(scan.row_schema().column_collation(1), Some(951));
+        }
+        let oid = view.relation_oids().row_type.unwrap();
+        let mut snapshot = crate::catalog::test_support::empty_catalog()
+            .snapshot()
+            .clone();
+        Arc::make_mut(&mut snapshot.definitions.views)
+            .insert(RelationIdentity::new("public", "v"), view.clone());
+        let catalog = CatalogReadView::new(snapshot);
+        let services = crate::catalog::test_support::CatalogServices::default();
+        let cache = crate::catalog::cache::RegtypeOutputCache::default();
+        let context = services.context(&catalog, &cache);
+        let descriptor = descriptor(&context, oid).unwrap().unwrap();
+        assert_eq!(
+            descriptor
+                .attributes
+                .iter()
+                .map(|attribute| (attribute.name.as_str(), attribute.collation_oid()))
+                .collect::<Vec<_>>(),
+            [("renamed_c", 950), ("renamed_p", 951)]
+        );
+        let columns = crate::catalog::projection::view_columns_for(
+            &context,
+            &catalog,
+            &services.resolution,
+            &view,
+        )
+        .unwrap();
+        assert_eq!(
+            columns
+                .iter()
+                .map(|column| column.collation_oid)
+                .collect::<Vec<_>>(),
+            [Some(950), Some(951)]
+        );
+        let sql_view = AnalysisCatalog::view_resolved(&catalog, &services.resolution, "public.v")
+            .unwrap()
+            .unwrap();
+        if materialized {
+            assert_eq!(
+                sql_view.materialized_column_collations,
+                Some(vec![950, 951])
+            );
+            let uqa_sql::plan::UnifiedPlan::Query(query) = uqa_sql::plan::UnifiedPlan::lower(
+                uqa_sql::compile("SELECT renamed_c,renamed_p FROM public.v")
+                    .unwrap()
+                    .remove(0),
+            ) else {
+                panic!("query")
+            };
+            let schema = uqa_sql::binding::analyze_query_plan_schema_with_catalog(
+                context.routines,
+                &query,
+                &[],
+                Arc::new(catalog.clone()),
+                services.resolution.clone(),
+            )
+            .unwrap();
+            assert_eq!(schema.column_collation(0), Some(950));
+            assert_eq!(schema.column_collation(1), Some(951));
+        }
+    }
+}
+
+fn collated_view() -> uqa_sql::catalog::stored_view::StoredView {
+    let uqa_sql::plan::UnifiedPlan::Query(query) = uqa_sql::plan::UnifiedPlan::lower(
+        uqa_sql::compile("SELECT NULL::text COLLATE \"C\" AS c, NULL::text COLLATE \"POSIX\" AS p")
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query")
+    };
+    uqa_sql::catalog::stored_view::StoredView {
+        security: uqa_sql::catalog::security::BoundTableSecurity::owner(
+            uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+        ),
+        definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+            object_id: [3; 16],
+            catalog_oids: None,
+            row_type_array_name: None,
+            query: *query,
+            output_columns: Some(vec!["renamed_c".into(), "renamed_p".into()]),
+            persistence: uqa_sql::ast::RelationPersistence::Permanent,
+            options: Vec::new(),
+            kind: uqa_sql::catalog::view::StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            materialized_column_collations: None,
+            populated: true,
+        },
+    }
+}
 
 #[test]
 fn relation_descriptor_cache_retains_results_and_bounds_missing_identities() {

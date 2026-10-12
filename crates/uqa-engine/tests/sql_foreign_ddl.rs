@@ -39,6 +39,7 @@ fn row(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
 
 fn integer_column(name: &str) -> ColumnDef {
     ColumnDef {
+        collation_oid: None,
         name: name.to_string(),
         ty: ColumnType::Integer,
         object_id: None,

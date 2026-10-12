@@ -56,7 +56,18 @@ fn projection_layout(
                             qualifier, &column,
                         ))
                     });
-                projected.push((column, ty, ProjectedSlot::Input(slot)));
+                let collation = logical.map_or_else(
+                    || input.qualified_collation(qualifier, &column),
+                    |position| input.column_collation(position),
+                );
+                projected.push((
+                    column,
+                    ty,
+                    ProjectedSlot::BoundInput {
+                        physical: slot,
+                        collation,
+                    },
+                ));
             }
             continue;
         }
@@ -74,15 +85,18 @@ fn projection_layout(
                 projected.push((
                     input.public_name(logical).unwrap_or(column).to_string(),
                     input.column_type(logical).cloned(),
-                    ProjectedSlot::Input(input.physical_slot(logical)),
+                    ProjectedSlot::BoundInput {
+                        physical: input.physical_slot(logical),
+                        collation: input.column_collation(logical),
+                    },
                 ));
             }
             continue;
         }
 
         let ty = evaluator.expression_type(&expression, input).ok().flatten();
-        let source = if let Some(logical) = crate::order_expression_position(input, &expression) {
-            ProjectedSlot::Input(input.physical_slot(logical))
+        let source = if let Some(source) = input.projection_input(&expression) {
+            source
         } else {
             let position = computed.len();
             computed.push(expression);

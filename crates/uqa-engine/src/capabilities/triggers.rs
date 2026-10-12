@@ -16,7 +16,7 @@ use uqa_execution::{
     routines::TriggerRoutineContext,
 };
 use uqa_sql::{
-    ast::{ColumnType, ForeignKey, TriggerEvent, TriggerTiming},
+    ast::{ColumnDef, ForeignKey, TriggerEvent, TriggerTiming},
     catalog::events::StoredTrigger,
     routines::SQLUserFunction,
     semantics::referential::ReferentialCatalog,
@@ -59,8 +59,9 @@ impl TriggerCatalog for Engine {
     ) -> Result<bool, SQLError> {
         self.event_lookup_context().has_row_triggers(table, event)
     }
-    fn rule_relation_columns(&self, table: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
-        self.event_analysis_context().rule_relation_columns(table)
+    fn trigger_relation_definitions(&self, table: &str) -> Result<Vec<ColumnDef>, SQLError> {
+        self.event_analysis_context()
+            .trigger_relation_definitions(table)
     }
     fn triggers_for(
         &self,

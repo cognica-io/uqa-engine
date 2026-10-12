@@ -1,0 +1,168 @@
+{
+  "create": "CREATE TABLE probe (id integer, removed text, c text COLLATE \"C\", p text COLLATE \"POSIX\", b varchar(12) COLLATE \"C\", n name COLLATE \"C\", words text[] COLLATE \"C\", t text, \"literal.dot\" text COLLATE \"C\")",
+  "dropped": "removed",
+  "attributes": [
+    {
+      "name": "id",
+      "attribute_number": 1,
+      "collation_oid": 0
+    },
+    {
+      "name": "c",
+      "attribute_number": 3,
+      "collation_oid": 950
+    },
+    {
+      "name": "p",
+      "attribute_number": 4,
+      "collation_oid": 951
+    },
+    {
+      "name": "b",
+      "attribute_number": 5,
+      "collation_oid": 950
+    },
+    {
+      "name": "n",
+      "attribute_number": 6,
+      "collation_oid": 950
+    },
+    {
+      "name": "words",
+      "attribute_number": 7,
+      "collation_oid": 950
+    },
+    {
+      "name": "t",
+      "attribute_number": 8,
+      "collation_oid": 100
+    },
+    {
+      "name": "literal.dot",
+      "attribute_number": 9,
+      "collation_oid": 950
+    }
+  ],
+  "cases": [
+    {
+      "check": "c <> ''",
+      "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(c <> ''::text)",
+      "pretty": "c <> ''::text"
+    },
+    {
+      "check": "p <> ''",
+      "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 951 :args ({VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(p <> ''::text)",
+      "pretty": "p <> ''::text"
+    },
+    {
+      "check": "t <> ''",
+      "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({VAR :varno 1 :varattno 8 :vartype 25 :vartypmod -1 :varcollid 100 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 8 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(t <> ''::text)",
+      "pretty": "t <> ''::text"
+    },
+    {
+      "check": "c=p",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :location -1}",
+      "sql": "(c = p)",
+      "pretty": "c = p"
+    },
+    {
+      "check": "c=t",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 8 :vartype 25 :vartypmod -1 :varcollid 100 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 8 :location -1}) :location -1}",
+      "sql": "(c = t)",
+      "pretty": "c = t"
+    },
+    {
+      "check": "c=b",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {RELABELTYPE :arg {VAR :varno 1 :varattno 5 :vartype 1043 :vartypmod 16 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 5 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(c = (b)::text)",
+      "pretty": "c = b::text"
+    },
+    {
+      "check": "c=n",
+      "conbin": "{OPEXPR :opno 260 :opfuncid 247 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 6 :vartype 19 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 6 :location -1}) :location -1}",
+      "sql": "(c = n)",
+      "pretty": "c = n"
+    },
+    {
+      "check": "words < ARRAY['z']",
+      "conbin": "{OPEXPR :opno 1072 :opfuncid 391 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 7 :vartype 1009 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 7 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+      "sql": "(words < ARRAY['z'::text])",
+      "pretty": "words < ARRAY['z'::text]"
+    },
+    {
+      "check": "c::varchar(5) <> 'z'",
+      "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({RELABELTYPE :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} :resulttype 1043 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 9 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+      "sql": "(((c)::character varying(5))::text <> 'z'::text)",
+      "pretty": "c::character varying(5)::text <> 'z'::text"
+    },
+    {
+      "check": "COALESCE(c,p)=t",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 25 :coalescecollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :location -1} {VAR :varno 1 :varattno 8 :vartype 25 :vartypmod -1 :varcollid 100 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 8 :location -1}) :location -1}",
+      "sql": "(COALESCE(c, p) = t)",
+      "pretty": "COALESCE(c, p) = t"
+    },
+    {
+      "check": "GREATEST(c,p) IS NOT NULL",
+      "conbin": "{NULLTEST :arg {MINMAXEXPR :minmaxtype 25 :minmaxcollid 0 :inputcollid 0 :op 0 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :location -1} :nulltesttype 1 :argisrow false :location -1}",
+      "sql": "(GREATEST(c, p) IS NOT NULL)",
+      "pretty": "GREATEST(c, p) IS NOT NULL"
+    },
+    {
+      "check": "(CASE WHEN id>0 THEN c ELSE p END) <> ''",
+      "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CASEEXPR :casetype 25 :casecollid 0 :arg <> :args ({CASEWHEN :expr {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :result {VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} :location -1}) :defresult {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1} :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(\nCASE\n    WHEN (id > 0) THEN c\n    ELSE p\nEND <> ''::text)",
+      "pretty": "\nCASE\n    WHEN id > 0 THEN c\n    ELSE p\nEND <> ''::text"
+    },
+    {
+      "check": "CASE c WHEN p THEN true ELSE false END",
+      "conbin": "{CASEEXPR :casetype 16 :casecollid 0 :arg {VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} :args ({CASEWHEN :expr {OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CASETESTEXPR :typeId 25 :typeMod -1 :collation 950} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :location -1} :result {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} :location -1}) :defresult {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} :location -1}",
+      "sql": "\nCASE c\n    WHEN p THEN true\n    ELSE false\nEND",
+      "pretty": "\nCASE c\n    WHEN p THEN true\n    ELSE false\nEND"
+    },
+    {
+      "check": "NULLIF(c,p) IS NULL",
+      "conbin": "{NULLTEST :arg {NULLIFEXPR :opno 98 :opfuncid 67 :opresulttype 25 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(NULLIF(c, p) IS NULL)",
+      "pretty": "NULLIF(c, p) IS NULL"
+    },
+    {
+      "check": "length(c)>0",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1317 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(length(c) > 0)",
+      "pretty": "length(c) > 0"
+    },
+    {
+      "check": "ROW(c,p) IS NOT NULL",
+      "conbin": "{NULLTEST :arg {ROWEXPR :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\" \"f2\") :location -1} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "(ROW(c, p) IS NOT NULL)",
+      "pretty": "ROW(c, p) IS NOT NULL"
+    },
+    {
+      "check": "ROW(c,id)=ROW('x',1)",
+      "conbin": "{BOOLEXPR :boolop and :args ({OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} {OPEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+      "sql": "((c = 'x'::text) AND (id = 1))",
+      "pretty": "c = 'x'::text AND id = 1"
+    },
+    {
+      "check": "('x' COLLATE \"POSIX\")=c",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 951 :args ({COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :collOid 951 :location -1} {VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1}",
+      "sql": "(('x'::text COLLATE \"POSIX\") = c)",
+      "pretty": "('x'::text COLLATE \"POSIX\") = c"
+    },
+    {
+      "check": "c COLLATE \"default\"=p",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COLLATEEXPR :arg {VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} :collOid 100 :location -1} {VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 951 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1}) :location -1}",
+      "sql": "((c COLLATE \"default\") = p)",
+      "pretty": "(c COLLATE \"default\") = p"
+    },
+    {
+      "check": "\"literal.dot\"<>''",
+      "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({VAR :varno 1 :varattno 9 :vartype 25 :vartypmod -1 :varcollid 950 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 9 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(\"literal.dot\" <> ''::text)",
+      "pretty": "\"literal.dot\" <> ''::text"
+    }
+  ]
+}

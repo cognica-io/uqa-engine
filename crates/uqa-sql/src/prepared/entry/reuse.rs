@@ -139,6 +139,7 @@ fn independent_expression(
     expression.visit(&mut |part| {
         independent &= match part {
             ScalarExpr::Literal(value) => independent_value(value),
+            ScalarExpr::Collated { ty, .. } => independent_type(ty) || composites.tracks_type(ty),
             ScalarExpr::Cast { ty, .. } => independent_type_name(ty) || composites.tracks_name(ty),
             ScalarExpr::TypedLiteral {
                 value,

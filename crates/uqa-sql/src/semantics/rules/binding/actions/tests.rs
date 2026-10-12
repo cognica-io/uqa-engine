@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod collations;
+
 struct Row(crate::ResultRow);
 
 impl RuleRowValues for Row {
@@ -28,6 +30,7 @@ fn rule_row_sources_preserve_every_admitted_byte() {
     let columns = BTreeMap::from([(
         "c".into(),
         RuleColumnMetadata {
+            collation_oid: None,
             ty: ColumnType::InternalChar,
             uses_document_id: false,
             position: 0,

@@ -74,6 +74,7 @@ impl InheritedColumns {
                 &column.ty,
             ));
         }
+        check_collation_merge(existing, &column, true)?;
         merge_not_null(existing, &column);
         if generation_kind(existing) != generation_kind(&column) {
             return Err(routine(
@@ -136,6 +137,7 @@ impl InheritedColumns {
                 &column.ty,
             ));
         }
+        check_collation_merge(inherited, &column, false)?;
         check_generation_merge(inherited, &column)?;
         if column.auto_increment.is_some() {
             // Identity is never inherited by an inheritance child; the declared column's identity applies.
@@ -369,4 +371,32 @@ fn routine(sqlstate: &str, message: String) -> SQLError {
         sqlstate: sqlstate.into(),
         message,
     }
+}
+
+fn check_collation_merge(
+    inherited: &ColumnDef,
+    declared: &ColumnDef,
+    parent: bool,
+) -> Result<(), SQLError> {
+    use crate::catalog::collations::{builtin_collation_name, declarations::column_oid};
+    let left = column_oid(inherited);
+    let right = column_oid(declared);
+    if left == right {
+        return Ok(());
+    }
+    let name = |oid| {
+        builtin_collation_name(oid)
+            .map(crate::expr::quote_ident)
+            .unwrap_or_else(|| oid.to_string())
+    };
+    Err(SQLError::Diagnostic {
+        sqlstate: "42P21".into(),
+        message: format!(
+            "{}column \"{}\" has a collation conflict",
+            if parent { "inherited " } else { "" },
+            declared.name
+        ),
+        detail: Some(format!("{} versus {}", name(left), name(right))),
+        hint: None,
+    })
 }

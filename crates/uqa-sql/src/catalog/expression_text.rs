@@ -23,6 +23,13 @@ pub fn default_expr_text(expr: Option<&Expr>) -> Result<Value, SQLError> {
     reason = "preserves catalog column and OID order"
 )]
 pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
+    if let Some(clause) = crate::catalog::collations::expression::ast_clause(expr)? {
+        return Ok(format!(
+            "({} COLLATE {})",
+            schema_expr_text(clause.argument)?,
+            clause.executable_name()?
+        ));
+    }
     Ok(match expr {
         Expr::Star => "*".into(),
         Expr::QualifiedStar(qualifier) => format!("{qualifier}.*"),

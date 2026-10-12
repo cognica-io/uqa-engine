@@ -186,6 +186,7 @@ mod tests {
 
     fn catalog() -> Catalog {
         let attribute = |name: &str, ty: ColumnType, number: i16| CompositeAttribute {
+            collation_oid: None,
             name: name.into(),
             ty,
             number,
@@ -250,6 +251,7 @@ mod tests {
         let catalog = catalog();
         let outer = reference(20_012, "outer_t");
         let column = ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "outer_domain".into(),
             oid: 20_020,

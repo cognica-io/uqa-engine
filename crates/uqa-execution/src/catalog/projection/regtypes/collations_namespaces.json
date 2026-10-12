@@ -1,0 +1,619 @@
+[
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "pg_catalog.\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "pg_catalog.\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "pg_catalog.\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "public.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"public.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "public.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"public.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "public.\"C\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "missing_schema.\"C\"",
+    "error": {
+      "sqlstate": "3F000",
+      "message": "schema \"missing_schema\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "missing_schema.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"missing_schema.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "missing_schema.\"C\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"private.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"private.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "private.\"C\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "pg_temp.\"C\"",
+    "error": {
+      "sqlstate": "3F000",
+      "message": "schema \"pg_temp\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "pg_temp.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"pg_temp.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "pg_temp.\"C\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "\"950\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"950\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "\"950\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"950\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "\"950\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "\"-\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"-\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "\"-\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"-\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "\"-\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "other_db.pg_catalog.\"C\"",
+    "error": {
+      "sqlstate": "0A000",
+      "message": "cross-database references are not implemented: other_db.pg_catalog.C",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "other_db.pg_catalog.\"C\"",
+    "error": {
+      "sqlstate": "0A000",
+      "message": "cross-database references are not implemented: other_db.pg_catalog.C",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "other_db.pg_catalog.\"C\"",
+    "error": {
+      "sqlstate": "0A000",
+      "message": "cross-database references are not implemented: other_db.pg_catalog.C",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "expression",
+    "name": "a.b.c.d",
+    "error": {
+      "sqlstate": "42601",
+      "message": "improper qualified name (too many dotted names): a.b.c.d",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "regcollation",
+    "name": "a.b.c.d",
+    "error": {
+      "sqlstate": "42601",
+      "message": "improper qualified name (too many dotted names): a.b.c.d",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "owner",
+    "mode": "lookup",
+    "name": "a.b.c.d",
+    "error": {
+      "sqlstate": "42601",
+      "message": "improper qualified name (too many dotted names): a.b.c.d",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "reader",
+    "mode": "expression",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "reader",
+    "mode": "regcollation",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "reader",
+    "mode": "lookup",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "reader",
+    "mode": "expression",
+    "name": "pg_catalog.\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "reader",
+    "mode": "regcollation",
+    "name": "pg_catalog.\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "reader",
+    "mode": "lookup",
+    "name": "pg_catalog.\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "reader",
+    "mode": "expression",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema private",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "reader",
+    "mode": "regcollation",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema private",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "reader",
+    "mode": "lookup",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema private",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "reader",
+    "mode": "expression",
+    "name": "missing_schema.\"C\"",
+    "error": {
+      "sqlstate": "3F000",
+      "message": "schema \"missing_schema\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "reader",
+    "mode": "regcollation",
+    "name": "missing_schema.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"missing_schema.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "reader",
+    "mode": "lookup",
+    "name": "missing_schema.\"C\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "empty_path",
+    "mode": "expression",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "empty_path",
+    "mode": "regcollation",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "empty_path",
+    "mode": "lookup",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "empty_path",
+    "mode": "expression",
+    "name": "pg_catalog.\"POSIX\"",
+    "error": null,
+    "oid": 951
+  },
+  {
+    "state": "empty_path",
+    "mode": "regcollation",
+    "name": "pg_catalog.\"POSIX\"",
+    "error": null,
+    "oid": 951
+  },
+  {
+    "state": "empty_path",
+    "mode": "lookup",
+    "name": "pg_catalog.\"POSIX\"",
+    "error": null,
+    "oid": 951
+  },
+  {
+    "state": "private_path",
+    "mode": "expression",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "private_path",
+    "mode": "regcollation",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "private_path",
+    "mode": "lookup",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "private_path",
+    "mode": "expression",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema private",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "private_path",
+    "mode": "regcollation",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema private",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "private_path",
+    "mode": "lookup",
+    "name": "private.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema private",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "temporary",
+    "mode": "expression",
+    "name": "pg_temp.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"pg_temp.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "temporary",
+    "mode": "regcollation",
+    "name": "pg_temp.\"C\"",
+    "error": {
+      "sqlstate": "42704",
+      "message": "collation \"pg_temp.C\" for encoding \"UTF8\" does not exist",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "temporary",
+    "mode": "lookup",
+    "name": "pg_temp.\"C\"",
+    "error": null,
+    "oid": null
+  },
+  {
+    "state": "temporary",
+    "mode": "expression",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "temporary",
+    "mode": "regcollation",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "temporary",
+    "mode": "lookup",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "catalog_revoked",
+    "mode": "expression",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "catalog_revoked",
+    "mode": "regcollation",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "catalog_revoked",
+    "mode": "lookup",
+    "name": "\"C\"",
+    "error": null,
+    "oid": 950
+  },
+  {
+    "state": "catalog_revoked",
+    "mode": "expression",
+    "name": "pg_catalog.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema pg_catalog",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "catalog_revoked",
+    "mode": "regcollation",
+    "name": "pg_catalog.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema pg_catalog",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  },
+  {
+    "state": "catalog_revoked",
+    "mode": "lookup",
+    "name": "pg_catalog.\"C\"",
+    "error": {
+      "sqlstate": "42501",
+      "message": "permission denied for schema pg_catalog",
+      "detail": null,
+      "hint": null
+    },
+    "oid": null
+  }
+]

@@ -7,8 +7,12 @@
 //! Bind catalog expression nodes to declared column and domain-value types.
 
 mod coercion;
+mod collations;
 mod constructs;
 mod operators;
+mod rows;
+mod schema;
+pub use schema::{ColumnReference, ExpressionSchema};
 
 use super::{values, Field, Node};
 use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax};
@@ -17,7 +21,7 @@ use crate::type_resolution::{
     binary_operator_catalog_entry, binary_operator_types, common_context_expression_type,
     FunctionTypeResolver,
 };
-use crate::{ColumnType, RowSchema, SQLError};
+use crate::{ColumnType, SQLError};
 
 pub struct RoutineIdentity {
     pub oid: i64,
@@ -35,7 +39,7 @@ pub trait ExpressionRoutines {
 }
 
 pub struct ExpressionContext<'a> {
-    pub schema: &'a RowSchema,
+    pub schema: &'a dyn ExpressionSchema,
     pub domain_value: Option<&'a ColumnType>,
     pub types: Option<&'a dyn FunctionTypeResolver>,
     pub routines: &'a dyn ExpressionRoutines,
@@ -48,8 +52,9 @@ struct TypedNode {
 
 impl ExpressionContext<'_> {
     pub fn check(&self, expression: &Expr) -> Result<Node, SQLError> {
-        self.encode(expression, Some(&ColumnType::Boolean))
-            .map(|value| value.node)
+        let mut value = self.encode(expression, Some(&ColumnType::Boolean))?;
+        collations::assign(&mut value.node)?;
+        Ok(value.node)
     }
 
     fn expression_type(&self, expression: &Expr) -> Result<Option<ColumnType>, SQLError> {
@@ -62,6 +67,9 @@ impl ExpressionContext<'_> {
         expression: &Expr,
         expected: Option<&ColumnType>,
     ) -> Result<TypedNode, SQLError> {
+        if let Some(clause) = crate::catalog::collations::expression::ast_clause(expression)? {
+            return self.collated_expression(clause, expected);
+        }
         let value = match expression {
             Expr::Column(column) => self.column(column, None)?,
             Expr::QualifiedColumn { qualifier, column } => self.column(column, Some(qualifier))?,
@@ -70,10 +78,18 @@ impl ExpressionContext<'_> {
                 value,
                 ty,
                 composite_source,
-            } => self.constant(value, self.resolve_type(ty)?, composite_source.as_deref())?,
+                collation_oid,
+            } => self.retained_constant(
+                value,
+                self.resolve_type(ty)?,
+                composite_source.as_deref(),
+                *collation_oid,
+            )?,
             Expr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs)?,
             Expr::UnaryMinus(argument) => self.unary_minus(argument)?,
             Expr::Array(elements) => self.array(elements, expected)?,
+            Expr::Row(elements) => self.row(elements)?,
+            Expr::CompositeRow { items, binding } => self.stored_row(items, binding)?,
             Expr::InList {
                 expr,
                 list,
@@ -88,14 +104,14 @@ impl ExpressionContext<'_> {
             Expr::Or(items) => self.boolean("or", items)?,
             Expr::Not(item) => self.boolean("not", std::slice::from_ref(item.as_ref()))?,
             Expr::IsNull { expr, negated } => {
-                let arg = self.encode(expr, None)?;
+                let (arg, is_row) = self.uncoerced_input(expr)?;
                 TypedNode {
                     node: Node::new(
                         "NULLTEST",
                         [
-                            ("arg", arg.node.into()),
+                            ("arg", arg.into()),
                             ("nulltesttype", i64::from(*negated).into()),
-                            ("argisrow", false.into()),
+                            ("argisrow", is_row.into()),
                             ("location", (-1).into()),
                         ],
                     ),
@@ -132,17 +148,7 @@ impl ExpressionContext<'_> {
                     self.function(name, binding.as_ref(), args, *order_syntax)?
                 }
             }
-            Expr::Cast { expr, ty, .. } => {
-                let ty = self.resolve_type(ty)?;
-                let unknown = self.expression_type(expr)?.is_none();
-                let mut input_type = &ty;
-                while let ColumnType::Domain { base, .. } = input_type {
-                    input_type = base;
-                }
-                let input_type = input_type.without_type_modifiers();
-                let inner = self.encode(expr, unknown.then_some(&input_type))?;
-                Self::coerce(inner, &ty, 1)?
-            }
+            Expr::Cast { expr, ty, implicit } => self.cast_expression(expr, ty, *implicit)?,
             _ => {
                 return Err(SQLError::Unsupported(
                     "catalog expression node encoding for this expression".into(),
@@ -220,6 +226,30 @@ impl ExpressionContext<'_> {
         })
     }
 
+    fn retained_constant(
+        &self,
+        value: &uqa_core::Value,
+        ty: ColumnType,
+        source: Option<&crate::expr::composites::CompositeConstantSource>,
+        collation: Option<u32>,
+    ) -> Result<TypedNode, SQLError> {
+        let mut value = self.constant(value, ty, source)?;
+        if let Some(oid) = collation {
+            crate::catalog::collations::expression::validate_literal_collation(
+                Some(&value.ty),
+                Some(oid),
+            )?;
+            value
+                .node
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "constcollid")
+                .expect("constant collation")
+                .1 = i64::from(oid).into();
+        }
+        Ok(value)
+    }
+
     fn resolve_type(&self, name: &str) -> Result<ColumnType, SQLError> {
         if let Some(resolver) = self.types {
             if let Some(ty) = resolver.resolve_type_name(name)? {
@@ -247,18 +277,9 @@ impl ExpressionContext<'_> {
                 ty: ty.clone(),
             });
         }
-        let position = qualifier
-            .map_or_else(
-                || self.schema.unqualified_position(name),
-                |qualifier| self.schema.qualified_position(qualifier, name),
-            )
-            .ok_or_else(|| SQLError::UnknownColumn(name.into()))?;
-        let ty = self
-            .schema
-            .column_type(position)
-            .ok_or_else(|| SQLError::Internal("catalog column has no declared type".into()))?;
-        let ordinal = i64::try_from(position + 1)
-            .map_err(|_| SQLError::Internal("column ordinal overflow".into()))?;
+        let column = self.schema.column_reference(name, qualifier)?;
+        let ty = column.ty;
+        let ordinal = column.attribute_number;
         Ok(TypedNode {
             node: Node::new(
                 "VAR",
@@ -267,7 +288,7 @@ impl ExpressionContext<'_> {
                     ("varattno", ordinal.into()),
                     ("vartype", pg_type_oid(ty).into()),
                     ("vartypmod", pg_type_modifier(ty).into()),
-                    ("varcollid", pg_type_collation_oid(ty).into()),
+                    ("varcollid", column.collation_oid.into()),
                     ("varnullingrels", Field::List(vec![Field::Atom("b".into())])),
                     ("varlevelsup", 0.into()),
                     ("varreturningtype", 0.into()),
@@ -281,6 +302,13 @@ impl ExpressionContext<'_> {
     }
 
     fn binary(&self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Result<TypedNode, SQLError> {
+        if let (Expr::Row(left), Expr::Row(right)) = (lhs, rhs) {
+            return self.row_comparison(op, left, right);
+        }
+        self.scalar_binary(op, lhs, rhs)
+    }
+
+    fn scalar_binary(&self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Result<TypedNode, SQLError> {
         let types = [self.expression_type(lhs)?, self.expression_type(rhs)?];
         let [left, right, result] =
             binary_operator_types(op, types[0].as_ref(), types[1].as_ref())?;
@@ -340,11 +368,6 @@ impl ExpressionContext<'_> {
             .zip(&routine.argument_types)
             .map(|(arg, ty)| self.encode(arg, Some(ty)))
             .collect::<Result<Vec<_>, _>>()?;
-        let collation = arguments
-            .iter()
-            .map(|argument| pg_type_collation_oid(&argument.ty))
-            .find(|oid| *oid != 0)
-            .unwrap_or(0);
         Ok(TypedNode {
             node: Node::new(
                 "FUNCEXPR",
@@ -365,7 +388,7 @@ impl ExpressionContext<'_> {
                         "funccollid",
                         pg_type_collation_oid(&routine.result_type).into(),
                     ),
-                    ("inputcollid", collation.into()),
+                    ("inputcollid", 0.into()),
                     (
                         "args",
                         Field::List(arguments.into_iter().map(|arg| arg.node.into()).collect()),
@@ -385,11 +408,6 @@ fn operator_node(
     result: ColumnType,
 ) -> TypedNode {
     let arguments: Vec<_> = arguments.into_iter().collect();
-    let input_collation = arguments
-        .iter()
-        .map(|argument| pg_type_collation_oid(&argument.ty))
-        .find(|oid| *oid != 0)
-        .unwrap_or(0);
     TypedNode {
         node: Node::new(
             "OPEXPR",
@@ -399,7 +417,7 @@ fn operator_node(
                 ("opresulttype", pg_type_oid(&result).into()),
                 ("opretset", false.into()),
                 ("opcollid", pg_type_collation_oid(&result).into()),
-                ("inputcollid", input_collation.into()),
+                ("inputcollid", 0.into()),
                 (
                     "args",
                     Field::List(arguments.into_iter().map(|arg| arg.node.into()).collect()),

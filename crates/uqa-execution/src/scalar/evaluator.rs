@@ -85,14 +85,10 @@ pub(super) fn eval_scalar_inner(
                 control,
             )
         }
+        ScalarExpr::Collated { expr, .. } => eval_scalar_inner(expr, context, control),
         ScalarExpr::Literal(value) => control.copy_value(value).map_err(Into::into),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params(), control),
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } => evaluate_function(name, binding.as_ref(), args, context, control),
+        ScalarExpr::Func { .. } => function::evaluate_expression(expression, context, control),
         ScalarExpr::Array(items) => array(items, context, control),
         ScalarExpr::CompositeRow { items, binding, .. } => {
             uqa_sql::expr::composites::constructor::evaluate_with_control(
@@ -541,9 +537,10 @@ fn evaluate_items(
 
 mod function;
 mod variants;
-use function::evaluate_function;
 use variants::{array, binary, cast, column, exists, in_subquery, is_null, not, row, unary_minus};
 
+#[cfg(test)]
+mod collation_tests;
 #[cfg(test)]
 mod comparison_tests;
 #[cfg(test)]

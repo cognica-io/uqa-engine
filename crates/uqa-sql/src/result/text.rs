@@ -237,6 +237,7 @@ mod tests {
 
     fn domain() -> ColumnType {
         ColumnType::Domain {
+            collation_oid: None,
             schema: "public".into(),
             name: "real_value".into(),
             oid: 16_500,

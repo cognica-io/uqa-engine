@@ -10,6 +10,9 @@ use crate::{catalog::roles::guards::RoleCatalogGuards, plan::QueryPlan, RowSchem
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
 
+mod collations;
+pub use collations::view_metadata_dependency_order;
+
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 pub enum RestoredView {

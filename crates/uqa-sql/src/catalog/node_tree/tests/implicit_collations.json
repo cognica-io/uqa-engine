@@ -1,0 +1,149 @@
+[
+  {
+    "base": "name",
+    "check": "VALUE::text < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "((VALUE)::text < 'z'::text)",
+    "pretty": "VALUE::text < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "'z' > VALUE::text",
+    "conbin": "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]} {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1}) :location -1}",
+    "sql": "('z'::text > (VALUE)::text)",
+    "pretty": "'z'::text > VALUE::text"
+  },
+  {
+    "base": "name",
+    "check": "COALESCE(VALUE::text, 'x') < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(COALESCE((VALUE)::text, 'x'::text) < 'z'::text)",
+    "pretty": "COALESCE(VALUE::text, 'x'::text) < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "COALESCE('x'::text, VALUE::text) < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COALESCEEXPR :coalescetype 25 :coalescecollid 950 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(COALESCE('x'::text, (VALUE)::text) < 'z'::text)",
+    "pretty": "COALESCE('x'::text, VALUE::text) < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "NULLIF('x'::text, VALUE::text) < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({NULLIFEXPR :opno 98 :opfuncid 67 :opresulttype 25 :opretset false :opcollid 950 :inputcollid 950 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(NULLIF('x'::text, (VALUE)::text) < 'z'::text)",
+    "pretty": "NULLIF('x'::text, VALUE::text) < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "NULLIF(VALUE::text, 'x') < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({NULLIFEXPR :opno 98 :opfuncid 67 :opresulttype 25 :opretset false :opcollid 950 :inputcollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(NULLIF((VALUE)::text, 'x'::text) < 'z'::text)",
+    "pretty": "NULLIF(VALUE::text, 'x'::text) < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "GREATEST(VALUE::text, 'x') < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({MINMAXEXPR :minmaxtype 25 :minmaxcollid 950 :inputcollid 950 :op 0 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(GREATEST((VALUE)::text, 'x'::text) < 'z'::text)",
+    "pretty": "GREATEST(VALUE::text, 'x'::text) < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "LEAST('x'::text, VALUE::text) < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({MINMAXEXPR :minmaxtype 25 :minmaxcollid 950 :inputcollid 950 :op 1 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(LEAST('x'::text, (VALUE)::text) < 'z'::text)",
+    "pretty": "LEAST('x'::text, VALUE::text) < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "CASE WHEN true THEN VALUE::text ELSE 'x' END < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({CASEEXPR :casetype 25 :casecollid 950 :arg <> :args ({CASEWHEN :expr {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} :result {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} :location -1}) :defresult {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(\nCASE\n    WHEN true THEN (VALUE)::text\n    ELSE 'x'::text\nEND < 'z'::text)",
+    "pretty": "\nCASE\n    WHEN true THEN VALUE::text\n    ELSE 'x'::text\nEND < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "CASE VALUE::text WHEN 'x' THEN 'a' ELSE 'b' END < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CASEEXPR :casetype 25 :casecollid 100 :arg {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} :args ({CASEWHEN :expr {OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({CASETESTEXPR :typeId 25 :typeMod -1 :collation 950} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} :result {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} :location -1}) :defresult {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]} :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(\nCASE (VALUE)::text\n    WHEN 'x'::text THEN 'a'::text\n    ELSE 'b'::text\nEND < 'z'::text)",
+    "pretty": "\nCASE VALUE::text\n    WHEN 'x'::text THEN 'a'::text\n    ELSE 'b'::text\nEND < 'z'::text"
+  },
+  {
+    "base": "name",
+    "check": "ARRAY[VALUE::text, 'x'] = ARRAY['a','b']",
+    "conbin": "{OPEXPR :opno 1070 :opfuncid 744 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({ARRAYEXPR :array_typeid 1009 :array_collid 950 :element_typeid 25 :elements ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(ARRAY[(VALUE)::text, 'x'::text] = ARRAY['a'::text, 'b'::text])",
+    "pretty": "ARRAY[VALUE::text, 'x'::text] = ARRAY['a'::text, 'b'::text]"
+  },
+  {
+    "base": "name",
+    "check": "VALUE::text = ANY(ARRAY['a'::text])",
+    "conbin": "{SCALARARRAYOPEXPR :opno 98 :opfuncid 67 :hashfuncid 0 :negfuncid 0 :useOr true :inputcollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "((VALUE)::text = ANY (ARRAY['a'::text]))",
+    "pretty": "VALUE::text = ANY (ARRAY['a'::text])"
+  },
+  {
+    "base": "name",
+    "check": "ROW(VALUE::text, VALUE::text) < ROW('x','y')",
+    "conbin": "{ROWCOMPAREEXPR :cmptype 1 :opnos (o 664 664) :opfamilies (o 1994 1994) :inputcollids (o 950 950) :largs ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1}) :rargs ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]})}",
+    "sql": "(ROW((VALUE)::text, (VALUE)::text) < ROW('x'::text, 'y'::text))",
+    "pretty": "(ROW(VALUE::text, VALUE::text) < ROW('x'::text, 'y'::text))"
+  },
+  {
+    "base": "name",
+    "check": "ROW(VALUE::text, 'a') IS DISTINCT FROM ROW('x','y')",
+    "conbin": "{BOOLEXPR :boolop or :args ({DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :location -1} {DISTINCTEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 121 ]}) :location -1}) :location -1}",
+    "sql": "(((VALUE)::text IS DISTINCT FROM 'x'::text) OR ('a'::text IS DISTINCT FROM 'y'::text))",
+    "pretty": "VALUE::text IS DISTINCT FROM 'x'::text OR 'a'::text IS DISTINCT FROM 'y'::text"
+  },
+  {
+    "base": "name",
+    "check": "length(VALUE::text) > 0",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1317 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 950 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(length((VALUE)::text) > 0)",
+    "pretty": "length(VALUE::text) > 0"
+  },
+  {
+    "base": "name",
+    "check": "VALUE::text::varchar(3) < 'z'::varchar",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({RELABELTYPE :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({RELABELTYPE :arg {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 950 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1}) :location -1} :resulttype 1043 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 950 :relabelformat 2 :location -1} {RELABELTYPE :arg {CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location -1}",
+    "sql": "((((VALUE)::text)::character varying(3))::text < ('z'::character varying)::text)",
+    "pretty": "VALUE::text::character varying(3)::text < 'z'::character varying::text"
+  },
+  {
+    "base": "name[]",
+    "check": "VALUE::text[] = ARRAY['x']",
+    "conbin": "{OPEXPR :opno 1070 :opfuncid 744 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({ARRAYCOERCEEXPR :arg {COERCETODOMAINVALUE :typeId 1003 :typeMod -1 :collation 950 :location -1} :elemexpr {FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 0 :args ({CASETESTEXPR :typeId 19 :typeMod -1 :collation 0}) :location -1} :resulttype 1009 :resulttypmod -1 :resultcollid 950 :coerceformat 1 :location -1} {ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 120 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "((VALUE)::text[] = ARRAY['x'::text])",
+    "pretty": "VALUE::text[] = ARRAY['x'::text]"
+  },
+  {
+    "base": "text",
+    "check": "VALUE::name < 'z'::name",
+    "conbin": "{OPEXPR :opno 660 :opfuncid 655 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({FUNCEXPR :funcid 407 :funcresulttype 19 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1}) :location -1} {CONST :consttype 19 :consttypmod -1 :constcollid 950 :constlen 64 :constbyval false :constisnull false :location -1 :constvalue 64 [ 122 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE)::name < 'z'::name)",
+    "pretty": "VALUE::name < 'z'::name"
+  },
+  {
+    "base": "text",
+    "check": "VALUE::name::text < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({FUNCEXPR :funcid 406 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({FUNCEXPR :funcid 407 :funcresulttype 19 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1}) :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "(((VALUE)::name)::text < 'z'::text)",
+    "pretty": "VALUE::name::text < 'z'::text"
+  },
+  {
+    "base": "text",
+    "check": "COALESCE(VALUE::name, 'x'::name) < 'z'::name",
+    "conbin": "{OPEXPR :opno 660 :opfuncid 655 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COALESCEEXPR :coalescetype 19 :coalescecollid 950 :args ({FUNCEXPR :funcid 407 :funcresulttype 19 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1}) :location -1} {CONST :consttype 19 :consttypmod -1 :constcollid 950 :constlen 64 :constbyval false :constisnull false :location -1 :constvalue 64 [ 120 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 19 :consttypmod -1 :constcollid 950 :constlen 64 :constbyval false :constisnull false :location -1 :constvalue 64 [ 122 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(COALESCE((VALUE)::name, 'x'::name) < 'z'::name)",
+    "pretty": "COALESCE(VALUE::name, 'x'::name) < 'z'::name"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE::text < 'z'",
+    "conbin": "{OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCEVIAIO :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 122 ]}) :location -1}",
+    "sql": "((VALUE)::text < 'z'::text)",
+    "pretty": "VALUE::text < 'z'::text"
+  }
+]

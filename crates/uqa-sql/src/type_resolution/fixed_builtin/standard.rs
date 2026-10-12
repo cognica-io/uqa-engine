@@ -13,6 +13,7 @@ use super::registry::{
 use crate::ast::ColumnType as T;
 
 declarations! { pub(super) fn lookup(name);
+        "current_schema" => &[Signature::new(&[], T::Name)],
         "array_dims" => &[Signature::new(&[T::AnyArray], T::Text)],
         "array_ndims" | "cardinality" => &[Signature::new(&[T::AnyArray], T::Integer)],
         "array_lower" | "array_upper" | "array_length" => &[

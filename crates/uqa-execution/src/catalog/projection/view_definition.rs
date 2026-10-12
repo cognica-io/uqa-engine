@@ -295,6 +295,7 @@ fn render_column(column: &Column, qualified: bool) -> String {
 
 fn expression_name(expression: &ScalarExpr) -> String {
     match expression {
+        ScalarExpr::Collated { expr, .. } => expression_name(expr),
         ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. } => name.clone(),
         ScalarExpr::Func { name, binding, .. } => {
             uqa_sql::semantics::function_projection_label(name, binding.as_ref())

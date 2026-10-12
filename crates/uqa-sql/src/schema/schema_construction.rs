@@ -68,6 +68,61 @@ impl RowSchema {
         Self::with_identities(columns, identities, types)
     }
 
+    /// Build a positional source from its catalog declarations without discarding selected column collations. Attribute numbers remain a catalog identity, independent of these query positions.
+    pub fn with_column_definitions(
+        qualifier: Option<&str>,
+        columns: &[crate::ast::ColumnDef],
+    ) -> Self {
+        Self::with_column_metadata(
+            qualifier,
+            columns.iter().map(|column| {
+                (
+                    column.name.clone(),
+                    Some(column.ty.clone()),
+                    column.collation_oid,
+                )
+            }),
+        )
+    }
+
+    /// Build a positional source while selecting names, types and collations together. This accepts projected, aliased and system columns without a second declaration lookup or a dense collation buffer.
+    pub fn with_column_metadata(
+        qualifier: Option<&str>,
+        columns: impl IntoIterator<Item = (String, Option<ColumnType>, Option<u32>)>,
+    ) -> Self {
+        let columns = columns.into_iter();
+        let capacity = columns.size_hint().0;
+        let mut names = Vec::with_capacity(capacity);
+        let mut identities = Vec::with_capacity(capacity);
+        let mut types = Vec::with_capacity(capacity);
+        let mut metadata = SchemaBuildMetadata::default();
+        for (name, ty, oid) in columns {
+            assert!(
+                oid.is_none_or(|oid| oid == 0
+                    || ty
+                        .as_ref()
+                        .is_some_and(super::composites::type_is_collatable)),
+                "collation requires a collatable column type"
+            );
+            metadata.collations.column(names.len(), oid, ty.as_ref());
+            identities.push(qualifier.map_or_else(
+                || ColumnIdentity::unqualified(&name),
+                |qualifier| ColumnIdentity::qualified(qualifier, &name),
+            ));
+            names.push(name);
+            types.push(ty);
+        }
+        let width = names.len();
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            names,
+            identities,
+            types,
+            (0..width).collect(),
+            width,
+            metadata,
+        )
+    }
+
     /// Build a positional schema from explicit structured identities.
     pub fn with_identities(
         columns: Vec<String>,
@@ -98,25 +153,37 @@ impl RowSchema {
         relation: InternalRelationId,
         types: Vec<Option<ColumnType>>,
     ) -> Self {
-        let internal = (0..types.len())
-            .map(|position| (relation.column(position), position))
-            .collect();
-        let internal_types = types
-            .iter()
-            .enumerate()
-            .map(|(position, ty)| (relation.column(position), ty.clone()))
-            .collect();
+        Self::with_internal_relation_metadata(relation, types.into_iter().map(|ty| (ty, None)))
+    }
+
+    /// Build executor-only inputs with the selected collation of each logical attribute, including NULL values.
+    pub fn with_internal_relation_metadata(
+        relation: InternalRelationId,
+        columns: impl IntoIterator<Item = (Option<ColumnType>, Option<u32>)>,
+    ) -> Self {
+        let mut metadata = SchemaBuildMetadata::default();
+        let mut width = 0;
+        for (position, (ty, oid)) in columns.into_iter().enumerate() {
+            assert!(
+                oid.is_none_or(|oid| oid == 0
+                    || ty
+                        .as_ref()
+                        .is_some_and(super::composites::type_is_collatable)),
+                "collation requires a collatable column type"
+            );
+            let column = relation.column(position);
+            metadata.collations.internal(column, oid, ty.as_ref());
+            metadata.internal.insert(column, position);
+            metadata.internal_types.insert(column, ty);
+            width += 1;
+        }
         Self::from_typed_parts_with_aliases_and_exact_precedence(
             Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            types.len(),
-            SchemaBuildMetadata {
-                internal,
-                internal_types,
-                ..SchemaBuildMetadata::default()
-            },
+            width,
+            metadata,
         )
     }
 
@@ -198,6 +265,7 @@ impl RowSchema {
         metadata: SchemaBuildMetadata,
     ) -> Self {
         let SchemaBuildMetadata {
+            mut collations,
             record_fields,
             aliases,
             alias_types,
@@ -212,6 +280,7 @@ impl RowSchema {
             extra_ambiguous_qualified,
             local_width,
         } = metadata;
+        collations.retain(&types, &alias_types, &internal_types, &binding_only);
         debug_assert_eq!(columns.len(), slots.len());
         debug_assert_eq!(columns.len(), identities.len());
         debug_assert_eq!(columns.len(), types.len());
@@ -279,6 +348,7 @@ impl RowSchema {
                 ambiguous_unqualified,
                 ambiguous_qualified,
                 cold: Box::new(SchemaColdMetadata {
+                    collations,
                     record_fields,
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,

@@ -120,6 +120,7 @@ fn table_introspection_distinguishes_unknown_tables_from_missing_columns() {
 fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
     let engine = Engine::new();
     let column = uqa_sql::ast::ColumnDef {
+        collation_oid: None,
         name: "value".into(),
         ty: uqa_sql::ast::ColumnType::Integer,
         object_id: None,
@@ -268,6 +269,7 @@ fn document_mutations_distinguish_unknown_tables_from_missing_documents() {
 #[test]
 fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
     let tensor_column = uqa_sql::ast::ColumnDef {
+        collation_oid: None,
         name: "embedding".into(),
         ty: uqa_sql::ast::ColumnType::Tensor(2),
         object_id: None,

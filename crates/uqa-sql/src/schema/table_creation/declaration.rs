@@ -57,6 +57,11 @@ pub fn transform_create_table(
                         &column.ty,
                     )?;
                 }
+                column.collation_oid = Some(crate::catalog::collations::declarations::select(
+                    context.types,
+                    &column.ty,
+                    declaration.collation.as_deref(),
+                )?);
                 deferrable_key |= super::column_declarations::check_column_declaration(
                     declaration,
                     &column.name,

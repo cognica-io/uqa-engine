@@ -207,6 +207,10 @@ impl FunctionTypeResolver for ScopedExpressionEvaluator<'_> {
         FunctionTypeResolver::resolve_type_name(self.context.as_ref(), name)
     }
 
+    fn resolve_collation_name(&self, name: &str) -> Result<Option<u32>, SQLError> {
+        self.context.resolve_collation_name(name)
+    }
+
     fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
         FunctionTypeResolver::enum_labels(self.context.as_ref())
     }

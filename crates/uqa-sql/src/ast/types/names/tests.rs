@@ -82,24 +82,12 @@ fn names() -> Vec<(ColumnType, &'static str, &'static str)> {
             "character varying[][]",
         ),
         (
-            ColumnType::Domain {
-                schema: "a\"B".into(),
-                name: "한.글".into(),
-                oid: 42,
-                array_oid: None,
-                base: Box::new(ColumnType::Text),
-            },
+            domain("a\"B", "한.글", 42, ColumnType::Text),
             "\"a\"\"B\".\"한.글\"",
             "\"a\"\"B\".\"한.글\"",
         ),
         (
-            ColumnType::Domain {
-                schema: "bare".into(),
-                name: "a1_$".into(),
-                oid: 43,
-                array_oid: None,
-                base: Box::new(ColumnType::Integer),
-            },
+            domain("bare", "a1_$", 43, ColumnType::Integer),
             "bare.a1_$",
             // PostgreSQL 18's `quote_identifier` quotes a `$` that SQL text accepts unquoted: `'bare.a1_$'::regtype` prints `bare."a1_$"`.
             "bare.\"a1_$\"",
@@ -137,6 +125,7 @@ fn ordinary_and_admitted_names_preserve_declared_modifiers_and_regtype_identity(
 #[test]
 fn rejected_type_names_cleanup_and_both_cancellation_scopes_remain_active() {
     let ty = ColumnType::Domain {
+        collation_oid: None,
         schema: "quoted.schema".repeat(200),
         name: "name".repeat(200),
         oid: 1,
@@ -162,5 +151,16 @@ fn rejected_type_names_cleanup_and_both_cancellation_scopes_remain_active() {
             Some(_) => assert!(matches!(result, Err(ValueRetentionError::Cancelled(_)))),
         }
         assert_eq!(budget.used(), 0);
+    }
+}
+
+fn domain(schema: &str, name: &str, oid: u32, base: ColumnType) -> ColumnType {
+    ColumnType::Domain {
+        schema: schema.into(),
+        name: name.into(),
+        oid,
+        array_oid: None,
+        collation_oid: None,
+        base: Box::new(base),
     }
 }

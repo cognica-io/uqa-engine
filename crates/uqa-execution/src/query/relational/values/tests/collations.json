@@ -1,0 +1,98 @@
+[
+  {
+    "sql": "VALUES ('a' COLLATE \"C\"),('b')",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "VALUES ('a'),('b' COLLATE \"POSIX\")",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "VALUES ('a' COLLATE \"C\"),('b' COLLATE \"POSIX\")",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "VALUES (NULL),('a' COLLATE \"C\")",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "VALUES (ARRAY['a' COLLATE \"C\"]),(ARRAY['b'])",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "VALUES (coalesce('a' COLLATE \"C\",'b' COLLATE \"POSIX\"),1),('c',true)",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "VALUES (coalesce('a' COLLATE \"C\",'b' COLLATE \"POSIX\"),1+true),('c',1)",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "VALUES (coalesce('a' COLLATE \"C\",'b' COLLATE \"POSIX\")),(missing)",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "VALUES ('a' COLLATE \"C\"),('b',missing)",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"missing\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "VALUES ('a' COLLATE \"C\"),('b','c')",
+    "error": {
+      "sqlstate": "42601",
+      "message": "VALUES lists must all be the same length",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "VALUES (1),(1+true,2)",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "VALUES (coalesce('a' COLLATE \"C\",'b' COLLATE \"POSIX\")),('a','b')",
+    "error": {
+      "sqlstate": "42601",
+      "message": "VALUES lists must all be the same length",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

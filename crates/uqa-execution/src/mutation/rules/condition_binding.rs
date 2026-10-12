@@ -65,12 +65,15 @@ where
         }
         let projected = project(row_index, side, &missing)?;
         super::inputs::append_source(&mut source, &projected.source);
-        for (name, input) in projected.expressions {
+        for (name, mut input) in projected.expressions {
             let column = match side {
                 RuleRowSide::Old => binding.old_column(&name),
                 RuleRowSide::New => binding.new_column(&name),
             }
             .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
+            let metadata = columns
+                .get(&name)
+                .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
             if let ScalarExpr::InternalColumn(input_column) = &input.scalar {
                 use uqa_sql::expr::RowLookup;
                 if let Some(value) = projected.source.view().internal_column(*input_column) {
@@ -83,6 +86,7 @@ where
                     }
                 }
             }
+            input.scalar = metadata.bind_input(input.scalar);
             inputs.insert(column, input);
         }
     }
@@ -98,6 +102,9 @@ where
         )?,
     ))
 }
+
+#[cfg(test)]
+mod tests;
 
 fn append_row_values(
     binding: &uqa_sql::catalog::events::RuleConditionBinding,
@@ -130,6 +137,7 @@ fn append_row_values(
                     name.to_string(),
                     input_value(record, doc_id, name, metadata)?,
                     Some(metadata.ty.clone()),
+                    metadata.collation_oid,
                 ))
             })
             .collect::<Result<Vec<_>, SQLError>>()?;

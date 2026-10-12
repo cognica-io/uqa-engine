@@ -1,0 +1,158 @@
+[
+  {
+    "sql": "SELECT coalesce(c,p) AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c,plain) AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(plain,p) AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT CASE WHEN n=1 THEN c ELSE p END AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT CASE WHEN n=1 THEN c ELSE plain END AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT CASE c WHEN p THEN plain ELSE plain END AS output FROM t",
+    "collations": [
+      100
+    ]
+  },
+  {
+    "sql": "SELECT greatest(c,p) AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT least(c,plain) AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT NULLIF(c,p) AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT c || p AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT c || plain AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT lower(c) AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT lower(c || p) AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c,p] AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT ARRAY[c,plain] AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c::varchar AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT c::text AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (c COLLATE \"C\") || p AS output FROM t",
+    "collations": [
+      950
+    ]
+  },
+  {
+    "sql": "SELECT (c || p) COLLATE \"POSIX\" AS output FROM t",
+    "collations": [
+      951
+    ]
+  },
+  {
+    "sql": "SELECT coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT ROW(c COLLATE \"C\",p COLLATE \"POSIX\") AS output FROM t",
+    "collations": [
+      0
+    ]
+  },
+  {
+    "sql": "SELECT CASE WHEN (c COLLATE \"C\")=(p COLLATE \"POSIX\") THEN c ELSE p END AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "SELECT coalesce(c COLLATE \"C\",p COLLATE \"POSIX\") + 1 AS output FROM t",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: text + integer",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "SELECT CASE WHEN n=1 THEN c COLLATE \"C\" ELSE p COLLATE \"POSIX\" END AS output FROM t",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"C\" and \"POSIX\"",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

@@ -24,12 +24,14 @@ pub struct TriggerConditionTypeResolver<'a> {
 }
 
 pub struct RuleRowTypeResolver<'a> {
-    pub columns: &'a [(String, ColumnType)],
+    pub columns: &'a [crate::ast::ColumnDef],
     pub event: RuleEvent,
+    condition: bool,
+    referenced_rows: (bool, bool),
 }
 
 pub struct RuleConditionNameResolver<'a> {
-    pub columns: &'a [(String, ColumnType)],
+    pub columns: &'a [crate::ast::ColumnDef],
     pub event: RuleEvent,
 }
 
@@ -51,7 +53,7 @@ impl VariableResolver for RuleConditionNameResolver<'_> {
     }
 
     fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>, SQLError> {
-        if !self.columns.iter().any(|(column, _)| column == name) {
+        if !self.columns.iter().any(|column| column.name == name) {
             if name.eq_ignore_ascii_case("old") || name.eq_ignore_ascii_case("new") {
                 return Ok(None);
             }
@@ -67,56 +69,84 @@ impl VariableResolver for RuleConditionNameResolver<'_> {
     }
 }
 
-impl RuleRowTypeResolver<'_> {
-    fn validate_row_qualifier(&self, qualifier: &str) -> Result<bool, SQLError> {
-        let is_old = qualifier.eq_ignore_ascii_case("old");
-        let is_new = qualifier.eq_ignore_ascii_case("new");
-        if !is_old && !is_new {
+pub(crate) fn unavailable_rule_row(event: RuleEvent, qualifier: &str) -> bool {
+    match qualifier {
+        "old" => matches!(event, RuleEvent::Insert | RuleEvent::Select),
+        "new" => matches!(event, RuleEvent::Delete | RuleEvent::Select),
+        _ => false,
+    }
+}
+
+impl<'a> RuleRowTypeResolver<'a> {
+    pub fn for_condition(columns: &'a [crate::ast::ColumnDef], event: RuleEvent) -> Self {
+        Self {
+            columns,
+            event,
+            condition: true,
+            referenced_rows: (false, false),
+        }
+    }
+
+    pub fn for_action(columns: &'a [crate::ast::ColumnDef], event: RuleEvent) -> Self {
+        Self {
+            condition: false,
+            ..Self::for_condition(columns, event)
+        }
+    }
+
+    pub fn validate_event_references(&self) -> Result<(), SQLError> {
+        let (old, new) = self.referenced_rows;
+        for (referenced, qualifier) in [(old, "old"), (new, "new")] {
+            if referenced && unavailable_rule_row(self.event, qualifier) {
+                return Err(SQLError::Routine {
+                    sqlstate: "42P17".into(),
+                    message: format!(
+                        "ON {} rule cannot use {}",
+                        rule_event_name(self.event),
+                        qualifier.to_ascii_uppercase()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_row_qualifier(&mut self, qualifier: &str) -> Result<bool, SQLError> {
+        if !matches!(qualifier, "old" | "new") {
             return Ok(false);
         }
-        if is_old && matches!(self.event, RuleEvent::Insert | RuleEvent::Select) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P17".into(),
-                message: format!(
-                    "there is no OLD relation for {event} rule",
-                    event = rule_event_name(self.event)
-                ),
-            });
+        if self.condition && unavailable_rule_row(self.event, qualifier) {
+            return Err(
+                crate::semantics::rules::action_binding::invalid_rule_relation_reference(qualifier),
+            );
         }
-        if is_new && matches!(self.event, RuleEvent::Delete | RuleEvent::Select) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P17".into(),
-                message: format!(
-                    "there is no NEW relation for {event} rule",
-                    event = rule_event_name(self.event)
-                ),
-            });
-        }
+        self.referenced_rows.0 |= qualifier == "old";
+        self.referenced_rows.1 |= qualifier == "new";
         Ok(true)
     }
 
-    fn resolve_record_field(
-        &self,
+    fn record_definition(
+        &mut self,
         qualifier: &str,
         column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
+    ) -> Result<Option<&crate::ast::ColumnDef>, SQLError> {
         if !self.validate_row_qualifier(qualifier)? {
             return Ok(None);
         }
-        let (_, ty) = self
+        let definition = self
             .columns
             .iter()
-            .find(|(name, _)| name == column)
-            .ok_or_else(|| SQLError::UnknownColumn(format!("{qualifier}.{column}")))?;
-        Ok(Some(ResolvedVariable {
-            value: Value::Null,
-            declared_type: Some(ty.catalog_name()),
-        }))
+            .find(|definition| definition.name == column)
+            .ok_or_else(|| SQLError::unknown_qualified_column(qualifier, column))?;
+        Ok(Some(definition))
     }
 }
 
 impl VariableResolver for RuleRowTypeResolver<'_> {
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        if self.condition && unavailable_rule_row(self.event, name) {
+            return Err(SQLError::UnknownColumn(name.into()));
+        }
         Ok(self
             .validate_row_qualifier(name)?
             .then(|| ResolvedVariable::untyped(Value::Record(Vec::new().into()))))
@@ -127,7 +157,13 @@ impl VariableResolver for RuleRowTypeResolver<'_> {
         qualifier: &str,
         column: &str,
     ) -> Result<Option<ResolvedVariable>, SQLError> {
-        self.resolve_record_field(qualifier, column)
+        Ok(self
+            .record_definition(qualifier, column)?
+            .map(|definition| ResolvedVariable {
+                collation_oid: definition.collation_oid,
+                value: Value::Null,
+                declared_type: Some(definition.ty.catalog_name()),
+            }))
     }
 
     fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
@@ -168,6 +204,7 @@ impl VariableResolver for TriggerConditionTypeResolver<'_> {
             .iter()
             .find(|definition| definition.name == column)
             .map(|definition| ResolvedVariable {
+                collation_oid: definition.collation_oid,
                 value: Value::Null,
                 declared_type: Some(definition.ty.catalog_name()),
             }))
@@ -381,7 +418,7 @@ fn invalid_rule_set_operation_reference() -> SQLError {
     }
 }
 
-pub(super) use crate::semantics::rules::action_binding::invalid_rule_action_reference;
+pub(super) use crate::semantics::rules::action_binding::invalid_rule_relation_reference;
 
 fn ambiguous_rule_pseudo_relation(qualifier: &str) -> SQLError {
     SQLError::Routine {
@@ -768,7 +805,7 @@ pub fn validate_rule_action_reference_scopes(
                             })
                         });
                     if let Some(qualifier) = reference {
-                        return Err(invalid_rule_action_reference(&qualifier));
+                        return Err(invalid_rule_relation_reference(&qualifier));
                     }
                     for expr in assignments.iter().flat_map(|(target, value)| {
                         target.expressions().chain(std::iter::once(value))

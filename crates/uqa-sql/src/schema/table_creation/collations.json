@@ -1,0 +1,994 @@
+[
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "c",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [
+      "renamed"
+    ],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "renamed",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT lower(c) AS x,coalesce(p,p) AS y FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT c COLLATE \"POSIX\" AS x,p COLLATE \"C\" AS y FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      },
+      {
+        "name": "y",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT c::varchar(2) AS x,n::text AS y FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 100
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::d_posix AS x",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [
+      "renamed",
+      "extra"
+    ],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"renamed\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x,c AS y FROM t",
+    "names": [
+      "dup",
+      "dup"
+    ],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"dup\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS xmin FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"xmin\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (ROW(lower(c))).f1 AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (r).f1 AS x FROM (SELECT ROW(lower(c)) AS r FROM t)q",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT (ROW(c)).f1 AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::text AS x,NULL::integer AS n",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 100
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT ROW(c) AS r,coalesce(c,p) AS bad FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"bad\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x FROM t UNION ALL SELECT p AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x,p AS y FROM t",
+    "names": [
+      "one",
+      "two",
+      "extra"
+    ],
+    "kind": "TABLE",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42601",
+      "message": "too many column names were specified",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "c",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [
+      "renamed"
+    ],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "renamed",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT lower(c) AS x,coalesce(p,p) AS y FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT c COLLATE \"POSIX\" AS x,p COLLATE \"C\" AS y FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      },
+      {
+        "name": "y",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT c::varchar(2) AS x,n::text AS y FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 100
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::d_posix AS x",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [
+      "renamed",
+      "extra"
+    ],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"renamed\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x,c AS y FROM t",
+    "names": [
+      "dup",
+      "dup"
+    ],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"dup\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS xmin FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"xmin\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (ROW(lower(c))).f1 AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (r).f1 AS x FROM (SELECT ROW(lower(c)) AS r FROM t)q",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT (ROW(c)).f1 AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::text AS x,NULL::integer AS n",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 100
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT ROW(c) AS r,coalesce(c,p) AS bad FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"bad\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x FROM t UNION ALL SELECT p AS x FROM t",
+    "names": [],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x,p AS y FROM t",
+    "names": [
+      "one",
+      "two",
+      "extra"
+    ],
+    "kind": "TABLE",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42601",
+      "message": "too many column names were specified",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "c",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [
+      "renamed"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "renamed",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT lower(c) AS x,coalesce(p,p) AS y FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT c COLLATE \"POSIX\" AS x,p COLLATE \"C\" AS y FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      },
+      {
+        "name": "y",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT c::varchar(2) AS x,n::text AS y FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 100
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::d_posix AS x",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [
+      "renamed",
+      "extra"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"renamed\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x,c AS y FROM t",
+    "names": [
+      "dup",
+      "dup"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"dup\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS xmin FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"xmin\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (ROW(lower(c))).f1 AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (r).f1 AS x FROM (SELECT ROW(lower(c)) AS r FROM t)q",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT (ROW(c)).f1 AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::text AS x,NULL::integer AS n",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 100
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT ROW(c) AS r,coalesce(c,p) AS bad FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"bad\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x FROM t UNION ALL SELECT p AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x,p AS y FROM t",
+    "names": [
+      "one",
+      "two",
+      "extra"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": false,
+    "error": {
+      "sqlstate": "42601",
+      "message": "too many column names were specified",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "c",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT c,p,n FROM t",
+    "names": [
+      "renamed"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "renamed",
+        "collation": 950
+      },
+      {
+        "name": "p",
+        "collation": 951
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT lower(c) AS x,coalesce(p,p) AS y FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT c COLLATE \"POSIX\" AS x,p COLLATE \"C\" AS y FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      },
+      {
+        "name": "y",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT c::varchar(2) AS x,n::text AS y FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      },
+      {
+        "name": "y",
+        "collation": 100
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::d_posix AS x",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 951
+      }
+    ]
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x FROM t",
+    "names": [
+      "renamed",
+      "extra"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"renamed\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS x,c AS y FROM t",
+    "names": [
+      "dup",
+      "dup"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"dup\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT coalesce(c,p) AS xmin FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"xmin\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (ROW(lower(c))).f1 AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT (r).f1 AS x FROM (SELECT ROW(lower(c)) AS r FROM t)q",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT (ROW(c)).f1 AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 950
+      }
+    ]
+  },
+  {
+    "query": "SELECT NULL::text AS x,NULL::integer AS n",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "columns": [
+      {
+        "name": "x",
+        "collation": 100
+      },
+      {
+        "name": "n",
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "query": "SELECT ROW(c) AS r,coalesce(c,p) AS bad FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"bad\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x FROM t UNION ALL SELECT p AS x FROM t",
+    "names": [],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42P22",
+      "message": "no collation was derived for column \"x\" with collatable type text",
+      "detail": null,
+      "hint": "Use the COLLATE clause to set the collation explicitly."
+    }
+  },
+  {
+    "query": "SELECT c AS x,p AS y FROM t",
+    "names": [
+      "one",
+      "two",
+      "extra"
+    ],
+    "kind": "MATERIALIZED VIEW",
+    "with_no_data": true,
+    "error": {
+      "sqlstate": "42601",
+      "message": "too many column names were specified",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

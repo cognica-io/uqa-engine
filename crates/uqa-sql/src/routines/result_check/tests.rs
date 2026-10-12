@@ -97,6 +97,7 @@ impl RoutineTypeCatalog for Types {
             "rb.pair" => Ok(pair(16384)),
             "rb.other" => Ok(pair(16385)),
             "rb.pair_domain" => Ok(ColumnType::Domain {
+                collation_oid: None,
                 schema: "rb".into(),
                 name: "pair_domain".into(),
                 array_oid: Some(16396),
@@ -145,11 +146,13 @@ impl CompositeTypeCatalog for Types {
             relation_oid: type_oid + 20,
             attributes: vec![
                 CompositeAttribute {
+                    collation_oid: None,
                     name: "a".into(),
                     ty: ColumnType::Integer,
                     number: 1,
                 },
                 CompositeAttribute {
+                    collation_oid: None,
                     name: "b".into(),
                     ty: ColumnType::Text,
                     number: 3,

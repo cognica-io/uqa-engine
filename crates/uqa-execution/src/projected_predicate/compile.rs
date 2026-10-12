@@ -23,19 +23,30 @@ pub(super) fn compile(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Option<ProjectedExpr>, SQLError> {
+    // This evaluator has no value catalog. Preserve such operands for the canonical evaluator instead of losing record/enum identity during predicate pushdown.
+    if matches!(
+        expression,
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_)
+    ) && crate::scalar_type(expression, schema, params)?
+        .as_ref()
+        .is_some_and(uqa_sql::type_resolution::catalog_value_type)
+    {
+        return Ok(None);
+    }
     let compiled = match expression {
+        ScalarExpr::Collated { expr, .. } => return compile(expr, schema, params),
         ScalarExpr::Column(column) => {
             let Some(index) = schema.unqualified_position(column) else {
                 return Ok(None);
             };
-            ProjectedExpr::Field(index)
+            field(index, schema)?
         }
-        ScalarExpr::Position(index) if *index < schema.len() => ProjectedExpr::Field(*index),
+        ScalarExpr::Position(index) if *index < schema.len() => field(*index, schema)?,
         ScalarExpr::QualifiedColumn { qualifier, column } => {
             let Some(index) = schema.qualified_position(qualifier, column) else {
                 return Ok(None);
             };
-            ProjectedExpr::Field(index)
+            field(index, schema)?
         }
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
             ProjectedExpr::Literal(value.clone())
@@ -391,4 +402,16 @@ fn parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {
         ),
         None => Err(SQLError::MissingParam(index)),
     }
+}
+
+fn field(index: usize, schema: &RowSchema) -> Result<ProjectedExpr, SQLError> {
+    if schema
+        .column_type(index)
+        .is_some_and(uqa_sql::type_resolution::catalog_value_type)
+    {
+        return Err(SQLError::Unsupported(
+            "field values require catalog predicate evaluation".into(),
+        ));
+    }
+    Ok(ProjectedExpr::Field(index))
 }

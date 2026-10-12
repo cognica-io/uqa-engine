@@ -189,6 +189,7 @@ mod tests {
         let untyped = Expr::Literal(Value::Int(0));
         for ty in ["integer", "int4"] {
             let cooked = Expr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Int(0),
                 ty: ty.into(),
@@ -206,6 +207,7 @@ mod tests {
         }
         for ty in ["smallint", "bigint", "oid"] {
             let cooked = Expr::TypedLiteral {
+                collation_oid: None,
                 composite_source: None,
                 value: Value::Int(0),
                 ty: ty.into(),

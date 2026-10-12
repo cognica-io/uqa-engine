@@ -57,6 +57,7 @@ pub(in crate::optimizer::scalar) fn fold_composite_constructor(
         ty: binding.ty.clone(),
         bound_type: Some(ty),
         parameter_index: None,
+        collation_oid: None,
         composite_source: None,
     })
 }
