@@ -1,0 +1,306 @@
+[
+  {
+    "event": "INSERT",
+    "side": "new",
+    "kind": "values",
+    "sql": "CREATE RULE insert_new_values AS ON INSERT TO items DO ALSO INSERT INTO log VALUES (NEW.c, NEW.p, NEW.plain, NEW.n)",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "INSERT",
+    "side": "new",
+    "kind": "select",
+    "sql": "CREATE RULE insert_new_select AS ON INSERT TO items DO ALSO INSERT INTO log SELECT NEW.c, NEW.p, NEW.plain, NEW.n",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "old",
+    "kind": "values",
+    "sql": "CREATE RULE update_old_values AS ON UPDATE TO items DO ALSO INSERT INTO log VALUES (OLD.c, OLD.p, OLD.plain, OLD.n)",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "old",
+    "kind": "select",
+    "sql": "CREATE RULE update_old_select AS ON UPDATE TO items DO ALSO INSERT INTO log SELECT OLD.c, OLD.p, OLD.plain, OLD.n",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "new",
+    "kind": "values",
+    "sql": "CREATE RULE update_new_values AS ON UPDATE TO items DO ALSO INSERT INTO log VALUES (NEW.c, NEW.p, NEW.plain, NEW.n)",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "new",
+    "kind": "select",
+    "sql": "CREATE RULE update_new_select AS ON UPDATE TO items DO ALSO INSERT INTO log SELECT NEW.c, NEW.p, NEW.plain, NEW.n",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "DELETE",
+    "side": "old",
+    "kind": "values",
+    "sql": "CREATE RULE delete_old_values AS ON DELETE TO items DO ALSO INSERT INTO log VALUES (OLD.c, OLD.p, OLD.plain, OLD.n)",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "DELETE",
+    "side": "old",
+    "kind": "select",
+    "sql": "CREATE RULE delete_old_select AS ON DELETE TO items DO ALSO INSERT INTO log SELECT OLD.c, OLD.p, OLD.plain, OLD.n",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  }
+]

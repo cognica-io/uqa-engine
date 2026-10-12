@@ -64,12 +64,40 @@ pub(super) struct RuntimeRuleResolver<'a> {
 }
 
 impl RuntimeRuleResolver<'_> {
+    pub(super) fn field_expression(
+        &self,
+        record: Option<&Document>,
+        doc_id: Option<DocId>,
+        column: &str,
+    ) -> Result<Expr, SQLError> {
+        let (metadata, value) = self.field(record, doc_id, column)?;
+        Ok(Expr::TypedLiteral {
+            value,
+            ty: metadata.ty.catalog_name(),
+            collation_oid: metadata.collation_oid,
+            composite_source: None,
+        })
+    }
+
     pub(super) fn record_field(
         &self,
         record: Option<&Document>,
         doc_id: Option<DocId>,
         column: &str,
     ) -> Result<ResolvedVariable, SQLError> {
+        let (metadata, value) = self.field(record, doc_id, column)?;
+        Ok(ResolvedVariable {
+            value,
+            declared_type: Some(metadata.ty.catalog_name()),
+        })
+    }
+
+    fn field(
+        &self,
+        record: Option<&Document>,
+        doc_id: Option<DocId>,
+        column: &str,
+    ) -> Result<(&RuleColumnMetadata, Value), SQLError> {
         let metadata = self
             .columns
             .get(column)
@@ -88,10 +116,7 @@ impl RuntimeRuleResolver<'_> {
         } else {
             Value::Null
         };
-        Ok(ResolvedVariable {
-            value,
-            declared_type: Some(metadata.ty.catalog_name()),
-        })
+        Ok((metadata, value))
     }
 
     pub(super) fn record(
@@ -113,6 +138,24 @@ impl RuntimeRuleResolver<'_> {
 }
 
 impl VariableResolver for RuntimeRuleResolver<'_> {
+    fn rewrite_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<Expr>, SQLError> {
+        if qualifier.eq_ignore_ascii_case("old") {
+            return self
+                .field_expression(self.old, self.old_doc_id, column)
+                .map(Some);
+        }
+        if qualifier.eq_ignore_ascii_case("new") {
+            return self
+                .field_expression(self.new, self.new_doc_id, column)
+                .map(Some);
+        }
+        Ok(None)
+    }
+
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         if name.eq_ignore_ascii_case("old") {
             return self.record(self.old, self.old_doc_id).map(Some);

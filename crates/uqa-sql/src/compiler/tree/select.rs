@@ -85,6 +85,7 @@ pub(in crate::compiler) fn compile_select(
             column_aliases: Vec::new(),
             internal_relation: None,
             internal_column_types: Vec::new(),
+            internal_column_collations: Vec::new(),
         });
         projections = vec![Projection {
             expr: Expr::Star,

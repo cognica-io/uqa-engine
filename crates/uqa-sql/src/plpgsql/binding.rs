@@ -481,12 +481,14 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             column_aliases,
             internal_relation,
             internal_column_types,
+            internal_column_collations,
         } => FromClause::Values {
             rows: bind_rows(rows, r)?,
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),
             internal_relation: *internal_relation,
             internal_column_types: internal_column_types.clone(),
+            internal_column_collations: internal_column_collations.clone(),
         },
         FromClause::Function {
             name,

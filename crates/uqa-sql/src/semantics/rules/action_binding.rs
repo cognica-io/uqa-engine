@@ -667,6 +667,7 @@ fn bind_from(
             column_aliases,
             internal_relation,
             internal_column_types,
+            internal_column_collations,
         } => FromClause::Values {
             rows: rows
                 .iter()
@@ -676,6 +677,7 @@ fn bind_from(
             column_aliases: column_aliases.clone(),
             internal_relation: *internal_relation,
             internal_column_types: internal_column_types.clone(),
+            internal_column_collations: internal_column_collations.clone(),
         },
         FromClause::Function {
             name,

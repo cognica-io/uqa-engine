@@ -465,6 +465,7 @@ impl SourcePlan {
                 column_aliases,
                 internal_relation,
                 internal_column_types,
+                internal_column_collations,
             } => Self::Values {
                 rows: rows
                     .into_iter()
@@ -478,6 +479,7 @@ impl SourcePlan {
                 column_aliases,
                 internal_relation,
                 internal_column_types,
+                internal_column_collations,
             },
             FromClause::Function {
                 name,

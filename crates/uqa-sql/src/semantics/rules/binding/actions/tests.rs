@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod collations;
+
 struct Row(crate::ResultRow);
 
 impl RuleRowValues for Row {

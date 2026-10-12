@@ -3149,6 +3149,45 @@
       "capability": "Rule condition and action namespaces",
       "workload": "Twenty-seven PostgreSQL condition/action cases cover unavailable event rows, missing fields, invalid operators, correlated subqueries and local OLD/NEW aliases.",
       "invariant": "Lexical condition lookup and final action event validation retain PostgreSQL SQLSTATE, primary text, DETAIL, HINT and diagnostic order without executing expressions."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_values_actions_preserve_postgresql_event_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations.rs",
+      "capability": "Runtime rule VALUES collation",
+      "workload": "Sixteen PostgreSQL VAR observations across INSERT, UPDATE and DELETE rules substitute actual event values and NULL fields.",
+      "invariant": "Typed value substitution preserves exact values, declared SQL types and implicit collation through AST and plan restoration."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_set_actions_preserve_postgresql_event_collations_with_empty_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations.rs",
+      "capability": "Set-oriented rule input metadata",
+      "workload": "Thirty-two PostgreSQL VAR observations cover source and action-result fields with both populated and empty private VALUES carriers.",
+      "invariant": "The declared collation and type survive runtime source binding and AST/plan restoration independently of input cardinality."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "internal_values_metadata_restores_legacy_defaults_and_rejects_invalid_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/plan/source_metadata/tests.rs",
+      "capability": "Private VALUES metadata restoration",
+      "workload": "Empty carriers restore explicit and indeterminate collations, legacy missing metadata, invalid widths and noncollatable attributes.",
+      "invariant": "Private attributes stay invisible to SQL wildcard lookup; legacy defaults remain readable and malformed metadata returns errors before schema construction."
     }
   ]
 }

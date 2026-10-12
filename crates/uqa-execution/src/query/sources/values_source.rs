@@ -26,7 +26,9 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
             column_aliases,
             internal_relation,
             internal_column_types,
+            ..
         } => {
+            let internal_schema = from.internal_values_schema()?;
             let inferred_types = crate::query::binding::values_types_in_scope(
                 context.ctes.routines,
                 rows,
@@ -51,9 +53,9 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
                             .into(),
                     ));
                 }
-                internal_column_types.clone()
+                internal_column_types.as_slice()
             } else {
-                inferred_types
+                inferred_types.as_slice()
             };
             let source_columns = if column_aliases.is_empty() {
                 (0..rows.first().map_or(0, Vec::len))
@@ -68,14 +70,12 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
                 hook.as_ref(),
                 params,
                 rows,
-                &column_types,
+                column_types,
             )?;
-            if let Some(relation) = internal_relation {
-                let schema =
-                    crate::RowSchema::with_internal_relation_types(*relation, column_types);
+            if let Some(schema) = internal_schema {
                 return Ok(Box::new(crate::TableScan::from_physical_rows(schema, rows)));
             }
-            let schema = crate::RowSchema::with_types(source_columns.clone(), column_types);
+            let schema = crate::RowSchema::with_types(source_columns.clone(), inferred_types);
             let operator: Box<dyn crate::PhysicalOperator + 'a> =
                 Box::new(crate::TableScan::from_physical_rows(schema, rows));
             Ok(qualify_source_operator_with_columns(

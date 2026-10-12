@@ -274,6 +274,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                         column_aliases,
                         internal_relation: None,
                         internal_column_types: Vec::new(),
+                        internal_column_collations: Vec::new(),
                     });
                 }
             }

@@ -481,14 +481,10 @@ impl SchemaScope {
                 rows,
                 alias,
                 column_aliases,
-                internal_relation,
-                internal_column_types,
+                ..
             } => {
-                if let Some(relation) = internal_relation {
-                    return Ok(RowSchema::with_internal_relation_types(
-                        *relation,
-                        internal_column_types.clone(),
-                    ));
+                if let Some(schema) = source.internal_values_schema()? {
+                    return Ok(schema);
                 }
                 let schema = self.bind_values_schema(routines, rows, subqueries, outer, params)?;
                 Ok(rename_schema(&schema, column_aliases, alias.as_deref()))

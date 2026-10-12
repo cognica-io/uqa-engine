@@ -73,6 +73,10 @@ pub enum FromClause {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         #[doc(hidden)]
         internal_column_types: Vec<Option<super::ColumnType>>,
+        /// Implicit collation identities of internal attributes, independent of row presence. An absent legacy vector uses each declared type's default.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[doc(hidden)]
+        internal_column_collations: Vec<Option<u32>>,
     },
     /// `FROM <fn>(<args>) [AS <alias>(<col_aliases>)]` -- e.g.
     /// `generate_series(1, 5)`, `unnest(arr)`, `regexp_split_to_table`,
