@@ -16,6 +16,9 @@ mod values;
 #[path = "regcollation/declarations.rs"]
 mod declarations;
 
+#[path = "regcollation/routines.rs"]
+mod routines;
+
 fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::new(),

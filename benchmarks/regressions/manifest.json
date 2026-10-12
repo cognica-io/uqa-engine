@@ -3292,6 +3292,77 @@
       "capability": "Procedural parameter collation identity",
       "workload": "Eighteen independent PostgreSQL record-field observations pass through PL/pgSQL parameterization, preparation, codec restoration and fresh variable reads.",
       "invariant": "Parameters retain implicit C/POSIX/default selections and conflicts without capturing invocation values or promoting the selection to explicit strength."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_record_fields_preserve_postgresql_declared_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/routines/resolver/tests.rs",
+      "capability": "Retained trigger record descriptors",
+      "workload": "Sixteen independent PostgreSQL trigger field identities are resolved from both populated and NULL OLD/NEW records, including cached record-field references.",
+      "invariant": "Each field retains its declared type and collation through activation-record lookup without changing values or missing-field diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collation_observation_binding_matches_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/collation_observation.rs",
+      "capability": "Analyzed collation observation",
+      "workload": "Thirteen independent PostgreSQL expressions cover unknown and typed NULLs, scalar and array types, explicit selection and signature errors.",
+      "invariant": "Original analysis, ordinary and controlled rebinding, codec restoration and value observation preserve exact results and diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "collation_observation_keeps_input_ownership_and_enforces_output_limits",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/collation_for/tests.rs",
+      "capability": "Bounded collation observation",
+      "workload": "An admitted 32 KiB argument is consumed with a 40 KiB total budget, followed by output quota exhaustion and invocation cancellation.",
+      "invariant": "No second argument payload copy is needed; result memory is retained, failure releases temporary ownership and earlier results survive."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "collation_observation_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/regcollation/routines.rs",
+      "capability": "Collation observation through storage adapters",
+      "workload": "Thirty-nine independent PostgreSQL observations cover catalog metadata, argument effects, error ordering, prepared parameters, user overloads and stored views on four providers.",
+      "invariant": "Runtime observations preserve PostgreSQL values, output types, diagnostics and sequence effects."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "trigger_routine_record_collations_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/regcollation/routines.rs",
+      "capability": "Trigger record descriptor persistence",
+      "workload": "Eleven independent PostgreSQL observations cover OLD/NEW, whole-record copies, NULLs, repeated invocations and persistent reopening on four providers.",
+      "invariant": "Declared field types and collations survive invocation, copying, field lookup and reopen without changing tuple values."
     }
   ]
 }

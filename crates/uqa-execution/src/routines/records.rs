@@ -16,27 +16,40 @@ impl Interpreter<'_> {
         self.resolver().datum_type(index)
     }
 
-    pub(super) fn record_expression_types(
+    pub(super) fn record_expression_schema(
         &self,
         expression: &PLpgSQLExpression,
-    ) -> Result<Option<Vec<Option<ColumnType>>>, SQLError> {
+    ) -> Result<Option<uqa_sql::RowSchema>, SQLError> {
         let prepared = self.prepare_expression(expression)?;
-        if let Some(fields) = prepared.analysis.result.record_fields(0) {
-            return Ok(Some(fields.to_vec()));
+        if let Some(schema) = self.raw_record_expression_schema(prepared.expression()?)? {
+            return Ok(Some(schema));
         }
-        self.raw_record_expression_types(prepared.expression()?)
+        if let Some(fields) = prepared.analysis.result.record_fields(0) {
+            return Ok(Some(uqa_sql::RowSchema::with_types(
+                (1..=fields.len()).map(|i| format!("f{i}")).collect(),
+                fields.to_vec(),
+            )));
+        }
+        Ok(None)
     }
 
-    fn raw_record_expression_types(
+    fn raw_record_expression_schema(
         &self,
         expr: &Expr,
-    ) -> Result<Option<Vec<Option<ColumnType>>>, SQLError> {
+    ) -> Result<Option<uqa_sql::RowSchema>, SQLError> {
         match expr {
             Expr::Column(name) | Expr::QualifiedStar(name) => Ok(self
                 .resolver()
                 .lookup(name)
-                .and_then(|index| self.record_types.get(&index).cloned())),
-            Expr::Cast { expr, ty, .. } if ty == "record" => self.raw_record_expression_types(expr),
+                .and_then(|index| self.record_schemas.get(&index).cloned())),
+            Expr::Cast { expr, ty, .. }
+                if matches!(
+                    self.services.expressions.catalog_column_type(ty),
+                    Some(ColumnType::Record)
+                ) =>
+            {
+                self.raw_record_expression_schema(expr)
+            }
             _ => Ok(None),
         }
     }
@@ -46,7 +59,9 @@ impl Interpreter<'_> {
         value: &PLpgSQLReturnValue,
     ) -> Result<Option<Vec<Option<ColumnType>>>, SQLError> {
         match value {
-            PLpgSQLReturnValue::Expr(expr) => self.record_expression_types(expr),
+            PLpgSQLReturnValue::Expr(expr) => Ok(self
+                .record_expression_schema(expr)?
+                .map(|schema| schema.column_types().to_vec())),
             PLpgSQLReturnValue::Datum(index) => match &self.datums[*index] {
                 PLpgSQLDatum::Row { fields } => Ok(Some(
                     fields
@@ -54,7 +69,10 @@ impl Interpreter<'_> {
                         .map(|field| self.datum_type(field.varno))
                         .collect(),
                 )),
-                _ => Ok(self.record_types.get(index).cloned()),
+                _ => Ok(self
+                    .record_schemas
+                    .get(index)
+                    .map(|schema| schema.column_types().to_vec())),
             },
         }
     }
@@ -101,12 +119,12 @@ pub fn shape_trigger_outcome(
         (Value::Record(fields), _) | (_, Value::Record(fields)) => fields,
         _ => return Err(trigger_shape_error()),
     };
-    if fields.len() != context.column_types.len() {
+    if fields.len() != context.row_schema.len() {
         return Err(trigger_shape_error());
     }
     let target = fields
         .iter()
-        .zip(&context.column_types)
+        .zip(context.row_schema.column_types())
         .map(|((name, _), ty)| {
             Ok(uqa_sql::routines::result_check::SQLFunctionResultColumn {
                 name: name.clone(),

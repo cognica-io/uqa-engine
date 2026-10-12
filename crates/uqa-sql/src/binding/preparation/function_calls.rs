@@ -23,6 +23,25 @@ pub(super) struct ObservedFunctionModifiers {
 }
 
 impl ObservedFunctionArguments {
+    pub(super) fn retain_collation_observer(&self, binding: &mut FunctionBinding) {
+        if !binding.builtin || binding.name != "pg_catalog.pg_collation_for" {
+            return;
+        }
+        let [argument] = self.values.as_slice() else {
+            return;
+        };
+        let noncollatable_type_oid = argument.ty.as_ref().and_then(|ty| {
+            (crate::catalog::type_metadata::pg_type_collation_oid(ty) == 0).then(|| {
+                u32::try_from(crate::catalog::type_metadata::pg_type_oid(ty))
+                    .expect("catalog type identity")
+            })
+        });
+        binding.dispatch = Some(crate::ast::FunctionDispatch::CollationFor {
+            collation_oid: u32::try_from(argument.derivation.oid()).expect("collation identity"),
+            noncollatable_type_oid,
+        });
+    }
+
     pub(super) fn types(&self) -> Vec<Option<ColumnType>> {
         self.values.iter().map(|value| value.ty.clone()).collect()
     }

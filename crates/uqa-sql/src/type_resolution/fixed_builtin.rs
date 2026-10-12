@@ -395,6 +395,11 @@ pub(super) fn bind_call(
         return name;
     }
     coerce_arguments(args, &overload.argument_types, schema, params, resolver);
+    if let Some(dispatch @ FunctionDispatch::CollationFor { .. }) =
+        binding.as_ref().and_then(|binding| binding.dispatch)
+    {
+        selected.binding.dispatch = Some(dispatch);
+    }
     selected.binding.dispatch = runtime_dispatch(&selected.binding);
     *binding = Some(selected.binding);
     name
@@ -429,7 +434,9 @@ fn requires_cast(
     actual: Option<&ColumnType>,
     declared: &ColumnType,
 ) -> bool {
-    if *declared == ColumnType::AnyArray {
+    if *declared == ColumnType::AnyArray
+        || matches!(declared, ColumnType::Named(name) if name == "any")
+    {
         return false;
     }
     if matches!(
@@ -445,6 +452,12 @@ fn requires_cast(
 }
 
 pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
+    if matches!(
+        binding.dispatch,
+        Some(FunctionDispatch::CollationFor { .. })
+    ) {
+        return binding.dispatch;
+    }
     let local = binding.name.rsplit('.').next()?;
     let arguments = binding.argument_types.as_slice();
     Some(match (local, arguments) {

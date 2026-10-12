@@ -82,6 +82,11 @@ pub enum FunctionDispatch {
     Collate {
         oid: Option<u32>,
     },
+    /// The selected argument metadata of `pg_collation_for`; the argument still executes before the observation.
+    CollationFor {
+        collation_oid: u32,
+        noncollatable_type_oid: Option<u32>,
+    },
     NamedArgument,
     VariadicArgument,
     ArraySubscripts,
@@ -159,6 +164,7 @@ impl FunctionDispatch {
         match self {
             Self::NumericOperator(operator) => operator.symbol(),
             Self::Collate { .. } => "COLLATE",
+            Self::CollationFor { .. } => "pg_catalog.pg_collation_for",
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",

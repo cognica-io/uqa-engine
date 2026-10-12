@@ -9,6 +9,9 @@
 use super::{DatumResolver, PLpgSQLDatum, ResolvedVariable, SQLError, Value, VariableResolver};
 use uqa_sql::ast::ColumnType;
 
+#[cfg(test)]
+mod tests;
+
 impl DatumResolver<'_> {
     pub(super) fn parameter_number(
         &self,
@@ -43,8 +46,7 @@ impl DatumResolver<'_> {
     pub(super) fn datum_type(&self, index: usize) -> Option<ColumnType> {
         match &self.datums[index] {
             PLpgSQLDatum::Var(variable) => self
-                .services
-                .expressions
+                .types
                 .catalog_column_type(&variable.type_name)
                 .filter(|ty| !matches!(ty, ColumnType::AnyArray | ColumnType::Record)),
             PLpgSQLDatum::RecField { parent, field } => self.record_field_type(*parent, field),
@@ -53,27 +55,49 @@ impl DatumResolver<'_> {
     }
 
     fn record_field_type(&self, parent: usize, field: &str) -> Option<ColumnType> {
+        let (index, _) = self.record_field(parent, field)?;
+        self.record_schemas
+            .get(&parent)?
+            .column_types()
+            .get(index)?
+            .clone()
+    }
+
+    fn record_field(&self, parent: usize, field: &str) -> Option<(usize, &Value)> {
         let Value::Record(fields) = &self.values[parent] else {
             return None;
         };
-        let index = fields.iter().position(|(name, _)| name == field)?;
-        self.record_types.get(&parent)?.get(index)?.clone()
+        fields
+            .iter()
+            .enumerate()
+            .find_map(|(index, (name, value))| (name == field).then_some((index, value)))
+    }
+
+    fn resolved_record_field(&self, parent: usize, field: &str) -> Option<ResolvedVariable> {
+        let (index, value) = self.record_field(parent, field)?;
+        let schema = self.record_schemas.get(&parent);
+        Some(ResolvedVariable {
+            value: value.clone(),
+            declared_type: schema
+                .and_then(|schema| schema.column_type(index))
+                .map(ColumnType::catalog_name),
+            collation_oid: schema.and_then(|schema| schema.column_collation(index)),
+        })
     }
 
     fn resolved_datum(&self, index: usize) -> ResolvedVariable {
-        let value = match &self.datums[index] {
-            PLpgSQLDatum::RecField { parent, field } => match &self.values[*parent] {
-                Value::Record(fields) => fields
-                    .iter()
-                    .find(|(name, _)| name == field)
-                    .map_or(Value::Null, |(_, value)| value.clone()),
-                _ => Value::Null,
-            },
-            _ => self.values[index].clone(),
-        };
+        if let PLpgSQLDatum::RecField { parent, field } = &self.datums[index] {
+            return self
+                .resolved_record_field(*parent, field)
+                .unwrap_or(ResolvedVariable {
+                    value: Value::Null,
+                    declared_type: None,
+                    collation_oid: None,
+                });
+        }
         ResolvedVariable {
             collation_oid: None,
-            value,
+            value: self.values[index].clone(),
             declared_type: self.datum_type(index).map(|ty| ty.catalog_name()),
         }
     }
@@ -81,7 +105,7 @@ impl DatumResolver<'_> {
 
 impl VariableResolver for DatumResolver<'_> {
     fn parameter_type(&self, name: &str) -> Option<ColumnType> {
-        self.services.expressions.catalog_column_type(name)
+        self.types.catalog_column_type(name)
     }
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         if let Some((state, message)) = self.error {
@@ -113,25 +137,13 @@ impl VariableResolver for DatumResolver<'_> {
         };
         match &self.datums[idx] {
             PLpgSQLDatum::Rec { name } => match &self.values[idx] {
-                Value::Record(fields) => {
-                    let value = fields
-                        .iter()
-                        .find(|(name, _)| name == column)
-                        .map(|(_, value)| value.clone());
-                    match value {
-                        Some(value) => Ok(Some(ResolvedVariable {
-                            collation_oid: None,
-                            value,
-                            declared_type: self
-                                .record_field_type(idx, column)
-                                .map(|ty| ty.catalog_name()),
-                        })),
-                        None => Err(SQLError::Routine {
-                            sqlstate: "42703".into(),
-                            message: format!("record \"{name}\" has no field \"{column}\""),
-                        }),
-                    }
-                }
+                Value::Record(_) => match self.resolved_record_field(idx, column) {
+                    Some(value) => Ok(Some(value)),
+                    None => Err(SQLError::Routine {
+                        sqlstate: "42703".into(),
+                        message: format!("record \"{name}\" has no field \"{column}\""),
+                    }),
+                },
                 Value::Null => Err(SQLError::Routine {
                     sqlstate: "55000".into(),
                     message: format!("record \"{name}\" is not assigned yet"),

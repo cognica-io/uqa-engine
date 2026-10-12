@@ -217,12 +217,14 @@ fn invoke_trigger(
     context.routines.execute_trigger_routine(
         &function,
         &TriggerRoutineContext {
-            column_types: context
-                .catalog
-                .rule_relation_columns(invocation.table)?
-                .into_iter()
-                .map(|(_, ty)| Some(ty))
-                .collect(),
+            row_schema: uqa_sql::RowSchema::with_column_metadata(
+                None,
+                context
+                    .catalog
+                    .trigger_relation_definitions(invocation.table)?
+                    .into_iter()
+                    .map(|column| (column.name, Some(column.ty), column.collation_oid)),
+            ),
             old: invocation.old,
             new: invocation.new,
             name: invocation.trigger.definition.name.clone(),

@@ -212,7 +212,9 @@ fn requires_cast(
     declared: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    if *declared == ColumnType::AnyArray {
+    if *declared == ColumnType::AnyArray
+        || matches!(declared, ColumnType::Named(name) if name == "any")
+    {
         return Ok(false);
     }
     if matches!(
