@@ -7,6 +7,22 @@
 use super::*;
 use crate::catalog::events::definition::tests::fixtures::Catalog;
 
+fn collated_catalog() -> Catalog {
+    let Statement::CreateTable(mut table) = crate::compile(
+        "CREATE TABLE items(c text COLLATE \"C\", p text COLLATE \"POSIX\", plain text, n integer)",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("table")
+    };
+    table.columns[0].collation_oid = Some(950);
+    table.columns[1].collation_oid = Some(951);
+    Catalog {
+        columns: Some(table.columns),
+        ..Catalog::default()
+    }
+}
+
 #[test]
 fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() {
     let Statement::CreateRule(definition) =
@@ -47,3 +63,4 @@ fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() 
 }
 
 mod collations;
+mod diagnostics;

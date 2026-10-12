@@ -12,14 +12,14 @@ use crate::{ColumnType, RelationIdentity, SQLError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub(super) fn table_definition(columns: Vec<crate::ast::ColumnDef>) -> TableDefinition {
+pub(crate) fn table_definition(columns: Vec<crate::ast::ColumnDef>) -> TableDefinition {
     TableDefinition {
         columns: Arc::new(columns),
         columns_declared: true,
     }
 }
 
-pub(super) fn catalog(tables: BTreeMap<RelationIdentity, TableDefinition>) -> CatalogReadView {
+pub(crate) fn catalog(tables: BTreeMap<RelationIdentity, TableDefinition>) -> CatalogReadView {
     catalog_with_foreign_tables(tables, BTreeMap::new())
 }
 

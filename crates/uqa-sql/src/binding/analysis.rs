@@ -255,7 +255,13 @@ impl SchemaScope {
         let resolver =
             self.query_function_type_resolver(engine, expression, schema, subqueries, params)?;
         Self::validate_expression_references_with_resolver(
-            engine, expression, schema, fallback, params, &resolver,
+            self.rule_condition_event,
+            engine,
+            expression,
+            schema,
+            fallback,
+            params,
+            &resolver,
         )
     }
 
@@ -276,6 +282,7 @@ impl SchemaScope {
     }
 
     pub(super) fn validate_expression_references_with_resolver(
+        rule_event: Option<crate::ast::RuleEvent>,
         engine: &dyn RoutineResolution,
         expression: &ScalarExpr,
         schema: &RowSchema,
@@ -283,7 +290,9 @@ impl SchemaScope {
         params: &[SQLParam],
         resolver: &dyn FunctionTypeResolver,
     ) -> Result<(), SQLError> {
-        references::validate_expression(engine, expression, schema, fallback, params, resolver)
+        references::validate_expression(
+            rule_event, engine, expression, schema, fallback, params, resolver,
+        )
     }
 
     pub(super) fn validate_table_function_source(
@@ -303,7 +312,13 @@ impl SchemaScope {
             .query_function_type_resolver_for_subqueries(engine, args, input, subqueries, params)?;
         for argument in args {
             Self::validate_expression_references_with_resolver(
-                engine, argument, input, None, params, &resolver,
+                self.rule_condition_event,
+                engine,
+                argument,
+                input,
+                None,
+                params,
+                &resolver,
             )?;
         }
         functions::validate_table_function(engine, name, binding, args, input, params, &resolver)

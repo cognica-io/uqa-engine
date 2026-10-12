@@ -70,6 +70,23 @@ impl CatalogRoutineAnalysisContext<'_> {
             )
         })
     }
+    pub fn bind_rule_condition(
+        &self,
+        expression: &mut ExpressionPlan,
+        outer: &RowSchema,
+        event: crate::ast::RuleEvent,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        self.with_scope_result(|scope| {
+            crate::binding::routine_binding::bind_rule_condition_routines(
+                self.routines,
+                expression,
+                &scope.binding_context()?,
+                outer,
+                event,
+            )
+        })
+    }
+
     pub fn bind_expression(
         &self,
         expression: &mut ExpressionPlan,

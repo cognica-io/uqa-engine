@@ -58,6 +58,28 @@ impl Catalog {
     pub fn record(&self, event: impl Into<String>) {
         self.events.lock().unwrap().push(event.into());
     }
+    fn analysis_context(&self) -> crate::binding::BindingContext<'static> {
+        let columns = self
+            .columns
+            .as_ref()
+            .expect("declaration rejection must precede catalog binding");
+        let mut context = crate::binding::fixture::empty_binding_context();
+        context.catalog = crate::binding::fixture::catalog(std::collections::BTreeMap::from([
+            (
+                RelationIdentity::new("public", "items"),
+                crate::binding::fixture::table_definition(columns.clone()),
+            ),
+            (
+                RelationIdentity::new("public", "log"),
+                crate::binding::fixture::table_definition(vec![ColumnDef::nullable(
+                    "c",
+                    ColumnType::Text,
+                )]),
+            ),
+        ]));
+        context
+    }
+
     pub fn context(&self) -> EventAnalysisContext<'_> {
         EventAnalysisContext {
             catalog: self,
@@ -338,7 +360,11 @@ impl ReturningCatalog for Catalog {
     fn try_describe_table_row_type(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         self.record(format!("columns:{table}"));
         if let Some(columns) = &self.columns {
-            return Ok(Some(columns.clone()));
+            return Ok(Some(if matches!(table, "log" | "public.log") {
+                vec![ColumnDef::nullable("c", ColumnType::Text)]
+            } else {
+                columns.clone()
+            }));
         }
         let Statement::CreateTable(table) = crate::compile("CREATE TABLE items (id integer)")
             .unwrap()
@@ -357,7 +383,7 @@ impl ReturningCatalog for Catalog {
 }
 impl ReturningScope for Catalog {
     fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError> {
-        panic!("unexpected RETURNING scope")
+        Ok(self.analysis_context().into())
     }
 }
 impl crate::plan::AggregateClassifier for Catalog {
@@ -366,16 +392,20 @@ impl crate::plan::AggregateClassifier for Catalog {
     }
 }
 impl RuleSourceCatalog for Catalog {
-    fn query_source_columns(&self, _: &str, _: bool) -> Result<Option<Vec<String>>, SQLError> {
-        panic!("unexpected action source")
+    fn query_source_columns(&self, name: &str, _: bool) -> Result<Option<Vec<String>>, SQLError> {
+        self.stored_relation_column_names(name)
     }
     fn rule_relation_definitions(&self, name: &str) -> Result<Vec<ColumnDef>, SQLError> {
         self.context().rule_relation_definitions(name)
     }
 }
 impl StoredColumnCatalog for Catalog {
-    fn stored_relation_column_names(&self, _: &str) -> Result<Option<Vec<String>>, SQLError> {
-        panic!("unexpected stored columns")
+    fn stored_relation_column_names(&self, name: &str) -> Result<Option<Vec<String>>, SQLError> {
+        assert!(self.columns.is_some(), "unexpected stored columns");
+        Ok(self
+            .try_describe_table_row_type(name)
+            .map_err(SQLError::Internal)?
+            .map(|columns| columns.into_iter().map(|column| column.name).collect()))
     }
 }
 impl StoredMergeColumnCatalog for Catalog {
@@ -404,20 +434,30 @@ impl RoutineCompilationCatalog for Catalog {
         panic!("unexpected detached compilation scope")
     }
     fn stored_query_namespace(&self) -> StoredQueryNamespace {
-        panic!("unexpected query namespace")
+        assert!(self.columns.is_some(), "unexpected query namespace");
+        StoredQueryNamespace {
+            temporary_schema: "pg_temp_1".into(),
+            transition_relations: std::collections::BTreeSet::new(),
+        }
     }
 }
 impl CatalogRoutineScopes for Catalog {
     fn with_catalog_scope(
         &self,
-        _: crate::binding::statements::StatementAnalysisOperation<'_>,
+        analyze: crate::binding::statements::StatementAnalysisOperation<'_>,
     ) -> Result<(), SQLError> {
-        panic!("declaration rejection must precede catalog routine binding")
+        analyze(self)
     }
 }
 
 impl crate::schema::dependencies::oid_alias::OidAliasInput for Catalog {
     fn resolve_oid_alias_input(&self, _: &ColumnType, _: &str) -> Result<Option<i64>, SQLError> {
         panic!("unexpected routine-default OID input")
+    }
+}
+
+impl crate::binding::statements::StatementBindingScope for Catalog {
+    fn binding_context(&self) -> Result<crate::binding::BindingContext<'_>, SQLError> {
+        Ok(self.analysis_context())
     }
 }

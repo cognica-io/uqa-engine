@@ -113,6 +113,7 @@ struct SchemaScope {
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+    rule_condition_event: Option<crate::ast::RuleEvent>,
     stored_whole_rows: BTreeMap<String, ScalarExpr>,
     /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
     routine_parameters: Option<RoutineParameterScope>,
@@ -144,6 +145,7 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
+            rule_condition_event: None,
             stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
@@ -171,6 +173,7 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
+            rule_condition_event: None,
             stored_whole_rows: BTreeMap::new(),
             routine_parameters: None,
             scalar_binding: ScalarBindingMode::Stored,
@@ -303,7 +306,13 @@ impl SchemaScope {
             self.query_function_type_resolver(routines, expression, schema, subqueries, params)?;
         if self.validate_references {
             Self::validate_expression_references_with_resolver(
-                routines, expression, schema, None, params, &resolver,
+                self.rule_condition_event,
+                routines,
+                expression,
+                schema,
+                None,
+                params,
+                &resolver,
             )?;
         }
         crate::type_resolution::validate_catalog_literals(expression, schema, params, &resolver)?;

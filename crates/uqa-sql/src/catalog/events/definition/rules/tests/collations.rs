@@ -20,22 +20,6 @@ struct Variable {
     collation: u32,
 }
 
-fn collated_catalog() -> Catalog {
-    let Statement::CreateTable(mut table) = crate::compile(
-        "CREATE TABLE items(c text COLLATE \"C\", p text COLLATE \"POSIX\", plain text, n integer)",
-    )
-    .unwrap()
-    .remove(0) else {
-        panic!("table")
-    };
-    table.columns[0].collation_oid = Some(950);
-    table.columns[1].collation_oid = Some(951);
-    Catalog {
-        columns: Some(table.columns),
-        ..Catalog::default()
-    }
-}
-
 #[test]
 fn rule_condition_row_metadata_matches_postgresql_event_variables() {
     let catalog = collated_catalog();
@@ -105,10 +89,7 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
                 collation_oid, ty, ..
             } = bind_expr(
                 &Expr::qualified_column(&variable.side, name),
-                &mut RuleRowTypeResolver {
-                    columns: &columns,
-                    event: rule.event,
-                },
+                &mut RuleRowTypeResolver::for_condition(&columns, rule.event),
             )
             .unwrap()
             else {

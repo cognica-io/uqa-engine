@@ -1,0 +1,210 @@
+[
+  {
+    "sql": "CREATE RULE conflict AS ON UPDATE TO items WHERE (NEW.c = OLD.p) DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE explicit_selection AS ON UPDATE TO items WHERE (NEW.c = OLD.p COLLATE \"C\") DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE type_error AS ON UPDATE TO items WHERE (NEW.c = OLD.p AND NEW.n + false = 0) DO NOTHING",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "CREATE RULE missing_field AS ON INSERT TO items WHERE (OLD.absent IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"old\"",
+      "detail": "There is an entry for table \"old\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE lazy_condition AS ON UPDATE TO items WHERE (true OR NEW.c = OLD.p) DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON INSERT TO items WHERE (OLD.c IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"old\"",
+      "detail": "There is an entry for table \"old\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON INSERT TO items WHERE (OLD.absent IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"old\"",
+      "detail": "There is an entry for table \"old\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON INSERT TO items WHERE (OLD IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"old\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON INSERT TO items WHERE (OLD.* IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"old\"",
+      "detail": "There is an entry for table \"old\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON INSERT TO items WHERE ((SELECT OLD.c) IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"old\"",
+      "detail": "There is an entry for table \"old\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON DELETE TO items WHERE (NEW.c IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"new\"",
+      "detail": "There is an entry for table \"new\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON DELETE TO items WHERE (NEW.absent IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"new\"",
+      "detail": "There is an entry for table \"new\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON DELETE TO items WHERE (NEW IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column \"new\" does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON DELETE TO items WHERE (NEW.* IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"new\"",
+      "detail": "There is an entry for table \"new\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE inspected AS ON DELETE TO items WHERE ((SELECT NEW.c) IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42P01",
+      "message": "invalid reference to FROM-clause entry for table \"new\"",
+      "detail": "There is an entry for table \"new\", but it cannot be referenced from this part of the query.",
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE local_insert_0 AS ON INSERT TO items WHERE ((SELECT OLD.c FROM (VALUES ('x'::text)) AS OLD(c)) IS NULL) DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE local_insert_1 AS ON INSERT TO items WHERE ((SELECT OLD FROM (VALUES ('x'::text)) AS r(OLD)) IS NULL) DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE local_insert_2 AS ON INSERT TO items WHERE ((SELECT OLD.absent FROM (VALUES ('x'::text)) AS OLD(c)) IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column old.absent does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE action_insert_0 AS ON INSERT TO items DO INSERT INTO log VALUES (OLD.c)",
+    "error": {
+      "sqlstate": "42P17",
+      "message": "ON INSERT rule cannot use OLD",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE action_insert_1 AS ON INSERT TO items DO INSERT INTO log VALUES (OLD.absent)",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column old.absent does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE action_insert_2 AS ON INSERT TO items DO INSERT INTO log VALUES (OLD.c + true)",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: text + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "sql": "CREATE RULE local_delete_0 AS ON DELETE TO items WHERE ((SELECT NEW.c FROM (VALUES ('x'::text)) AS NEW(c)) IS NULL) DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE local_delete_1 AS ON DELETE TO items WHERE ((SELECT NEW FROM (VALUES ('x'::text)) AS r(NEW)) IS NULL) DO NOTHING",
+    "error": null
+  },
+  {
+    "sql": "CREATE RULE local_delete_2 AS ON DELETE TO items WHERE ((SELECT NEW.absent FROM (VALUES ('x'::text)) AS NEW(c)) IS NULL) DO NOTHING",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column new.absent does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE action_delete_0 AS ON DELETE TO items DO INSERT INTO log VALUES (NEW.c)",
+    "error": {
+      "sqlstate": "42P17",
+      "message": "ON DELETE rule cannot use NEW",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE action_delete_1 AS ON DELETE TO items DO INSERT INTO log VALUES (NEW.absent)",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column new.absent does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE action_delete_2 AS ON DELETE TO items DO INSERT INTO log VALUES (NEW.c + true)",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: text + boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  }
+]

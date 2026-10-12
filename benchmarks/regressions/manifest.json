@@ -3136,6 +3136,19 @@
       "capability": "Runtime OLD/NEW input metadata",
       "workload": "The sixteen independent PostgreSQL rule attributes are materialized both with stored values and with absent row images.",
       "invariant": "Joined private inputs retain each declared collation and exact value or NULL without exposing user-visible wildcard columns."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_event_namespaces_match_postgresql_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/diagnostics.rs",
+      "capability": "Rule condition and action namespaces",
+      "workload": "Twenty-seven PostgreSQL condition/action cases cover unavailable event rows, missing fields, invalid operators, correlated subqueries and local OLD/NEW aliases.",
+      "invariant": "Lexical condition lookup and final action event validation retain PostgreSQL SQLSTATE, primary text, DETAIL, HINT and diagnostic order without executing expressions."
     }
   ]
 }

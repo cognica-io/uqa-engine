@@ -117,7 +117,7 @@ impl RuleActionReturningResolver<'_, '_> {
             && !self.is_action_image_alias(qualifier)
             && (qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new"))
         {
-            return Err(super::invalid_rule_action_reference(qualifier));
+            return Err(super::invalid_rule_relation_reference(qualifier));
         }
         Ok(())
     }

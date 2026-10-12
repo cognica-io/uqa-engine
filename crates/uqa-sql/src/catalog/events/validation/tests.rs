@@ -59,27 +59,22 @@ fn unqualified_rule_conditions_bind_to_the_available_event_row() {
 }
 
 #[test]
-fn unavailable_rule_rows_are_rejected_before_column_lookup() {
-    let mut resolver = RuleRowTypeResolver {
-        columns: &[],
-        event: RuleEvent::Insert,
-    };
-    routine_error(
-        resolver.resolve_qualified("OLD", "missing").unwrap_err(),
-        "42P17",
-        "there is no OLD relation for INSERT rule",
+fn unavailable_condition_rows_are_rejected_before_column_lookup() {
+    let mut resolver = RuleRowTypeResolver::for_condition(&[], RuleEvent::Insert);
+    let error = resolver.resolve_qualified("old", "missing").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P01"));
+    assert_eq!(
+        error.to_string(),
+        "invalid reference to FROM-clause entry for table \"old\""
     );
-    assert!(
-        matches!(resolver.resolve_qualified("NEW", "missing"), Err(SQLError::UnknownColumn(name)) if name == "NEW.missing")
-    );
+    let error = resolver.resolve_qualified("new", "missing").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42703"));
+    assert_eq!(error.to_string(), "column new.missing does not exist");
     let columns = vec![crate::ast::ColumnDef::nullable("id", ColumnType::Integer)];
-    let typed_row = RuleRowTypeResolver {
-        columns: &columns,
-        event: RuleEvent::Update,
-    }
-    .resolve_qualified("OLD", "id")
-    .unwrap()
-    .unwrap();
+    let typed_row = RuleRowTypeResolver::for_condition(&columns, RuleEvent::Update)
+        .resolve_qualified("old", "id")
+        .unwrap()
+        .unwrap();
     assert_eq!(typed_row.value, Value::Null);
     assert_eq!(
         typed_row.declared_type.as_deref(),

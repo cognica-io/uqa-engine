@@ -959,7 +959,7 @@ fn bind_orders(
         .collect()
 }
 
-pub fn invalid_rule_action_reference(qualifier: &str) -> SQLError {
+pub fn invalid_rule_relation_reference(qualifier: &str) -> SQLError {
     SQLError::Diagnostic {
         sqlstate: "42P01".into(),
         message: format!("invalid reference to FROM-clause entry for table \"{qualifier}\""),

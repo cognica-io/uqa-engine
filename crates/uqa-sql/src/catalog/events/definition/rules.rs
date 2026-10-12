@@ -252,7 +252,10 @@ impl EventAnalysisContext<'_> {
             });
         }
         if !has_subquery {
-            let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
+            let bound = bind_expr(
+                condition,
+                &mut RuleRowTypeResolver::for_condition(columns, event),
+            )?;
             let lowered = crate::plan::ExpressionPlan::lower(bound);
             match crate::common_context_expression_type(
                 &lowered.scalar,
@@ -309,7 +312,7 @@ impl EventAnalysisContext<'_> {
         let schema = binding.row_schema(columns);
         let ty = self
             .stored_routines
-            .bind_expression(&mut plan, &[], &schema)?;
+            .bind_rule_condition(&mut plan, &schema, event)?;
         if let Some(ty) = ty {
             if !is_boolean_type(&ty) {
                 return Err(SQLError::TypeMismatch(format!(
@@ -431,14 +434,12 @@ impl EventAnalysisContext<'_> {
             )?,
         );
         validate_rule_action_reference_scopes(self.sources, action)?;
+        let mut row_resolver = RuleRowTypeResolver::for_action(event_columns, event);
         let bound = crate::semantics::rules::action_binding::bind_rule_action(
             self.sources,
             action,
             &action_columns,
-            &mut RuleRowTypeResolver {
-                columns: event_columns,
-                event,
-            },
+            &mut row_resolver,
         )?;
         let schema = crate::semantics::returning::dml_statement_returning_schema(
             self.returning,
@@ -452,6 +453,7 @@ impl EventAnalysisContext<'_> {
             &mut stored_plan,
         )?;
         let bound_routines = self.stored_routines.bind_statement(&stored_plan)?;
+        row_resolver.validate_event_references()?;
         if let Some(routine_plan) = &bound_routines.query {
             crate::catalog::events::dependencies::collect_query_routine_dependencies(
                 routine_plan,
@@ -501,7 +503,10 @@ impl EventAnalysisContext<'_> {
             return Ok(());
         }
 
-        let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
+        let bound = bind_expr(
+            condition,
+            &mut RuleRowTypeResolver::for_condition(columns, event),
+        )?;
         let lowered = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.routines.has_registered_aggregate_function(name)
         });
