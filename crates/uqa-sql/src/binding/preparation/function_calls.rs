@@ -159,6 +159,25 @@ impl Preparation<'_> {
             .is_some_and(FunctionBinding::is_polymorphic_builtin_syntax)
         {
             (None, None)
+        } else if let Some(selected) = crate::type_resolution::json_path::resolve_call(
+            name,
+            binding,
+            crate::type_resolution::RoutineCallDescriptor {
+                argument_names: &arguments.names,
+                argument_types: &types,
+                explicit_variadic: arguments.variadic,
+            },
+            Some(self.routines),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )? {
+            (
+                Some(
+                    selected
+                        .into_uncontrolled()
+                        .expect("ordinary routine selection has no reservation"),
+                ),
+                None,
+            )
         } else if let Some(fixed) = crate::resolve_fixed_builtin_call(
             name,
             binding,

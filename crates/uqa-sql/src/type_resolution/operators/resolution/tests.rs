@@ -8,6 +8,57 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn json_operator_selection_retains_only_selected_input_types() {
+    let path = ColumnType::Array(Box::new(ColumnType::Varchar(None)));
+    for limit in [0, 32, 128, 512, 4096, 65536] {
+        let budget = MemoryBudget::new(limit);
+        let cancellation = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+        match named_binary_operator_types_with_control(
+            "#>",
+            Some(&ColumnType::JsonB),
+            Some(&path),
+            &control,
+        ) {
+            Ok(output) => {
+                assert_eq!(
+                    *output,
+                    [
+                        ColumnType::JsonB,
+                        ColumnType::Array(Box::new(ColumnType::Text)),
+                        ColumnType::JsonB
+                    ]
+                );
+                assert_eq!(output.reserved_bytes(), size_of::<ColumnType>());
+                assert_eq!(budget.used(), output.reserved_bytes());
+                drop(output);
+            }
+            Err(error) => assert_eq!(error.sqlstate(), Some("53200")),
+        }
+        assert_eq!(budget.used(), 0);
+    }
+    for cancel_original in [true, false] {
+        let budget = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let error = named_binary_operator_types_with_control(
+            "->",
+            Some(&ColumnType::JsonB),
+            None,
+            &ProductionControl::new(&budget, &original, &invoking),
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn controlled_operator_types_preserve_exact_unknown_and_cross_type_selection() {
     let budget = MemoryBudget::new(1 << 20);
     let cancellation = CancellationToken::new();

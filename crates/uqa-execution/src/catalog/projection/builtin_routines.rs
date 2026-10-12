@@ -11,7 +11,10 @@ pub use identities::{
     builtin_routine_identities, builtin_routine_identity, BuiltinRoutineIdentity,
 };
 
-use uqa_sql::catalog::languages::{INTERNAL_LANGUAGE, SQL_LANGUAGE};
+use uqa_sql::catalog::{
+    json_path::{JsonPathFunction, JSON_PATH_FUNCTIONS},
+    languages::{INTERNAL_LANGUAGE, SQL_LANGUAGE},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinRoutineCatalogEntry {
@@ -81,6 +84,9 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn variadic_type(self) -> i64 {
+        if JsonPathFunction::by_oid(self.oid).is_some() {
+            return 25;
+        }
         match self.oid {
             4282 => 3904,
             4285 => 3906,
@@ -93,6 +99,9 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn all_argument_types(self) -> Option<&'static [i64]> {
+        if let Some(entry) = JsonPathFunction::by_oid(self.oid) {
+            return Some(entry.argument_oids);
+        }
         match self.oid {
             3078 => Some(&[26, 20, 20, 20, 20, 16, 20, 26]),
             6427 => Some(&[2205, 20, 16]),
@@ -102,6 +111,9 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn argument_modes(self) -> Option<&'static [&'static str]> {
+        if JsonPathFunction::by_oid(self.oid).is_some() {
+            return Some(&["i", "v"]);
+        }
         match self.oid {
             3078 => Some(&["i", "o", "o", "o", "o", "o", "o", "o"]),
             6427 => Some(&["i", "o", "o"]),
@@ -227,7 +239,31 @@ const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalo
     }
 }
 
+const fn json_path_entry(entry: JsonPathFunction) -> BuiltinRoutineCatalogEntry {
+    BuiltinRoutineCatalogEntry {
+        oid: entry.oid,
+        name: entry.name,
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: entry.result_oid,
+        argument_types: entry.argument_oids,
+        argument_names: &["from_json", "path_elems"],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: entry.name,
+    }
+}
+
 pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
+    &[
+        json_path_entry(JSON_PATH_FUNCTIONS[0]),
+        json_path_entry(JSON_PATH_FUNCTIONS[1]),
+        json_path_entry(JSON_PATH_FUNCTIONS[2]),
+        json_path_entry(JSON_PATH_FUNCTIONS[3]),
+    ],
     support::ROUTINES,
     scalar::ROUTINES,
     aggregate_windows::ROUTINES,

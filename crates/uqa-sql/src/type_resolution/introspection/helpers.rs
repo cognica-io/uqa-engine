@@ -23,6 +23,14 @@ impl Binder<'_, '_> {
         let params = self.params;
         let resolver = self.resolver;
         let control = self.control;
+        crate::type_resolution::json_path::bind_call(
+            call,
+            self.memory,
+            params,
+            infer,
+            resolver,
+            &control,
+        )?;
         if control.budget().is_none() {
             call.name = crate::type_resolution::array_transform::bind_call(
                 std::mem::take(&mut call.name),

@@ -20,7 +20,7 @@ pub(super) use production::{
     cast_json_value_with_control, compare_jsonb_datums_with_control, evaluate,
     format_core_value_as_json_with_control, format_value_as_json_with_control,
     json_concat_with_control, json_delete_values_with_control, json_extract_operator_with_control,
-    quote_with_control, utf8_lossy_with_control, JsonbInput,
+    json_path_function_with_control, quote_with_control, utf8_lossy_with_control, JsonbInput,
 };
 pub(crate) use production::{decode_jsonb_datum_with_control, encode_jsonb_datum};
 

@@ -1,0 +1,134 @@
+[
+  {
+    "sql": "SELECT '[10,20]'::jsonb -> 1::smallint",
+    "command_tags": [
+      "SELECT 1"
+    ],
+    "error": null,
+    "results": [
+      {
+        "columns": [
+          "?column?"
+        ],
+        "type_oids": [
+          3802
+        ],
+        "rows": [
+          [
+            "20"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "sql": "SELECT '[10,20]'::jsonb -> 1::bigint",
+    "command_tags": [],
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb -> bigint",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    },
+    "results": []
+  },
+  {
+    "sql": "SELECT NULL::jsonb -> true",
+    "command_tags": [],
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb -> boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    },
+    "results": []
+  },
+  {
+    "sql": "SELECT NULL::jsonb #> NULL::integer[]",
+    "command_tags": [],
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb #> integer[]",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    },
+    "results": []
+  },
+  {
+    "sql": "SELECT NULL::jsonb #> 'bad'",
+    "command_tags": [],
+    "error": {
+      "sqlstate": "22P02",
+      "message": "malformed array literal: \"bad\"",
+      "detail": "Array value must start with \"{\" or dimension information.",
+      "hint": null
+    },
+    "results": []
+  },
+  {
+    "sql": "SELECT '{\"a\":1}'::jsonb #> '{a}'::text",
+    "command_tags": [],
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: jsonb #> text",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    },
+    "results": []
+  },
+  {
+    "sql": "SELECT NULL -> 'a'",
+    "command_tags": [],
+    "error": {
+      "sqlstate": "42725",
+      "message": "operator is not unique: unknown -> unknown",
+      "detail": null,
+      "hint": "Could not choose a best candidate operator. You might need to add explicit type casts."
+    },
+    "results": []
+  },
+  {
+    "sql": "SELECT '{\"a\":1}'::jsonb #> ARRAY['a']::varchar[]",
+    "command_tags": [
+      "SELECT 1"
+    ],
+    "error": null,
+    "results": [
+      {
+        "columns": [
+          "?column?"
+        ],
+        "type_oids": [
+          3802
+        ],
+        "rows": [
+          [
+            "1"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "sql": "SELECT '{\"a\":1}'::jsonb -> 'a'::\"char\"",
+    "command_tags": [
+      "SELECT 1"
+    ],
+    "error": null,
+    "results": [
+      {
+        "columns": [
+          "?column?"
+        ],
+        "type_oids": [
+          3802
+        ],
+        "rows": [
+          [
+            "1"
+          ]
+        ]
+      }
+    ]
+  }
+]

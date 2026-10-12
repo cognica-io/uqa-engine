@@ -53,7 +53,7 @@ pub(super) fn render_expr_in(
         Expr::Func {
             binding:
                 Some(crate::ast::FunctionBinding {
-                    dispatch: Some(crate::ast::FunctionDispatch::JsonExtract { as_text, path }),
+                    dispatch: Some(dispatch @ crate::ast::FunctionDispatch::JsonExtract { .. }),
                     ..
                 }),
             args,
@@ -64,13 +64,29 @@ pub(super) fn render_expr_in(
                     "JSON extraction requires two operands".into(),
                 ));
             };
-            let operator = match (*path, *as_text) {
-                (false, false) => "->",
-                (false, true) => "->>",
-                (true, false) => "#>",
-                (true, true) => "#>>",
-            };
+            let operator = dispatch.json_extraction_symbol().expect("JSON operator");
             format!("({} {operator} {})", render_expr(lhs)?, render_expr(rhs)?)
+        }
+        Expr::Func {
+            binding: Some(binding),
+            args,
+            ..
+        } if matches!(
+            binding.dispatch,
+            Some(crate::ast::FunctionDispatch::JsonPath { .. })
+        ) =>
+        {
+            let [input, path] = args.as_slice() else {
+                return Err(SQLError::Internal(
+                    "JSON path call requires two arguments".into(),
+                ));
+            };
+            format!(
+                "{}({}, VARIADIC {})",
+                binding.name,
+                render_expr(input)?,
+                render_expr(path)?
+            )
         }
         Expr::Func {
             name,

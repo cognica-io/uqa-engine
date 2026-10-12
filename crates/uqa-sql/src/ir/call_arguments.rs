@@ -141,6 +141,24 @@ pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgumen
     })
 }
 
+/// Move a validated argument value out of named and VARIADIC wrappers without copying its payload.
+pub(crate) fn scalar_call_argument_value_owned(
+    mut expression: ScalarExpr,
+) -> Result<ScalarExpr, SQLError> {
+    scalar_call_argument(&expression)?;
+    loop {
+        if !matches!(&expression, ScalarExpr::Func { binding, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch).is_some_and(FunctionDispatch::is_call_argument_marker))
+        {
+            return Ok(expression);
+        }
+        let ScalarExpr::Func { mut args, .. } = expression else {
+            unreachable!()
+        };
+        expression = args.pop().expect("validated argument marker has a value");
+    }
+}
+
 fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, bool), SQLError> {
     let ScalarExpr::Func {
         order_syntax,

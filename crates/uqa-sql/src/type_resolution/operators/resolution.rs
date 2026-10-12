@@ -41,7 +41,20 @@ pub fn binary_operator_types_with_control(
     named_binary_operator_types_with_control(binary_operator_name(op), left, right, control)
 }
 
-pub(super) fn named_binary_operator_types_with_control(
+pub(crate) fn named_binary_operator_types(
+    name: &str,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+) -> Result<[ColumnType; 3], SQLError> {
+    named_binary_operator_types_with_control(name, left, right, &ProductionControl::uncontrolled())
+        .map(|types| {
+            types
+                .into_uncontrolled()
+                .expect("ordinary operator types have no reservation")
+        })
+}
+
+pub(crate) fn named_binary_operator_types_with_control(
     name: &str,
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,

@@ -39,6 +39,7 @@ mod gamma;
 mod inference;
 use inference::scalar_type_inner_with_control;
 mod introspection;
+pub(crate) mod json_path;
 mod json_strip;
 mod length;
 mod md5;
@@ -114,6 +115,7 @@ pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
+pub(crate) use operators::named_binary_operator_types;
 #[doc(hidden)]
 pub use operators::{
     binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,

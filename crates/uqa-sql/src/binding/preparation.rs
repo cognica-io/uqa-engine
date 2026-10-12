@@ -15,6 +15,7 @@ mod expression_contexts;
 mod expressions;
 mod fields;
 mod function_calls;
+mod json_operators;
 mod membership;
 mod parameters;
 mod queries;

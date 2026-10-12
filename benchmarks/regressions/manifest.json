@@ -3890,6 +3890,165 @@
       "capability": "Array column identity and collation",
       "workload": "Eight independent table checks use a dropped attribute slot, numeric endpoints, nested reads, inherited and explicit collations and casts of subscript results.",
       "invariant": "Both typed nodes and reconstructed SQL preserve original attribute numbers, integer assignment context, selected collations and cast grouping."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_variadic_calls_preserve_formal_identity_and_effective_argument_targets",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/builtin/tests.rs",
+      "capability": "Typed variadic routine selection",
+      "workload": "Expanded and explicit arrays, named calls, unknowns, rejected types, quotas and both cancellation owners.",
+      "invariant": "Formal routine identity and argument coercion targets remain exact; rejected candidates and failures release every reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_variadic_matching_rejects_missing_wrong_and_implicitly_named_paths",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/builtin/tests.rs",
+      "capability": "Typed variadic routine selection",
+      "workload": "Expanded and explicit arrays, named calls, unknowns, rejected types, quotas and both cancellation owners.",
+      "invariant": "Formal routine identity and argument coercion targets remain exact; rejected candidates and failures release every reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_variadic_matching_and_invocation_release_quota_and_cancellation_failures",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/builtin/tests.rs",
+      "capability": "Typed variadic routine selection",
+      "workload": "Expanded and explicit arrays, named calls, unknowns, rejected types, quotas and both cancellation owners.",
+      "invariant": "Formal routine identity and argument coercion targets remain exact; rejected candidates and failures release every reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_path_normalization_admits_packed_arrays_and_releases_every_partial_owner",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/tests.rs",
+      "capability": "Retained JSON path calls",
+      "workload": "Normalize path arguments under progressively exhausted allowances and both cancellation owners.",
+      "invariant": "Original input payloads and constructed casts/arrays share the original owner; no reservation survives success destruction or failure."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_path_binding_observes_both_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/tests.rs",
+      "capability": "Retained JSON path calls",
+      "workload": "Normalize path arguments under progressively exhausted allowances and both cancellation owners.",
+      "invariant": "Original input payloads and constructed casts/arrays share the original owner; no reservation survives success destruction or failure."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "lexical_json_extraction_preserves_source_under_a_small_output_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/json/production/lexical_access/tests.rs",
+      "capability": "Lexical JSON extraction",
+      "workload": "Select a small child from 32 KiB of ignored JSON under a 1 KiB allowance, then check quota, Unicode diagnostics and cancellation.",
+      "invariant": "Extracted bytes match PostgreSQL while unrelated payloads remain borrowed and all temporary memory is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "lexical_json_errors_and_cancellation_release_every_temporary",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/json/production/lexical_access/tests.rs",
+      "capability": "Lexical JSON extraction",
+      "workload": "Select a small child from 32 KiB of ignored JSON under a 1 KiB allowance, then check quota, Unicode diagnostics and cancellation.",
+      "invariant": "Extracted bytes match PostgreSQL while unrelated payloads remain borrowed and all temporary memory is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_operand_analysis_matches_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/json_operators.rs",
+      "capability": "JSON operand preparation",
+      "workload": "Independent PostgreSQL scalar, NULL and invalid-path operator references.",
+      "invariant": "Complete operand signatures and unknown-input diagnostics are selected before execution can skip the expression."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_operator_selection_retains_only_selected_input_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "JSON operator resolution",
+      "workload": "Selected JSON signatures under a bounded allowance and error paths.",
+      "invariant": "Both operands select the shared PostgreSQL signature and only selected input types survive matching."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_variadic_builtins_preserve_catalog_precedence_and_same_schema_fixed_priority",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/routines/resolution/combined_overloads/tests.rs",
+      "capability": "Routine overload precedence",
+      "workload": "Earlier/later schemas and a fixed declaration sharing a schema with an expanded native variadic routine.",
+      "invariant": "Visible user routines keep PostgreSQL priority and explicit arrays select the native formal declaration."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "json_operators_match_postgresql_inputs_definitions_and_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_operators.rs",
+      "capability": "Persistent JSON extraction",
+      "workload": "174 independent PostgreSQL observations on four providers, followed by executing both reconstructed SQL forms for each retained view.",
+      "invariant": "Operand types, values, names, diagnostics and native/user routine selection agree before and after reopen; emitted view SQL preserves the same results."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invalid_json_path_binding_retains_a_typed_error_instead_of_panicking",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/tests.rs",
+      "capability": "JSON binding diagnostics",
+      "workload": "Bind a JSON path call with a declared Boolean path argument through the infallible scalar-binding adapter.",
+      "invariant": "The call retains PostgreSQL 42883 metadata instead of panicking or silently becoming an executable unbound builtin."
     }
   ]
 }
