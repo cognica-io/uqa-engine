@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod expanded;
+
 #[derive(serde::Deserialize)]
 struct Reference {
     sql: String,

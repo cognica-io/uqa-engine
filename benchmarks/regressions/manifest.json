@@ -3147,7 +3147,7 @@
       ],
       "source": "crates/uqa-sql/src/catalog/events/definition/rules/tests/diagnostics.rs",
       "capability": "Rule condition and action namespaces",
-      "workload": "Twenty-seven PostgreSQL condition/action cases cover unavailable event rows, missing fields, invalid operators, correlated subqueries and local OLD/NEW aliases.",
+      "workload": "Thirty-three PostgreSQL condition/action cases cover unavailable event rows, direct and parenthesized missing fields, invalid operators, correlated subqueries and local OLD/NEW aliases and columns.",
       "invariant": "Lexical condition lookup and final action event validation retain PostgreSQL SQLSTATE, primary text, DETAIL, HINT and diagnostic order without executing expressions."
     },
     {
@@ -3214,6 +3214,19 @@
       "capability": "Runtime trigger field metadata",
       "workload": "The sixteen independent trigger attributes bind real and absent row images through AST restoration, physical lowering and scalar evaluation.",
       "invariant": "Trigger WHEN evaluation and field values remain exact while types and selected implicit collations survive substitution, including NULL inputs."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "expanded_rule_fields_keep_postgresql_event_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations/expanded.rs",
+      "capability": "Expanded event-field identity and scope",
+      "workload": "Eighty independent PostgreSQL VAR observations cover parenthesized event fields, whole-row star expansion and a locally shadowing NEW relation with different collations.",
+      "invariant": "Scope-aware binding retains declared field types and implicit collations through actual and empty rule inputs and AST/plan restoration without replacing local bindings."
     }
   ]
 }

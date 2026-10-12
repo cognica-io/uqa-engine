@@ -1,0 +1,88 @@
+[
+  {
+    "sql": "CREATE RULE local_alias AS ON INSERT TO items DO ALSO INSERT INTO log SELECT q.* FROM (SELECT (NEW).c, (NEW).p, (NEW).plain, (NEW).n FROM (VALUES ('local c'::text COLLATE \"POSIX\", 'local p'::text COLLATE \"C\", NULL::text, 9)) AS NEW(c,p,plain,n)) AS q",
+    "kind": "alias",
+    "variables": [
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "attribute": 1,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "attribute": 2,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  }
+]

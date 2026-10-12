@@ -1,0 +1,56 @@
+[
+  {
+    "sql": "CREATE RULE invalid_insert_c AS ON INSERT TO items DO INSERT INTO log(c) VALUES ((OLD).c)",
+    "error": {
+      "sqlstate": "42P17",
+      "message": "ON INSERT rule cannot use OLD",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE invalid_insert_absent AS ON INSERT TO items DO INSERT INTO log(c) VALUES ((OLD).absent)",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column old.absent does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE local_column_insert AS ON INSERT TO items DO INSERT INTO log(c) SELECT (OLD).c FROM (VALUES ('x'::text)) AS r(OLD)",
+    "error": {
+      "sqlstate": "42809",
+      "message": "column notation .c applied to type text, which is not a composite type",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE invalid_delete_c AS ON DELETE TO items DO INSERT INTO log(c) VALUES ((NEW).c)",
+    "error": {
+      "sqlstate": "42P17",
+      "message": "ON DELETE rule cannot use NEW",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE invalid_delete_absent AS ON DELETE TO items DO INSERT INTO log(c) VALUES ((NEW).absent)",
+    "error": {
+      "sqlstate": "42703",
+      "message": "column new.absent does not exist",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "sql": "CREATE RULE local_column_delete AS ON DELETE TO items DO INSERT INTO log(c) SELECT (NEW).c FROM (VALUES ('x'::text)) AS r(NEW)",
+    "error": {
+      "sqlstate": "42809",
+      "message": "column notation .c applied to type text, which is not a composite type",
+      "detail": null,
+      "hint": null
+    }
+  }
+]

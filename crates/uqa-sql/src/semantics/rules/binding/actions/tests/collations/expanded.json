@@ -1,0 +1,450 @@
+[
+  {
+    "event": "INSERT",
+    "side": "new",
+    "kind": "whole_field",
+    "sql": "CREATE RULE insert_new_whole_field AS ON INSERT TO items DO ALSO INSERT INTO log SELECT (NEW).c, (NEW).p, (NEW).plain, (NEW).n",
+    "variables": [
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "INSERT",
+    "side": "new",
+    "kind": "star",
+    "sql": "CREATE RULE insert_new_star AS ON INSERT TO items DO ALSO INSERT INTO log SELECT NEW.*",
+    "variables": [
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "old",
+    "kind": "whole_field",
+    "sql": "CREATE RULE update_old_whole_field AS ON UPDATE TO items DO ALSO INSERT INTO log SELECT (OLD).c, (OLD).p, (OLD).plain, (OLD).n",
+    "variables": [
+      {
+        "relation": 1,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 1,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 1,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 1,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "old",
+    "kind": "star",
+    "sql": "CREATE RULE update_old_star AS ON UPDATE TO items DO ALSO INSERT INTO log SELECT OLD.*",
+    "variables": [
+      {
+        "relation": 1,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 1,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 1,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 1,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "new",
+    "kind": "whole_field",
+    "sql": "CREATE RULE update_new_whole_field AS ON UPDATE TO items DO ALSO INSERT INTO log SELECT (NEW).c, (NEW).p, (NEW).plain, (NEW).n",
+    "variables": [
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "UPDATE",
+    "side": "new",
+    "kind": "star",
+    "sql": "CREATE RULE update_new_star AS ON UPDATE TO items DO ALSO INSERT INTO log SELECT NEW.*",
+    "variables": [
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "DELETE",
+    "side": "old",
+    "kind": "whole_field",
+    "sql": "CREATE RULE delete_old_whole_field AS ON DELETE TO items DO ALSO INSERT INTO log SELECT (OLD).c, (OLD).p, (OLD).plain, (OLD).n",
+    "variables": [
+      {
+        "relation": 1,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 1,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 1,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 1,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  },
+  {
+    "event": "DELETE",
+    "side": "old",
+    "kind": "star",
+    "sql": "CREATE RULE delete_old_star AS ON DELETE TO items DO ALSO INSERT INTO log SELECT OLD.*",
+    "variables": [
+      {
+        "relation": 1,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 1,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 1,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 1,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      },
+      {
+        "relation": 2,
+        "attribute": 1,
+        "type": 25,
+        "collation": 950
+      },
+      {
+        "relation": 2,
+        "attribute": 2,
+        "type": 25,
+        "collation": 951
+      },
+      {
+        "relation": 2,
+        "attribute": 3,
+        "type": 25,
+        "collation": 100
+      },
+      {
+        "relation": 2,
+        "attribute": 4,
+        "type": 23,
+        "collation": 0
+      }
+    ]
+  }
+]

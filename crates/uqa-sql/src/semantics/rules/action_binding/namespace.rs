@@ -10,6 +10,36 @@ use crate::ast::{Expr, Statement};
 use crate::plpgsql::{ResolvedVariable, VariableResolver};
 use crate::SQLError;
 
+pub(super) fn event_field_reference<'a>(
+    expression: &'a Expr,
+    scope: &super::RuleBindingScope,
+) -> Option<(&'a str, &'a str)> {
+    let Expr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = expression
+    else {
+        return None;
+    };
+    if binding.dispatch != Some(crate::ast::FunctionDispatch::FieldSelect) {
+        return None;
+    }
+    let [row, Expr::Literal(uqa_core::Value::Str(column))] = args.as_slice() else {
+        return None;
+    };
+    let (Expr::Column(qualifier) | Expr::QualifiedStar(qualifier)) = row else {
+        return None;
+    };
+    if !matches!(qualifier.as_str(), "old" | "new")
+        || scope.qualifier_is_shadowed(qualifier)
+        || matches!(row, Expr::Column(_)) && scope.column_is_shadowed(qualifier)
+    {
+        return None;
+    }
+    Some((qualifier, column))
+}
+
 pub(super) fn action_target_qualifier_referenced(
     catalog: &dyn super::RuleSourceCatalog,
     action: &Statement,

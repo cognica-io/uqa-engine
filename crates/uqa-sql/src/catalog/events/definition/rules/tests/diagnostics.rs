@@ -17,8 +17,12 @@ fn rule_event_namespaces_match_postgresql_diagnostics() {
     let catalog = collated_catalog();
     let context = catalog.context();
     let columns = catalog.columns.as_ref().unwrap();
-    let cases: Vec<DiagnosticCase> =
+    let mut cases: Vec<DiagnosticCase> =
         serde_json::from_str(include_str!("diagnostics.json")).unwrap();
+    cases.extend(
+        serde_json::from_str::<Vec<DiagnosticCase>>(include_str!("parenthesized_diagnostics.json"))
+            .unwrap(),
+    );
     let mut mismatches = Vec::new();
     for case in cases {
         let Statement::CreateRule(rule) = crate::compile(&case.sql).unwrap().remove(0) else {

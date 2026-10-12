@@ -315,6 +315,11 @@ fn bind_rule_function_expression(
     scope: &RuleBindingScope,
     context: &RuleBindingContext<'_>,
 ) -> Result<Expr, SQLError> {
+    if let Some((qualifier, column)) = namespace::event_field_reference(expr, scope) {
+        return Ok(resolver
+            .rewrite_qualified(qualifier, column)?
+            .unwrap_or_else(|| Expr::qualified_column(qualifier, column)));
+    }
     let Expr::Func {
         order_syntax,
         name,
