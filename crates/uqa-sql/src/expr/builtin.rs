@@ -244,6 +244,7 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::RandomInt8Range
             | FunctionDispatch::RandomNumericRange
             | FunctionDispatch::ArraySortJson
+            | FunctionDispatch::JsonPath { .. }
             | FunctionDispatch::JsonExtract { .. }
             | FunctionDispatch::Range { .. } => Some(true),
             FunctionDispatch::ArraySubscripts
@@ -386,6 +387,9 @@ pub(super) fn eval_dispatched_builtin_with_control(
             super::numeric_operator::eval_bound_operator_with_control(
                 operator, binding, evaluated, control,
             )
+        }
+        FunctionDispatch::JsonPath { as_text, jsonb } => {
+            super::json::json_path_function_with_control(evaluated, as_text, jsonb, control)
         }
         FunctionDispatch::JsonExtract { as_text, path } => {
             super::json::json_extract_operator_with_control(evaluated, as_text, path, control)

@@ -99,6 +99,12 @@ impl Preparation<'_> {
             ..
         } = expression
         {
+            if let Some(symbol) = binding
+                .dispatch
+                .and_then(|dispatch| dispatch.json_extraction_symbol())
+            {
+                return self.json_extraction(symbol, args, input, subqueries);
+            }
             if let Some(access) = binding.dispatch.and_then(|dispatch| {
                 crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
                     matches!(args[index], ScalarExpr::Literal(Value::Null))

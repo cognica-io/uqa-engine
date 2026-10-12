@@ -123,6 +123,11 @@ pub enum FunctionDispatch {
     ArrayConcat,
     ArrayAppend,
     ArrayPrepend,
+    /// A resolved JSON path function whose final argument is the declared text array.
+    JsonPath {
+        as_text: bool,
+        jsonb: bool,
+    },
     JsonExtract {
         as_text: bool,
         path: bool,
@@ -242,6 +247,22 @@ impl FunctionDispatch {
             Self::ArrayConcat => "pg_catalog.array_cat",
             Self::ArrayAppend => "pg_catalog.array_append",
             Self::ArrayPrepend => "pg_catalog.array_prepend",
+            Self::JsonPath {
+                as_text: false,
+                jsonb: false,
+            } => "pg_catalog.json_extract_path",
+            Self::JsonPath {
+                as_text: true,
+                jsonb: false,
+            } => "pg_catalog.json_extract_path_text",
+            Self::JsonPath {
+                as_text: false,
+                jsonb: true,
+            } => "pg_catalog.jsonb_extract_path",
+            Self::JsonPath {
+                as_text: true,
+                jsonb: true,
+            } => "pg_catalog.jsonb_extract_path_text",
             Self::JsonExtract { as_text: false, .. } => "JSON extraction operator",
             Self::JsonExtract { as_text: true, .. } => "JSON text extraction operator",
             Self::Range { operation, .. } => operation.label(),
@@ -252,6 +273,30 @@ impl FunctionDispatch {
     #[must_use]
     pub const fn is_call_argument_marker(self) -> bool {
         matches!(self, Self::NamedArgument | Self::VariadicArgument)
+    }
+
+    /// The SQL spelling of a retained JSON extraction operator, independent of its diagnostic label.
+    #[must_use]
+    pub const fn json_extraction_symbol(self) -> Option<&'static str> {
+        match self {
+            Self::JsonExtract {
+                as_text: false,
+                path: false,
+            } => Some("->"),
+            Self::JsonExtract {
+                as_text: true,
+                path: false,
+            } => Some("->>"),
+            Self::JsonExtract {
+                as_text: false,
+                path: true,
+            } => Some("#>"),
+            Self::JsonExtract {
+                as_text: true,
+                path: true,
+            } => Some("#>>"),
+            _ => None,
+        }
     }
 
     /// Decode the compiler-private function spellings written into durable expressions by releases through 0.1.6. This is a catalog migration primitive, never a SQL routine lookup path.

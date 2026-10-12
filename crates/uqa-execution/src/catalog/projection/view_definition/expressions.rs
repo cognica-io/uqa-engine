@@ -15,6 +15,7 @@ use uqa_sql::plan::QueryPlan;
 
 use super::{quote_ident, render_column, Deparser, SQLError, Scope};
 
+mod operators;
 #[cfg(test)]
 mod tests;
 
@@ -392,35 +393,6 @@ impl Deparser<'_> {
         )))
     }
 
-    fn numeric_operator(
-        &self,
-        operator: uqa_sql::ast::NumericOperator,
-        args: &[ScalarExpr],
-        scope: &Scope,
-        subqueries: &[QueryPlan],
-    ) -> Result<String, SQLError> {
-        let priority = numeric_operator_precedence(operator);
-        let text = match args {
-            [argument] if operator.arity() == 1 => format!(
-                "{} {}",
-                operator.symbol(),
-                self.operand(argument, priority, false, scope, subqueries)?
-            ),
-            [left, right] if operator.arity() == 2 => format!(
-                "{} {} {}",
-                self.operand(left, priority, false, scope, subqueries)?,
-                operator.symbol(),
-                self.operand(right, priority, true, scope, subqueries)?
-            ),
-            _ => {
-                return Err(SQLError::Internal(
-                    "invalid numeric operator operands".into(),
-                ))
-            }
-        };
-        Ok(self.parenthesize(text))
-    }
-
     fn boolean_test(
         &self,
         args: &[ScalarExpr],
@@ -461,6 +433,12 @@ impl Deparser<'_> {
             binding.and_then(|binding| binding.dispatch)
         {
             return self.numeric_operator(operator, args, scope, subqueries);
+        }
+        if let Some(symbol) = binding
+            .and_then(|binding| binding.dispatch)
+            .and_then(FunctionDispatch::json_extraction_symbol)
+        {
+            return self.json_operator(symbol, args, scope, subqueries);
         }
         match binding.and_then(|binding| binding.dispatch) {
             Some(FunctionDispatch::BooleanTest(test)) => {
@@ -511,6 +489,12 @@ impl Deparser<'_> {
             }
         }
         let name = self.function_name(name, binding)?;
+        if matches!(
+            binding.and_then(|binding| binding.dispatch),
+            Some(FunctionDispatch::JsonPath { .. })
+        ) {
+            return self.json_path_call(&name, args, scope, subqueries);
+        }
         let arguments = args
             .iter()
             .enumerate()
@@ -888,7 +872,7 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         {
             35
         }
-        // `isSimpleNode` never counts a `ScalarArrayOpExpr` as simple, so it keeps its parentheses as any operand.
+        // `isSimpleNode` retains operand parentheses around quantified comparisons and non-arithmetic JSON operators.
         ScalarExpr::Func {
             binding: Some(binding),
             ..
@@ -897,6 +881,7 @@ fn precedence(expression: &ScalarExpr) -> u8 {
             Some(
                 uqa_sql::ast::FunctionDispatch::AnyOperator
                     | uqa_sql::ast::FunctionDispatch::AllOperator
+                    | uqa_sql::ast::FunctionDispatch::JsonExtract { .. }
             )
         ) =>
         {
@@ -976,6 +961,7 @@ pub(super) fn prints_as_call(
                 | FunctionDispatch::ArraySlices
                 | FunctionDispatch::ArraySlicesWithBounds(_)
                 | FunctionDispatch::NumericOperator(_)
+                | FunctionDispatch::JsonExtract { .. }
                 | FunctionDispatch::Collate { .. }
         )
     ) || (args.len() == 2 && binary_function_operator(name).is_some());

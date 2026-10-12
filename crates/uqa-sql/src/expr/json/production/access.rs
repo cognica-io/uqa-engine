@@ -27,6 +27,29 @@ pub(super) fn extract_path(
     extract(&args[0], &args[1..], as_text, jsonb, None, control)
 }
 
+pub(in crate::expr) fn json_path_function_with_control(
+    args: &[Value],
+    as_text: bool,
+    jsonb: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
+    let [input, path] = args else {
+        return Err(SQLError::Internal(
+            "JSON path call requires its declared array argument".into(),
+        ));
+    };
+    if matches!(input, Value::Null) || matches!(path, Value::Null) {
+        return inline(Value::Null, control);
+    }
+    let Value::Array(keys) = path else {
+        return Err(SQLError::Internal(
+            "JSON path call lost its text array".into(),
+        ));
+    };
+    extract_array(input, keys, as_text, jsonb, control)
+}
+
 pub(in crate::expr) fn json_extract_operator_with_control(
     args: &[Value],
     as_text: bool,
@@ -49,7 +72,7 @@ pub(in crate::expr) fn json_extract_operator_with_control(
                 "JSON path cast must return an array".into(),
             ));
         };
-        extract(input, keys.elements(), as_text, false, None, control)
+        extract_array(input, keys, as_text, false, control)
     } else {
         extract(
             input,
@@ -62,19 +85,43 @@ pub(in crate::expr) fn json_extract_operator_with_control(
     }
 }
 
-fn extract(
+fn extract_array(
     value: &Value,
-    keys: &[Value],
+    keys: &uqa_core::ArrayValue,
+    as_text: bool,
+    jsonb: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let mut flattened = ProductionVec::new(*control);
+    let mut cursor = keys.elements_with_control(control)?;
+    while let Some(key) = cursor.next_element()? {
+        if matches!(key, Value::Null) {
+            return inline(Value::Null, control);
+        }
+        flattened.push_copy(key)?;
+    }
+    let flattened = flattened.finish()?;
+    extract(value, &flattened, as_text, jsonb, None, control)
+}
+
+fn extract<K: std::borrow::Borrow<Value>>(
+    value: &Value,
+    keys: &[K],
     as_text: bool,
     jsonb: bool,
     array_index: Option<bool>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
-    if matches!(value, Value::Null) || keys.iter().any(|key| matches!(key, Value::Null)) {
+    if matches!(value, Value::Null) || keys.iter().any(|key| matches!(key.borrow(), Value::Null)) {
         return inline(Value::Null, control);
     }
     let jsonb = jsonb || matches!(value, Value::JsonB(_));
+    if let Value::Json(text) = value {
+        if !jsonb {
+            return super::lexical_access::extract(text, keys, as_text, array_index, control);
+        }
+    }
     let root = input(value, control)?;
     if matches!(
         (&root, array_index),
@@ -84,7 +131,7 @@ fn extract(
     }
     let mut current = &root;
     for key in keys {
-        let key = value_to_string_with_control(key, control)?;
+        let key = value_to_string_with_control(key.borrow(), control)?;
         let Some(next) = child(current, &key, control)? else {
             return inline(Value::Null, control);
         };

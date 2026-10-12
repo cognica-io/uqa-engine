@@ -383,6 +383,14 @@ fn query_plan_sources_have_legacy_routine_identity(plan: &QueryPlan) -> bool {
 }
 
 pub fn query_plan_has_legacy_routine_identity(plan: &QueryPlan) -> bool {
+    query_plan_has_legacy_routine_identity_with_types(plan, None)
+}
+
+/// Preserve unbound host callbacks when their catalog context is available during restoration.
+pub fn query_plan_has_legacy_routine_identity_with_types(
+    plan: &QueryPlan,
+    types: Option<&dyn crate::FunctionTypeResolver>,
+) -> bool {
     let mut scalar_plan = plan.clone();
     let mut legacy = false;
     scalar_plan.rewrite_scalar_expressions(&mut |expression| {
@@ -397,6 +405,8 @@ pub fn query_plan_has_legacy_routine_identity(plan: &QueryPlan) -> bool {
             legacy |= binding
                 .as_ref()
                 .is_some_and(function_binding_needs_object_identity);
+            legacy |=
+                crate::type_resolution::json_path::requires_binding(name, binding.as_ref(), types);
             // Legacy ordered-set nodes lack the selected combined signature and
             // written syntax; restore both in the existing initial-open transaction.
             legacy |= *order_syntax == crate::ast::FunctionOrderSyntax::Legacy

@@ -39,6 +39,7 @@ mod gamma;
 mod inference;
 use inference::scalar_type_inner_with_control;
 mod introspection;
+pub(crate) mod json_path;
 mod json_strip;
 mod length;
 mod md5;
@@ -56,6 +57,7 @@ pub use operators::comparison::{
     comparison_key_is_constant, type_supports_hashing, type_supports_ordering, ComparisonKeySupport,
 };
 mod overload_resolution;
+pub(crate) use overload_resolution::resolve_local_builtin_call_with_control;
 mod qualified_column;
 mod range;
 mod range_offsets;
@@ -113,6 +115,7 @@ pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
+pub(crate) use operators::named_binary_operator_types;
 #[doc(hidden)]
 pub use operators::{
     binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
@@ -125,11 +128,11 @@ pub use operators::{
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
-    canonical_routine_type_name, function_resolution_error, match_builtin_function_overload,
-    match_function_signature, parse_enum_type_identity, rank_function_matches,
-    resolve_local_builtin_overload, routine_type_accepts_implicit_cast, routine_type_category,
-    routine_type_is_preferred, FunctionParameterDescriptor, MatchedBuiltinFunction,
-    MatchedFunctionSignature, RankedFunctionMatch,
+    canonical_routine_type_name, function_resolution_error, match_builtin_function_call,
+    match_builtin_function_overload, match_function_signature, parse_enum_type_identity,
+    rank_function_matches, resolve_local_builtin_overload, routine_type_accepts_implicit_cast,
+    routine_type_category, routine_type_is_preferred, FunctionParameterDescriptor,
+    MatchedBuiltinFunction, MatchedFunctionSignature, RankedFunctionMatch,
 };
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
@@ -250,6 +253,8 @@ pub trait FunctionTypeResolver: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinFunctionOverload {
+    /// The final declared array parameter accepts expanded elements or an explicit VARIADIC array.
+    pub variadic: bool,
     pub name: String,
     pub argument_names: Vec<Option<String>>,
     pub argument_types: Vec<ColumnType>,

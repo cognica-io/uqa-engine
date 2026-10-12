@@ -6,6 +6,8 @@
 
 //! Local overload resolution borrows immutable declarations and owns matching workspace plus the selected binding.
 
+mod variadic;
+
 use super::{
     bound_function_resolution_error, candidates::Candidates,
     canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
@@ -14,7 +16,7 @@ use super::{
 };
 use crate::{
     ast::FunctionBinding,
-    type_resolution::{BuiltinFunctionOverload, ResolvedFunctionOverload},
+    type_resolution::{BuiltinFunctionOverload, ResolvedFunctionOverload, RoutineCallDescriptor},
     ColumnType, SQLError,
 };
 use uqa_core::{
@@ -88,8 +90,7 @@ fn binding_matches(
 
 fn match_builtin(
     builtin: &BuiltinFunctionOverload,
-    argument_names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
+    call: RoutineCallDescriptor<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<MatchedFunctionSignature>>, ValueRetentionError> {
     if builtin.default_arguments > builtin.argument_types.len()
@@ -97,7 +98,7 @@ fn match_builtin(
     {
         return Ok(None);
     }
-    match_signature_with_control(builtin, argument_names, argument_types, control)
+    variadic::match_call(builtin, call, control)
 }
 
 #[must_use]
@@ -106,15 +107,25 @@ pub fn match_builtin_function_overload(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> Option<MatchedBuiltinFunction> {
-    let matched = match_builtin(
-        &builtin,
-        argument_names,
-        argument_types,
-        &ProductionControl::uncontrolled(),
+    match_builtin_function_call(
+        builtin,
+        RoutineCallDescriptor {
+            argument_names,
+            argument_types,
+            explicit_variadic: false,
+        },
     )
-    .expect("ordinary signature matching cannot be cancelled or limited")?
-    .into_uncontrolled()
-    .expect("ordinary matching workspace has no reservation");
+}
+
+#[must_use]
+pub fn match_builtin_function_call(
+    builtin: BuiltinFunctionOverload,
+    call: RoutineCallDescriptor<'_>,
+) -> Option<MatchedBuiltinFunction> {
+    let matched = match_builtin(&builtin, call, &ProductionControl::uncontrolled())
+        .expect("ordinary signature matching cannot be cancelled or limited")?
+        .into_uncontrolled()
+        .expect("ordinary matching workspace has no reservation");
     Some(MatchedBuiltinFunction {
         overload: builtin,
         argument_types: matched.argument_types,
@@ -155,15 +166,28 @@ pub(in crate::type_resolution) fn resolve_local_builtin_overload_with_control(
     builtins: &[BuiltinFunctionOverload],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ResolvedFunctionOverload>, SQLError> {
-    let selected = select_local_builtin_with_control(
+    resolve_local_builtin_call_with_control(
         name,
         binding,
-        argument_names,
-        argument_types,
+        RoutineCallDescriptor {
+            argument_names,
+            argument_types,
+            explicit_variadic: false,
+        },
         builtins,
         control,
-    )?;
-    resolved(selected, argument_types, control)
+    )
+}
+
+pub(crate) fn resolve_local_builtin_call_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    call: RoutineCallDescriptor<'_>,
+    builtins: &[BuiltinFunctionOverload],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ResolvedFunctionOverload>, SQLError> {
+    let selected = select_call_with_control(name, binding, call, builtins, control)?;
+    resolved(selected, call.argument_types, control)
 }
 
 pub(in crate::type_resolution) fn select_local_builtin_with_control<'a>(
@@ -174,6 +198,31 @@ pub(in crate::type_resolution) fn select_local_builtin_with_control<'a>(
     builtins: &'a [BuiltinFunctionOverload],
     control: &ProductionControl<'_>,
 ) -> Result<BorrowedMatch<'a>, SQLError> {
+    select_call_with_control(
+        name,
+        binding,
+        RoutineCallDescriptor {
+            argument_names,
+            argument_types,
+            explicit_variadic: false,
+        },
+        builtins,
+        control,
+    )
+}
+
+fn select_call_with_control<'a>(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    call: RoutineCallDescriptor<'_>,
+    builtins: &'a [BuiltinFunctionOverload],
+    control: &ProductionControl<'_>,
+) -> Result<BorrowedMatch<'a>, SQLError> {
+    let RoutineCallDescriptor {
+        argument_names,
+        argument_types,
+        explicit_variadic,
+    } = call;
     control.check()?;
     if let Some(binding) = binding {
         if !binding.builtin {
@@ -181,11 +230,12 @@ pub(in crate::type_resolution) fn select_local_builtin_with_control<'a>(
         }
         for builtin in builtins {
             if binding_matches(builtin, binding, control)? {
-                let matched = match_builtin(builtin, argument_names, argument_types, control)?
+                let matched = match_builtin(builtin, call, control)?
                     .ok_or_else(|| bound_function_resolution_error(binding))?;
                 return Ok(BorrowedMatch {
                     builtin,
                     signature: matched,
+                    explicit_variadic,
                 });
             }
         }
@@ -195,10 +245,12 @@ pub(in crate::type_resolution) fn select_local_builtin_with_control<'a>(
     for builtin in builtins {
         control.check()?;
         if builtin_name_matches(name, &builtin.name) {
-            if let Some(signature) =
-                match_builtin(builtin, argument_names, argument_types, control)?
-            {
-                candidates.push(BorrowedMatch { builtin, signature })?;
+            if let Some(signature) = match_builtin(builtin, call, control)? {
+                candidates.push(BorrowedMatch {
+                    builtin,
+                    signature,
+                    explicit_variadic,
+                })?;
             }
         }
     }
@@ -233,6 +285,7 @@ pub(in crate::type_resolution) fn select_local_builtin_with_control<'a>(
 pub(in crate::type_resolution) struct BorrowedMatch<'a> {
     pub(in crate::type_resolution) builtin: &'a BuiltinFunctionOverload,
     signature: Produced<MatchedFunctionSignature>,
+    explicit_variadic: bool,
 }
 
 impl RankedFunctionMatch for BorrowedMatch<'_> {
@@ -255,6 +308,8 @@ fn resolved(
     argument_types: &[Option<ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ResolvedFunctionOverload>, SQLError> {
+    let invocation = variadic::invocation(&matched, argument_types, control)?;
+    let (invocation, invocation_memory) = invocation.into_parts();
     let name = control.copy_text(&matched.builtin.name)?;
     let return_type = matched.builtin.return_type.clone_with_control(control)?;
     let mut types = ProductionVec::new(*control);
@@ -275,7 +330,7 @@ fn resolved(
                     argument_types: types,
                     builtin: true,
                     dispatch: None,
-                    invocation: None,
+                    invocation,
                     composite_field: None,
                     resolution_error: None,
                 },
@@ -285,7 +340,10 @@ fn resolved(
                 preferred_matches: matched.signature.preferred_matches,
                 precedes_pg_catalog: false,
             },
-            control.combine(name_memory, control.combine(return_memory, types_memory)),
+            control.combine(
+                invocation_memory,
+                control.combine(name_memory, control.combine(return_memory, types_memory)),
+            ),
         )
         .map_err(Into::into)
 }

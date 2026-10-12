@@ -169,6 +169,7 @@ fn prefix_candidate(
     control
         .finish(
             BuiltinFunctionOverload {
+                variadic: false,
                 name,
                 argument_names,
                 argument_types,

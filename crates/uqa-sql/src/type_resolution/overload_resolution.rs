@@ -227,9 +227,10 @@ impl RankedFunctionMatch for MatchedBuiltinFunction {
 }
 
 mod builtin;
+pub(crate) use builtin::resolve_local_builtin_call_with_control;
 pub use builtin::{
-    builtin_binding_matches, builtin_name_matches, match_builtin_function_overload,
-    resolve_local_builtin_overload,
+    builtin_binding_matches, builtin_name_matches, match_builtin_function_call,
+    match_builtin_function_overload, resolve_local_builtin_overload,
 };
 pub(super) use builtin::{
     resolve_local_builtin_overload_with_control, select_local_builtin_with_control,

@@ -19,6 +19,9 @@ pub use numeric::{
     numeric_operator_types, numeric_operator_types_with_control, NumericOperatorTypes,
 };
 pub use resolution::{binary_operator_types, binary_operator_types_with_control};
+pub(crate) use resolution::{
+    named_binary_operator_types, named_binary_operator_types_with_control,
+};
 
 #[derive(Debug, Clone)]
 pub struct UnaryOperatorCatalogEntry {

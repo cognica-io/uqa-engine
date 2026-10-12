@@ -275,6 +275,24 @@ SELECT ('{"query":{}}'::jsonb -> 'query') = '{}'::jsonb AS matches,
 
 The results are `true`, `true`, `true`, SQL NULL, JSONB `7` and text `UQA`.
 
+The selected operator determines both operand types before execution: field keys are `text`, positional keys are `integer`, and paths are `text[]`. Applicable implicit casts, including `smallint` to `integer` and `varchar[]` to `text[]`, follow the shared operator rules. A `bigint` or Boolean key, an integer-array path or an explicitly typed scalar-text path is not accepted merely because a value is NULL or the relation is empty. Unknown path literals are read as arrays during analysis. Textual `json` extraction preserves the selected value's original spelling and internal whitespace; `jsonb` uses canonical output. Object extraction selects the last matching duplicate key, and text extraction decodes selected strings.
+
+### JSON path functions
+
+`json_extract_path(from_json json, VARIADIC path_elems text[])` returns `json`, and `jsonb_extract_path(from_json jsonb, VARIADIC path_elems text[])` returns `jsonb`. Their `_text` variants accept the same arguments and return `text`.
+
+Supply one or more separate text path elements, or one explicit `VARIADIC` array. An explicit array can be empty and multidimensional; its elements are visited in row-major order. An empty path selects the input root. Named arguments require explicit `VARIADIC`, using `from_json` and `path_elems`. Ordinary routine lookup, including implicit `pg_catalog` and earlier explicitly listed schemas, determines whether a native or user-defined overload is selected.
+
+All four functions are strict, immutable and parallel safe and do not change database state. A NULL input, NULL path array, NULL path element or missing path produces SQL NULL. The `_text` forms also convert JSON null to SQL NULL. Input and path arguments must match their declared types through PostgreSQL's implicit conversions; passing the other JSON storage type, a Boolean path element, an integer array or an array without `VARIADIC` fails function resolution. Malformed unknown JSON is rejected during input analysis. Textual extraction that requires an embedded `\u0000` character reports `22P05` with PostgreSQL's Unicode diagnostic.
+
+```sql execute
+SELECT json_extract_path('{"a" : [10, 20]}', 'a') AS original_json,
+       jsonb_extract_path_text(from_json => '{"a":[10,20]}',
+                               VARIADIC path_elems => ARRAY['a','1']) AS selected_text;
+```
+
+The results are JSON `[10, 20]` and text `20`. Stored views retain the selected declaration and explicit array argument, and reconstructed SQL can be executed with the same result after reopening.
+
 ### Stripping JSON nulls
 
 `json_strip_nulls(target json [, strip_in_arrays boolean DEFAULT false]) -> json` and `jsonb_strip_nulls(target jsonb [, strip_in_arrays boolean DEFAULT false]) -> jsonb` recursively remove object fields whose value is JSON null. The optional flag retains null array elements when omitted or `false` and removes them when `true`; `target` and `strip_in_arrays` support named notation in declaration-independent order. Both functions are strict, immutable, and parallel safe, do not change database state, preserve the input base return type, and accept domains over their declared argument types. Textual `json` results compact insignificant whitespace while preserving object order, duplicate keys, and numeric lexemes and decoding string escapes; `jsonb` results use normal binary-JSON key and numeric canonicalization. Calls with explicit `text`, the other JSON storage type, a non-Boolean flag, an unknown argument name, or an unsupported arity fail during overload resolution, while malformed unknown JSON input reports invalid JSON syntax.

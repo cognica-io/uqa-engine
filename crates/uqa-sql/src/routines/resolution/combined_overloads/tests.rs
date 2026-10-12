@@ -101,11 +101,74 @@ impl RoutineOverloadCatalog for Catalog {
 
 fn md5() -> BuiltinFunctionOverload {
     BuiltinFunctionOverload {
+        variadic: false,
         name: "pg_catalog.md5".into(),
         argument_names: vec![None],
         argument_types: vec![ColumnType::Text],
         default_arguments: 0,
         return_type: ColumnType::Text,
+    }
+}
+
+#[test]
+fn typed_variadic_builtins_preserve_catalog_precedence_and_same_schema_fixed_priority() {
+    let builtins = [BuiltinFunctionOverload {
+        variadic: true,
+        name: "pg_catalog.jsonb_extract_path".into(),
+        argument_names: vec![Some("from_json".into()), Some("path_elems".into())],
+        argument_types: vec![
+            ColumnType::JsonB,
+            ColumnType::Array(Box::new(ColumnType::Text)),
+        ],
+        default_arguments: 0,
+        return_type: ColumnType::JsonB,
+    }];
+    for (schema, path, builtin) in [
+        ("pg_catalog", vec!["pg_catalog", "public"], false),
+        ("app", vec!["app", "pg_catalog"], false),
+        ("app", vec!["pg_catalog", "app"], true),
+    ] {
+        let declaration = format!("CREATE FUNCTION {schema}.jsonb_extract_path(jsonb,text) RETURNS text LANGUAGE SQL RETURN 'fixed'");
+        let catalog = Catalog::new(&[&declaration], &path);
+        let resolver = RoutineOverloadContext { catalog: &catalog };
+        let selected = resolve(
+            &resolver,
+            "jsonb_extract_path",
+            None,
+            &[None, None],
+            &[Some(ColumnType::JsonB), Some(ColumnType::Text)],
+            false,
+            &builtins,
+        )
+        .unwrap();
+        assert_eq!(selected.binding.builtin, builtin, "{schema} {path:?}");
+        assert_eq!(
+            selected.return_type,
+            if builtin {
+                ColumnType::JsonB
+            } else {
+                ColumnType::Text
+            }
+        );
+        let selected = resolve(
+            &resolver,
+            "jsonb_extract_path",
+            None,
+            &[None, None],
+            &[
+                Some(ColumnType::JsonB),
+                Some(ColumnType::Array(Box::new(ColumnType::Text))),
+            ],
+            true,
+            &builtins,
+        )
+        .unwrap();
+        assert!(selected.binding.builtin);
+        assert_eq!(selected.binding.argument_types, ["jsonb", "text[]"]);
+        assert!(matches!(
+            selected.binding.invocation.unwrap().variadic_mode,
+            crate::ast::RoutineVariadicMode::Explicit { parameter_index: 1 }
+        ));
     }
 }
 
@@ -289,6 +352,7 @@ fn concrete_sql_overload_wins_over_polymorphic_builtin_without_false_exact_match
         &["pg_catalog", "app"],
     );
     let builtins = [BuiltinFunctionOverload {
+        variadic: false,
         name: "pg_catalog.mode".into(),
         argument_names: vec![None],
         argument_types: vec![ColumnType::Named("anyelement".into())],

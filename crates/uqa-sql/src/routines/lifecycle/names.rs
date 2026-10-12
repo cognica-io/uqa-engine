@@ -52,7 +52,10 @@ pub fn routine_lookup_keys(
         ]);
     }
     let current_user = catalog.current_role();
-    let search_path = catalog.search_path();
+    let mut search_path = catalog.search_path();
+    if !search_path.iter().any(|schema| schema == "pg_catalog") {
+        search_path.insert(0, "pg_catalog".into());
+    }
     Ok(search_path
         .into_iter()
         .filter(|schema| {
@@ -68,21 +71,7 @@ pub fn routine_lookup_keys_with_builtins(
     catalog: &dyn RoutineNameCatalog,
     name: &str,
 ) -> Result<Vec<String>, SQLError> {
-    let mut keys = routine_lookup_keys(catalog, name)?;
-    let (schema, local) = RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
-    if schema.is_none()
-        && catalog.schema_has_usage("pg_catalog", &catalog.current_role())
-        && !catalog
-            .search_path()
-            .iter()
-            .any(|schema| schema == "pg_catalog")
-    {
-        keys.insert(
-            0,
-            RelationIdentity::new("pg_catalog", local).qualified_name(),
-        );
-    }
-    Ok(keys)
+    routine_lookup_keys(catalog, name)
 }
 
 /// `LookupFuncName` matches declared input OIDs exactly, ignores procedures, and does not expand defaults or variadics.

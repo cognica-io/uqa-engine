@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::ast::{ColumnType, FunctionBinding, FunctionReturns};
 use crate::type_resolution::{
-    builtin_binding_matches, builtin_name_matches, match_builtin_function_overload,
+    builtin_binding_matches, builtin_name_matches, match_builtin_function_call,
     rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver, RankedFunctionMatch,
     ResolvedFunctionOverload, RoutineSignatureMatchError,
 };
@@ -199,7 +199,7 @@ fn resolve_bound(
         request.explicit_variadic,
     )
     .ok_or_else(|| bound_function_resolution_error(binding))?;
-    let mut resolved = resolved_builtin_overload(builtin.clone(), request.argument_types);
+    let mut resolved = resolved_builtin_overload(builtin, request)?;
     resolved.exact_matches = matched.exact_matches;
     resolved.preferred_matches = matched.preferred_matches;
     Ok(resolved)
@@ -225,7 +225,12 @@ fn resolve_candidates(
             )
         })
         .collect::<Vec<_>>();
-    apply_catalog_shadowing(request.resolver, &mut candidates, &mut builtin_candidates);
+    apply_catalog_shadowing(
+        request.resolver,
+        &mut candidates,
+        &mut builtin_candidates,
+        request.explicit_variadic,
+    );
     candidates.extend(builtin_candidates);
     if candidates.is_empty() {
         if let Some(error) = match_error {
@@ -301,17 +306,26 @@ fn apply_catalog_shadowing(
     resolver: &RoutineOverloadContext<'_>,
     user_candidates: &mut Vec<FunctionMatch>,
     builtin_candidates: &mut Vec<FunctionMatch>,
+    explicit_variadic: bool,
 ) {
     let builtin_signatures = builtin_candidates
         .iter()
         .map(|candidate| candidate.argument_types.clone())
         .collect::<Vec<_>>();
+    let precedes_builtin = |matched: &StaticFunctionMatch| {
+        resolver.user_function_precedes_pg_catalog(&matched.function.def.name)
+            || !explicit_variadic
+                && matched.function.def.name.starts_with("pg_catalog.")
+                && matches!(matched.invocation.variadic_mode, crate::ast::RoutineVariadicMode::None)
+                && builtin_candidates.iter().any(|candidate| {
+                    candidate.argument_types == matched.argument_types
+                        && matches!(&candidate.target, FunctionTarget::Builtin(builtin) if builtin.variadic)
+                })
+    };
     let user_signatures_preceding_pg_catalog = user_candidates
         .iter()
         .filter_map(|candidate| match &candidate.target {
-            FunctionTarget::User(matched)
-                if resolver.user_function_precedes_pg_catalog(&matched.function.def.name) =>
-            {
+            FunctionTarget::User(matched) if precedes_builtin(matched) => {
                 Some(candidate.argument_types.clone())
             }
             _ => None,
@@ -321,10 +335,10 @@ fn apply_catalog_shadowing(
         !user_signatures_preceding_pg_catalog.contains(&candidate.argument_types)
     });
     user_candidates.retain(|candidate| {
-        let FunctionTarget::User(matched) = &candidate.target else {
+        let FunctionTarget::User(_) = &candidate.target else {
             return true;
         };
-        resolver.user_function_precedes_pg_catalog(&matched.function.def.name)
+        user_signatures_preceding_pg_catalog.contains(&candidate.argument_types)
             || !builtin_signatures.contains(&candidate.argument_types)
     });
 }
@@ -376,7 +390,7 @@ fn resolve_selected_candidate(
                 .user_function_precedes_pg_catalog(&matched.function.def.name),
         }),
         FunctionTarget::Builtin(builtin) => {
-            let mut resolved = resolved_builtin_overload(builtin, request.argument_types);
+            let mut resolved = resolved_builtin_overload(&builtin, request)?;
             resolved.exact_matches = selected.exact_matches;
             resolved.preferred_matches = selected.preferred_matches;
             Ok(resolved)
@@ -403,10 +417,14 @@ fn builtin_function_match(
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
 ) -> Option<FunctionMatch> {
-    if explicit_variadic && argument_names.iter().any(Option::is_some) {
-        return None;
-    }
-    let matched = match_builtin_function_overload(builtin, argument_names, argument_types)?;
+    let matched = match_builtin_function_call(
+        builtin,
+        crate::type_resolution::RoutineCallDescriptor {
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        },
+    )?;
     Some(FunctionMatch {
         target: FunctionTarget::Builtin(matched.overload),
         argument_types: matched.argument_types,
@@ -417,30 +435,25 @@ fn builtin_function_match(
 }
 
 fn resolved_builtin_overload(
-    builtin: BuiltinFunctionOverload,
-    argument_types: &[Option<ColumnType>],
-) -> ResolvedFunctionOverload {
-    ResolvedFunctionOverload {
-        binding: FunctionBinding {
-            object_id: None,
-            name: builtin.name,
-            argument_types: builtin
-                .argument_types
-                .iter()
-                .map(ColumnType::sql_name)
-                .collect(),
-            builtin: true,
-            dispatch: None,
-            invocation: None,
-            composite_field: None,
-            resolution_error: None,
+    builtin: &BuiltinFunctionOverload,
+    request: &ResolutionRequest<'_>,
+) -> Result<ResolvedFunctionOverload, SQLError> {
+    crate::type_resolution::resolve_local_builtin_call_with_control(
+        &builtin.name,
+        None,
+        crate::type_resolution::RoutineCallDescriptor {
+            argument_names: request.argument_names,
+            argument_types: request.argument_types,
+            explicit_variadic: request.explicit_variadic,
         },
-        return_type: builtin.return_type,
-        exact_matches: 0,
-        known_arguments: argument_types.iter().flatten().count(),
-        preferred_matches: 0,
-        precedes_pg_catalog: false,
-    }
+        std::slice::from_ref(builtin),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|selected| {
+        selected
+            .into_uncontrolled()
+            .expect("ordinary builtin resolution has no reservation")
+    })
 }
 
 fn bound_function_resolution_error(binding: &FunctionBinding) -> SQLError {

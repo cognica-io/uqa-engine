@@ -913,3 +913,5 @@ pub mod stored_view;
 pub mod errors;
 
 pub mod sequence_functions;
+
+pub mod json_path;

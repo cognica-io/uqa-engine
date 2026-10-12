@@ -17,6 +17,18 @@ pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
 ];
 
 pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
+    ("#>", "json", "_text", "json", 3966, 3951),
+    ("#>", "jsonb", "_text", "jsonb", 3213, 3217),
+    ("#>>", "json", "_text", "text", 3967, 3953),
+    ("#>>", "jsonb", "_text", "text", 3206, 3940),
+    ("->", "json", "int4", "json", 3964, 3949),
+    ("->", "json", "text", "json", 3962, 3947),
+    ("->", "jsonb", "int4", "jsonb", 3212, 3215),
+    ("->", "jsonb", "text", "jsonb", 3211, 3478),
+    ("->>", "json", "int4", "text", 3965, 3950),
+    ("->>", "json", "text", "text", 3963, 3948),
+    ("->>", "jsonb", "int4", "text", 3481, 3216),
+    ("->>", "jsonb", "text", "text", 3477, 3214),
     ("%", "int2", "int2", "int2", 529, 155),
     ("%", "int4", "int4", "int4", 530, 156),
     ("%", "int8", "int8", "int8", 439, 945),

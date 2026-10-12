@@ -14,9 +14,7 @@ use crate::type_resolution::{
 use crate::{
     ast::FunctionBinding, schema::ScalarTypeSchema, ColumnType, SQLError, SQLParam, ScalarExpr,
 };
-use uqa_core::memory::{
-    MemoryReservation, Produced, ProductionControl, ProductionString, ProductionVec,
-};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl, ProductionVec};
 
 pub(super) fn bind_local_call(
     name: String,
@@ -97,20 +95,13 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
     ) {
         Ok(selected) => selected,
         Err(error) if error.sqlstate() == Some("42883") => {
-            let signature = unresolved_call_signature_with_control(
-                &call.name,
+            call::retain_undefined_call(
+                call,
+                memory,
                 &signature.names,
                 &signature.effective,
                 control,
             )?;
-            let name = control.copy_text(&call.name)?;
-            let error_memory = control.reserve(size_of::<crate::ast::FunctionResolutionError>())?;
-            let (signature, extra) = signature.into_parts();
-            *memory = control.combine(memory.take(), extra);
-            let (name, extra) = name.into_parts();
-            *memory = control.combine(memory.take(), extra);
-            *memory = control.combine(memory.take(), error_memory);
-            call.binding = Some(FunctionBinding::undefined_function(name, signature));
             return Ok(());
         }
         Err(error) => return optional_error(error, control),
@@ -208,33 +199,6 @@ fn optional<T>(
     };
     let (value, memory) = value.into_parts();
     Ok(control.finish(Some(value), memory)?)
-}
-
-pub(super) fn unresolved_call_signature_with_control(
-    name: &str,
-    names: &[Option<String>],
-    types: &[Option<ColumnType>],
-    control: &ProductionControl<'_>,
-) -> Result<Produced<String>, SQLError> {
-    let mut signature = ProductionString::new(*control);
-    signature.push_str(name)?;
-    signature.push('(')?;
-    for (position, (name, ty)) in names.iter().zip(types).enumerate() {
-        if position > 0 {
-            signature.push_str(", ")?;
-        }
-        if let Some(name) = name {
-            signature.push_str(name)?;
-            signature.push_str(" => ")?;
-        }
-        if let Some(ty) = ty {
-            signature.push_str(&ty.regtype_name_with_control(control)?)?;
-        } else {
-            signature.push_str("unknown")?;
-        }
-    }
-    signature.push(')')?;
-    Ok(signature.finish()?)
 }
 
 #[cfg(test)]

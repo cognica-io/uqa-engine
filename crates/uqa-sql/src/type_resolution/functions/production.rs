@@ -494,6 +494,20 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             control,
         );
     }
+    if crate::catalog::json_path::JsonPathFunction::lookup(original_name).is_some() {
+        return super::super::json_path::resolve_type(
+            FunctionTypeCall {
+                name: original_name,
+                binding,
+                args,
+            },
+            &call_arguments,
+            &argument_types,
+            params,
+            resolver,
+            control,
+        );
+    }
     let ordered_argument_types =
         infer_types(order_by.iter().map(|order| &order.expr), infer, control)?;
     let argument = |position: usize| argument_types.get(position).and_then(Option::as_ref);
@@ -543,26 +557,8 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             | FunctionDispatch::ArrayPrepend => {
                 return concat_type(effective(0), effective(1), control);
             }
-            FunctionDispatch::JsonExtract { as_text, .. } => {
-                let input = first();
-                let input = input.map(base_type);
-                return match input {
-                    Some(ColumnType::Json | ColumnType::JsonB) => {
-                        if as_text {
-                            inline(ColumnType::Text, control)
-                        } else {
-                            copy(input, control)
-                        }
-                    }
-                    None => Ok(None),
-                    Some(other) => Err(SQLError::Routine {
-                        sqlstate: "42883".into(),
-                        message: format!(
-                            "JSON extraction operator does not exist for {}",
-                            other.sql_name()
-                        ),
-                    }),
-                };
+            FunctionDispatch::JsonPath { .. } | FunctionDispatch::JsonExtract { .. } => {
+                return super::super::json_path::dispatch_type(dispatch, &effective_types, control);
             }
             FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => {
                 return copy(first(), control);

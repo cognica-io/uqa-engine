@@ -202,6 +202,7 @@ impl InputConstants {
         if let Some(selected) = self.1.remove(&identity) {
             if let ScalarExpr::Func { binding, .. } = expression {
                 *binding = Some(selected);
+                crate::type_resolution::json_path::normalize_retained(expression)?;
             }
         }
         if let Some(constant) = self.0.remove(&identity) {
@@ -404,6 +405,7 @@ impl<'a> ParameterTypes<'a> {
     ) {
         if !selected.builtin
             || crate::fixed_builtin_return_type(selected).is_some()
+            || crate::catalog::json_path::JsonPathFunction::lookup(&selected.name).is_some()
             || matches!(
                 selected.dispatch,
                 Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(_))

@@ -563,7 +563,7 @@ fn unresolved_call_signature(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> String {
-    binding::unresolved_call_signature_with_control(
+    super::call::unresolved_call_signature_with_control(
         name,
         argument_names,
         argument_types,
@@ -596,6 +596,7 @@ pub(crate) fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
         signatures
             .iter()
             .map(|signature| BuiltinFunctionOverload {
+                variadic: false,
                 name: format!("pg_catalog.{name}"),
                 argument_names: if signature.argument_names.is_empty() {
                     vec![None; signature.argument_types.len()]

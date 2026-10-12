@@ -16,6 +16,7 @@ mod access;
 mod binary;
 mod functions;
 mod jsonpath;
+mod lexical_access;
 mod mutation;
 mod parsed;
 mod pretty;
@@ -435,7 +436,9 @@ fn input(value: &Value, control: &ProductionControl<'_>) -> Result<Node> {
     )
 }
 
-pub(in crate::expr) use access::json_extract_operator_with_control;
+pub(in crate::expr) use access::{
+    json_extract_operator_with_control, json_path_function_with_control,
+};
 pub(in crate::expr) use functions::evaluate;
 #[cfg(test)]
 pub(in crate::expr) use mutation::json_delete_with_control;
