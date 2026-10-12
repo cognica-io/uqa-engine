@@ -416,3 +416,101 @@ fn returning_collation_selections_keep_original_plan_addresses() {
         }
     }
 }
+
+#[test]
+fn stored_view_coercions_preserve_prepared_result_collations() {
+    struct Aliases;
+    impl OidAliasInput for Aliases {
+        fn resolve_oid_alias_input(
+            &self,
+            _: &ColumnType,
+            _: &str,
+        ) -> Result<Option<i64>, SQLError> {
+            panic!("view has no OID alias constants")
+        }
+    }
+    let context = binding();
+    for (input, oid, ty, has_cast) in [
+        (
+            "(c COLLATE \"C\")::varchar(5)",
+            950,
+            ColumnType::Varchar(Some(5)),
+            true,
+        ),
+        (
+            "((c COLLATE \"C\") COLLATE \"POSIX\")::varchar(5)",
+            951,
+            ColumnType::Varchar(Some(5)),
+            true,
+        ),
+        (
+            "((c COLLATE \"C\") COLLATE \"POSIX\")::text",
+            951,
+            ColumnType::Text,
+            false,
+        ),
+    ] {
+        let sql = format!("CREATE VIEW v AS SELECT {input} AS value FROM t");
+        let mut plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        read_executable_inputs(&NoRoutines, &mut plan, &[], &context, &Aliases).unwrap();
+        let UnifiedPlan::Command(command) = &mut plan else {
+            panic!("view command")
+        };
+        let crate::plan::CommandPlan::CreateView { query, .. } = command.as_mut() else {
+            panic!("view query")
+        };
+        let (_, selected_type, selection) = retained_view_projection(query);
+        assert_eq!(selected_type, &ty);
+        let selection = *selection;
+        for _ in 0..2 {
+            let schema = crate::binding::bind_query_plan_routines_for_storage(
+                &NoRoutines,
+                query,
+                &[],
+                &context,
+                None,
+            )
+            .unwrap();
+            assert_eq!(schema.column_type(0), Some(&ty), "{input}");
+            assert_eq!(schema.column_collation(0), Some(oid), "{input}");
+            let (inner, selected_type, retained) = retained_view_projection(query);
+            assert_eq!((selected_type, retained), (&ty, &selection), "{input}");
+            let clause = crate::catalog::collations::expression::scalar_clause(inner)
+                .unwrap()
+                .unwrap_or_else(|| panic!("outer COLLATE: {input}: {inner:?}"));
+            assert_eq!(clause.oid, Some(oid), "{input}");
+            assert_eq!(
+                matches!(clause.argument, ScalarExpr::Cast { .. }),
+                has_cast,
+                "{input}"
+            );
+            clause.argument.visit(&mut |node| {
+                assert!(
+                    crate::catalog::collations::expression::scalar_clause(node)
+                        .unwrap()
+                        .is_none(),
+                    "nested COLLATE: {input}"
+                );
+            });
+            let serialized = serde_json::to_vec(query).unwrap();
+            *query = serde_json::from_slice(&serialized).unwrap();
+        }
+    }
+}
+
+fn retained_view_projection(
+    query: &QueryPlan,
+) -> (&ScalarExpr, &ColumnType, &crate::ir::ResultCollation) {
+    let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("view query block")
+    };
+    let ScalarExpr::Collated {
+        expr,
+        ty,
+        collation,
+    } = &block.projections[0].expr
+    else {
+        panic!("prepared result collation")
+    };
+    (expr, ty, collation)
+}
