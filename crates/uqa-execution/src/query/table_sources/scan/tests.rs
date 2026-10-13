@@ -13,6 +13,7 @@ use crate::RowSource;
 use parking_lot::RwLockReadGuard;
 use std::sync::Arc;
 use uqa_sql::ast::{ColumnDef, ColumnType};
+use uqa_sql::schema::ScalarTypeSchema;
 use uqa_sql::Statement;
 use uqa_storage::DocumentStore;
 
@@ -39,7 +40,9 @@ fn pruned_scan_collations_follow_the_original_field_not_its_public_alias() {
         if include_oid {
             visible.push("tableoid".into());
         }
-        let schema = projected_scan_schema("q", &physical, &visible, &definitions, include_oid);
+        let schema =
+            projected_scan_schema("q", &physical, &visible, &definitions, include_oid, None)
+                .unwrap();
         assert_eq!(schema.columns(), visible);
         assert_eq!(schema.qualified_collation("q", "c"), Some(951));
         assert_eq!(schema.qualified_collation("q", "p"), Some(950));
@@ -53,6 +56,35 @@ fn pruned_scan_collations_follow_the_original_field_not_its_public_alias() {
             assert_eq!(schema.column_collation(4), Some(0));
             assert!(!schema.wildcard_position_visible(4));
         }
+    }
+}
+
+#[test]
+fn scan_whole_row_identity_survives_aliases_and_empty_projection() {
+    let row_type = uqa_sql::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "stored_row".into(),
+        oid: 50_101,
+        array_oid: 50_102,
+        relation_oid: 50_100,
+    };
+    for fields in [Vec::new(), vec!["c".into()]] {
+        let visible = fields.iter().map(|_| "renamed".into()).collect::<Vec<_>>();
+        let schema = projected_scan_schema(
+            "alias",
+            &fields,
+            &visible,
+            &columns(),
+            false,
+            Some(row_type.clone()),
+        )
+        .unwrap();
+        assert_eq!(schema.columns(), visible);
+        assert_eq!(
+            schema.whole_row_type("alias"),
+            Some(&ColumnType::Composite(row_type.clone()))
+        );
+        assert!(schema.whole_row_type("stored_row").is_none());
     }
 }
 

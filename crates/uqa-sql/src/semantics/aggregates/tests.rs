@@ -52,6 +52,9 @@ fn array_and_row_ordering_expressions_keep_structural_group_identity() {
         ("ROW(n, 0)", "ROW(n, 1)", false),
         ("ROW(n, 0)", "ROW(n, 0.0)", false),
         ("ARRAY[n]", "ROW(n)", false),
+        ("pg_typeof(t.*)", "pg_typeof(t.*)", true),
+        ("pg_typeof(a.*)", "pg_typeof(b.*)", false),
+        ("ROW(t.*)", "ROW(t.*)", true),
     ] {
         let sql = format!("SELECT DISTINCT ON ({left}) n FROM t ORDER BY {right},n");
         let plan = crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));

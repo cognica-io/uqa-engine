@@ -30,6 +30,15 @@ pub struct ViewDefinition {
 
 /// Immutable namespace-aware lookup for SQL analysis. This contract exposes definitions only; it grants no row access, mutation, locking, or transaction services.
 pub trait AnalysisCatalog: Send + Sync {
+    /// The actual row type of a selected catalog relation. Anonymous query sources and catalog fixtures without identities leave this unavailable.
+    fn relation_row_type(
+        &self,
+        _resolution: &RelationNameResolution,
+        _name: &str,
+    ) -> Result<Option<crate::ast::CompositeTypeReference>, SQLError> {
+        Ok(None)
+    }
+
     /// Exact revisions of the requested identities in this catalog view. Return `None` only when the catalog has no revision capability; within an available snapshot, include every requested identity and use a missing value for an absent object.
     fn prepared_dependency_snapshot(
         &self,

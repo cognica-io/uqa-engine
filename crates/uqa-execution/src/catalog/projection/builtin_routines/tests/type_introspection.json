@@ -142,6 +142,241 @@
           ]
         }
       ]
+    },
+    {
+      "sql": "SELECT pg_typeof(t.*)::text,pg_typeof(t)::text FROM named_any AS t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "named_any",
+              "named_any"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(t.*)::text FROM named_any AS t(renamed)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "named_any"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(a.*)::text,pg_typeof(b.*)::text FROM named_any a JOIN named_any b ON true",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "named_any",
+              "named_any"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(t.*)::text FROM named_any t WHERE pg_typeof(t.*)='named_any'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "named_any"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(t.*)::text FROM named_any t GROUP BY pg_typeof(t.*)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "named_any"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(derived.*)::text FROM (SELECT * FROM named_any) derived",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "record"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH derived AS (SELECT * FROM named_any) SELECT pg_typeof(derived.*)::text FROM derived",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "record"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE empty_any()",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO empty_any DEFAULT VALUES",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(t.*)::text FROM empty_any AS t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty_any"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(a.*)::text,pg_typeof(b.*)::text FROM empty_any a JOIN named_any b ON true",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "empty_any",
+              "named_any"
+            ]
+          ]
+        }
+      ]
     }
   ]
 }

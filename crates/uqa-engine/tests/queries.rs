@@ -114,6 +114,8 @@ mod sql_simple_query;
 mod sql_subqueries;
 #[path = "sql_subquery.rs"]
 mod sql_subquery;
+#[path = "queries/sql_type_introspection.rs"]
+mod sql_type_introspection;
 #[path = "queries/sql_type_lifecycle.rs"]
 mod sql_type_lifecycle;
 #[path = "queries/sql_type_lifecycle_reopen.rs"]

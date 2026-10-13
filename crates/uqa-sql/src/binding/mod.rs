@@ -393,7 +393,7 @@ impl SchemaScope {
                             Some(ColumnType::Boolean),
                         ],
                     );
-                    return alias_table_schema(&schema, qualifier, column_aliases);
+                    return self.alias_relation_schema(&schema, name, qualifier, column_aliases);
                 }
                 let view = self.catalog.view_resolved(&self.resolution, name)?;
                 if let Some(view) = view {
@@ -413,7 +413,12 @@ impl SchemaScope {
                             view.materialized_column_collations.as_deref(),
                         )?;
                         let schema = RowSchema::with_relation_qualifier(&schema, qualifier);
-                        return alias_table_schema(&schema, qualifier, column_aliases);
+                        return self.alias_relation_schema(
+                            &schema,
+                            name,
+                            qualifier,
+                            column_aliases,
+                        );
                     }
                     let key = name.to_ascii_lowercase();
                     if !self.visiting_views.insert(key.clone()) {
@@ -430,7 +435,7 @@ impl SchemaScope {
                                 view.output_columns.as_deref().unwrap_or(&[]),
                                 Some(qualifier),
                             );
-                            alias_table_schema(&schema, qualifier, column_aliases)
+                            self.alias_relation_schema(&schema, name, qualifier, column_aliases)
                         });
                     self.visiting_views.remove(&key);
                     return result;
@@ -442,7 +447,8 @@ impl SchemaScope {
                         RowSchema::with_column_definitions(Some(qualifier), &table.columns);
                     let schema =
                         crate::semantics::bound_source_schema(&schema, bound_columns.as_deref())?;
-                    let schema = alias_table_schema(&schema, qualifier, column_aliases)?;
+                    let schema =
+                        self.alias_relation_schema(&schema, name, qualifier, column_aliases)?;
                     let schema = if table.columns.is_empty() && !table.columns_declared {
                         RowSchema::with_open_columns(&schema, Some(qualifier))
                     } else {
@@ -459,7 +465,7 @@ impl SchemaScope {
                         RowSchema::with_column_definitions(Some(qualifier), &foreign_table.columns);
                     let schema =
                         crate::semantics::bound_source_schema(&schema, bound_columns.as_deref())?;
-                    return alias_table_schema(&schema, qualifier, column_aliases);
+                    return self.alias_relation_schema(&schema, name, qualifier, column_aliases);
                 }
                 if let Some(schema) = self
                     .catalog
@@ -471,7 +477,7 @@ impl SchemaScope {
                         .map(|(column, ty)| (column, Some(ty)))
                         .unzip();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
-                    return alias_table_schema(&schema, qualifier, column_aliases);
+                    return self.alias_relation_schema(&schema, name, qualifier, column_aliases);
                 }
                 if let Some(relation) = self.catalog.unopenable_relation(&self.resolution, name)? {
                     return Err(relation.error());

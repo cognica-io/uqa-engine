@@ -169,7 +169,11 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         &schema,
         &root_table.columns,
         include_table_oid,
-    );
+        root_table.catalog_oids.row_type_reference(
+            &uqa_core::RelationIdentity::from_legacy_name(&root_name)
+                .map_err(SQLError::Internal)?,
+        ),
+    )?;
     let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut metadata_attributes = Vec::with_capacity(2);
     if metadata.includes_doc_id() {
@@ -384,7 +388,8 @@ fn projected_scan_schema(
     visible: &[String],
     definitions: &[uqa_sql::ast::ColumnDef],
     include_table_oid: bool,
-) -> crate::RowSchema {
+    row_type: Option<uqa_sql::ast::CompositeTypeReference>,
+) -> Result<crate::RowSchema, SQLError> {
     let column_metadata = columns.iter().zip(visible).map(|(column, visible)| {
         let definition = definitions
             .iter()
@@ -418,7 +423,11 @@ fn projected_scan_schema(
         physical_schema =
             crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, system_positions);
     }
-    physical_schema
+    if let Some(row_type) = row_type {
+        physical_schema = physical_schema
+            .with_relation_row_type(qualifier, uqa_sql::ast::ColumnType::Composite(row_type))?;
+    }
+    Ok(physical_schema)
 }
 
 #[cfg(test)]

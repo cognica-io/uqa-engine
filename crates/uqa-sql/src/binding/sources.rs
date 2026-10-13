@@ -35,6 +35,24 @@ pub(super) fn alias_table_schema(
     Ok(rename_schema(schema, column_aliases, Some(qualifier)))
 }
 
+impl SchemaScope {
+    pub(super) fn alias_relation_schema(
+        &self,
+        schema: &RowSchema,
+        name: &str,
+        qualifier: &str,
+        column_aliases: &[String],
+    ) -> Result<RowSchema, SQLError> {
+        let schema = alias_table_schema(schema, qualifier, column_aliases)?;
+        match self.catalog.relation_row_type(&self.resolution, name)? {
+            Some(row_type) => {
+                schema.with_relation_row_type(qualifier, crate::ColumnType::Composite(row_type))
+            }
+            None => Ok(schema),
+        }
+    }
+}
+
 pub(super) struct JoinSchemaBinding<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
     pub(super) kind: JoinKind,

@@ -37,6 +37,21 @@ pub struct RelationCatalogOids {
 }
 
 impl RelationCatalogOids {
+    /// Construct the named row type from these exact relation identities, including a newly allocated relation that is not published yet.
+    #[must_use]
+    pub fn row_type_reference(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+    ) -> Option<crate::ast::CompositeTypeReference> {
+        Some(crate::ast::CompositeTypeReference {
+            schema: relation.schema.clone(),
+            name: relation.name.clone(),
+            oid: self.row_type?,
+            array_oid: self.array_type.unwrap_or(0),
+            relation_oid: self.relation,
+        })
+    }
+
     /// The OIDs a relation created before OIDs were recorded derives from its identity. Such relations have no recorded array type.
     #[must_use]
     pub fn legacy(kind: RelationOidKind, object_id: &[u8; 16]) -> Self {
