@@ -11,6 +11,9 @@ mod completion;
 mod cross_process;
 mod hub;
 mod inbox;
+mod sql_session;
+pub(crate) use inbox::SubscriptionInbox as SQLNotificationInbox;
+pub use sql_session::SQLNotificationOptions;
 mod owner;
 mod registration;
 mod session_policy;
@@ -310,6 +313,7 @@ struct NotificationSessionCommit<'a> {
     process_id: i32,
     channels: Vec<String>,
     queue: &'a Arc<Mutex<VecDeque<SQLNotification>>>,
+    subscription: Option<Arc<inbox::SubscriptionInbox>>,
     wake: &'a Arc<Condvar>,
     notices: &'a Arc<uqa_execution::query::NoticeQueue>,
     pending: &'a [PendingNotification],
@@ -777,6 +781,11 @@ impl Engine {
         if let Some(error) = self.notification_hub.cross_error.lock().take() {
             return Err(SQLError::Internal(error));
         }
+        if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().as_ref() {
+            return inbox
+                .pending_count()
+                .map_err(|error| sql_session::sql_failure(&error));
+        }
         Ok(self.runtime.notifications.lock().len())
     }
 
@@ -794,6 +803,11 @@ impl Engine {
             if elapsed >= timeout {
                 return Ok(false);
             }
+            if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().clone() {
+                return inbox
+                    .wait_ready(timeout.saturating_sub(elapsed))
+                    .map_err(|error| sql_session::sql_failure(&error));
+            }
             let mut notifications = self.runtime.notifications.lock();
             if !notifications.is_empty() {
                 return Ok(true);
@@ -808,6 +822,10 @@ impl Engine {
     pub fn take_sql_notifications(&self) -> Vec<SQLNotification> {
         if self.transaction_depth() != 0 {
             return Vec::new();
+        }
+        if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().clone() {
+            // The checked API preserves the terminal error for a bounded adapter.
+            return inbox.take_sql().unwrap_or_default();
         }
         self.runtime.notifications.lock().drain(..).collect()
     }

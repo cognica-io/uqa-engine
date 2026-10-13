@@ -27,26 +27,26 @@ use super::subscription::{
     NotificationSubscriptionError, NotificationSubscriptionOptions, NotificationWait,
 };
 
-pub(super) struct SubscriptionInbox {
+pub(crate) struct SubscriptionInbox {
     pub(super) options: NotificationSubscriptionOptions,
     pub(super) memory: MemoryBudget,
     identity: NotificationIdentity,
-    state: Mutex<InboxState>,
-    wake: Condvar,
+    pub(in crate::notifications) state: Mutex<InboxState>,
+    pub(in crate::notifications) wake: Condvar,
 }
 
-struct InboxState {
-    queue: BudgetedDeque<BufferedNotification>,
+pub(in crate::notifications) struct InboxState {
+    pub(in crate::notifications) queue: BudgetedDeque<BufferedNotification>,
     reserved: usize,
     next_sequence: Option<u64>,
-    closed: bool,
-    failure: Option<NotificationSubscriptionError>,
+    pub(in crate::notifications) closed: bool,
+    pub(in crate::notifications) failure: Option<NotificationSubscriptionError>,
     async_waiting: bool,
     async_waker: Option<std::task::Waker>,
 }
 
-struct BufferedNotification {
-    value: SQLNotification,
+pub(in crate::notifications) struct BufferedNotification {
+    pub(in crate::notifications) value: SQLNotification,
     _memory: MemoryReservation,
 }
 

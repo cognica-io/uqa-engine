@@ -71,6 +71,7 @@ impl Engine {
         self.prepare_notification_recovery()?;
         let control = self.query_retention_control()?;
         let final_channels = transaction.final_listened_channels(&current_channels);
+        self.validate_sql_notification_channels(&final_channels)?;
         let cross = self
             .notification_hub
             .cross
@@ -201,6 +202,7 @@ impl Engine {
             process_id: self.backend_process_id(),
             channels: channels.clone(),
             queue: &self.runtime.notifications,
+            subscription: self.runtime.bounded_sql_notifications.lock().clone(),
             wake: &self.runtime.notification_wake,
             notices: &self.runtime.notices,
             pending: &transaction.pending_notifications,
