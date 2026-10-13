@@ -51,6 +51,25 @@ fn declaration_expressions_see_their_own_relation_and_type(#[case] provider: usi
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn foreign_declarations_bind_defaults_before_the_server(#[case] provider: usize) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("foreign-declaration-scope.db");
+    let engine = scope_engine(provider, &path);
+    crate::pg18_oracle::verify(&engine, include_str!("foreign_declaration_scope.json"));
+    drop(engine);
+    if provider != 0 {
+        crate::pg18_oracle::verify(
+            &scope_engine(provider, &path),
+            include_str!("foreign_declaration_reopen.json"),
+        );
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn partition_column_options_inherit_type_and_collation(#[case] provider: usize) {
     let directory = TempDir::new().unwrap();
     let engine = scope_engine(provider, &directory.path().join("partition-options.db"));
@@ -62,11 +81,22 @@ fn partition_column_options_inherit_type_and_collation(#[case] provider: usize) 
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn declared_relation_visibility_follows_transaction_commit(#[case] provider: usize) {
+    verify_declaration_sessions(provider, include_str!("declaration_peers.json"));
+}
+
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn foreign_declaration_visibility_follows_commit(#[case] provider: usize) {
+    verify_declaration_sessions(provider, include_str!("foreign_declaration_peers.json"));
+}
+
+fn verify_declaration_sessions(provider: usize, transcript: &str) {
     let directory = TempDir::new().unwrap();
     let writer = scope_engine(provider, &directory.path().join("declaration-peers.db"));
     let reader = writer.new_session().unwrap();
-    let reference: serde_json::Value =
-        serde_json::from_str(include_str!("declaration_peers.json")).unwrap();
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     for case in reference["cases"].as_array().unwrap() {
         let engine = match case["session"].as_u64().unwrap() {
             0 => &writer,

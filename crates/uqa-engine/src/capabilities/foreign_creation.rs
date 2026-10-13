@@ -75,7 +75,9 @@ impl ForeignCreationNamespace for Engine {
 }
 impl ForeignCreationTransactions for Engine {
     fn with_foreign_catalog_write(&self, write: ForeignCatalogWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.foreign_creation_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            write(&engine.foreign_creation_context())
+        })
     }
 }
 

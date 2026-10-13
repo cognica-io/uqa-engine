@@ -26,7 +26,7 @@ pub struct StoredForeignTable {
     pub catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     pub row_type_array_name: Option<String>,
     pub server_name: String,
-    /// Captured server identity; absent only while converting a legacy definition at initial open.
+    /// Captured server identity. The declaration's relation and row type are visible before its server is bound; legacy definitions also acquire this identity during initial restoration.
     pub server_reference: Option<ForeignServerReference>,
     pub columns: Vec<ColumnDef>,
     pub dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
