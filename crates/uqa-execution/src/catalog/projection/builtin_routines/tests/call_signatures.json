@@ -1,0 +1,61 @@
+{
+  "raw_sha256": "5cdaf7b66d36d311d8feae70e46f51e78bf6fae8ecf2cd18b9b06e613ad0f3cb",
+  "rows": [
+    [
+      "378",
+      "array_append",
+      "5078",
+      "5078 5077",
+      null,
+      null,
+      "0",
+      "f",
+      "i",
+      "s",
+      "f",
+      "array_append"
+    ],
+    [
+      "2176",
+      "array_length",
+      "23",
+      "2277 23",
+      null,
+      null,
+      "0",
+      "t",
+      "i",
+      "s",
+      "f",
+      "array_length"
+    ],
+    [
+      "3058",
+      "concat",
+      "25",
+      "2276",
+      "{2276}",
+      "{v}",
+      "2276",
+      "f",
+      "s",
+      "s",
+      "f",
+      "text_concat"
+    ],
+    [
+      "3059",
+      "concat_ws",
+      "25",
+      "25 2276",
+      "{25,2276}",
+      "{i,v}",
+      "2276",
+      "f",
+      "s",
+      "s",
+      "f",
+      "text_concat_ws"
+    ]
+  ]
+}

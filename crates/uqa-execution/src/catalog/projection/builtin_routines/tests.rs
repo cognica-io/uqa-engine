@@ -8,6 +8,8 @@ use std::collections::BTreeSet;
 
 use super::PG18_BUILTIN_ROUTINE_GROUPS;
 
+mod call_signatures;
+
 #[test]
 fn integer_series_metadata_matches_postgresql() {
     let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
