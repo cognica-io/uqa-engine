@@ -175,3 +175,42 @@ fn fetch_with_ties_preserves_its_boundary_and_requires_ordering() {
     assert!(matches!(values.from, Some(FromClause::Values { .. })));
     assert!(matches!(values.projections[0].expr, Expr::Star));
 }
+
+#[test]
+fn sql_value_syntax_retains_the_selected_catalog_signature() {
+    let Statement::Select(select) =
+        first("SELECT CURRENT_SCHEMA, current_schema(), pg_catalog.current_schema(), CURRENT_USER")
+    else {
+        panic!("expected SELECT");
+    };
+    let Expr::Func {
+        binding: Some(binding),
+        ..
+    } = &select.projections[0].expr
+    else {
+        panic!("SQL value syntax must retain its builtin binding");
+    };
+    assert_eq!(
+        crate::type_resolution::fixed_builtin_return_type(binding),
+        Some(ColumnType::Name),
+        "the retained binding must identify the catalog's fixed signature",
+    );
+    let selected = crate::type_resolution::resolve_fixed_builtin_call(
+        "current_schema",
+        Some(binding),
+        &[],
+        &[],
+        false,
+        None,
+    )
+    .unwrap()
+    .expect("current_schema has a fixed signature");
+    assert_eq!(&selected.selected.binding, binding);
+    for projection in &select.projections[1..3] {
+        assert!(matches!(&projection.expr, Expr::Func { binding: None, .. }));
+    }
+    assert!(matches!(
+        &select.projections[3].expr,
+        Expr::Func { binding: Some(binding), .. } if binding.builtin && binding.name == "current_user"
+    ));
+}

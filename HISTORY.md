@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve the catalog-selected binding of `CURRENT_SCHEMA` syntax, restoring its declared result type and use in queries, stored routines and role contexts.
+
 - Restore spilled rows with their retained SQL schema after validating all physical bindings, preserving named relation types and record descriptors through grouping, windows, stored column changes and cursor reads.
 
 - Preserve the unlimited length of catalog-qualified `bpchar`, avoiding premature one-character truncation in character casts, enum and date input, stored values and analytical query results.
