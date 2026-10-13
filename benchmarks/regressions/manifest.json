@@ -5500,6 +5500,162 @@
       "capability": "Retained SQL schema across physical spill",
       "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
       "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sql_value_syntax_retains_the_selected_catalog_signature",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/tests/query_features.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "sql_value_clock_matches_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/sql_value_clock.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "sql_value_clock_matches_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/sql_value_clock.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "sql_value_clock_matches_postgresql_with_spilled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/sql_value_clock.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "floating_point_width_matches_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/floating_point_width.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "floating_point_width_matches_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/floating_point_width.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "floating_point_width_matches_postgresql_with_spilled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/floating_point_width.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_routine_owner_acl_context_and_catalog_move_together",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "routine_context_restores_identity_and_settings_after_callback_panic",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_alter_security_configuration_and_planner_metadata_are_atomic",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "current_schema_functions_follow_the_logical_session_catalog",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_set_search_path.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "an_empty_search_path_finds_no_schema_to_create_in",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/configuration_parameters.rs",
+      "capability": "Retained SQL value-function identity",
+      "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
+      "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
     }
   ]
 }
