@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve contextual types for untyped string parameters during output analysis, restoring JSON function calls while retaining errors for explicitly typed incompatible inputs.
+
 - Preserve original scalar inputs beside `RETURNING` wildcards during preparation, retain MERGE source-before-target column order and avoid ambiguous target references or lost prepared constants.
 
 - Retain `merge_action()` as a row-dependent MERGE expression through parsing, preparation and optimization. Enforce RETURNING clause ancestry with PostgreSQL diagnostics and preserve each action through nested and prepared subqueries, while keeping ordinary quoted or qualified functions distinct.
