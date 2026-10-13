@@ -25,6 +25,10 @@ mod tests;
 
 pub trait ExpressionNames {
     fn column(&self, attribute: i64) -> Result<String, SQLError>;
+    /// The current local relation name used by a whole-row Var.
+    fn relation_name(&self) -> Result<String, SQLError> {
+        Err(invalid("whole-row reference requires its relation name"))
+    }
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError>;
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError>;
 
@@ -86,14 +90,7 @@ impl Renderer<'_> {
     fn node(&self, node: &Node, outer: bool) -> Result<String, SQLError> {
         match node.kind.as_str() {
             "COERCETODOMAINVALUE" => Ok("VALUE".into()),
-            "VAR" => {
-                if node.integer("varno")? != 1 || node.integer("varlevelsup")? != 0 {
-                    return Err(invalid("invalid varno in stored expression"));
-                }
-                self.names
-                    .column(node.integer("varattno")?)
-                    .map(|name| crate::expr::quote_ident(&name))
-            }
+            "VAR" => self.variable(node),
             "PARAM" => self.parameter(node),
             "SUBSCRIPTINGREF" => self.array_access(node),
             "FIELDSELECT" => self.field_select(node),
@@ -175,6 +172,23 @@ impl Renderer<'_> {
                 "catalog expression deparser for {}",
                 node.kind
             ))),
+        }
+    }
+
+    fn variable(&self, node: &Node) -> Result<String, SQLError> {
+        if node.integer("varno")? != 1 || node.integer("varlevelsup")? != 0 {
+            return Err(invalid("invalid varno in stored expression"));
+        }
+        match node.integer("varattno")? {
+            0 => self
+                .names
+                .relation_name()
+                .map(|name| format!("{}.*", crate::expr::quote_ident(&name))),
+            -6 => Ok("tableoid".into()),
+            attribute => self
+                .names
+                .column(attribute)
+                .map(|name| crate::expr::quote_ident(&name)),
         }
     }
 

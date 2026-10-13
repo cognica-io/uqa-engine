@@ -96,6 +96,9 @@ impl ExpressionContext<'_> {
         let value = match expression {
             Expr::Column(column) => self.column(column, None)?,
             Expr::QualifiedColumn { qualifier, column } => self.column(column, Some(qualifier))?,
+            Expr::QualifiedStar(qualifier) => {
+                Self::variable(self.schema.whole_row_reference(qualifier)?)
+            }
             Expr::Literal(value) => self.literal(expression, value, expected)?,
             Expr::TypedLiteral {
                 value,
@@ -301,9 +304,13 @@ impl ExpressionContext<'_> {
             });
         }
         let column = self.schema.column_reference(name, qualifier)?;
+        Ok(Self::variable(column))
+    }
+
+    fn variable(column: ColumnReference<'_>) -> TypedNode {
         let ty = column.ty;
         let ordinal = column.attribute_number;
-        Ok(TypedNode {
+        TypedNode {
             node: Node::new(
                 "VAR",
                 [
@@ -321,7 +328,7 @@ impl ExpressionContext<'_> {
                 ],
             ),
             ty: Some(ty.clone()),
-        })
+        }
     }
 
     fn binary(&self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Result<TypedNode, SQLError> {

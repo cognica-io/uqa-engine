@@ -31,13 +31,7 @@ impl RowSchema {
         outer_columns: &[(ColumnIdentity, Option<ColumnType>)],
     ) -> Self {
         let outer_base = input.physical_width();
-        let current_qualifiers = input
-            .index
-            .qualified
-            .keys()
-            .chain(input.index.aliases.keys())
-            .filter_map(ColumnIdentity::qualifier)
-            .collect::<HashSet<_>>();
+        let current_qualifiers = input.relation_qualifiers().collect::<HashSet<_>>();
         let mut current_unqualified = input
             .identities()
             .iter()
@@ -126,6 +120,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                row_types: input.index.cold.row_types.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: outer_ambiguous,
                 extra_ambiguous_qualified: ambiguous_qualified,
@@ -142,13 +137,7 @@ impl RowSchema {
     pub fn with_outer_schema(input: &Self, outer: &Self) -> Self {
         let mut collations = input.index.cold.collations.clone();
         let outer_base = input.physical_width();
-        let current_qualifiers = input
-            .index
-            .qualified
-            .keys()
-            .chain(input.index.aliases.keys())
-            .filter_map(ColumnIdentity::qualifier)
-            .collect::<HashSet<_>>();
+        let current_qualifiers = input.relation_qualifiers().collect::<HashSet<_>>();
         let mut current_unqualified = input
             .index
             .unqualified
@@ -303,6 +292,7 @@ impl RowSchema {
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                row_types: super::relation_types::RelationRowTypes::with_outer(input, outer),
                 open_qualifiers,
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,

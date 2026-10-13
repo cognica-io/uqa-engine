@@ -4867,6 +4867,71 @@
       "capability": "Catalog node input and retained values",
       "workload": "Already admitted catalog value assigned to its own type, followed by external input rejection.",
       "invariant": "A typed assignment transfers the original value and byte reservation without a second input call; both success and rejection release all owned memory."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_scope_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/relation_scope.rs",
+      "capability": "Named relation expression scopes",
+      "workload": "Seventeen independently captured PostgreSQL nodes and compact/pretty expressions; logical and physical declared type lookup.",
+      "invariant": "Whole-row and tableoid identities retain exact types and attribute numbers through quoted names, ADD/DROP, rename and ordinary column shadowing."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_whole_rows_preserve_empty_scopes_and_ordinary_column_precedence",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Named relation expression scopes",
+      "workload": "Zero-column and ordinary relation scopes, a column named as its relation and invalid scope declarations.",
+      "invariant": "Named row identity adds no physical slot or ordinary column; real columns take lexical precedence and non-composite identities are rejected."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_row_types_follow_aliases_and_scope_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Named relation expression scopes",
+      "workload": "Relation alias, explicit projection boundary, shared hidden-slot extension and canonical projection.",
+      "invariant": "The matching namespace retains its actual type, hidden physical extension shares the same Arc, and a new anonymous projection cannot inherit a stale named identity."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_empty_relations_shadow_outer_relation_types_and_qualified_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Named relation expression scopes",
+      "workload": "Empty local relation shadowing a same-named outer relation, and an unshadowed outer scope.",
+      "invariant": "Lexical precedence applies to both the named row type and qualified fields, including empty local descriptors."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "joins_keep_independent_relation_types_without_inventing_a_combined_named_row",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Named relation expression scopes",
+      "workload": "Joining independent empty and nonempty named relations, followed by aliasing the complete joined row.",
+      "invariant": "Each independent source retains its type; a combined relation has an anonymous record rather than either source type."
     }
   ]
 }
