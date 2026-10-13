@@ -169,12 +169,12 @@ pub fn join_using_predicate(
         .iter()
         .map(|column| {
             let lhs = coerced_join_column(
-                scalar_column(left, column.left),
+                ScalarExpr::Position(column.left),
                 left.column_type(column.left),
                 column.comparison_type.as_ref(),
             );
             let rhs = coerced_join_column(
-                scalar_column(right, column.right),
+                ScalarExpr::Position(left.len() + column.right),
                 right.column_type(column.right),
                 column.comparison_type.as_ref(),
             );
@@ -190,14 +190,6 @@ pub fn join_using_predicate(
         1 => predicates.pop(),
         _ => Some(ScalarExpr::And(predicates)),
     }
-}
-
-fn scalar_column(schema: &RowSchema, position: usize) -> ScalarExpr {
-    let identity = &schema.identities()[position];
-    identity.qualifier().map_or_else(
-        || ScalarExpr::Column(identity.column().to_string()),
-        |qualifier| ScalarExpr::qualified_column(qualifier, identity.column()),
-    )
 }
 
 fn coerced_join_column(
@@ -467,6 +459,21 @@ fn coerced_output_source(
 mod tests {
     use super::*;
 
+    struct Types;
+    impl crate::FunctionTypeResolver for Types {
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&crate::ast::FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<ColumnType>],
+            _: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+    }
+    impl crate::routines::RoutineResolution for Types {}
+
     #[test]
     fn natural_columns_follow_left_input_order() {
         let left = RowSchema::with_qualified_types(
@@ -490,6 +497,65 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["b", "a"]
         );
+    }
+
+    #[test]
+    fn nested_using_predicate_preserves_resolved_input_positions() {
+        let base = |alias: &str| {
+            RowSchema::with_qualified_types(
+                alias,
+                vec!["payload".into(), "id".into()],
+                vec![Some(ColumnType::Text), Some(ColumnType::Integer)],
+            )
+        };
+        let using = JoinUsing {
+            columns: vec!["id".into()],
+            alias: None,
+        };
+        let nested = |a: &str, b: &str, kind| {
+            let (a, b) = (base(a), base(b));
+            let resolved = resolve_join_using(Some(&using), false, &a, &b)
+                .unwrap()
+                .unwrap();
+            join_using_output_schema(kind, &a, &b, &resolved).unwrap()
+        };
+        for kind in [
+            JoinKind::Inner,
+            JoinKind::Left,
+            JoinKind::Right,
+            JoinKind::Full,
+        ] {
+            let left = nested("a", "b", kind);
+            let right = nested("c", "d", kind);
+            let resolved = resolve_join_using(Some(&using), false, &left, &right)
+                .unwrap()
+                .unwrap();
+            let predicate = join_using_predicate(&resolved, &left, &right).unwrap();
+            let joined = RowSchema::join(&left, &right, []);
+            let crate::plan::UnifiedPlan::Query(query) =
+                crate::plan::UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0))
+            else {
+                panic!("query")
+            };
+            let crate::plan::RelationalPlan::QueryBlock(mut block) = query.root else {
+                panic!("block")
+            };
+            block.r#where = Some(predicate);
+            crate::binding::validate_query_block_references(
+                &Types,
+                &block,
+                &joined,
+                &[],
+                &crate::binding::fixture::empty_binding_context(),
+                None,
+            )
+            .unwrap();
+            assert_ne!(
+                left.physical_slot(0),
+                Some(0),
+                "logical positions must not be physical offsets"
+            );
+        }
     }
 
     #[test]

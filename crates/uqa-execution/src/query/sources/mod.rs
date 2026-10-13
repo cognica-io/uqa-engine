@@ -31,7 +31,7 @@ use uqa_sql::{
     },
     semantics::{
         cte_names::query_cte_names,
-        join_predicates::{decide_join_sides, join_conjuncts},
+        join_predicates::{bind_join_sides, join_conjuncts},
         resolve_user_table_function,
         source_filters::{combine_filters, qualifier_filter, qualifier_for},
         table_function_column_types, validate_table_function_alias_count,

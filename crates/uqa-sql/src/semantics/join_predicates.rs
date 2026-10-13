@@ -6,6 +6,8 @@
 
 //! Join conjunct analysis and structural side binding.
 
+use std::borrow::Cow;
+
 use crate::RowSchema;
 use crate::ScalarExpr;
 
@@ -22,34 +24,66 @@ pub fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     }
 }
 
-/// Determine the input side of two equality operands from structured schema identities. Planning does not synthesize a sample row, and punctuation in a quoted identifier is never interpreted as a relation boundary.
+/// Determine the input side of equality operands from structured identities and joined logical positions. Planning does not synthesize a sample row, and punctuation in a quoted identifier is never interpreted as a relation boundary.
 pub fn decide_join_sides<'a>(
     left: &RowSchema,
     right: &RowSchema,
     lhs: &'a ScalarExpr,
     rhs: &'a ScalarExpr,
 ) -> Option<(&'a ScalarExpr, &'a ScalarExpr)> {
-    if expression_binds_to(lhs, left) && expression_binds_to(rhs, right) {
+    let binds = |expression, schema, offset| {
+        let (valid, has_column) = expression_binding(expression, schema, offset);
+        valid && has_column
+    };
+    if binds(lhs, left, 0) && binds(rhs, right, left.len()) {
         return Some((lhs, rhs));
     }
-    if expression_binds_to(rhs, left) && expression_binds_to(lhs, right) {
+    if binds(rhs, left, 0) && binds(lhs, right, left.len()) {
         return Some((rhs, lhs));
     }
     None
 }
 
-fn expression_binds_to(expression: &ScalarExpr, schema: &RowSchema) -> bool {
-    let (valid, has_column) = expression_binding(expression, schema);
-    valid && has_column
+/// Rebase selected right-input positions for independent key evaluation, borrowing expressions whose coordinates already match their own input.
+pub fn bind_join_sides<'a>(
+    left: &RowSchema,
+    right: &RowSchema,
+    lhs: &'a ScalarExpr,
+    rhs: &'a ScalarExpr,
+) -> Option<(Cow<'a, ScalarExpr>, Cow<'a, ScalarExpr>)> {
+    let (lhs, rhs) = decide_join_sides(left, right, lhs, rhs)?;
+    Some((Cow::Borrowed(lhs), local_join_key(rhs, left.len())))
 }
 
-fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, bool) {
+fn local_join_key(expression: &ScalarExpr, offset: usize) -> Cow<'_, ScalarExpr> {
+    let mut has_position = false;
+    if offset != 0 {
+        expression.visit(&mut |part| has_position |= matches!(part, ScalarExpr::Position(_)));
+    }
+    if !has_position {
+        return Cow::Borrowed(expression);
+    }
+    let mut bound = expression.clone();
+    crate::plan::rewrite_scalar_expression(&mut bound, &mut |part| {
+        if let ScalarExpr::Position(position) = part {
+            *position -= offset;
+        }
+    });
+    Cow::Owned(bound)
+}
+
+fn expression_binding(expression: &ScalarExpr, schema: &RowSchema, offset: usize) -> (bool, bool) {
     match expression {
         ScalarExpr::Column(column) => (schema.unqualified_position(column).is_some(), true),
         ScalarExpr::QualifiedColumn { qualifier, column } => {
             (schema.qualified_position(qualifier, column).is_some(), true)
         }
-        ScalarExpr::Position(position) => (*position < schema.len(), true),
+        ScalarExpr::Position(position) => (
+            position
+                .checked_sub(offset)
+                .is_some_and(|position| position < schema.len()),
+            true,
+        ),
         ScalarExpr::InternalColumn(column) => (schema.internal_slot(*column).is_some(), true),
         ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => {
             (true, false)
@@ -64,26 +98,27 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
                 .chain(order_by.iter().map(|order| &order.expr))
                 .chain(filter.as_deref()),
             schema,
+            offset,
         ),
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::CompositeRow { items, .. }
         | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => combine_bindings(items, schema),
+        | ScalarExpr::Or(items) => combine_bindings(items, schema, offset),
         ScalarExpr::Binary { lhs, rhs, .. } => {
-            combine_bindings([lhs.as_ref(), rhs.as_ref()], schema)
+            combine_bindings([lhs.as_ref(), rhs.as_ref()], schema, offset)
         }
         ScalarExpr::UnaryMinus(expr)
         | ScalarExpr::Not(expr)
         | ScalarExpr::IsNull { expr, .. }
         | ScalarExpr::Cast { expr, .. }
         | ScalarExpr::Collated { expr, .. }
-        | ScalarExpr::InSubquery { expr, .. } => expression_binding(expr, schema),
+        | ScalarExpr::InSubquery { expr, .. } => expression_binding(expr, schema, offset),
         ScalarExpr::Between { expr, low, high } => {
-            combine_bindings([expr.as_ref(), low.as_ref(), high.as_ref()], schema)
+            combine_bindings([expr.as_ref(), low.as_ref(), high.as_ref()], schema, offset)
         }
         ScalarExpr::InList { expr, list, .. } => {
-            combine_bindings(std::iter::once(expr.as_ref()).chain(list), schema)
+            combine_bindings(std::iter::once(expr.as_ref()).chain(list), schema, offset)
         }
         ScalarExpr::Case {
             base,
@@ -98,6 +133,7 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
                 )
                 .chain(else_branch.as_deref()),
             schema,
+            offset,
         ),
         ScalarExpr::WindowCall { .. }
         | ScalarExpr::Default
@@ -111,10 +147,11 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
 fn combine_bindings<'a>(
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,
     schema: &RowSchema,
+    offset: usize,
 ) -> (bool, bool) {
     expressions
         .into_iter()
-        .map(|expression| expression_binding(expression, schema))
+        .map(|expression| expression_binding(expression, schema, offset))
         .fold((true, false), |(valid, has_column), binding| {
             (valid && binding.0, has_column || binding.1)
         })
@@ -139,6 +176,41 @@ mod tests {
             decide_join_sides(&left, &right, &lhs, &rhs),
             Some((&lhs, &rhs))
         );
+    }
+
+    #[test]
+    fn joined_positions_are_rebased_only_to_their_own_input() {
+        let left = RowSchema::new(vec!["l0".into(), "l1".into()]);
+        let right = RowSchema::new(vec!["r0".into()]);
+        let lhs = ScalarExpr::Position(1);
+        let rhs = ScalarExpr::Cast {
+            implicit: true,
+            expr: Box::new(ScalarExpr::Position(2)),
+            ty: "bigint".into(),
+        };
+        let expected = ScalarExpr::Cast {
+            implicit: true,
+            expr: Box::new(ScalarExpr::Position(0)),
+            ty: "bigint".into(),
+        };
+        for (a, b) in [(&lhs, &rhs), (&rhs, &lhs)] {
+            let (a, b) = bind_join_sides(&left, &right, a, b).unwrap();
+            assert_eq!(a.as_ref(), &lhs);
+            assert_eq!(b.as_ref(), &expected);
+        }
+        for other in [
+            ScalarExpr::Position(0),
+            ScalarExpr::Position(3),
+            ScalarExpr::Literal(uqa_core::Value::Int(1)),
+        ] {
+            assert!(decide_join_sides(&left, &right, &lhs, &other).is_none());
+        }
+        let mixed = ScalarExpr::Binary {
+            op: crate::ast::BinaryOp::Add,
+            lhs: Box::new(lhs.clone()),
+            rhs: Box::new(rhs.clone()),
+        };
+        assert!(decide_join_sides(&left, &right, &mixed, &rhs).is_none());
     }
 
     #[test]
