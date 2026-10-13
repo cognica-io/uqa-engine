@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain `merge_action()` as a row-dependent MERGE expression through parsing, preparation and optimization. Enforce RETURNING clause ancestry with PostgreSQL diagnostics and preserve each action through nested and prepared subqueries, while keeping ordinary quoted or qualified functions distinct.
+
 - Preserve the catalog-selected binding of `CURRENT_SCHEMA` syntax, restoring its declared result type and use in queries, stored routines and role contexts.
 
 - Restore spilled rows with their retained SQL schema after validating all physical bindings, preserving named relation types and record descriptors through grouping, windows, stored column changes and cursor reads.

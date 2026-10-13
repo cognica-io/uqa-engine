@@ -5656,6 +5656,227 @@
       "capability": "Retained SQL value-function identity",
       "workload": "Fixed parser, SQL value/clock or session/role history with ordinary and spilled execution.",
       "invariant": "Reserved syntax retains the catalog-selected builtin identity and declared result type; ordinary calls keep overload resolution and session-dependent values."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "merge_action_syntax_retains_identity_without_binding_ordinary_calls",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/compiler/tests/data_commands.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "merge_action_output_retains_its_allowance_and_honors_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/runtime_scalars.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_action_remains_a_row_input_during_constant_folding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/tests.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_action_syntax_is_distinct_from_ordinary_routines",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_action_does_not_collide_with_user_column_name",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_returning_exposes_postgresql_18_row_images",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_not_matched_by_source_orders_actions_and_returns_all_row_images",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_tracks_physical_partition_identity_and_routes_actions_under_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/merge.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "generated_columns_are_recomputed_for_upsert_and_merge",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_generated_columns/mutations_and_functions.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "instead_of_view_merge_actions_and_statement_order_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/instead_of.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partitioned_merge_returning_uses_each_action_post_trigger_image_and_physical_leaf",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/row_images.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "view_merge_trigger_definitions_route_even_when_replica_mode_suppresses_them",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/instead_of.rs",
+      "capability": "Parser-owned MERGE action identity",
+      "workload": "Fixed SQL/Planner owners and MERGE row-image, trigger, generated-column and spill histories.",
+      "invariant": "MERGE action remains a row input through binding, serialization and constant folding; ordinary routines remain independent; output allowance, cancellation and SQL results are preserved."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "merge_action_scope_follows_returning_ancestry_and_analysis_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests.rs",
+      "capability": "MERGE action clause and row identity",
+      "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
+      "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "merge_action_scope_is_restored_after_returning_analysis",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests.rs",
+      "capability": "MERGE action clause and row identity",
+      "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
+      "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "implicit_action_inputs_preserve_their_enclosing_row_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/correlation.rs",
+      "capability": "MERGE action clause and row identity",
+      "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
+      "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_action_context_errors_precede_execution_and_preserve_input_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "MERGE action clause and row identity",
+      "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
+      "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_action_subqueries_follow_each_returned_action",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "MERGE action clause and row identity",
+      "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
+      "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
     }
   ]
 }

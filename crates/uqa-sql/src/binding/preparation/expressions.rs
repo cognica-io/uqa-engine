@@ -99,6 +99,17 @@ impl Preparation<'_> {
             ..
         } = expression
         {
+            if binding.builtin
+                && binding.dispatch == Some(crate::ast::FunctionDispatch::MergeAction)
+                && !self.scope.merge_returning
+                && !self.parameters.is_output_binding()
+            {
+                return Err(error(
+                    "42601",
+                    "MERGE_ACTION() can only be used in the RETURNING list of a MERGE command"
+                        .into(),
+                ));
+            }
             if let Some(symbol) = binding
                 .dispatch
                 .and_then(|dispatch| dispatch.json_extraction_symbol())

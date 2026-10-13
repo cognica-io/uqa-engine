@@ -343,3 +343,81 @@ fn peer_range_frames_do_not_require_offset_support() {
         );
     }
 }
+
+#[test]
+fn merge_action_scope_follows_returning_ancestry_and_analysis_order() {
+    let crate::Statement::CreateTable(table) =
+        crate::compile("CREATE TABLE action_target (id integer)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("table")
+    };
+    let context = BindingContext {
+        catalog: crate::binding::fixture::catalog(BTreeMap::from([(
+            RelationIdentity::new("public", "action_target"),
+            crate::binding::fixture::table_definition(table.columns),
+        )])),
+        ..crate::binding::fixture::empty_binding_context()
+    };
+    for (sql, expected) in [
+        ("SELECT merge_action()", Some("42601")),
+        ("SELECT merge_action() WHERE false", Some("42601")),
+        ("SELECT CASE WHEN false THEN merge_action() ELSE 'unused' END", Some("42601")),
+        ("SELECT lower(merge_action())", Some("42601")),
+        ("SELECT merge_action() FROM absent_action_relation", Some("42P01")),
+        ("SELECT 'bad'::integer, merge_action()", Some("22P02")),
+        ("SELECT merge_action(), 'bad'::integer", Some("42601")),
+        ("INSERT INTO action_target VALUES (2) RETURNING merge_action()", Some("42601")),
+        ("UPDATE action_target SET id=id RETURNING merge_action()", Some("42601")),
+        ("DELETE FROM action_target WHERE false RETURNING merge_action()", Some("42601")),
+        ("MERGE INTO action_target AS t USING (VALUES (1)) AS s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=s.id RETURNING merge_action()", None),
+        ("MERGE INTO action_target AS t USING (VALUES (1)) AS s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=s.id RETURNING lower(merge_action())", None),
+        ("MERGE INTO action_target AS t USING (VALUES (1)) AS s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=s.id RETURNING (SELECT merge_action())", None),
+        ("MERGE INTO action_target AS t USING (VALUES (1)) AS s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=s.id RETURNING CASE WHEN false THEN (SELECT merge_action()) ELSE 'unused' END", None),
+        ("MERGE INTO action_target t USING (VALUES(1)) s(id) ON merge_action()='UPDATE' WHEN MATCHED THEN DO NOTHING", Some("42601")),
+        ("MERGE INTO action_target t USING (VALUES(1)) s(id) ON t.id=s.id WHEN MATCHED AND merge_action()='UPDATE' THEN DO NOTHING", Some("42601")),
+        ("MERGE INTO action_target t USING (VALUES(1)) s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=length(merge_action())", Some("42601")),
+        ("MERGE INTO action_target t USING (SELECT length(merge_action()) AS id) s ON t.id=s.id WHEN MATCHED THEN DO NOTHING", Some("42601")),
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        for retained in [false, true] {
+            let result = read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None);
+            if let Some(state) = expected {
+                let error = result.expect_err(sql);
+                assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+                if state == "42601" {
+                    assert_eq!(error.to_string(), "MERGE_ACTION() can only be used in the RETURNING list of a MERGE command", "{sql}");
+                }
+                break;
+            }
+            result.unwrap_or_else(|error| panic!("retained={retained}: {sql}: {error}"));
+            let schema = crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context).unwrap_or_else(|error| panic!("{sql}: {error}")).unwrap();
+            assert_eq!(schema.column_type(0), Some(&ColumnType::Text), "{sql}");
+        }
+    }
+}
+
+#[test]
+fn merge_action_scope_is_restored_after_returning_analysis() {
+    let context = assignment_context();
+    let mut scope = SchemaScope::for_analysis(&context).unwrap();
+    let mut analysis = Preparation {
+        routines: &NoRoutines,
+        scope: &mut scope,
+        parameters: ParameterTypes::new(&[]),
+        schema_expression: None,
+    };
+    for (returning, valid) in [
+        ("merge_action()", true),
+        ("merge_action(), missing_context_column", false),
+    ] {
+        let sql = format!("MERGE INTO assignment_target t USING (VALUES(1)) s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=s.id RETURNING {returning}");
+        let plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        let result = analysis.plan(&plan);
+        assert_eq!(result.is_ok(), valid, "{sql}: {result:?}");
+        let select = UnifiedPlan::lower(crate::compile("SELECT merge_action()").unwrap().remove(0));
+        let error = analysis.plan(&select).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42601"));
+    }
+}

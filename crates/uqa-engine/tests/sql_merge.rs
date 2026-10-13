@@ -33,6 +33,40 @@ fn setup() -> Engine {
 }
 
 #[test]
+fn merge_action_syntax_is_distinct_from_ordinary_routines() {
+    let eng = setup();
+    eng.sql(
+        "CREATE FUNCTION public.\"merge_action\"() RETURNS text
+         LANGUAGE sql IMMUTABLE RETURN 'ordinary'::text",
+        &[],
+    )
+    .unwrap();
+    let result = eng
+        .sql(
+            "MERGE INTO inventory t USING deltas d ON t.id = d.id
+             WHEN MATCHED THEN UPDATE SET qty = t.qty + d.change
+             WHEN NOT MATCHED THEN INSERT VALUES (d.id, d.change)
+             RETURNING merge_action() AS action,
+                       \"merge_action\"() AS quoted,
+                       public.merge_action() AS qualified",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.affected_rows, 2);
+    assert_eq!(result.rows.len(), 2);
+    for row in &result.rows {
+        assert_eq!(row["quoted"], Value::Str("ordinary".into()));
+        assert_eq!(row["qualified"], Value::Str("ordinary".into()));
+    }
+    for action in ["INSERT", "UPDATE"] {
+        assert!(result
+            .rows
+            .iter()
+            .any(|row| row["action"] == Value::Str(action.into())));
+    }
+}
+
+#[test]
 fn merge_updates_matched_inserts_unmatched() {
     let eng = setup();
     let r = eng
@@ -572,4 +606,101 @@ fn merge_returning_star_orders_source_columns_before_target_columns() {
             Value::Int(3),
             Value::Int(7),
         ]));
+}
+
+#[test]
+fn merge_action_context_errors_precede_execution_and_preserve_input_order() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE action_target (id integer)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO action_target VALUES (1)", &[])
+        .unwrap();
+    for (sql, state) in [
+        ("PREPARE bad_action AS SELECT merge_action()", "42601"),
+        ("CREATE TEMP VIEW bad_action_view AS SELECT merge_action()", "42601"),
+        ("CREATE FUNCTION public.bad_action() RETURNS text LANGUAGE sql RETURN merge_action()", "42601"),
+        ("CREATE FUNCTION public.bad_action() RETURNS text LANGUAGE sql AS 'SELECT merge_action()'", "42601"),
+        ("SELECT merge_action()", "42601"),
+        ("SELECT merge_action() WHERE false", "42601"),
+        ("SELECT CASE WHEN false THEN merge_action() ELSE 'unused' END", "42601"),
+        ("SELECT lower(merge_action())", "42601"),
+        ("SELECT merge_action() FROM absent_action_relation", "42P01"),
+        ("SELECT 'bad'::integer, merge_action()", "22P02"),
+        ("SELECT merge_action(), 'bad'::integer", "42601"),
+        ("INSERT INTO action_target VALUES (2) RETURNING merge_action()", "42601"),
+        ("UPDATE action_target SET id=id RETURNING merge_action()", "42601"),
+        ("DELETE FROM action_target WHERE false RETURNING merge_action()", "42601"),
+        ("MERGE INTO action_target t USING (VALUES(1)) s(id) ON merge_action()='UPDATE' WHEN MATCHED THEN DO NOTHING", "42601"),
+        ("MERGE INTO action_target t USING (VALUES(1)) s(id) ON t.id=s.id WHEN MATCHED AND merge_action()='UPDATE' THEN DO NOTHING", "42601"),
+        ("MERGE INTO action_target t USING (VALUES(1)) s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=length(merge_action())", "42601"),
+        ("MERGE INTO action_target t USING (SELECT length(merge_action()) AS id) s ON t.id=s.id WHEN MATCHED THEN DO NOTHING", "42601"),
+        ("SELECT pg_catalog.merge_action()", "42883"),
+        ("SELECT \"merge_action\"()", "42883"),
+        ("CREATE TEMP TABLE bad_action_default (v text DEFAULT merge_action())", "42601"),
+        ("CREATE TEMP TABLE bad_action_check (v text CHECK(v=merge_action()))", "42601"),
+    ] {
+        let error = eng.sql(sql, &[]).expect_err(sql);
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+        if state == "42601" {
+            assert_eq!(error.to_string(), "MERGE_ACTION() can only be used in the RETURNING list of a MERGE command", "{sql}");
+        }
+    }
+    let rows = eng.sql("SELECT id FROM action_target", &[]).unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["id"], Value::Int(1));
+}
+
+#[test]
+fn merge_action_subqueries_follow_each_returned_action() {
+    for prepared in [false, true] {
+        let eng = setup();
+        let sql = "MERGE INTO inventory t USING deltas d ON t.id=d.id
+                   WHEN MATCHED THEN UPDATE SET qty=t.qty+d.change
+                   WHEN NOT MATCHED THEN INSERT VALUES(d.id,d.change)
+                   RETURNING t.id, merge_action() AS direct,
+                     (SELECT merge_action()) AS nested,
+                     (SELECT lower(merge_action()) WHERE t.id>0) AS correlated,
+                     (SELECT (SELECT merge_action())) AS deep,
+                     EXISTS (SELECT 1 WHERE merge_action()='INSERT') AS inserted";
+        if prepared {
+            eng.sql(&format!("PREPARE action_output AS {sql}"), &[])
+                .unwrap();
+        }
+        for repeated in [false, true] {
+            let result = eng
+                .sql(
+                    if prepared {
+                        "EXECUTE action_output"
+                    } else {
+                        sql
+                    },
+                    &[],
+                )
+                .unwrap();
+            assert_eq!(result.affected_rows, 2);
+            assert_eq!(result.rows.len(), 2);
+            for id in [1, 3] {
+                let inserted = id == 3 && !repeated;
+                let (action, lower) = if inserted {
+                    ("INSERT", "insert")
+                } else {
+                    ("UPDATE", "update")
+                };
+                let row = result
+                    .rows
+                    .iter()
+                    .find(|row| row["id"] == Value::Int(id))
+                    .unwrap();
+                for column in ["direct", "nested", "deep"] {
+                    assert_eq!(
+                        row[column],
+                        Value::Str(action.into()),
+                        "prepared={prepared}, repeated={repeated}, id={id}, column={column}"
+                    );
+                }
+                assert_eq!(row["correlated"], Value::Str(lower.into()));
+                assert_eq!(row["inserted"], Value::Bool(inserted));
+            }
+        }
+    }
 }

@@ -110,15 +110,9 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         }
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
-        NodeEnum::MergeSupportFunc(_) => Ok(Expr::Func {
-            order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-            binding: None,
-            name: "merge_action".into(),
-            args: Vec::new(),
-            distinct: false,
-            order_by: Vec::new(),
-            filter: None,
-        }),
+        NodeEnum::MergeSupportFunc(_) => {
+            Ok(dispatched_call(FunctionDispatch::MergeAction, Vec::new()))
+        }
         NodeEnum::BoolExpr(b) => compile_bool_expr(b),
         NodeEnum::BooleanTest(test) => compile_boolean_test(test),
         NodeEnum::NullTest(n) => compile_null_test(n),

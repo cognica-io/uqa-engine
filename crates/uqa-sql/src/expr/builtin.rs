@@ -239,6 +239,7 @@ pub fn bound_scalar_function_strictness(
             FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::Pattern { .. } | FunctionDispatch::PatternEscape { .. } => Some(true),
             FunctionDispatch::Collate { .. } => None,
+            FunctionDispatch::MergeAction => Some(false),
             FunctionDispatch::Subscript
             | FunctionDispatch::FieldSelect
             | FunctionDispatch::BetweenSymmetric
@@ -382,6 +383,13 @@ pub(super) fn eval_dispatched_builtin_with_control(
         return result;
     }
     match dispatch {
+        FunctionDispatch::MergeAction => {
+            crate::semantics::runtime_scalars::merge_action_value_with_control(
+                evaluated.len(),
+                context.row_lookup()?,
+                control,
+            )
+        }
         FunctionDispatch::CollationFor {
             collation_oid,
             noncollatable_type_oid,

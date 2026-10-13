@@ -506,6 +506,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     let first = || argument(0);
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         match dispatch {
+            FunctionDispatch::MergeAction => return inline(ColumnType::Text, control),
             FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
             FunctionDispatch::Pattern { operator, .. } => {
                 super::super::pattern::select(operator, &effective_types, control)?;
