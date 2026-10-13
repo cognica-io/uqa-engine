@@ -55,3 +55,38 @@ fn add_column_checks_match_postgresql(#[case] provider: usize) {
         include_str!("../../../../../tests/parity/pg18/add_column_checks_oracle.expected.json"),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn column_removal_keeps_checks_with_surviving_dependencies(#[case] provider: usize) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("retained-column-checks.db");
+    let engine = retained_check_engine(provider, &path);
+    crate::pg18_oracle::verify(&engine, include_str!("retained_column_checks.json"));
+    drop(engine);
+    if provider != 0 {
+        crate::pg18_oracle::verify(
+            &retained_check_engine(provider, &path),
+            include_str!("retained_column_checks_reopen.json"),
+        );
+    }
+}
+
+fn retained_check_engine(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
+}

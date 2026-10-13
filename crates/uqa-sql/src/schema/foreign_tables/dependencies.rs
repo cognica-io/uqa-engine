@@ -76,28 +76,12 @@ pub fn validate_foreign_column_removal(
 pub fn remove_foreign_column(
     columns: &mut Vec<ColumnDef>,
     checks: &mut Vec<TableCheck>,
-    column_index: usize,
     column_name: &str,
 ) {
-    for column in columns.iter_mut() {
-        if column.name != column_name
-            && column
-                .check
-                .as_ref()
-                .is_some_and(|expression| schema_expr_references_column(expression, column_name))
-        {
-            column.check = None;
-            column.check_name = None;
-            column.check_object_id = None;
-            column.check_catalog_oid = None;
-            column.check_is_local = true;
-            column.check_enforced = true;
-            column.check_validated = true;
-            column.check_no_inherit = false;
-        }
-    }
-    columns.remove(column_index);
-    checks.retain(|check| !schema_expr_references_column(&check.expr, column_name));
+    checks.extend(
+        crate::schema::columns::removal_metadata::remove_column_declarations(columns, column_name),
+    );
+    crate::schema::columns::removal_metadata::remove_column_checks(checks, column_name);
 }
 
 pub use crate::schema::sequences::dependencies::detach_sequence_provenance as detach_foreign_sequence_provenance;

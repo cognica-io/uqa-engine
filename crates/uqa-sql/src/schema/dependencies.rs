@@ -122,11 +122,20 @@ pub fn walk_schema_expr_mut(
 }
 
 pub fn schema_expr_references_column(expression: &crate::ast::Expr, column: &str) -> bool {
+    references_column(expression, column, true)
+}
+
+/// Attribute dependencies survive column renames but disappear with the selected column. A whole-row value depends on its relation and continues to read that relation's current fields after a column is dropped.
+pub fn schema_expr_depends_on_column(expression: &crate::ast::Expr, column: &str) -> bool {
+    references_column(expression, column, false)
+}
+
+fn references_column(expression: &crate::ast::Expr, column: &str, reads_whole_row: bool) -> bool {
     let mut expression = expression.clone();
     let mut referenced = false;
     let result = walk_schema_expr_mut(&mut expression, &mut |node| {
         referenced |= match node {
-            crate::ast::Expr::Star | crate::ast::Expr::QualifiedStar(_) => true,
+            crate::ast::Expr::Star | crate::ast::Expr::QualifiedStar(_) => reads_whole_row,
             crate::ast::Expr::Column(name)
             | crate::ast::Expr::QualifiedColumn { column: name, .. } => name == column,
             _ => false,

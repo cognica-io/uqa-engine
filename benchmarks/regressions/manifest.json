@@ -5224,6 +5224,35 @@
       "capability": "Foreign declaration identity and publication",
       "workload": "Retained session declarations, temporary and durable foreign definitions with their security metadata.",
       "invariant": "Temporary publication preserves durable data; same-session refresh retains unbound declarations and security while replacing bound permanent definitions from the selected durable view."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "dropping_the_written_column_preserves_independent_check_identity_and_flags",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/columns/removal_metadata/tests.rs",
+      "capability": "CHECK dependency lifetime",
+      "workload": "Constant and surviving-column predicates in ordinary and foreign column removal with retained identities and flags.",
+      "invariant": "The written column does not create a false attribute dependency; surviving declarations retain their identity and flags, while actual attribute dependencies are still removed."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "column_removal_keeps_checks_with_surviving_dependencies",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/column_declarations.rs",
+      "capability": "CHECK dependency lifetime",
+      "workload": "Thirty-seven PostgreSQL lifecycle commands across four providers and seven observations after actual persistent reopen.",
+      "invariant": "Column removal preserves independent ordinary/foreign CHECK identities, flags and enforcement through savepoints, rollback and persistent reopening."
     }
   ]
 }

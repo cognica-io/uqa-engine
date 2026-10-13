@@ -1,0 +1,9 @@
+{"postgresql_version":"PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit","cases":[
+{"sql":"SET search_path=retained_check,public","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"SELECT c.conname,c.conkey,c.conenforced,c.convalidated,c.conislocal,c.connoinherit,c.oid=i.original_oid AS same_identity FROM pg_constraint c JOIN check_identity i ON i.name=c.conname WHERE c.connamespace='retained_check'::regnamespace ORDER BY c.conname","command_tags":["SELECT 4"],"error":null,"results":[{"columns":["conname","conkey","conenforced","convalidated","conislocal","connoinherit","same_identity"],"type_oids":[19,1005,16,16,16,16,16],"rows":[["always_false",null,"t","t","t","t","t"],["foreign_constant",null,"t","t","t","f","t"],["ignored_check",null,"f","f","t","f","t"],["other_positive","{2}","t","t","t","f","t"]]}]},
+{"sql":"INSERT INTO blocked(t) VALUES('reopen_rejected')","command_tags":[],"error":{"sqlstate":"23514","message":"new row for relation \"blocked\" violates check constraint \"always_false\"","detail":"Failing row contains (reopen_rejected).","hint":null},"results":[]},
+{"sql":"INSERT INTO other_field(t) VALUES(0)","command_tags":[],"error":{"sqlstate":"23514","message":"new row for relation \"other_field\" violates check constraint \"other_positive\"","detail":"Failing row contains (0).","hint":null},"results":[]},
+{"sql":"SELECT count(*) FROM blocked","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["count"],"type_oids":[20],"rows":[["0"]]}]},
+{"sql":"SELECT t FROM allowed","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[23],"rows":[["7"]]}]},
+{"sql":"SELECT t FROM other_field","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[23],"rows":[["1"]]}]}
+]}

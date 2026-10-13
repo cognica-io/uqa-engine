@@ -7,7 +7,8 @@
 //! Validate column dependencies against retained relation metadata and remove local declarations.
 use crate::ast::{ColumnDef, ForeignKey, TableCheck, TableKeyConstraint};
 use crate::schema::dependencies::{
-    rewrites::stored_relation_reference_matches, schema_expr_references_column,
+    rewrites::stored_relation_reference_matches, schema_expr_depends_on_column,
+    schema_expr_references_column,
 };
 use std::ops::Deref;
 use uqa_core::RelationIdentity;
@@ -114,27 +115,27 @@ pub fn validate_column_dependencies(
     }
     Ok(())
 }
-pub fn remove_column_declarations(columns: &mut Vec<ColumnDef>, column: &str) {
+/// A column's written CHECK can depend only on the relation. Move that surviving declaration to the table without changing its identity or enforcement flags.
+pub fn remove_column_declarations(columns: &mut Vec<ColumnDef>, column: &str) -> Vec<TableCheck> {
+    let mut retained = Vec::new();
     for definition in columns.iter_mut() {
         if definition
             .check
             .as_ref()
-            .is_some_and(|expression| schema_expr_references_column(expression, column))
+            .is_some_and(|expression| schema_expr_depends_on_column(expression, column))
         {
-            definition.check = None;
-            definition.check_name = None;
-            definition.check_object_id = None;
-            definition.check_catalog_oid = None;
-            definition.check_is_local = true;
-            definition.check_enforced = true;
-            definition.check_validated = true;
-            definition.check_no_inherit = false;
+            let _ = crate::schema::constraint_changes::take_column_check(definition);
+        } else if definition.name == column {
+            retained.extend(crate::schema::constraint_changes::take_column_check(
+                definition,
+            ));
         }
     }
     columns.retain(|c| c.name != column);
+    retained
 }
 pub fn remove_column_checks(checks: &mut Vec<TableCheck>, column: &str) {
-    checks.retain(|constraint| !schema_expr_references_column(&constraint.expr, column));
+    checks.retain(|constraint| !schema_expr_depends_on_column(&constraint.expr, column));
 }
 /// A key constraint goes with any column of its supporting index: a key column or an included one. A single-column constraint that goes with an included column also gives up the key flag of its surviving key column, unless another constraint of its kind still keys that column alone.
 pub fn remove_column_keys(
@@ -184,3 +185,6 @@ pub fn remove_column_foreign_keys(keys: &mut Vec<ForeignKey>, column: &str) {
                 .any(|name| name == column)
     });
 }
+
+#[cfg(test)]
+mod tests;
