@@ -9,6 +9,27 @@
 use super::{ColumnIdentity, ColumnType, HashSet, RowSchema, NULL_SLOT};
 
 impl RowSchema {
+    /// Compare the complete physical row contract while the original schema retains analysis-only namespaces and record descriptors. A restored row must match this layout before it can reuse the original binding context.
+    pub fn has_same_physical_layout(&self, other: &Self) -> bool {
+        let left = &self.index;
+        let right = &other.index;
+        left.columns == right.columns
+            && left.identities == right.identities
+            && left.slots == right.slots
+            && left.physical_width == right.physical_width
+            && left.aliases == right.aliases
+            && left.executor_attributes == right.executor_attributes
+            && left.cold.columns == right.cold.columns
+            && left.cold.aliases == right.cold.aliases
+            && left.cold.executor_attribute_types == right.cold.executor_attribute_types
+            && left.cold.score_sources == right.cold.score_sources
+            && left.cold.wildcard_hidden == right.cold.wildcard_hidden
+            && left
+                .cold
+                .collations
+                .same_physical_bindings(&right.cold.collations)
+    }
+
     /// Whether one logical source attribute participates in `*` expansion.
     #[must_use]
     pub fn wildcard_position_visible(&self, position: usize) -> bool {

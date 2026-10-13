@@ -5370,6 +5370,136 @@
       "capability": "Catalog-qualified character type identity",
       "workload": "The fixed 142-command PostgreSQL datetime fixture on sqlite.",
       "invariant": "Temporal values, types and errors match the independent reference, including CHAR(10) to date."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spill_readers_retain_named_rows_and_record_field_descriptors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/schemas.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_relation_identity_survives_spill_without_a_value_slot",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/schemas.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "restored_schema_rejects_different_physical_types_aliases_and_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/schemas.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "tiny_work_mem_spills_group_map_distinct_and_ordered_collection_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_blocking_spill.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "tiny_work_mem_replays_distinct_hash_aggregate_after_budget_exhaustion",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_blocking_spill.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "tiny_work_mem_spills_window_input_sort_and_random_access_partition",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_blocking_spill.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "stored_column_rename_matches_postgresql_with_spilled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/stored_column_rename.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "stored_column_drop_matches_postgresql_with_spilled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/stored_column_drop.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "stored_column_alias_drop_matches_postgresql_with_spilled_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/stored_column_alias_drop.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "window_results_preserve_postgresql_return_types_through_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_prepared.rs",
+      "capability": "Retained SQL schema across physical spill",
+      "workload": "Fixed named-row, record-field, blocking-operator or stored-column history using the existing spill allowance.",
+      "invariant": "Physical identities, value types, slots and collations must match; original SQL binding metadata and query output survive without increasing resource limits."
     }
   ]
 }

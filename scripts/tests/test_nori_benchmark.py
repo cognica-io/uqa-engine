@@ -90,7 +90,8 @@ class NoriBenchmarkTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             (directory / script).parent.mkdir()
-            (directory / script).write_bytes((ROOT / script).read_bytes())
+            for dependency in (script, "scripts/check-public-repository-hygiene.py"):
+                (directory / dependency).write_bytes((ROOT / dependency).read_bytes())
             subprocess.run(["git", "init", "--quiet", str(directory)], check=True)
             contract = directory / "benchmarks/nori/limits.json"
             contract.parent.mkdir(parents=True)

@@ -46,6 +46,15 @@ fn override_value(oid: Option<u32>, ty: Option<&ColumnType>) -> Option<u32> {
 }
 
 impl Collations {
+    pub(super) fn same_physical_bindings(&self, other: &Self) -> bool {
+        let empty = Bindings::default();
+        let left = self.0.as_deref().unwrap_or(&empty);
+        let right = other.0.as_deref().unwrap_or(&empty);
+        left.columns == right.columns
+            && left.aliases == right.aliases
+            && left.internal == right.internal
+    }
+
     pub(super) fn joined(left: &RowSchema, right: &RowSchema) -> Self {
         let mut result = left.index.cold.collations.clone();
         if let Some(target) = &mut result.0 {
