@@ -5881,6 +5881,84 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "fixed_parameter_metadata_preserves_contextual_input_types",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/json_operators.rs",
+      "capability": "Contextual parameter metadata",
+      "workload": "Fixed fresh and retained JSON call schemas, named/default arguments, explicit types and empty results.",
+      "invariant": "Output analysis shares parameter type identity with input analysis; values, JSON storage representation and incompatible-signature diagnostics remain unchanged."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "fixed_parameter_metadata_rejects_declared_text_without_implicit_json_casts",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/json_operators.rs",
+      "capability": "Contextual parameter metadata",
+      "workload": "Fixed fresh and retained JSON call schemas, named/default arguments, explicit types and empty results.",
+      "invariant": "Output analysis shares parameter type identity with input analysis; values, JSON storage representation and incompatible-signature diagnostics remain unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_json_null_stripping_preserves_each_storage_contract",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_strip_nulls.rs",
+      "capability": "Contextual parameter metadata",
+      "workload": "Fixed fresh and retained JSON call schemas, named/default arguments, explicit types and empty results.",
+      "invariant": "Output analysis shares parameter type identity with input analysis; values, JSON storage representation and incompatible-signature diagnostics remain unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_json_null_stripping_binds_defaults_names_types_and_parameters",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_strip_nulls.rs",
+      "capability": "Contextual parameter metadata",
+      "workload": "Fixed fresh and retained JSON call schemas, named/default arguments, explicit types and empty results.",
+      "invariant": "Output analysis shares parameter type identity with input analysis; values, JSON storage representation and incompatible-signature diagnostics remain unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_json_null_stripping_reports_declared_signature_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_strip_nulls.rs",
+      "capability": "Contextual parameter metadata",
+      "workload": "Fixed fresh and retained JSON call schemas, named/default arguments, explicit types and empty results.",
+      "invariant": "Output analysis shares parameter type identity with input analysis; values, JSON storage representation and incompatible-signature diagnostics remain unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pg18_json_null_stripping_ranks_defaults_and_user_overloads_by_search_path",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/json_strip_nulls.rs",
+      "capability": "Contextual parameter metadata",
+      "workload": "Fixed fresh and retained JSON call schemas, named/default arguments, explicit types and empty results.",
+      "invariant": "Output analysis shares parameter type identity with input analysis; values, JSON storage representation and incompatible-signature diagnostics remain unchanged."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "merge_action_scope_follows_returning_ancestry_and_analysis_order",
       "cases": 1,
       "case_names": [

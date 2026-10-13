@@ -373,7 +373,7 @@ impl<'a> ParameterTypes<'a> {
         }
     }
 
-    /// Output binding borrows values whose input types have already been selected.
+    /// Output binding borrows caller parameters and preserves their explicit declarations.
     pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
         Self {
             fixed_values: Some(values),
@@ -430,11 +430,12 @@ impl<'a> ParameterTypes<'a> {
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {
         if let Some(values) = self.fixed_values {
-            let ty = crate::scalar_type(
-                &ScalarExpr::Param(number),
-                &crate::RowSchema::default(),
+            let parameter = ScalarExpr::Param(number);
+            let ty = crate::effective_overload_argument_type_with_params(
+                &parameter,
+                crate::scalar_type(&parameter, &crate::RowSchema::default(), values)?,
                 values,
-            )?;
+            );
             let mut value = ExpressionType::leaf(ty);
             if number
                 .checked_sub(1)
