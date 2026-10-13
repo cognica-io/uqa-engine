@@ -15,6 +15,7 @@ mod name_binding;
 mod open_columns;
 mod outer_scope;
 mod record_fields;
+mod relation_types;
 mod result_columns;
 mod schema_composition;
 mod schema_construction;
@@ -108,6 +109,7 @@ struct SchemaIndex {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SchemaColdMetadata {
     collations: Collations,
+    row_types: relation_types::RelationRowTypes,
     record_fields: HashMap<usize, RecordMetadata>,
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
@@ -131,6 +133,7 @@ struct SchemaColdMetadata {
 #[derive(Default)]
 struct SchemaBuildMetadata {
     collations: Collations,
+    row_types: relation_types::RelationRowTypes,
     record_fields: HashMap<usize, RecordMetadata>,
     aliases: HashMap<ColumnIdentity, usize>,
     alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,

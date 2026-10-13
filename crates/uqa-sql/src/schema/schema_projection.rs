@@ -49,6 +49,7 @@ impl RowSchema {
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                row_types: input.index.cold.row_types.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -175,6 +176,7 @@ impl RowSchema {
                     score_sources: input.index.cold.score_sources.clone(),
                     wildcard_hidden,
                     binding_only: input.index.cold.binding_only.clone(),
+                    row_types: input.index.cold.row_types.clone(),
                     open_qualifiers: input.index.cold.open_qualifiers.clone(),
                     ..SchemaBuildMetadata::default()
                 },
@@ -290,6 +292,7 @@ impl RowSchema {
                     score_sources: self.index.cold.score_sources.clone(),
                     wildcard_hidden: self.index.cold.wildcard_hidden.clone(),
                     binding_only: self.index.cold.binding_only.clone(),
+                    row_types: self.index.cold.row_types.clone(),
                     open_qualifiers: self.index.cold.open_qualifiers.clone(),
                     ..SchemaBuildMetadata::default()
                 },
@@ -581,6 +584,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
+                row_types: input.index.cold.row_types.clone(),
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },

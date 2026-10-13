@@ -1,0 +1,386 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "name": "bare",
+      "relation": "subject",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "t",
+          "type": "text",
+          "attribute": 2
+        }
+      ],
+      "expression": "\"subject\" IS NOT NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31000 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "(subject.* IS NOT NULL)",
+      "pretty": "subject.* IS NOT NULL"
+    },
+    {
+      "name": "expanded",
+      "relation": "subject",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "t",
+          "type": "text",
+          "attribute": 2
+        }
+      ],
+      "expression": "\"subject\".* IS NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31000 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+      "sql": "(subject.* IS NULL)",
+      "pretty": "subject.* IS NULL"
+    },
+    {
+      "name": "qualified_column",
+      "relation": "subject",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "t",
+          "type": "text",
+          "attribute": 2
+        }
+      ],
+      "expression": "\"subject\".n > 0",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(n > 0)",
+      "pretty": "n > 0"
+    },
+    {
+      "name": "qualified_oid",
+      "relation": "subject",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "t",
+          "type": "text",
+          "attribute": 2
+        }
+      ],
+      "expression": "\"subject\".tableoid > 0",
+      "node": "{OPEXPR :opno 610 :opfuncid 1638 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno -6 :vartype 26 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn -6 :location -1} {RELABELTYPE :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :resulttype 26 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(tableoid > (0)::oid)",
+      "pretty": "tableoid > 0::oid"
+    },
+    {
+      "name": "relation_oid",
+      "relation": "subject",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "t",
+          "type": "text",
+          "attribute": 2
+        }
+      ],
+      "expression": "tableoid > 0",
+      "node": "{OPEXPR :opno 610 :opfuncid 1638 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno -6 :vartype 26 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn -6 :location -1} {RELABELTYPE :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :resulttype 26 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(tableoid > (0)::oid)",
+      "pretty": "tableoid > 0::oid"
+    },
+    {
+      "name": "bare",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\" IS NOT NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31000 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "(renamed.* IS NOT NULL)",
+      "pretty": "renamed.* IS NOT NULL"
+    },
+    {
+      "name": "expanded",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\".* IS NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31000 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+      "sql": "(renamed.* IS NULL)",
+      "pretty": "renamed.* IS NULL"
+    },
+    {
+      "name": "qualified_column",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\".n > 0",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(n > 0)",
+      "pretty": "n > 0"
+    },
+    {
+      "name": "qualified_oid",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\".tableoid > 0",
+      "node": "{OPEXPR :opno 610 :opfuncid 1638 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno -6 :vartype 26 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn -6 :location -1} {RELABELTYPE :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :resulttype 26 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(tableoid > (0)::oid)",
+      "pretty": "tableoid > 0::oid"
+    },
+    {
+      "name": "relation_oid",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "tableoid > 0",
+      "node": "{OPEXPR :opno 610 :opfuncid 1638 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno -6 :vartype 26 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn -6 :location -1} {RELABELTYPE :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :resulttype 26 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(tableoid > (0)::oid)",
+      "pretty": "tableoid > 0::oid"
+    },
+    {
+      "name": "Odd.Name_check",
+      "relation": "Odd.Name",
+      "relation_oid": 31012,
+      "type_oid": 31014,
+      "array_oid": 31013,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        }
+      ],
+      "expression": "\"Odd.Name\".* IS NOT NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31014 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "(\"Odd.Name\".* IS NOT NULL)",
+      "pretty": "\"Odd.Name\".* IS NOT NULL"
+    },
+    {
+      "name": "bare",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\" IS NOT NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31000 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "(renamed.* IS NOT NULL)",
+      "pretty": "renamed.* IS NOT NULL"
+    },
+    {
+      "name": "expanded",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\".* IS NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 0 :vartype 31000 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 0 :location -1} :nulltesttype 0 :argisrow true :location -1}",
+      "sql": "(renamed.* IS NULL)",
+      "pretty": "renamed.* IS NULL"
+    },
+    {
+      "name": "qualified_column",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\".n > 0",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(n > 0)",
+      "pretty": "n > 0"
+    },
+    {
+      "name": "qualified_oid",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "\"renamed\".tableoid > 0",
+      "node": "{OPEXPR :opno 610 :opfuncid 1638 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno -6 :vartype 26 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn -6 :location -1} {RELABELTYPE :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :resulttype 26 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(tableoid > (0)::oid)",
+      "pretty": "tableoid > 0::oid"
+    },
+    {
+      "name": "relation_oid",
+      "relation": "renamed",
+      "relation_oid": 30998,
+      "type_oid": 31000,
+      "array_oid": 30999,
+      "columns": [
+        {
+          "name": "n",
+          "type": "integer",
+          "attribute": 1
+        },
+        {
+          "name": "extra",
+          "type": "integer",
+          "attribute": 3
+        }
+      ],
+      "expression": "tableoid > 0",
+      "node": "{OPEXPR :opno 610 :opfuncid 1638 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno -6 :vartype 26 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn -6 :location -1} {RELABELTYPE :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :resulttype 26 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1}) :location -1}",
+      "sql": "(tableoid > (0)::oid)",
+      "pretty": "tableoid > 0::oid"
+    },
+    {
+      "name": "shadow_shadow_check",
+      "relation": "shadow",
+      "relation_oid": 31008,
+      "type_oid": 31010,
+      "array_oid": 31009,
+      "columns": [
+        {
+          "name": "shadow",
+          "type": "integer",
+          "attribute": 1
+        }
+      ],
+      "expression": "shadow IS NOT NULL",
+      "node": "{NULLTEST :arg {VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} :nulltesttype 1 :argisrow false :location -1}",
+      "sql": "(shadow IS NOT NULL)",
+      "pretty": "shadow IS NOT NULL"
+    }
+  ]
+}

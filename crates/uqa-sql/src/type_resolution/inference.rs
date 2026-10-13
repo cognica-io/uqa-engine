@@ -45,7 +45,10 @@ pub(super) fn scalar_type_inner_with_control(
             if schema.has_unqualified_column(column) || schema.column_is_ambiguous(column) {
                 copy_type(schema.type_of(column), control)
             } else if schema.has_qualifier(column) {
-                copy_type(Some(&ColumnType::Record), control)
+                copy_type(
+                    schema.whole_row_type(column).or(Some(&ColumnType::Record)),
+                    control,
+                )
             } else {
                 Ok(None)
             }
@@ -369,9 +372,12 @@ pub(super) fn scalar_type_inner_with_control(
                         .transpose()
                 })
         }
-        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => {
-            copy_type(Some(&ColumnType::Record), control)
-        }
+        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => copy_type(
+            schema
+                .whole_row_type(qualifier)
+                .or(Some(&ColumnType::Record)),
+            control,
+        ),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
     }
 }

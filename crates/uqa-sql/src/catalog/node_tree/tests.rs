@@ -15,6 +15,7 @@ mod concatenation;
 mod fields;
 mod json_extraction;
 mod patterns;
+mod relation_scope;
 mod routine_calls;
 mod rows;
 mod scalar;
@@ -112,6 +113,10 @@ struct StringSettings<'a>(&'a dyn deparse::ExpressionNames, bool);
 impl deparse::ExpressionNames for StringSettings<'_> {
     fn column(&self, attribute: i64) -> Result<String, SQLError> {
         self.0.column(attribute)
+    }
+
+    fn relation_name(&self) -> Result<String, SQLError> {
+        self.0.relation_name()
     }
 
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError> {

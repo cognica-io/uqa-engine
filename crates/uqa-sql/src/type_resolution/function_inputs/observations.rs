@@ -57,6 +57,9 @@ impl ScalarTypeSchema for CallInputTypes<'_> {
     fn has_qualifier(&self, qualifier: &str) -> bool {
         self.schema.has_qualifier(qualifier)
     }
+    fn whole_row_type(&self, qualifier: &str) -> Option<&ColumnType> {
+        self.schema.whole_row_type(qualifier)
+    }
     fn has_qualified_column(&self, qualifier: &str, name: &str) -> bool {
         self.schema.has_qualified_column(qualifier, name)
     }

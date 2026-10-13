@@ -266,6 +266,7 @@ impl RowSchema {
     ) -> Self {
         let SchemaBuildMetadata {
             mut collations,
+            row_types,
             record_fields,
             aliases,
             alias_types,
@@ -349,6 +350,7 @@ impl RowSchema {
                 ambiguous_qualified,
                 cold: Box::new(SchemaColdMetadata {
                     collations,
+                    row_types,
                     record_fields,
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,

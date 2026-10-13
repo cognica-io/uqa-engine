@@ -22,6 +22,10 @@ pub trait ScalarTypeSchema {
     fn column_type(&self, position: usize) -> Option<&ColumnType>;
     fn internal_type(&self, column: InternalColumnRef) -> Option<&ColumnType>;
     fn has_qualifier(&self, qualifier: &str) -> bool;
+    /// The named composite identity of a relation's whole row, when the caller retains it. Query-only scopes may expose an anonymous record instead.
+    fn whole_row_type(&self, _qualifier: &str) -> Option<&ColumnType> {
+        None
+    }
     fn has_qualified_column(&self, qualifier: &str, name: &str) -> bool;
     fn qualified_column_is_ambiguous(&self, qualifier: &str, name: &str) -> bool;
     fn qualified_type(&self, qualifier: &str, name: &str) -> Option<&ColumnType>;
@@ -81,6 +85,9 @@ impl ScalarTypeSchema for RowSchema {
     fn has_qualifier(&self, qualifier: &str) -> bool {
         Self::has_qualifier(self, qualifier)
     }
+    fn whole_row_type(&self, qualifier: &str) -> Option<&ColumnType> {
+        self.index.cold.row_types.get(qualifier)
+    }
     fn has_qualified_column(&self, qualifier: &str, name: &str) -> bool {
         Self::has_qualified_column(self, qualifier, name)
     }
@@ -102,11 +109,36 @@ impl ScalarTypeSchema for RowSchema {
 #[derive(Clone, Copy)]
 pub struct ColumnTypeSchema<'a> {
     columns: &'a [ColumnDef],
+    relation: Option<(&'a str, &'a ColumnType)>,
 }
 
 impl<'a> ColumnTypeSchema<'a> {
     pub fn new(columns: &'a [ColumnDef]) -> Self {
-        Self { columns }
+        Self {
+            columns,
+            relation: None,
+        }
+    }
+
+    /// Retain the declaring relation's actual row type without copying its columns or representing system attributes as user columns.
+    pub fn with_relation(
+        columns: &'a [ColumnDef],
+        name: &'a str,
+        row_type: &'a ColumnType,
+    ) -> Result<Self, crate::SQLError> {
+        if !matches!(row_type, ColumnType::Composite(_)) {
+            return Err(crate::SQLError::Internal(
+                "a relation scope requires its named composite row type".into(),
+            ));
+        }
+        Ok(Self {
+            columns,
+            relation: Some((name, row_type)),
+        })
+    }
+
+    pub(crate) fn system_column_type(&self, name: &str) -> Option<&ColumnType> {
+        (self.relation.is_some() && name == "tableoid").then_some(&ColumnType::Oid)
     }
 
     /// Original declarations, including stable attribute numbers and selected collations, borrowed from the same catalog generation as type lookup.
@@ -129,7 +161,9 @@ impl ScalarTypeSchema for ColumnTypeSchema<'_> {
             .iter()
             .enumerate()
             .filter(|(_, column)| column.name == name);
-        let (position, _) = matching.next()?;
+        let Some((position, _)) = matching.next() else {
+            return self.system_column_type(name).map(default_collation);
+        };
         matching
             .next()
             .is_none()
@@ -139,6 +173,7 @@ impl ScalarTypeSchema for ColumnTypeSchema<'_> {
 
     fn has_unqualified_column(&self, name: &str) -> bool {
         self.columns.iter().any(|column| column.name == name)
+            || self.system_column_type(name).is_some()
     }
     fn column_is_ambiguous(&self, name: &str) -> bool {
         self.columns
@@ -149,7 +184,9 @@ impl ScalarTypeSchema for ColumnTypeSchema<'_> {
     }
     fn type_of(&self, name: &str) -> Option<&ColumnType> {
         let mut matching = self.columns.iter().filter(|column| column.name == name);
-        let first = matching.next()?;
+        let Some(first) = matching.next() else {
+            return self.system_column_type(name);
+        };
         matching.next().is_none().then_some(&first.ty)
     }
     fn column_type(&self, position: usize) -> Option<&ColumnType> {
@@ -158,17 +195,31 @@ impl ScalarTypeSchema for ColumnTypeSchema<'_> {
     fn internal_type(&self, _: InternalColumnRef) -> Option<&ColumnType> {
         None
     }
-    fn has_qualifier(&self, _: &str) -> bool {
-        false
+    fn has_qualifier(&self, qualifier: &str) -> bool {
+        self.whole_row_type(qualifier).is_some()
     }
-    fn has_qualified_column(&self, _: &str, _: &str) -> bool {
-        false
+    fn whole_row_type(&self, qualifier: &str) -> Option<&ColumnType> {
+        let (name, row_type) = self.relation?;
+        let ColumnType::Composite(reference) = row_type else {
+            unreachable!("relation scope validates its row type");
+        };
+        (qualifier == name || qualifier == reference.name).then_some(row_type)
     }
-    fn qualified_column_is_ambiguous(&self, _: &str, _: &str) -> bool {
-        false
+    fn has_qualified_column(&self, qualifier: &str, name: &str) -> bool {
+        self.has_qualifier(qualifier) && self.has_unqualified_column(name)
     }
-    fn qualified_type(&self, _: &str, _: &str) -> Option<&ColumnType> {
-        None
+    fn qualified_column_is_ambiguous(&self, qualifier: &str, name: &str) -> bool {
+        self.has_qualifier(qualifier) && self.column_is_ambiguous(name)
+    }
+    fn qualified_type(&self, qualifier: &str, name: &str) -> Option<&ColumnType> {
+        self.has_qualifier(qualifier)
+            .then(|| self.type_of(name))
+            .flatten()
+    }
+    fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
+        self.has_qualifier(qualifier)
+            .then(|| self.collation_of(name))
+            .flatten()
     }
     fn columns_are_open(&self, _: Option<&str>) -> bool {
         false

@@ -23,6 +23,17 @@ pub trait ExpressionSchema: ScalarTypeSchema {
         name: &str,
         qualifier: Option<&str>,
     ) -> Result<ColumnReference<'_>, SQLError>;
+
+    /// Whole-row Vars retain attribute zero and the relation's actual named type, independently of its current live attribute list.
+    fn whole_row_reference(&self, qualifier: &str) -> Result<ColumnReference<'_>, SQLError> {
+        self.whole_row_type(qualifier)
+            .map(|ty| ColumnReference {
+                attribute_number: 0,
+                ty,
+                collation_oid: 0,
+            })
+            .ok_or_else(|| SQLError::UnknownTable(qualifier.into()))
+    }
 }
 
 impl ExpressionSchema for RowSchema {
@@ -58,12 +69,25 @@ impl ExpressionSchema for ColumnTypeSchema<'_> {
         name: &str,
         qualifier: Option<&str>,
     ) -> Result<ColumnReference<'_>, SQLError> {
+        if qualifier.is_some_and(|qualifier| !self.has_qualifier(qualifier)) {
+            return Err(SQLError::UnknownColumn(name.into()));
+        }
         let mut matching = self
             .columns()
             .iter()
             .enumerate()
-            .filter(|(_, column)| qualifier.is_none() && column.name == name);
+            .filter(|(_, column)| column.name == name);
         let Some((position, column)) = matching.next() else {
+            if let Some(ty) = self.system_column_type(name) {
+                return Ok(ColumnReference {
+                    attribute_number: -6,
+                    ty,
+                    collation_oid: 0,
+                });
+            }
+            if qualifier.is_none() && self.has_qualifier(name) {
+                return self.whole_row_reference(name);
+            }
             return Err(SQLError::UnknownColumn(name.into()));
         };
         if matching.next().is_some() {

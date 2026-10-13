@@ -29,6 +29,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                row_types: input.index.cold.row_types.clone(),
                 open_qualifiers,
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
