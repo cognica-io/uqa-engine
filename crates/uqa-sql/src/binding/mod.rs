@@ -21,6 +21,7 @@ pub mod composite_rename;
 mod cte_controls;
 mod ctes;
 mod dependencies;
+pub mod legacy_patterns;
 mod merge_scopes;
 mod ordered_calls;
 mod preparation;

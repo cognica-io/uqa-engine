@@ -1,0 +1,853 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE TABLE legacy_pattern_source(id integer PRIMARY KEY, a text NOT NULL DEFAULT 'a_b', binary_value bytea NOT NULL DEFAULT '\\xff', default_match boolean DEFAULT ('a' LIKE 'a'), generated_match boolean GENERATED ALWAYS AS (a LIKE 'a%') STORED, CHECK(a LIKE 'a%' ESCAPE '!'))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_source(id) VALUES (1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION public.\"like\"(text,text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION legacy_pattern_body(t text) RETURNS boolean LANGUAGE sql IMMUTABLE RETURN t LIKE 'a%'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE VIEW legacy_patterns AS SELECT id, a LIKE 'a%' AS l, a NOT LIKE 'b%' AS nl, a ILIKE 'A%' AS il, a NOT ILIKE 'B%' AS nil, a ~ '^a' AS r, a !~ '^b' AS nr, a ~* '^A' AS ri, a !~* '^B' AS nri, a LIKE 'a!_b' ESCAPE '!' AS e, a SIMILAR TO 'a!_b' ESCAPE '!' AS s, binary_value LIKE '_'::bytea AS binary, public.\"like\"(a,a) AS ordinary FROM legacy_pattern_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION legacy_pattern_parameter(p boolean DEFAULT ('a' NOT LIKE 'b')) RETURNS boolean LANGUAGE sql RETURN p",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN legacy_pattern_boolean AS boolean DEFAULT ('a' ILIKE 'A')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN legacy_pattern_text AS text CHECK (VALUE LIKE 'a%')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE legacy_pattern_domains(id integer, flag legacy_pattern_boolean, payload legacy_pattern_text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE INDEX legacy_pattern_index ON legacy_pattern_source ((a LIKE 'a%')) WHERE a NOT LIKE 'z%'",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE legacy_pattern_partitions(a text) PARTITION BY LIST ((a LIKE 'a%'))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE legacy_pattern_true PARTITION OF legacy_pattern_partitions FOR VALUES IN (true)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE legacy_pattern_false PARTITION OF legacy_pattern_partitions FOR VALUES IN (false)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE legacy_pattern_events(id integer, payload text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE legacy_pattern_log(id integer, marker text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE RULE legacy_pattern_rule AS ON INSERT TO legacy_pattern_events WHERE NEW.payload LIKE 'r%' DO ALSO INSERT INTO legacy_pattern_log VALUES (NEW.id, CASE WHEN NEW.payload NOT LIKE 'z%' THEN 'rule' ELSE 'invalid' END)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION legacy_pattern_trigger_body() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO legacy_pattern_log VALUES (NEW.id,'trigger'); RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TRIGGER legacy_pattern_trigger BEFORE INSERT ON legacy_pattern_events FOR EACH ROW WHEN (NEW.payload ILIKE 'T%') EXECUTE FUNCTION legacy_pattern_trigger_body()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FOREIGN DATA WRAPPER legacy_pattern_fdw",
+      "command_tags": [
+        "CREATE FOREIGN DATA WRAPPER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE SERVER legacy_pattern_server FOREIGN DATA WRAPPER legacy_pattern_fdw",
+      "command_tags": [
+        "CREATE SERVER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FOREIGN TABLE legacy_pattern_foreign(a text CHECK(a LIKE 'a%'), flag boolean DEFAULT ('a' NOT LIKE 'b')) SERVER legacy_pattern_server",
+      "command_tags": [
+        "CREATE FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SELECT * FROM legacy_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "nl",
+            "il",
+            "nil",
+            "r",
+            "nr",
+            "ri",
+            "nri",
+            "e",
+            "s",
+            "binary",
+            "ordinary"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,default_match,generated_match FROM legacy_pattern_source ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "default_match",
+            "generated_match"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT legacy_pattern_body('abc'),legacy_pattern_body('bad')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "legacy_pattern_body",
+            "legacy_pattern_body"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('legacy_patterns'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (a ~~ 'a%'::text) AS l,\n    (a !~~ 'b%'::text) AS nl,\n    (a ~~* 'A%'::text) AS il,\n    (a !~~* 'B%'::text) AS nil,\n    (a ~ '^a'::text) AS r,\n    (a !~ '^b'::text) AS nr,\n    (a ~* '^A'::text) AS ri,\n    (a !~* '^B'::text) AS nri,\n    (a ~~ like_escape('a!_b'::text, '!'::text)) AS e,\n    (a ~ similar_to_escape('a!_b'::text, '!'::text)) AS s,\n    (binary_value ~~ '\\x5f'::bytea) AS \"binary\",\n    public.\"like\"(a, a) AS ordinary\n   FROM legacy_pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('legacy_patterns'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    a ~~ 'a%'::text AS l,\n    a !~~ 'b%'::text AS nl,\n    a ~~* 'A%'::text AS il,\n    a !~~* 'B%'::text AS nil,\n    a ~ '^a'::text AS r,\n    a !~ '^b'::text AS nr,\n    a ~* '^A'::text AS ri,\n    a !~* '^B'::text AS nri,\n    a ~~ like_escape('a!_b'::text, '!'::text) AS e,\n    a ~ similar_to_escape('a!_b'::text, '!'::text) AS s,\n    binary_value ~~ '\\x5f'::bytea AS \"binary\",\n    public.\"like\"(a, a) AS ordinary\n   FROM legacy_pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_functiondef('legacy_pattern_body(text)'::regprocedure)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_functiondef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "CREATE OR REPLACE FUNCTION public.legacy_pattern_body(t text)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nRETURN (t ~~ 'a%'::text)\n"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_source(id,a) VALUES (2,'abc')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,default_match,generated_match FROM legacy_pattern_source ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "default_match",
+            "generated_match"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_source(id,a) VALUES (2,'bad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"legacy_pattern_source\" violates check constraint \"legacy_pattern_source_a_check\"",
+        "detail": "Failing row contains (2, bad, \\xff, t, f).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM legacy_pattern_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT legacy_pattern_parameter()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "legacy_pattern_parameter"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM legacy_pattern_source WHERE (a LIKE 'a%') = true AND a NOT LIKE 'z%' ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_domains(id,payload) VALUES (1,'abc')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM legacy_pattern_domains ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "flag",
+            "payload"
+          ],
+          "type_oids": [
+            23,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "abc"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_partitions VALUES ('abc'),('xyz')",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM legacy_pattern_true ORDER BY a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM legacy_pattern_false ORDER BY a",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "xyz"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_events VALUES (1,'rule'),(2,'trigger'),(3,'other')",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM legacy_pattern_log ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "marker"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "rule"
+            ],
+            [
+              "2",
+              "trigger"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO legacy_pattern_domains(id,payload) VALUES (2,'bad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain legacy_pattern_text violates check constraint \"legacy_pattern_text_check\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM legacy_pattern_domains",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

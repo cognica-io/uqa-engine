@@ -8,6 +8,8 @@
 
 use uqa_engine::Engine;
 
+#[path = "pattern_operators/restoration.rs"]
+mod restoration;
 
 fn open(provider: usize, path: &std::path::Path) -> Engine {
     match provider {

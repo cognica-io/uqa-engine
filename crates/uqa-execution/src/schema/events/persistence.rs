@@ -57,19 +57,12 @@ impl EventRestoreContext<'_> {
         let mut recorded_oids = false;
         let mut restored_expressions = false;
         for mut rule in stored.rules {
-            let mut expression_migration =
-                rule.definition.condition.is_some() && rule.bound_condition_plan().is_none();
-            if let Some(condition) = &mut rule.definition.condition {
-                expression_migration |= condition.upgrade_legacy_serialized_dispatches();
-            }
-            if let Some(condition) = &mut rule.condition_plan {
-                expression_migration |= condition
-                    .upgrade_legacy_range_predicates()
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            }
-            for action in &mut rule.definition.actions {
-                expression_migration |= action.upgrade_legacy_serialized_dispatches();
-            }
+            let expression_migration =
+                uqa_sql::catalog::events::restoration::restore_rule_expressions(
+                    &mut rule,
+                    self.analysis.routines,
+                )
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             let constructor_migration =
                 rule_constructor_migration(&mut rule.definition, self.analysis.routines)?;
             if (constructor_migration || expression_migration) && !allows_migration {
@@ -78,11 +71,12 @@ impl EventRestoreContext<'_> {
                 ));
             }
             restored_expressions |= constructor_migration || expression_migration;
-            let persisted_definition = if migrating_catalog || constructor_migration {
-                None
-            } else {
-                Some(serde_json::to_string(&rule.definition)?)
-            };
+            let persisted_definition =
+                if migrating_catalog || constructor_migration || expression_migration {
+                    None
+                } else {
+                    Some(serde_json::to_string(&rule.definition)?)
+                };
             let stored_condition_plan = rule.condition_plan.clone();
             let stored_condition_binding = rule.condition_binding.clone();
             let (relation, condition_plan, condition_binding, dependencies) = self
@@ -167,7 +161,8 @@ impl EventRestoreContext<'_> {
             if trigger.definition.constraint && trigger.constraint_name.is_none() {
                 trigger.constraint_name = Some(trigger.definition.name.clone());
             }
-            migrated |= restore_trigger_expression(&mut trigger, allows_migration)?;
+            migrated |=
+                restore_trigger_expression(&mut trigger, self.analysis.routines, allows_migration)?;
             let (relation, condition_routine_bindings_changed) = self
                 .analysis
                 .validate_trigger_definition(&mut trigger.definition, RelationLookupMode::Bound)
@@ -244,13 +239,18 @@ impl EventRestoreContext<'_> {
 
 fn restore_trigger_expression(
     trigger: &mut StoredTrigger,
+    routines: &dyn uqa_sql::FunctionTypeResolver,
     allows_migration: bool,
 ) -> StorageBackendResult<bool> {
-    let changed = trigger
+    let mut changed = trigger
         .definition
         .when
         .as_mut()
         .is_some_and(uqa_sql::ast::Expr::upgrade_legacy_serialized_dispatches);
+    if let Some(condition) = &mut trigger.definition.when {
+        changed |= uqa_sql::binding::legacy_patterns::restore_expression(condition, routines)
+            .map_err(StorageBackendError::Other)?;
+    }
     if changed && !allows_migration {
         return Err(StorageBackendError::Other(format!(
             "trigger `{}` WHEN condition requires an initial-open expression migration",

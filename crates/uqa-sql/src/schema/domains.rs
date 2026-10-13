@@ -112,20 +112,31 @@ pub fn restore_composite_constructors(
     let mut changed = false;
     if let Some(default) = &mut definition.default {
         changed |= default.upgrade_legacy_serialized_dispatches();
-        if crate::type_resolution::composite_rows::expression_requires_binding(
-            default,
-            context.catalog,
-        )? {
-            changed |=
-                super::defaults::bind_stored_schema_expression(context, default, default.clone())?;
+        let pattern = crate::binding::legacy_patterns::restore_expression(default, context.catalog)
+            .map_err(SQLError::Internal)?;
+        if pattern
+            || crate::type_resolution::composite_rows::expression_requires_binding(
+                default,
+                context.catalog,
+            )?
+        {
+            super::defaults::bind_stored_schema_expression(context, default, default.clone())?;
+            changed = true;
         }
     }
     for check in &mut definition.checks {
         changed |= check.expression.upgrade_legacy_serialized_dispatches();
-        if crate::type_resolution::composite_rows::expression_requires_binding(
-            &check.expression,
+        let pattern = crate::binding::legacy_patterns::restore_expression(
+            &mut check.expression,
             context.catalog,
-        )? {
+        )
+        .map_err(SQLError::Internal)?;
+        if pattern
+            || crate::type_resolution::composite_rows::expression_requires_binding(
+                &check.expression,
+                context.catalog,
+            )?
+        {
             bind_domain_check(context, &definition.base, &mut check.expression)?;
             changed = true;
         }

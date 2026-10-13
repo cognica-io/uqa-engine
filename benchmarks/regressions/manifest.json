@@ -4335,6 +4335,285 @@
       "capability": "Typed coercion grouping",
       "workload": "Fifteen independent PostgreSQL compositions cover JSON, concatenation, arithmetic, arrays, domains, CASE and composite fields.",
       "invariant": "Original typed children determine grouping even when implicit casts are hidden; binary-compatible domain inputs avoid redundant relabeling while retaining modifier checks."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_pattern_identity_preserves_shared_expression_storage_bounds",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/pattern/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL binary signatures, invalid operands, constrained admission and shared expression carriers.",
+      "invariant": "Native identity preserves the existing dispatch/binding/scalar size bounds, selected signatures and resource-error release; no allowance is raised."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "pattern_overloads_match_independent_postgresql_catalog",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/pattern/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL binary signatures, invalid operands, constrained admission and shared expression carriers.",
+      "invariant": "Native identity preserves the existing dispatch/binding/scalar size bounds, selected signatures and resource-error release; no allowance is raised."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "pattern_selection_releases_workspace_on_signature_quota_and_cancellation_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/pattern/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL binary signatures, invalid operands, constrained admission and shared expression carriers.",
+      "invariant": "Native identity preserves the existing dispatch/binding/scalar size bounds, selected signatures and resource-error release; no allowance is raised."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "binary_like_borrows_bytes_and_preserves_padding_without_text_conversion",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/scalar_helpers/like_pattern/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Bytea and padded character operands, admitted compiled tokens, repeated matching and forced quota/cancellation failures.",
+      "invariant": "Binary input remains borrowed, padding remains significant, token capacity stays admitted until its owner is dropped and failed scratch is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_like_keeps_native_pattern_capacity_until_last_owner_release",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/scalar_helpers/like_pattern/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Bytea and padded character operands, admitted compiled tokens, repeated matching and forced quota/cancellation failures.",
+      "invariant": "Binary input remains borrowed, padding remains significant, token capacity stays admitted until its owner is dropped and failed scratch is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_like_quota_failure_drops_partial_tokens_and_match_scratch",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/scalar_helpers/like_pattern/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Bytea and padded character operands, admitted compiled tokens, repeated matching and forced quota/cancellation failures.",
+      "invariant": "Binary input remains borrowed, padding remains significant, token capacity stays admitted until its owner is dropped and failed scratch is released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "escape_results_retain_their_entire_buffer_and_release_temporary_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/pattern/escape/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Text/bytea LIKE and SIMILAR escape helpers under fixed output quotas, strict NULLs and both cancellation owners.",
+      "invariant": "Completed output retains its exact exposed capacity; conversion scratch and partial outputs release on errors or cancellation without changing strict NULL behavior."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "escape_failure_nulls_and_both_cancellation_owners_release_admitted_buffers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/pattern/escape/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Text/bytea LIKE and SIMILAR escape helpers under fixed output quotas, strict NULLs and both cancellation owners.",
+      "invariant": "Completed output retains its exact exposed capacity; conversion scratch and partial outputs release on errors or cancellation without changing strict NULL behavior."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "predecessor_pattern_markers_restore_nested_helpers_and_negative_identity_once",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/legacy_patterns/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Previous positive/negative native markers, escape children, scalar subqueries, retained statements and ordinary/callback identities.",
+      "invariant": "Shared restoration preserves selected ordinary calls and analyzed structure, and a second conversion leaves byte-identical syntax/plans."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_ordinary_calls_and_registered_callbacks_are_not_native_patterns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/legacy_patterns/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Previous positive/negative native markers, escape children, scalar subqueries, retained statements and ordinary/callback identities.",
+      "invariant": "Shared restoration preserves selected ordinary calls and analyzed structure, and a second conversion leaves byte-identical syntax/plans."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_subqueries_and_statement_bodies_restore_before_syntax_site_binding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/legacy_patterns/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Previous positive/negative native markers, escape children, scalar subqueries, retained statements and ordinary/callback identities.",
+      "invariant": "Shared restoration preserves selected ordinary calls and analyzed structure, and a second conversion leaves byte-identical syntax/plans."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_pattern_helpers_keep_compiled_projection_matching_and_one_field_read",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/projected_predicate/evaluate/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Parsed text, bytea, padded character, ESCAPE and negative predicates plus ordinary pattern-named calls.",
+      "invariant": "Native projected matches read exactly one required field and preserve output; ordinary calls remain with canonical evaluation."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordinary_pattern_named_calls_do_not_become_projection_matchers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/projected_predicate/evaluate/tests.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Parsed text, bytea, padded character, ESCAPE and negative predicates plus ordinary pattern-named calls.",
+      "invariant": "Native projected matches read exactly one required field and preserve output; ordinary calls remain with canonical evaluation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pattern_operator_identity_and_inputs_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL results on memory, native SQLite, SQLite Key/Value and redb, including callbacks, independent sessions and stored views.",
+      "invariant": "Exact values, SQLSTATE/message/detail/hint and reconstructed SQL retain native/ordinary identity across execution and persistent reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pattern_escape_helpers_and_null_evaluation_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL results on memory, native SQLite, SQLite Key/Value and redb, including callbacks, independent sessions and stored views.",
+      "invariant": "Exact values, SQLSTATE/message/detail/hint and reconstructed SQL retain native/ordinary identity across execution and persistent reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pattern_and_ordinary_call_negation_preserve_postgresql_view_definition",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL results on memory, native SQLite, SQLite Key/Value and redb, including callbacks, independent sessions and stored views.",
+      "invariant": "Exact values, SQLSTATE/message/detail/hint and reconstructed SQL retain native/ordinary identity across execution and persistent reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pattern_operator_views_and_predicates_match_postgresql_across_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL results on memory, native SQLite, SQLite Key/Value and redb, including callbacks, independent sessions and stored views.",
+      "invariant": "Exact values, SQLSTATE/message/detail/hint and reconstructed SQL retain native/ordinary identity across execution and persistent reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_patterns_and_registered_callbacks_keep_separate_definitions",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Pinned PostgreSQL results on memory, native SQLite, SQLite Key/Value and redb, including callbacks, independent sessions and stored views.",
+      "invariant": "Exact values, SQLSTATE/message/detail/hint and reconstructed SQL retain native/ordinary identity across execution and persistent reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "predecessor_patterns_restore_retained_definitions_once",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators/restoration.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Predecessor table/view/routine/domain/index/partition/foreign/rule/trigger definitions on all three persistent providers.",
+      "invariant": "Initial open restores PostgreSQL output once, a second open preserves full definition bytes, and secondary sessions refuse migration without publishing changes."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "secondary_sessions_cannot_publish_pattern_migrations",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/pattern_operators/restoration.rs",
+      "capability": "Native pattern semantics and retained resources",
+      "workload": "Predecessor table/view/routine/domain/index/partition/foreign/rule/trigger definitions on all three persistent providers.",
+      "invariant": "Initial open restores PostgreSQL output once, a second open preserves full definition bytes, and secondary sessions refuse migration without publishing changes."
     }
   ]
 }

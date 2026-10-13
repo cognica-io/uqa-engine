@@ -33,18 +33,22 @@ pub fn restore_constructors(
                     .map(|expression| (expression, true)),
             )
         {
-            let normalized = expression.upgrade_legacy_serialized_dispatches();
+            let pattern =
+                uqa_sql::binding::legacy_patterns::restore_expression(expression, context.schema)
+                    .map_err(invalid)?;
+            let normalized = expression.upgrade_legacy_serialized_dispatches() | pattern;
             if normalized && !allow_migration {
                 return Err(invalid(
                     "index expressions require an initial-open migration",
                 ));
             }
             changed |= normalized;
-            if !uqa_sql::type_resolution::composite_rows::expression_requires_binding(
-                expression,
-                context.schema,
-            )
-            .map_err(invalid)?
+            if !pattern
+                && !uqa_sql::type_resolution::composite_rows::expression_requires_binding(
+                    expression,
+                    context.schema,
+                )
+                .map_err(invalid)?
             {
                 continue;
             }
