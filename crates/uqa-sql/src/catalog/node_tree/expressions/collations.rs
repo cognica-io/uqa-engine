@@ -91,6 +91,9 @@ pub(super) fn peel(mut node: Node) -> Result<(Node, Option<i64>), SQLError> {
 }
 
 fn visit(node: &mut Node, case_value: Option<i64>) -> Result<Derivation, SQLError> {
+    if node.kind == "NAMEDARGEXPR" {
+        return visit_field(field_mut(node, "arg")?, case_value);
+    }
     let leaf = match node.kind.as_str() {
         "VAR" => Some("varcollid"),
         "CONST" => Some("constcollid"),

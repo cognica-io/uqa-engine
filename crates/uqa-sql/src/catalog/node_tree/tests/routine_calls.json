@@ -1,0 +1,210 @@
+{
+  "provenance": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "raw_sha256": "5cdaf7b66d36d311d8feae70e46f51e78bf6fae8ecf2cd18b9b06e613ad0f3cb"
+  },
+  "routines": [
+    {
+      "oid": "378",
+      "proname": "array_append",
+      "prorettype": "5078",
+      "proargtypes": "5078 5077",
+      "proargnames": null,
+      "proallargtypes": null,
+      "pronargdefaults": "0",
+      "proargmodes": null,
+      "provariadic": "0",
+      "proisstrict": "f",
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": "f",
+      "prosrc": "array_append"
+    },
+    {
+      "oid": "2176",
+      "proname": "array_length",
+      "prorettype": "23",
+      "proargtypes": "2277 23",
+      "proargnames": null,
+      "proallargtypes": null,
+      "pronargdefaults": "0",
+      "proargmodes": null,
+      "provariadic": "0",
+      "proisstrict": "t",
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": "f",
+      "prosrc": "array_length"
+    },
+    {
+      "oid": "30780",
+      "proname": "chosen",
+      "prorettype": "23",
+      "proargtypes": "23 23",
+      "proargnames": "{a,b}",
+      "proallargtypes": null,
+      "pronargdefaults": "1",
+      "proargmodes": null,
+      "provariadic": "0",
+      "proisstrict": "f",
+      "provolatile": "i",
+      "proparallel": "u",
+      "proleakproof": "f",
+      "prosrc": ""
+    },
+    {
+      "oid": "3058",
+      "proname": "concat",
+      "prorettype": "25",
+      "proargtypes": "2276",
+      "proargnames": null,
+      "proallargtypes": "{2276}",
+      "pronargdefaults": "0",
+      "proargmodes": "{v}",
+      "provariadic": "2276",
+      "proisstrict": "f",
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": "f",
+      "prosrc": "text_concat"
+    },
+    {
+      "oid": "3059",
+      "proname": "concat_ws",
+      "prorettype": "25",
+      "proargtypes": "25 2276",
+      "proargnames": null,
+      "proallargtypes": "{25,2276}",
+      "pronargdefaults": "0",
+      "proargmodes": "{i,v}",
+      "provariadic": "2276",
+      "proisstrict": "f",
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": "f",
+      "prosrc": "text_concat_ws"
+    },
+    {
+      "oid": "30782",
+      "proname": "first_item",
+      "prorettype": "2283",
+      "proargtypes": "2277",
+      "proargnames": "{items}",
+      "proallargtypes": null,
+      "pronargdefaults": "0",
+      "proargmodes": null,
+      "provariadic": "0",
+      "proisstrict": "f",
+      "provolatile": "i",
+      "proparallel": "u",
+      "proleakproof": "f",
+      "prosrc": "SELECT items[1]"
+    },
+    {
+      "oid": "30781",
+      "proname": "total",
+      "prorettype": "23",
+      "proargtypes": "1007",
+      "proargnames": "{items}",
+      "proallargtypes": "{1007}",
+      "pronargdefaults": "0",
+      "proargmodes": "{v}",
+      "provariadic": "23",
+      "proisstrict": "f",
+      "provolatile": "i",
+      "proparallel": "u",
+      "proleakproof": "f",
+      "prosrc": ""
+    }
+  ],
+  "checks": [
+    {
+      "name": "array_append_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {FUNCEXPR :funcid 378 :funcresulttype 1007 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :refassgnexpr <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((array_append(a, 1))[1] > 0)",
+      "pretty": "(array_append(a, 1))[1] > 0"
+    },
+    {
+      "name": "array_length_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 2176 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(array_length(a, 1) > 0)",
+      "pretty": "array_length(a, 1) > 0"
+    },
+    {
+      "name": "default_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 30780 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(chosen(n) > 0)",
+      "pretty": "chosen(n) > 0"
+    },
+    {
+      "name": "explicit_variadic_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 30781 :funcresulttype 23 :funcretset false :funcvariadic true :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(total(VARIADIC a) > 0)",
+      "pretty": "total(VARIADIC a) > 0"
+    },
+    {
+      "name": "named_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 30780 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({NAMEDARGEXPR :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]} :name b :argnumber 1 :location -1} {NAMEDARGEXPR :arg {VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} :name a :argnumber 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(chosen(b => 3, a => n) > 0)",
+      "pretty": "chosen(b => 3, a => n) > 0"
+    },
+    {
+      "name": "polymorphic_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 30782 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(first_item(a) > 0)",
+      "pretty": "first_item(a) > 0"
+    },
+    {
+      "name": "variadic_call",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 30781 :funcresulttype 23 :funcretset false :funcvariadic true :funcformat 0 :funccollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(total(VARIADIC ARRAY[n, 2]) > 0)",
+      "pretty": "total(VARIADIC ARRAY[n, 2]) > 0"
+    }
+  ],
+  "defaults": [
+    {
+      "name": "n",
+      "node": "{FUNCEXPR :funcid 30780 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "chosen(1)"
+    },
+    {
+      "name": "t",
+      "node": "{FUNCEXPR :funcid 3058 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 0 :args ({CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 97 0 ]} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 98 0 ]}) :location -1}",
+      "sql": "concat('a', 'b')"
+    },
+    {
+      "name": "a",
+      "node": "{FUNCEXPR :funcid 378 :funcresulttype 1007 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "array_append(ARRAY[1], 2)"
+    }
+  ],
+  "shapes": [
+    {
+      "name": "explicit_any",
+      "node": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({FUNCEXPR :funcid 3058 :funcresulttype 25 :funcretset false :funcvariadic true :funcformat 0 :funccollid 100 :inputcollid 100 :args ({ARRAYEXPR :array_typeid 1009 :array_collid 100 :element_typeid 25 :elements ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(concat(VARIADIC ARRAY['a'::text, 'b'::text]) <> ''::text)",
+      "pretty": "concat(VARIADIC ARRAY['a'::text, 'b'::text]) <> ''::text"
+    },
+    {
+      "name": "mixed_any",
+      "node": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({FUNCEXPR :funcid 3058 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 97 0 ]} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(concat(n, 'a', NULL::unknown) <> ''::text)",
+      "pretty": "concat(n, 'a', NULL::unknown) <> ''::text"
+    },
+    {
+      "name": "named_var",
+      "node": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 30781 :funcresulttype 23 :funcretset false :funcvariadic true :funcformat 0 :funccollid 0 :inputcollid 0 :args ({NAMEDARGEXPR :arg {VAR :varno 1 :varattno 2 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 2 :location -1} :name items :argnumber 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(total(VARIADIC items => a) > 0)",
+      "pretty": "total(VARIADIC items => a) > 0"
+    },
+    {
+      "name": "sep_any",
+      "node": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({FUNCEXPR :funcid 3059 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 45 ]} {VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 705 :consttypmod -1 :constcollid 0 :constlen -2 :constbyval false :constisnull false :location -1 :constvalue 2 [ 97 0 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+      "sql": "(concat_ws('-'::text, n, 'a') <> ''::text)",
+      "pretty": "concat_ws('-'::text, n, 'a') <> ''::text"
+    }
+  ],
+  "create_checks": "CREATE TABLE calls(n integer, a integer[], CONSTRAINT default_call CHECK(chosen(n)>0), CONSTRAINT named_call CHECK(chosen(b=>3,a=>n)>0), CONSTRAINT variadic_call CHECK(total(n,2)>0), CONSTRAINT explicit_variadic_call CHECK(total(VARIADIC a)>0), CONSTRAINT polymorphic_call CHECK(first_item(a)>0), CONSTRAINT array_length_call CHECK(array_length(a,1)>0), CONSTRAINT array_append_call CHECK((array_append(a,1))[1]>0))",
+  "create_defaults": "CREATE TABLE default_calls(n integer DEFAULT chosen(1), t text DEFAULT concat('a','b'), a integer[] DEFAULT array_append(ARRAY[1],2))",
+  "create_shapes": "CREATE TABLE call_shapes (n integer, a integer[], CONSTRAINT named_var CHECK(total(VARIADIC items => a)>0), CONSTRAINT mixed_any CHECK(concat(n, 'a', NULL)<>''), CONSTRAINT explicit_any CHECK(concat(VARIADIC ARRAY['a','b'])<>''), CONSTRAINT sep_any CHECK(concat_ws('-',n,'a')<>''))"
+}

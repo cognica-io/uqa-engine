@@ -15,6 +15,7 @@ mod concatenation;
 mod fields;
 mod json_extraction;
 mod patterns;
+mod routine_calls;
 mod rows;
 mod scalar;
 mod subscripts;
@@ -346,19 +347,20 @@ impl expressions::ExpressionRoutines for Routines {
         &self,
         name: &str,
         _: Option<&crate::ast::FunctionBinding>,
-        arguments: &[Option<crate::ColumnType>],
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
     ) -> Result<expressions::RoutineIdentity, crate::SQLError> {
+        let arguments = call.argument_types;
         assert_eq!(arguments, &[Some(crate::ColumnType::Text)]);
         let (oid, result_type) = match name {
             "length" => (1317, crate::ColumnType::Integer),
             "lower" => (870, crate::ColumnType::Text),
             _ => panic!("unknown fixture routine {name}"),
         };
-        Ok(expressions::RoutineIdentity {
+        Ok(expressions::RoutineIdentity::positional(
             oid,
-            argument_types: vec![crate::ColumnType::Text],
+            vec![crate::ColumnType::Text],
             result_type,
-        })
+        ))
     }
 }
 
@@ -373,8 +375,9 @@ fn quoted_nullif_keeps_the_catalog_routine_identity() {
             &self,
             name: &str,
             binding: Option<&crate::ast::FunctionBinding>,
-            arguments: &[Option<crate::ColumnType>],
+            call: crate::type_resolution::RoutineCallDescriptor<'_>,
         ) -> Result<expressions::RoutineIdentity, crate::SQLError> {
+            let arguments = call.argument_types;
             assert_eq!(name, self.name);
             assert_eq!(
                 binding.and_then(|binding| binding.object_id),
@@ -387,11 +390,11 @@ fn quoted_nullif_keeps_the_catalog_routine_identity() {
                     Some(crate::ColumnType::Integer)
                 ]
             );
-            Ok(expressions::RoutineIdentity {
-                oid: 424_242,
-                argument_types: vec![crate::ColumnType::Integer; 2],
-                result_type: crate::ColumnType::Boolean,
-            })
+            Ok(expressions::RoutineIdentity::positional(
+                424_242,
+                vec![crate::ColumnType::Integer; 2],
+                crate::ColumnType::Boolean,
+            ))
         }
     }
     for retained in [false, true] {
@@ -649,19 +652,20 @@ impl expressions::ExpressionRoutines for ExtractRoutines {
         &self,
         name: &str,
         _: Option<&crate::ast::FunctionBinding>,
-        arguments: &[Option<crate::ColumnType>],
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
     ) -> Result<expressions::RoutineIdentity, SQLError> {
+        let arguments = call.argument_types;
         assert!(matches!(name, "extract" | "pg_catalog.extract"));
         assert_eq!(arguments.len(), 2);
         assert_eq!(arguments[1], Some(crate::ColumnType::TimestampTz));
-        Ok(expressions::RoutineIdentity {
-            oid: 6203,
-            argument_types: vec![crate::ColumnType::Text, crate::ColumnType::TimestampTz],
-            result_type: crate::ColumnType::Numeric {
+        Ok(expressions::RoutineIdentity::positional(
+            6203,
+            vec![crate::ColumnType::Text, crate::ColumnType::TimestampTz],
+            crate::ColumnType::Numeric {
                 precision: None,
                 scale: None,
             },
-        })
+        ))
     }
 }
 

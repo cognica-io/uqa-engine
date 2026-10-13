@@ -1453,7 +1453,7 @@ Issue #807 exposed an incorrect `42P17` for generated expressions that concatena
 - [x] Qualify the isolated correction: all 1,834 SQL owner tests, all 36 PostgreSQL observations on four providers, both 115-case default-cooking references, the manual harness, strict SQL/Engine Clippy and ownership checks pass.
 - [x] Extend the unchanged automatic allowances to 357 checks / 505 cases; inventory validation and all 24 verifier tests pass.
 - [x] Prepare the separate fixing PR on `fix/planned-text-concatenation` after merged PR #808, preserving all original #638 records.
-- [ ] Verify actual Linux/macOS regression artifacts, merge, close #807 and remove its branch.
+- [x] Verify actual Linux/macOS regression artifacts, merge PR #809 as `fbc861e599`, close #807 and remove its local and remote branch.
 
 ### Preservation of planned-expression meaning
 
@@ -1463,4 +1463,31 @@ If $o_T$ is immutable and both operands are immutable, the result is independent
 
 ### Independent concrete-output evidence
 
-The pinned PostgreSQL 18.4 Docker image and collector recorded above provide a 36-case reference covering both concatenation orders for nine scalar types, enum/composite/integer-domain/date-domain inputs, named composite casts, incompatible assignments and `now()` error priority. The SQL-owned compact reference contains the eighteen scalar mutability observations. Raw capture SHA-256 is `a05e626a39a7a967608ed58b4c0d72e06166780afabaa703bd321c673dff6a52`, the 36-case Engine fixture is `b58c4fd2d99add09cc6adb183f4cdda4994ba12ea8dbbab4eb4f06e76cec2c01`, and the compact SQL fixture is `7ccf28deb1d7cbe1ba6ef7fe78a69ea8b597d8e4e62bce0e450bfa104acdf453`. Raw reports remain outside Git. All 1,834 SQL owner tests, the six provider/default-cooking tests and the manual compile/execute harness pass on the isolated correction, without the following typed-catalog runtime work. Strict SQL/Engine library-and-test Clippy, dependency/capability, header/file-size and single-harness checks pass. Actual automatic platform acceptance remains required before delivery; no timing claim is made.
+The pinned PostgreSQL 18.4 Docker image and collector recorded above provide a 36-case reference covering both concatenation orders for nine scalar types, enum/composite/integer-domain/date-domain inputs, named composite casts, incompatible assignments and `now()` error priority. The SQL-owned compact reference contains the eighteen scalar mutability observations. Raw capture SHA-256 is `a05e626a39a7a967608ed58b4c0d72e06166780afabaa703bd321c673dff6a52`, the 36-case Engine fixture is `b58c4fd2d99add09cc6adb183f4cdda4994ba12ea8dbbab4eb4f06e76cec2c01`, and the compact SQL fixture is `7ccf28deb1d7cbe1ba6ef7fe78a69ea8b597d8e4e62bce0e450bfa104acdf453`. Raw reports remain outside Git. All 1,834 SQL owner tests, the six provider/default-cooking tests and the manual compile/execute harness pass on the isolated correction, without the following typed-catalog runtime work. Strict SQL/Engine library-and-test Clippy, dependency/capability, header/file-size and single-harness checks pass. Automatic run [38342245573](https://github.com/cognica-io/uqa-engine/actions/runs/38342245573) passes actual Linux x86_64 and macOS arm64 qualification: 357 checks / 505 cases, zero JUnit failures/errors/skips and eight successful independent-process histories per platform. Manifest, case names and every test-source hash match source `4c88d5ee969220e39f289575b224eaf901fca075`; tested merge `8c231e59d5eca5b4d999e85351e2dc563d71bdf1` and squash `fbc861e599639aad1883e516a337dd386c72890f` share tree `624ab06b9994618ed67fc80c618f82f9f79714b5`. Direct review found no remaining defect or unresolved thread; quota-limited bot notices are not review evidence. PR #809 is merged and its branch is removed; #807 is closed. No timing claim is made.
+
+
+## Supplied arguments in catalog routine nodes
+
+The SQL-owned routine codec separates declared catalog identity from the existing invocation binding. It receives supplied names, types and explicit VARIADIC syntax, uses the shared signature matcher and concrete coercion targets, and retains omitted defaults, named positions, polymorphic targets, expanded arrays and unknown wildcard inputs. The generic expression entry point shares the existing CHECK encoder. A single pseudo-type identity table supports both declared-name and catalog-OID lookup. This unit changes no Execution or Engine product code, storage format, dependency, feature or resource allowance; catalog metadata and runtime adapters remain separate units.
+
+- [x] Capture exact call nodes, physical Datums, declared signatures and both reconstructed SQL forms independently from PostgreSQL.
+- [x] Preserve supplied argument shape through SQL binding, collation assignment and rendering.
+- [x] Qualify the isolated SQL-only source: all 1,835 library tests, strict library-and-test Clippy, formatting and repository ownership/harness/header/file-size checks pass.
+- [x] Add two deterministic checks, requiring 359 checks / 507 cases with existing allowances unchanged.
+- [x] Prepare this independent unit on `fix/catalog-call-arguments` after merged PR #809, preserving all original #638 records.
+- [ ] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform, merge and remove the branch.
+- [ ] Deliver builtin signature metadata and retained-catalog runtime integration separately before closing #119.
+
+### Call representation preservation
+
+Fix a valid declared routine $d$ and supplied argument sequence $a$. Let the existing SQL matcher return $M(d,a)=(p,t,v)$, where $p$ maps supplied positions to declared parameters, $t$ contains selected coercion targets and $v$ specifies variadic handling. The codec applies those same coercions once per supplied argument, keeps each named argument at its written position with its declared parameter number, and represents expanded variadic elements by an ordered array. The declared routine OID and concrete result type are unchanged. Structurally omitted inputs are not replaced by evaluated or copied defaults; default substitution remains owned by ordinary invocation.
+
+$$
+\operatorname{invoke}(d,a)=\operatorname{invoke}\bigl(d,\operatorname{decode}(\operatorname{encode}_{M(d,a)}(a))\bigr).
+$$
+
+The equality follows from the shared position/coercion mapping and ordered variadic array representation. Wildcard inputs retain their individual types rather than acquiring a common coercion, so unknown literals remain unknown until the ordinary invocation requires their value. Collation assignment visits the same value children, including named wrappers. Encoding and rendering execute no routine, duplicate no value computation and mutate no catalog or transaction state. Consequently all existing document, row, graph and score carriers and their algebraic operations are preserved; this is a representation extension for metadata.
+
+### Independent call-node evidence
+
+The pinned PostgreSQL 18.4 Docker image and collector recorded above captured fourteen nodes covering omitted defaults, named argument order, named and positional explicit VARIADIC arrays, expanded arrays, polymorphic input/results, mixed wildcard types and unknown strings/NULLs. Raw capture SHA-256 is `5cdaf7b66d36d311d8feae70e46f51e78bf6fae8ecf2cd18b9b06e613ad0f3cb`; compact SQL fixture `routine_calls.json` has SHA-256 `17450921c6bcad2e71f5e145bdea3f473b2c8d0f847c9f9871665be3825da0b1`. The test compares the complete parsed nodes, every physical byte and compact/pretty SQL against the captured values. The actual isolated source passes all 1,835 SQL library tests and strict SQL library-and-test Clippy. Raw reports remain outside Git. The broader local runtime checks are not used as isolated qualification for this unit, and automatic platform acceptance remains pending; no timing claim is made.

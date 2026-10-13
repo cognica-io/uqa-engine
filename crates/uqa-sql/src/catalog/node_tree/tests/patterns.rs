@@ -43,8 +43,9 @@ impl expressions::ExpressionRoutines for PatternRoutines {
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
-        arguments: &[Option<ColumnType>],
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
     ) -> Result<expressions::RoutineIdentity, SQLError> {
+        let arguments = call.argument_types;
         let selected = crate::type_resolution::resolve_fixed_builtin_call(
             name,
             binding,
@@ -67,15 +68,15 @@ impl expressions::ExpressionRoutines for PatternRoutines {
                         .map(String::as_str))
             })
             .expect("captured PostgreSQL signature");
-        Ok(expressions::RoutineIdentity {
-            oid: routine.oid,
-            argument_types: routine
+        Ok(expressions::RoutineIdentity::positional(
+            routine.oid,
+            routine
                 .args
                 .split(", ")
                 .map(|name| ColumnType::from_sql_name(name).unwrap())
                 .collect(),
-            result_type: ColumnType::from_sql_name(&routine.result_type).unwrap(),
-        })
+            ColumnType::from_sql_name(&routine.result_type).unwrap(),
+        ))
     }
 }
 

@@ -113,6 +113,11 @@ impl Renderer<'_> {
                 ))
             }
             "FUNCEXPR" => self.function(node),
+            "NAMEDARGEXPR" => Ok(format!(
+                "{} => {}",
+                crate::expr::quote_ident(atom(node, "name")?),
+                self.field(node.field("arg")?, self.pretty)?
+            )),
             "RELABELTYPE" | "COERCEVIAIO" | "COERCETODOMAIN" | "ARRAYCOERCEEXPR" => {
                 self.coercion(node, outer)
             }
