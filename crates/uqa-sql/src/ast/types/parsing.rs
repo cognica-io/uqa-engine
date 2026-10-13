@@ -41,7 +41,7 @@ impl ColumnType {
         }
         if let Some(element) = normalized.strip_suffix("[]") {
             let element_type = Self::from_sql_name_with_control(element, control)?;
-            if matches!(*element_type, Self::Void) {
+            if matches!(*element_type, Self::Void | Self::PgNodeTree) {
                 return Err(crate::SQLError::Routine {
                     sqlstate: "42704".into(),
                     message: format!("type \"{}\" does not exist", normalized.as_ref()),

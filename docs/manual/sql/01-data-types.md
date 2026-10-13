@@ -47,6 +47,8 @@ A selected type keeps its identity through generated coercions, `pg_typeof`, pre
 
 PostgreSQL's internal `"char"` differs from `CHAR(n)`: empty text denotes byte zero, other text supplies its first UTF-8 byte, and a backslash followed by three octal digits denotes that byte. Byte zero prints as empty text, ASCII bytes print directly, and bytes 128–255 print as backslash plus three octal digits. Integer conversion uses signed eight-bit values and raises `22003` outside −128–127; comparison uses unsigned byte order. Arrays, composite fields and stored values preserve these rules.
 
+`pg_node_tree` is a catalog pseudotype. A non-NULL external string cast reports `0A000`, `cannot accept a value of type pg_node_tree`; incompatible typed casts report `42846`. NULL and values already declared as `pg_node_tree` retain that type, and a typed value can be rendered as text. PostgreSQL defines no array type for it: `pg_node_tree[]` reports `42704`. User table and domain declarations retain PostgreSQL pseudotype restrictions.
+
 ## Integer and serial behavior
 
 `SMALLINT`, `INTEGER`, and `BIGINT` retain distinct declared identities and enforce PostgreSQL's signed 16-bit, 32-bit, and 64-bit ranges at casts, writes, schema rewrites, and supported migration boundaries. `OID` casts preserve the source integer width, including PostgreSQL's sign-extension behavior for negative `SMALLINT` and `INTEGER`, while negative `BIGINT` to `OID` raises `22003`; `XID` accepts its PostgreSQL text input but rejects integer and OID cast sources with `42846`.

@@ -4828,6 +4828,45 @@
       "capability": "Builtin routine signature metadata",
       "workload": "Four independently captured PostgreSQL pg_proc signatures: array_append, array_length, concat and concat_ws.",
       "invariant": "Declared argument/result OIDs, wildcard variadic modes, strictness, volatility, parallel safety, leakproof status and native source names match PostgreSQL without changing invocation or resource allowances."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "external_node_tree_input_matches_postgresql_and_preserves_typed_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/casting/tests/node_tree.rs",
+      "capability": "Catalog node input and retained values",
+      "workload": "Unknown, text-compatible and incompatible inputs; NULL; typed output; controlled copy and release.",
+      "invariant": "SQLSTATE and message match the independent PostgreSQL reference; a typed copy is charged and releases its entire reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "node_tree_arrays_do_not_exist_even_for_null_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/casting/tests/node_tree.rs",
+      "capability": "Catalog node input and retained values",
+      "workload": "Unqualified, catalog-qualified and uppercase catalog identifiers; NULL cast; CREATE TABLE; the nonexistent internal array name.",
+      "invariant": "All entry points reject the missing array identity; the existing void-array rejection remains intact."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_node_tree_assignments_keep_the_admitted_value_and_lease",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/assignment/conversion/production/tests.rs",
+      "capability": "Catalog node input and retained values",
+      "workload": "Already admitted catalog value assigned to its own type, followed by external input rejection.",
+      "invariant": "A typed assignment transfers the original value and byte reservation without a second input call; both success and rejection release all owned memory."
     }
   ]
 }

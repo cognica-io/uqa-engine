@@ -516,10 +516,12 @@ pub(super) fn compile_pg_type_name(
     } else {
         base
     };
-    if matches!(base, ColumnType::Void) && !type_name.array_bounds.is_empty() {
+    if matches!(base, ColumnType::Void | ColumnType::PgNodeTree)
+        && !type_name.array_bounds.is_empty()
+    {
         return Err(SQLError::Routine {
             sqlstate: "42704".into(),
-            message: "type \"void[]\" does not exist".into(),
+            message: format!("type \"{}[]\" does not exist", base.sql_name()),
         });
     }
     Ok(type_name
