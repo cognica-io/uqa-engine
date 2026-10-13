@@ -150,6 +150,8 @@ impl Folding for OperatorCoercions<'_> {
                 || matches!(
                     selected.and_then(|binding| binding.dispatch),
                     Some(crate::ast::FunctionDispatch::Collate { oid: Some(_) })
+                        | Some(crate::ast::FunctionDispatch::Pattern { .. })
+                        | Some(crate::ast::FunctionDispatch::PatternEscape { .. })
                 ))
         {
             *stored = selected.cloned();

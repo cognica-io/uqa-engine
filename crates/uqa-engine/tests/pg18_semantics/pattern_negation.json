@@ -1,0 +1,400 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT like('a'::character(4),'a') AS routine, 'a'::character(4) LIKE 'a' AS operator",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine",
+            "operator"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT like('é'::bytea,'__'::bytea) AS routine, 'é'::bytea LIKE '__'::bytea AS operator",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine",
+            "operator"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT like('a','a'), like('a'::name,'a'), like('\\xff'::bytea,'_'::bytea)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "like",
+            "like",
+            "like"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT like(NULL,'a'), like('a',NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "like",
+            "like"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT like(true,'t')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function like(boolean, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT like(NULL::boolean,'t')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function like(boolean, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT like('a','a','!')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function like(unknown, unknown, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE pattern_source(t text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO pattern_source VALUES ('abc'), ('z'), (NULL)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.\"like\"(text,text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW negated_patterns AS SELECT NOT(t LIKE 'a%') AS l, NOT(t NOT LIKE 'a%') AS nl, NOT(t ILIKE 'a%') AS il, NOT(t ~ '^a') AS r, NOT(public.\"like\"(t,'a%')) AS ordinary FROM pattern_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM negated_patterns ORDER BY l",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l",
+            "nl",
+            "il",
+            "r",
+            "ordinary"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "f",
+              "f",
+              "t"
+            ],
+            [
+              "t",
+              "f",
+              "t",
+              "t",
+              "t"
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('negated_patterns'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT (NOT (t ~~ 'a%'::text)) AS l,\n    (NOT (t !~~ 'a%'::text)) AS nl,\n    (NOT (t ~~* 'a%'::text)) AS il,\n    (NOT (t ~ '^a'::text)) AS r,\n    (NOT public.\"like\"(t, 'a%'::text)) AS ordinary\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('negated_patterns'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT NOT t ~~ 'a%'::text AS l,\n    NOT t !~~ 'a%'::text AS nl,\n    NOT t ~~* 'a%'::text AS il,\n    NOT t ~ '^a'::text AS r,\n    NOT public.\"like\"(t, 'a%'::text) AS ordinary\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT like('a','a') AS builtin, public.\"like\"('a','a') AS ordinary",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "builtin",
+            "ordinary"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW builtin_pattern_calls AS SELECT like(t,'a%') AS l FROM pattern_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('builtin_pattern_calls'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT \"like\"(t, 'a%'::text) AS l\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('builtin_pattern_calls'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT \"like\"(t, 'a%'::text) AS l\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM builtin_pattern_calls ORDER BY l",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "l"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ],
+            [
+              "t"
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

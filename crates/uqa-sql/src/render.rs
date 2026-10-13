@@ -27,6 +27,24 @@ mod expressions;
 use expressions::{render_expr, render_expr_in};
 pub(crate) mod function_syntax;
 
+pub(crate) fn pattern_sql<'a, T: 'a>(
+    operator: crate::ast::PatternOperator,
+    arguments: &'a [T],
+    mut render: impl FnMut(&'a T) -> Result<String, SQLError>,
+) -> Result<String, SQLError> {
+    let [left, pattern] = arguments else {
+        return Err(SQLError::Internal(
+            "invalid pattern operator operands".into(),
+        ));
+    };
+    Ok(format!(
+        "({} {} {})",
+        render(left)?,
+        operator.syntax(),
+        render(pattern)?
+    ))
+}
+
 /// Render one executable statement represented by UQA's durable SQL AST.
 pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
     match statement {

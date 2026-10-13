@@ -13,6 +13,19 @@ use super::registry::{
 use crate::ast::ColumnType as T;
 
 declarations! { pub(super) fn lookup(name);
+        "like" => &[
+            Signature::new(&[T::Text, T::Text], T::Boolean),
+            Signature::new(&[T::Name, T::Text], T::Boolean),
+            Signature::new(&[T::Bytea, T::Bytea], T::Boolean),
+        ],
+        "like_escape" => &[
+            Signature::new(&[T::Text, T::Text], T::Text),
+            Signature::new(&[T::Bytea, T::Bytea], T::Bytea),
+        ],
+        "similar_to_escape" => &[
+            Signature::new(&[T::Text], T::Text),
+            Signature::new(&[T::Text, T::Text], T::Text),
+        ],
         "current_schema" => &[Signature::new(&[], T::Name)],
         "array_dims" => &[Signature::new(&[T::AnyArray], T::Text)],
         "array_ndims" | "cardinality" => &[Signature::new(&[T::AnyArray], T::Integer)],

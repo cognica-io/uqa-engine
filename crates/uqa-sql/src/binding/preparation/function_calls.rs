@@ -154,7 +154,11 @@ impl Preparation<'_> {
         let mut kind = None;
         let (overload, positions) = if matches!(
             binding.and_then(|binding| binding.dispatch),
-            Some(crate::ast::FunctionDispatch::NumericOperator(_))
+            Some(
+                crate::ast::FunctionDispatch::NumericOperator(_)
+                    | crate::ast::FunctionDispatch::Pattern { .. }
+                    | crate::ast::FunctionDispatch::PatternEscape { .. }
+            )
         ) || binding
             .and_then(|binding| binding.dispatch)
             .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
@@ -259,6 +263,65 @@ impl Preparation<'_> {
         }
     }
 
+    fn coerce_pattern_arguments(
+        &mut self,
+        dispatch: crate::ast::FunctionDispatch,
+        arguments: &mut ObservedFunctionArguments,
+    ) -> Result<FunctionResult, SQLError> {
+        let types = arguments.types();
+        if let Some(crate::ast::FunctionDispatch::PatternEscape { similar }) = Some(dispatch) {
+            if !(1..=2).contains(&types.len()) {
+                return Err(SQLError::Internal("invalid pattern escape operands".into()));
+            }
+            if arguments.values.iter().any(ExpressionType::is_deferred) {
+                return Ok(FunctionResult::Selected(None));
+            }
+            let inputs = [
+                types.first().and_then(Option::as_ref),
+                types.get(1).and_then(Option::as_ref),
+            ];
+            let selected = crate::type_resolution::pattern::select_escape(
+                similar,
+                &inputs[..types.len()],
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
+            for value in &mut arguments.values {
+                self.parameters.coerce_unknown(value, &selected)?;
+            }
+            return Ok(FunctionResult::Selected(Some(
+                selected
+                    .into_uncontrolled()
+                    .expect("ordinary pattern helper selection"),
+            )));
+        }
+        if let Some(crate::ast::FunctionDispatch::Pattern { operator, .. }) = Some(dispatch) {
+            if arguments.values.iter().any(ExpressionType::is_deferred) {
+                return Ok(FunctionResult::Selected(None));
+            }
+            if types.len() != 2 {
+                return Err(SQLError::Internal(
+                    "invalid pattern operator operands".into(),
+                ));
+            }
+            let inputs = [
+                types.first().and_then(Option::as_ref),
+                types.get(1).and_then(Option::as_ref),
+                types.get(2).and_then(Option::as_ref),
+            ];
+            let selected = crate::type_resolution::pattern::select(
+                operator,
+                &inputs[..types.len()],
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
+            for (position, value) in arguments.values.iter_mut().enumerate() {
+                self.parameters
+                    .coerce_unknown(value, selected.argument(position))?;
+            }
+            return Ok(FunctionResult::Selected(Some(ColumnType::Boolean)));
+        }
+        unreachable!("only native pattern dispatches enter pattern argument coercion")
+    }
+
     pub(super) fn coerce_function_arguments(
         &mut self,
         name: &str,
@@ -282,6 +345,13 @@ impl Preparation<'_> {
             };
             self.coerce_row_comparison(BinaryOp::Equal, left, right, true)?;
             return Ok(FunctionResult::Selected(Some(ColumnType::Boolean)));
+        }
+        if let Some(
+            dispatch @ (crate::ast::FunctionDispatch::Pattern { .. }
+            | crate::ast::FunctionDispatch::PatternEscape { .. }),
+        ) = binding.and_then(|binding| binding.dispatch)
+        {
+            return self.coerce_pattern_arguments(dispatch, arguments);
         }
         let types = arguments.types();
         if binding

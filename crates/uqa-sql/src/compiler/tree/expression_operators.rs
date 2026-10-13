@@ -8,22 +8,22 @@
 
 use super::expression_core::{builtin_syntax_call, dispatched_call};
 use super::{compile_expr, extract_strings, BinaryOp, Expr, NodeEnum, Result, SQLError, Value};
-use crate::ast::{FunctionDispatch, NumericOperator};
+use crate::ast::{FunctionDispatch, NumericOperator, PatternOperator};
 
-fn compile_pattern_operands(
+fn compile_pattern_operand(
     rhs: &pg_query::protobuf::Node,
     wrapper_name: &str,
     operator_name: &str,
-) -> Result<Vec<Expr>> {
+    operator_location: i32,
+) -> Result<Expr> {
     let Some(NodeEnum::FuncCall(function)) = rhs.node.as_ref() else {
-        return Ok(vec![compile_expr(rhs)?]);
+        return compile_expr(rhs);
     };
-    let function_name = extract_strings(&function.funcname)?
-        .into_iter()
-        .next_back()
-        .ok_or_else(|| SQLError::Internal(format!("{operator_name} wrapper has no name")))?;
-    if function_name != wrapper_name {
-        return Ok(vec![compile_expr(rhs)?]);
+    let function_name = extract_strings(&function.funcname)?;
+    if function.location != operator_location
+        || !matches!(function_name.as_slice(), [schema, local] if schema == "pg_catalog" && local == wrapper_name)
+    {
+        return compile_expr(rhs);
     }
     if function.agg_distinct
         || function.agg_star
@@ -42,7 +42,16 @@ fn compile_pattern_operands(
             "{wrapper_name} expects a pattern and optional escape"
         )));
     }
-    function.args.iter().map(compile_expr).collect()
+    Ok(dispatched_call(
+        FunctionDispatch::PatternEscape {
+            similar: wrapper_name == "similar_to_escape",
+        },
+        function
+            .args
+            .iter()
+            .map(compile_expr)
+            .collect::<Result<Vec<_>>>()?,
+    ))
 }
 
 #[expect(
@@ -135,27 +144,15 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         vec![compile_expr(lhs)?, compile_expr(rhs)?],
                     ));
                 }
-                // POSIX regex operators: `~` match, `~*` case-insensitive match, `!~` / `!~*` their negations, lowered under names no PostgreSQL function has so that they label and print as operators while `regexp_like(...)` stays a call.
-                "~" | "~*" | "!~" | "!~*" => {
-                    let call = Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: if op_name.ends_with('*') {
-                            "regex_imatch_op"
-                        } else {
-                            "regex_match_op"
-                        }
-                        .into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    };
-                    return Ok(if op_name.starts_with('!') {
-                        Expr::Not(Box::new(call))
-                    } else {
-                        call
-                    });
+                "~" | "~*" | "!~" | "!~*" | "~~" | "!~~" | "~~*" | "!~~*" => {
+                    return Ok(dispatched_call(
+                        FunctionDispatch::Pattern {
+                            operator: PatternOperator::from_symbol(&op_name)
+                                .expect("pattern symbol"),
+                            oid: None,
+                        },
+                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    ));
                 }
                 // Array overlap.
                 "&&" => {
@@ -179,50 +176,6 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         order_by: Vec::new(),
                         filter: None,
                     });
-                }
-                "~~" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "like".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "~~*" => {
-                    return Ok(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "ilike".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "!~~" => {
-                    return Ok(Expr::Not(Box::new(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "like".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    })));
-                }
-                "!~~*" => {
-                    return Ok(Expr::Not(Box::new(Expr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        binding: None,
-                        name: "ilike".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    })));
                 }
                 "->" | "->>" => {
                     return Ok(dispatched_call(
@@ -365,28 +318,26 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("SIMILAR TO without rhs".into()))?;
-            let mut args = vec![compile_expr(lhs)?];
-            args.extend(compile_pattern_operands(
-                rhs,
-                "similar_to_escape",
-                "SIMILAR TO",
-            )?);
-            let call = Expr::Func {
-                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                binding: None,
-                name: "similar_to".into(),
-                args,
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
+            let args = vec![
+                compile_expr(lhs)?,
+                compile_pattern_operand(rhs, "similar_to_escape", "SIMILAR TO", a.location)?,
+            ];
+            let operator = match op_name.as_str() {
+                "~" => PatternOperator::Regex,
+                "!~" => PatternOperator::NotRegex,
+                other => {
+                    return Err(SQLError::Internal(format!(
+                        "SIMILAR TO has unexpected operator `{other}`"
+                    )))
+                }
             };
-            match op_name.as_str() {
-                "~" => Ok(call),
-                "!~" => Ok(Expr::Not(Box::new(call))),
-                other => Err(SQLError::Internal(format!(
-                    "SIMILAR TO has unexpected operator `{other}`"
-                ))),
-            }
+            Ok(dispatched_call(
+                FunctionDispatch::Pattern {
+                    operator,
+                    oid: None,
+                },
+                args,
+            ))
         }
         AExprKind::AexprOpAny | AExprKind::AexprOpAll => {
             let op_name = extract_strings(&a.name)?.join("");
@@ -426,12 +377,13 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 vec![compile_expr(lhs)?, compile_expr(rhs)?],
             ));
         }
-        AExprKind::AexprLike => {
-            // libpg_query encodes LIKE as `~~` and NOT LIKE as `!~~` in
-            // `a.name`. The keyword form lands here regardless of the
-            // user's syntax (LIKE / NOT LIKE / ~~ / !~~), so we have to
-            // peek at the name to recover the negation.
+        AExprKind::AexprLike | AExprKind::AexprIlike => {
             let op_name = extract_strings(&a.name)?.join("");
+            let operator = PatternOperator::from_symbol(&op_name)
+                .filter(|operator| operator.is_like())
+                .ok_or_else(|| {
+                    SQLError::Internal(format!("LIKE has unexpected operator `{op_name}`"))
+                })?;
             let lhs = a
                 .lexpr
                 .as_ref()
@@ -440,54 +392,17 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("LIKE without rhs".into()))?;
-            let mut args = vec![compile_expr(lhs)?];
-            args.extend(compile_pattern_operands(rhs, "like_escape", "LIKE")?);
-            let func = Expr::Func {
-                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                binding: None,
-                name: "like".into(),
+            let args = vec![
+                compile_expr(lhs)?,
+                compile_pattern_operand(rhs, "like_escape", "LIKE", a.location)?,
+            ];
+            Ok(dispatched_call(
+                FunctionDispatch::Pattern {
+                    operator,
+                    oid: None,
+                },
                 args,
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            };
-            return match op_name.as_str() {
-                "~~" => Ok(func),
-                "!~~" => Ok(Expr::Not(Box::new(func))),
-                other => Err(SQLError::Internal(format!(
-                    "LIKE has unexpected operator `{other}`"
-                ))),
-            };
-        }
-        AExprKind::AexprIlike => {
-            // Same shape as AexprLike: ILIKE -> `~~*`, NOT ILIKE -> `!~~*`.
-            let op_name = extract_strings(&a.name)?.join("");
-            let lhs = a
-                .lexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("ILIKE without lhs".into()))?;
-            let rhs = a
-                .rexpr
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("ILIKE without rhs".into()))?;
-            let mut args = vec![compile_expr(lhs)?];
-            args.extend(compile_pattern_operands(rhs, "like_escape", "ILIKE")?);
-            let func = Expr::Func {
-                order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                binding: None,
-                name: "ilike".into(),
-                args,
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            };
-            return match op_name.as_str() {
-                "~~*" => Ok(func),
-                "!~~*" => Ok(Expr::Not(Box::new(func))),
-                other => Err(SQLError::Internal(format!(
-                    "ILIKE has unexpected operator `{other}`"
-                ))),
-            };
+            ))
         }
         AExprKind::AexprIn => {
             let expr = a

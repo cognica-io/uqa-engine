@@ -177,6 +177,8 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         {
             Some(true)
         }
+        "like_escape" if argument_count == 2 => Some(true),
+        "similar_to_escape" if matches!(argument_count, 1 | 2) => Some(true),
         "like" | "ilike" | "similar_to" | "regex_match_op" | "regex_imatch_op"
             if argument_count == 2 =>
         {
@@ -235,6 +237,7 @@ pub fn bound_scalar_function_strictness(
                     .map(|operator| !matches!(operator.oid, 349 | 374 | 375))
             }),
             FunctionDispatch::NumericOperator(_) => Some(true),
+            FunctionDispatch::Pattern { .. } | FunctionDispatch::PatternEscape { .. } => Some(true),
             FunctionDispatch::Collate { .. } => None,
             FunctionDispatch::Subscript
             | FunctionDispatch::FieldSelect
@@ -398,6 +401,12 @@ pub(super) fn eval_dispatched_builtin_with_control(
         }
         FunctionDispatch::Concat { oid } => {
             super::concatenation::evaluate(binding, oid, evaluated, control, context)
+        }
+        FunctionDispatch::Pattern { operator, .. } => {
+            super::pattern::evaluate(operator, evaluated, control)
+        }
+        FunctionDispatch::PatternEscape { similar } => {
+            super::pattern::escape(similar, evaluated, control)
         }
         FunctionDispatch::JsonExtract { as_text, path } => {
             super::json::json_extract_operator_with_control(evaluated, as_text, path, control)

@@ -617,7 +617,7 @@ pub fn stored_expression_prints_as_call(expression: &uqa_sql::ast::Expr) -> bool
     let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
     matches!(
         &expression.scalar,
-        ScalarExpr::Func { name, binding, args, .. }
-            if expressions::prints_as_call(name, binding.as_ref(), args)
+        ScalarExpr::Func { binding, args, .. }
+            if expressions::prints_as_call(binding.as_ref(), args)
     )
 }

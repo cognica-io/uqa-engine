@@ -294,25 +294,14 @@ mod tests {
 
     #[test]
     fn projected_like_predicates_match_the_canonical_evaluator() {
-        for (name, pattern) in [
-            ("like", "%"),
-            ("like", "%green%"),
-            ("like", "%special%requests%"),
-            ("like", "a_c"),
-            ("ilike", "%GREEN%"),
+        for (operator, pattern) in [
+            ("LIKE", "%"),
+            ("LIKE", "%green%"),
+            ("LIKE", "%special%requests%"),
+            ("LIKE", "a_c"),
+            ("ILIKE", "%GREEN%"),
         ] {
-            let expression = ScalarExpr::Func {
-                order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
-                name: name.into(),
-                binding: None,
-                args: vec![
-                    ScalarExpr::Column("text".into()),
-                    ScalarExpr::Literal(Value::Str(pattern.into())),
-                ],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            };
+            let expression = parsed_expression(&format!("text {operator} '{pattern}'"));
             let fields = vec!["text".into()];
             let predicate = ProjectedPredicate::compile(&expression, &fields, &[])
                 .unwrap()
@@ -331,18 +320,7 @@ mod tests {
 
     #[test]
     fn qualified_like_runs_directly_on_a_composite_physical_row() {
-        let expression = ScalarExpr::Not(Box::new(ScalarExpr::Func {
-            order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
-            name: "like".into(),
-            binding: None,
-            args: vec![
-                ScalarExpr::qualified_column("o", "comment"),
-                ScalarExpr::Literal(Value::Str("%special%requests%".into())),
-            ],
-            distinct: false,
-            order_by: Vec::new(),
-            filter: None,
-        }));
+        let expression = parsed_expression("o.comment NOT LIKE '%special%requests%'");
         let left_schema =
             crate::RowSchema::with_qualified_types("c", vec!["id".into()], vec![None]);
         let right_schema =
@@ -362,6 +340,16 @@ mod tests {
         );
         assert!(predicate.keep_row(&schema.view(&accepted)).unwrap());
         assert!(!predicate.keep_row(&schema.view(&rejected)).unwrap());
+    }
+
+    fn parsed_expression(source: &str) -> ScalarExpr {
+        let uqa_sql::Statement::Select(mut query) = uqa_sql::compile(&format!("SELECT {source}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("scalar SELECT");
+        };
+        uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar
     }
 
     #[test]

@@ -1,0 +1,448 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT pg_catalog.like_escape('a!_b', '!'), pg_catalog.like_escape(E'a\\\\b', ''), pg_catalog.like_escape('a§%b', '§')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "like_escape",
+            "like_escape",
+            "like_escape"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "a\\_b",
+              "a\\\\b",
+              "a\\%b"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.like_escape('\\xff'::bytea, ''::bytea), pg_catalog.like_escape('\\xff5f'::bytea, '\\xff'::bytea)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "like_escape",
+            "like_escape"
+          ],
+          "type_oids": [
+            17,
+            17
+          ],
+          "rows": [
+            [
+              "\\xff",
+              "\\x5c5f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.like_escape(NULL::text, 'xx'), pg_catalog.like_escape('a', NULL::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "like_escape",
+            "like_escape"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.like_escape('a', 'xx')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_catalog.like_escape('a'::bytea, 'xx'::bytea)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_catalog.similar_to_escape('a%'), pg_catalog.similar_to_escape('a!_%', '!')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "similar_to_escape",
+            "similar_to_escape"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "^(?:a.*)$",
+              "^(?:a\\_.*)$"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.similar_to_escape(NULL::text), pg_catalog.similar_to_escape(NULL::text,'xx'), pg_catalog.similar_to_escape('a', NULL::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "similar_to_escape",
+            "similar_to_escape",
+            "similar_to_escape"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.similar_to_escape('a', 'xx')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'a'::character(4) ~ 'a$', 'a'::character(4) ~* 'A$', 'a'::character(4) SIMILAR TO 'a', 'a'::character(4) SIMILAR TO 'a%'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "f",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '\\xff5f'::bytea LIKE '\\xff5f'::bytea ESCAPE '\\xff'::bytea",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '\\x5f'::bytea LIKE '\\xff5f'::bytea ESCAPE '\\xff'::bytea",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_catalog.like_escape(1,'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_catalog.like_escape(integer, unknown) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_catalog.similar_to_escape(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_catalog.similar_to_escape(integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION public.like_escape(text,text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT $1 $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' LIKE public.like_escape('a','ignored')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE pattern_visits",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('pattern_visits')::text LIKE NULL::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('pattern_visits')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nextval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::text LIKE nextval('pattern_visits')::text ESCAPE ''",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('pattern_visits')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nextval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::text SIMILAR TO nextval('pattern_visits')::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('pattern_visits')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nextval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,481 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE FUNCTION public.\"like\"(a text,b text) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT false'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' LIKE 'a' AS operator_value, public.\"like\"('a','a') AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "operator_value",
+            "routine_value"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.regex_match_op(a text,b text) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT false'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' ~ 'a' AS operator_value, public.regex_match_op('a','a') AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "operator_value",
+            "routine_value"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a'::bytea LIKE 'a' AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '\\xff'::bytea LIKE '_' AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '\\x0001'::bytea LIKE '__' AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '\\xff'::bytea NOT LIKE '_' AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a'::character(4) LIKE 'a' AS a, 'a'::character(4) LIKE 'a%' AS b, 'a'::name LIKE 'a' AS c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "c"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a_b' LIKE 'a!_b' ESCAPE '!' AS a, 'A_B' ILIKE 'a!_b' ESCAPE '!' AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a_b' SIMILAR TO 'a!_b' ESCAPE '!' AS a, 'a_b' NOT SIMILAR TO 'a!_b' ESCAPE '!' AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1 LIKE '1'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer ~~ unknown",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1' LIKE 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: unknown ~~ integer",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'a' ILIKE true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: unknown ~~* boolean",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::integer LIKE NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer ~~ unknown",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::bytea ILIKE NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: bytea ~~* unknown",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'a'::bytea ~ 'a'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: bytea ~ unknown",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'a'::bytea LIKE 'a' ESCAPE '!'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: bytea ~~ text",
+        "detail": null,
+        "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'a' LIKE 'a' ESCAPE 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function pg_catalog.like_escape(unknown, integer) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL LIKE 'a' ESCAPE 'xx'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::text LIKE 'a' ESCAPE 'xx'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22025",
+        "message": "invalid escape string",
+        "detail": null,
+        "hint": "Escape string must be empty or one character."
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::text LIKE NULL::text ESCAPE 'xx'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' LIKE 'a' ESCAPE NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::text SIMILAR TO NULL::text ESCAPE 'xx'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' ~ 'a', 'A' ~* 'a', 'a' !~ 'b', 'A' !~* 'b'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1 BETWEEN SYMMETRIC 2 AND 0 AS a, 1 NOT BETWEEN SYMMETRIC 2 AND 0 AS b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

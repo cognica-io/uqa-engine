@@ -21,6 +21,7 @@ mod concat;
 mod enums;
 mod helpers;
 mod membership;
+mod pattern;
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types.
 pub fn bind_type_introspection(
@@ -496,7 +497,7 @@ impl Binder<'_, '_> {
 
     fn bind_call(&mut self, mut call: BindingCall) -> Result<ScalarExpr, SQLError> {
         self.items(&mut call.arguments)?;
-        if self.bind_collation(&mut call)? {
+        if self.bind_collation(&mut call)? || self.coerce_pattern_call(&mut call)? {
             return Ok(call.into_expression());
         }
         for order in &mut call.order_by {

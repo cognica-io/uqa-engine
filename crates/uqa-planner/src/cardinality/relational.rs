@@ -189,12 +189,12 @@ impl CardinalityEstimator {
                 value: Value::Null, ..
             } => Selectivity(0.0),
             ScalarExpr::Between { .. } => Selectivity(self.range_selectivity).clamp(),
-            ScalarExpr::Func { name, .. } if name.eq_ignore_ascii_case("like") => {
-                Selectivity(self.like_selectivity).clamp()
-            }
-            ScalarExpr::Func { name, args, .. } => {
-                self.scalar_function_selectivity(name, args, stats)
-            }
+            ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } => self.scalar_function_selectivity(name, binding.as_ref(), args, stats),
             _ => Selectivity(self.default_selectivity).clamp(),
         }
     }
@@ -202,9 +202,22 @@ impl CardinalityEstimator {
     fn scalar_function_selectivity(
         &self,
         name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
         args: &[ScalarExpr],
         stats: &RelationStats,
     ) -> Selectivity {
+        if let Some(uqa_sql::ast::FunctionDispatch::Pattern { operator, .. }) =
+            binding.and_then(|binding| binding.dispatch)
+        {
+            if operator.is_like() {
+                return Selectivity(if operator.negated() {
+                    1.0 - self.like_selectivity
+                } else {
+                    self.like_selectivity
+                })
+                .clamp();
+            }
+        }
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
             "knn_match" | "calibrated_vector_match" => {

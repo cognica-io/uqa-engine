@@ -62,6 +62,7 @@ pub mod enums;
 pub(crate) mod hashing;
 pub(crate) mod internal_char;
 pub(crate) mod interval_style;
+mod pattern;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;

@@ -7,8 +7,39 @@
 use super::{CompiledLikePattern, LikePatternToken};
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
-    CancellationToken,
+    CancellationToken, Value,
 };
+
+#[test]
+fn binary_like_borrows_bytes_and_preserves_padding_without_text_conversion() {
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let pattern = CompiledLikePattern::from_value_with_escape_with_control(
+        &Value::Bytes(vec![b'_', b'%']),
+        false,
+        None,
+        &control,
+    )
+    .unwrap();
+    let retained = memory.used();
+    assert!(pattern.try_is_match_with_control("é", &control).unwrap());
+    assert_eq!(memory.used(), retained);
+    let source = Value::Bytes(vec![0xff; 32 * 1024]);
+    assert!(pattern
+        .try_matches_value_with_control(&source, &control)
+        .unwrap());
+    assert_eq!(memory.used(), retained);
+    drop(pattern);
+    assert_eq!(memory.used(), 0);
+    let pattern =
+        CompiledLikePattern::with_escape_with_control("a", false, None, &control).unwrap();
+    assert!(!pattern
+        .try_matches_value_with_control(&Value::FixedChar("a   ".into()), &control)
+        .unwrap());
+    drop(pattern);
+    assert_eq!(memory.used(), 0);
+}
 
 #[test]
 fn controlled_like_keeps_native_pattern_capacity_until_last_owner_release() {

@@ -78,6 +78,7 @@ pub use stored_constants::{
     contains_unknown_literal, fold_stored_enum_constants, store_operand_coercions,
     stored_enum_constant,
 };
+pub(crate) mod pattern;
 mod string_binary;
 
 pub use cast_compatibility::{

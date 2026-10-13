@@ -78,6 +78,15 @@ impl FunctionResolutionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionDispatch {
     NumericOperator(NumericOperator),
+    /// SQL pattern syntax, retaining its selected binary operator after escape processing.
+    Pattern {
+        operator: super::PatternOperator,
+        oid: Option<std::num::NonZeroU32>,
+    },
+    /// A parser-owned escape helper, evaluated and folded independently of the strict match operator.
+    PatternEscape {
+        similar: bool,
+    },
     /// A non-strict SQL Boolean test, distinct from routine lookup and equality.
     BooleanTest(BooleanTest),
     /// A collation clause, retaining its selected identity independently of its written name.
@@ -236,6 +245,9 @@ impl FunctionDispatch {
     pub const fn label(self) -> &'static str {
         match self {
             Self::NumericOperator(operator) => operator.symbol(),
+            Self::Pattern { operator, .. } => operator.syntax(),
+            Self::PatternEscape { similar: false } => "pg_catalog.like_escape",
+            Self::PatternEscape { similar: true } => "pg_catalog.similar_to_escape",
             Self::BooleanTest(test) => test.label(),
             Self::Collate { .. } => "COLLATE",
             Self::CollationFor { .. } => "pg_catalog.pg_collation_for",

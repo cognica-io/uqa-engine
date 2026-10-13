@@ -100,6 +100,7 @@ pub fn function_projection_label(
         binding.and_then(|binding| binding.dispatch),
         Some(
             crate::ast::FunctionDispatch::NumericOperator(_)
+                | crate::ast::FunctionDispatch::Pattern { .. }
                 | crate::ast::FunctionDispatch::Concat { .. }
                 | crate::ast::FunctionDispatch::ArrayConcat
                 | crate::ast::FunctionDispatch::ArrayAppend
@@ -138,11 +139,6 @@ fn operator_call(name: &str) -> bool {
             | "json_has_any_key"
             | "json_has_all_keys"
             | "json_delete_path"
-            | "like"
-            | "ilike"
-            | "similar_to"
-            | "regex_match_op"
-            | "regex_imatch_op"
     )
 }
 
