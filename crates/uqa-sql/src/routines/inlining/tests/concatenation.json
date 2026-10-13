@@ -1,0 +1,92 @@
+[
+  {
+    "type": "integer",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "integer",
+    "expression": "'x'::text || a",
+    "immutable": true
+  },
+  {
+    "type": "boolean",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "boolean",
+    "expression": "'x'::text || a",
+    "immutable": true
+  },
+  {
+    "type": "numeric",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "numeric",
+    "expression": "'x'::text || a",
+    "immutable": true
+  },
+  {
+    "type": "double precision",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "double precision",
+    "expression": "'x'::text || a",
+    "immutable": true
+  },
+  {
+    "type": "text",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "text",
+    "expression": "'x'::text || a",
+    "immutable": true
+  },
+  {
+    "type": "date",
+    "expression": "a || 'x'::text",
+    "immutable": false
+  },
+  {
+    "type": "date",
+    "expression": "'x'::text || a",
+    "immutable": false
+  },
+  {
+    "type": "timestamp with time zone",
+    "expression": "a || 'x'::text",
+    "immutable": false
+  },
+  {
+    "type": "timestamp with time zone",
+    "expression": "'x'::text || a",
+    "immutable": false
+  },
+  {
+    "type": "time",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "time",
+    "expression": "'x'::text || a",
+    "immutable": true
+  },
+  {
+    "type": "jsonb",
+    "expression": "a || 'x'::text",
+    "immutable": true
+  },
+  {
+    "type": "jsonb",
+    "expression": "'x'::text || a",
+    "immutable": true
+  }
+]

@@ -1,0 +1,473 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE SCHEMA generated_concat",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SET search_path=generated_concat,public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('calm')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TYPE pair AS (n integer)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN number_domain AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN date_domain AS date",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE generated_0_left(a integer, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_0_right(a integer, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_1_left(a boolean, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_1_right(a boolean, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_2_left(a numeric, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_2_right(a numeric, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_3_left(a double precision, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_3_right(a double precision, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_4_left(a text, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_4_right(a text, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_5_left(a date, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_5_right(a date, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_6_left(a timestamp with time zone, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_6_right(a timestamp with time zone, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_7_left(a time, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_7_right(a time, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_8_left(a jsonb, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_8_right(a jsonb, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_named_0_left(a mood, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_named_0_right(a mood, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_named_1_left(a pair, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_named_1_right(a pair, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_named_2_left(a number_domain, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_named_2_right(a number_domain, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE generated_named_3_left(a date_domain, g text GENERATED ALWAYS AS (a || 'x'::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_named_3_right(a date_domain, g text GENERATED ALWAYS AS ('x'::text || a) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_record_cast(a pair,g text GENERATED ALWAYS AS(a::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE generated_record_input(a text,g pair GENERATED ALWAYS AS(a::pair) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE bad_target(a integer,g integer GENERATED ALWAYS AS(a || 'x'::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"g\" is of type integer but default expression is of type text",
+        "detail": null,
+        "hint": "You will need to rewrite or cast the expression."
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE stable_target(a integer,g integer GENERATED ALWAYS AS(now()) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    }
+  ]
+}

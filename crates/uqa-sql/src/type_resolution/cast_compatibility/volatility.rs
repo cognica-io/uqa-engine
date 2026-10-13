@@ -81,6 +81,7 @@ fn output_is_stable(ty: &ColumnType) -> bool {
             | ColumnType::Regtype
             | ColumnType::AclItem
             | ColumnType::Record
+            | ColumnType::Composite(_)
             | ColumnType::Range(_)
             | ColumnType::Multirange(_)
             | ColumnType::Enum(_)
@@ -112,6 +113,13 @@ mod tests {
 
     #[test]
     fn casts_follow_postgresql_function_and_input_output_volatility() {
+        let record = ColumnType::Composite(crate::ast::CompositeTypeReference {
+            schema: "public".into(),
+            name: "pair".into(),
+            oid: 20_002,
+            array_oid: 20_003,
+            relation_oid: 20_004,
+        });
         let mood = ColumnType::Enum(EnumTypeReference {
             schema: "public".into(),
             name: "mood".into(),
@@ -124,6 +132,9 @@ mod tests {
         assert!(stable(&mood, &ColumnType::Text));
         assert!(stable(&ColumnType::Text, &mood));
         assert!(!stable(&mood, &mood));
+        assert!(stable(&record, &ColumnType::Text));
+        assert!(stable(&ColumnType::Text, &record));
+        assert!(!stable(&record, &record));
         assert!(stable(&ColumnType::TimestampTz, &ColumnType::Text));
         assert!(stable(&ColumnType::Date, &ColumnType::TimestampTz));
         assert!(stable(&ColumnType::Text, &ColumnType::Date));

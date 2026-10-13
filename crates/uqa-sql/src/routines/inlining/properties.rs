@@ -103,7 +103,15 @@ fn inspect_node(
             args,
             ..
         } => {
-            volatility = inspect_call(context, name, binding.as_ref(), args.len(), properties);
+            volatility = inspect_call(
+                context,
+                name,
+                binding.as_ref(),
+                args,
+                parameters,
+                schema,
+                properties,
+            );
         }
         ScalarExpr::Cast { expr, ty, .. } => {
             let target = context.types.resolve_catalog_column_type_name(ty)?;
@@ -188,9 +196,12 @@ fn inspect_call(
     context: &RoutineInliningContext<'_>,
     name: &str,
     binding: Option<&crate::ast::FunctionBinding>,
-    arity: usize,
+    arguments: &[ScalarExpr],
+    parameters: &[SQLParam],
+    schema: &RowSchema,
     properties: &mut Properties,
 ) -> FunctionVolatility {
+    let arity = arguments.len();
     let function = binding
         .filter(|binding| !binding.builtin)
         .and_then(|binding| {
@@ -210,12 +221,17 @@ fn inspect_call(
         properties.cost += f64::from(function.def.cost.unwrap_or(100.0));
         volatility
     } else {
-        let volatility = crate::semantics::volatility::function_volatility_with_binding(
-            context.volatility,
-            name,
-            binding,
-            arity,
-        );
+        let volatility = super::operators::concatenation_volatility(
+            context, binding, arguments, parameters, schema,
+        )
+        .unwrap_or_else(|| {
+            crate::semantics::volatility::function_volatility_with_binding(
+                context.volatility,
+                name,
+                binding,
+                arity,
+            )
+        });
         properties.nonstrict |=
             crate::expr::bound_scalar_function_strictness(name, binding, arity) != Some(true);
         properties.set_returning |= crate::semantics::sets::validation::builtin_returns_set(

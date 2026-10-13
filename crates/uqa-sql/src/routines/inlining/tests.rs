@@ -11,6 +11,7 @@ use super::*;
 use crate::ast::Statement;
 use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
+mod concatenation;
 mod fixture;
 use fixture::Catalog;
 
