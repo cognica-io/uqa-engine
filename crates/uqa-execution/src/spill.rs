@@ -643,6 +643,19 @@ fn validate_decoded_schema(batch: Batch, expected_schema: Option<&RowSchema>) ->
     )))
 }
 
+fn restore_decoded_schema(
+    mut batch: Batch,
+    expected_schema: Option<&RowSchema>,
+) -> ExecResult<Batch> {
+    // The file carries physical bindings; the buffer owns the original immutable SQL scope, including named rows and record descriptors that are not repeated in each record.
+    if let Some(expected) = expected_schema {
+        if expected.has_same_physical_layout(&batch.schema) {
+            batch.schema = expected.clone();
+        }
+    }
+    validate_decoded_schema(batch, expected_schema)
+}
+
 /// Reader for a [`SharedSpill`]. Independent readers retain the shared source;
 /// a consuming reader may instead own unique in-memory batches directly.
 pub struct SharedSpillReader {
@@ -685,7 +698,7 @@ impl Iterator for SharedSpillReader {
                     Ok(None) => None,
                     Ok(Some(record)) => {
                         let decoded = decode_batch(&record).and_then(|batch| {
-                            validate_decoded_schema(batch, self.expected_schema.as_ref())
+                            restore_decoded_schema(batch, self.expected_schema.as_ref())
                         });
                         if decoded.is_err() {
                             self.failed = true;
@@ -741,7 +754,7 @@ impl Iterator for SpillDrain {
                 }
                 Ok(Some(record)) => {
                     let decoded = decode_batch(&record).and_then(|batch| {
-                        validate_decoded_schema(batch, self.expected_schema.as_ref())
+                        restore_decoded_schema(batch, self.expected_schema.as_ref())
                     });
                     if decoded.is_err() {
                         self.failed = true;
@@ -805,7 +818,7 @@ impl Iterator for SpillReader<'_> {
                 }
                 Ok(Some(record)) => {
                     let decoded = decode_batch(&record).and_then(|batch| {
-                        validate_decoded_schema(batch, self.expected_schema.as_ref())
+                        restore_decoded_schema(batch, self.expected_schema.as_ref())
                     });
                     if decoded.is_err() {
                         self.failed = true;

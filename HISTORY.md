@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Restore spilled rows with their retained SQL schema after validating all physical bindings, preserving named relation types and record descriptors through grouping, windows, stored column changes and cursor reads.
+
 - Preserve the unlimited length of catalog-qualified `bpchar`, avoiding premature one-character truncation in character casts, enum and date input, stored values and analytical query results.
 
 - Dropping an ordinary or foreign column preserves CHECK constraints that do not depend on that attribute, including constant predicates and checks of another surviving column, with their original identities, flags and enforcement after rollback or reopening.
