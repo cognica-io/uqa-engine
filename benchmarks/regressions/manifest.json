@@ -5816,6 +5816,71 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "returning_wildcards_keep_original_inputs_and_declared_scopes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Original RETURNING inputs and wildcard scopes",
+      "workload": "Fixed DML preparation, reanalysis, CTE, zero-column and view-trigger histories.",
+      "invariant": "Original expression identity, declared output order/types/collations, zero-column errors and PostgreSQL row images remain correct without reading unrelated rows."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "returning_wildcards_preserve_cte_output_and_zero_column_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "capability": "Original RETURNING inputs and wildcard scopes",
+      "workload": "Fixed DML preparation, reanalysis, CTE, zero-column and view-trigger histories.",
+      "invariant": "Original expression identity, declared output order/types/collations, zero-column errors and PostgreSQL row images remain correct without reading unrelated rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "merge_returning_star_orders_source_columns_before_target_columns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_merge.rs",
+      "capability": "Original RETURNING inputs and wildcard scopes",
+      "workload": "Fixed DML preparation, reanalysis, CTE, zero-column and view-trigger histories.",
+      "invariant": "Original expression identity, declared output order/types/collations, zero-column errors and PostgreSQL row images remain correct without reading unrelated rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "replication_suppressed_view_triggers_match_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/instead_of.rs",
+      "capability": "Original RETURNING inputs and wildcard scopes",
+      "workload": "Fixed DML preparation, reanalysis, CTE, zero-column and view-trigger histories.",
+      "invariant": "Original expression identity, declared output order/types/collations, zero-column errors and PostgreSQL row images remain correct without reading unrelated rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "replication_suppressed_view_triggers_match_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/instead_of.rs",
+      "capability": "Original RETURNING inputs and wildcard scopes",
+      "workload": "Fixed DML preparation, reanalysis, CTE, zero-column and view-trigger histories.",
+      "invariant": "Original expression identity, declared output order/types/collations, zero-column errors and PostgreSQL row images remain correct without reading unrelated rows."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "merge_action_scope_follows_returning_ancestry_and_analysis_order",
       "cases": 1,
       "case_names": [

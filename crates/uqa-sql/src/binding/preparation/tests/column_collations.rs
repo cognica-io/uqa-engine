@@ -388,6 +388,108 @@ fn executable_collation_selections_survive_reanalysis() {
 }
 
 #[test]
+fn returning_wildcards_keep_original_inputs_and_declared_scopes() {
+    let context = binding();
+    for (sql, expected) in [
+        (
+            "INSERT INTO t VALUES ('a','b',1) RETURNING *, upper(c), lower('literal'), old.*, new.*",
+            vec![950, 951, 0, 950, 100, 950, 951, 0, 950, 951, 0],
+        ),
+        (
+            "UPDATE t SET n=n RETURNING *, upper(c), lower('literal'), old.*, new.*",
+            vec![950, 951, 0, 950, 100, 950, 951, 0, 950, 951, 0],
+        ),
+        (
+            "DELETE FROM t RETURNING *, upper(c), lower('literal'), old.*, new.*",
+            vec![950, 951, 0, 950, 100, 950, 951, 0, 950, 951, 0],
+        ),
+        (
+            "MERGE INTO local t USING remote s ON t.n=s.n WHEN MATCHED THEN UPDATE SET n=t.n RETURNING *, merge_action(), upper(t.c), old.*, new.*",
+            vec![950, 951, 0, 950, 951, 0, 100, 950, 950, 951, 0, 950, 951, 0],
+        ),
+        (
+            "MERGE INTO local t USING remote s ON t.n=s.n WHEN MATCHED THEN UPDATE SET n=t.n RETURNING WITH (OLD AS before, NEW AS after) s.*, before.*, after.*, merge_action(), upper(t.c)",
+            vec![950, 951, 0, 950, 951, 0, 950, 951, 0, 100, 950],
+        ),
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        for _ in 0..2 {
+            read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None)
+                .unwrap_or_else(|error| panic!("{sql}: {error}"));
+            let schema = crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context)
+                .unwrap_or_else(|error| panic!("{sql}: {error}"))
+                .unwrap();
+            assert_eq!(
+                (0..schema.len())
+                    .map(|position| schema.column_collation(position).unwrap())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{sql}: {:?}",
+                schema.columns()
+            );
+        }
+    }
+}
+
+#[test]
+fn returning_wildcards_preserve_cte_output_and_zero_column_diagnostics() {
+    let context = binding();
+    let mut plan = UnifiedPlan::lower(
+        crate::compile(
+            "WITH changed AS (
+                UPDATE t SET n=n RETURNING *, upper(c) AS u, lower('literal') AS literal
+             ) SELECT * FROM changed",
+        )
+        .unwrap()
+        .remove(0),
+    );
+    read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None).unwrap();
+    let schema = crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context)
+        .unwrap()
+        .unwrap();
+    assert_eq!(schema.columns(), ["c", "p", "n", "u", "literal"]);
+    assert_eq!(
+        (0..schema.len())
+            .map(|position| schema.column_collation(position).unwrap())
+            .collect::<Vec<_>>(),
+        [950, 951, 0, 950, 100]
+    );
+
+    let context = BindingContext {
+        catalog: crate::binding::fixture::catalog(BTreeMap::from([(
+            RelationIdentity::new("public", "empty_target"),
+            crate::binding::fixture::table_definition(Vec::new()),
+        )])),
+        ..crate::binding::fixture::empty_binding_context()
+    };
+    for command in [
+        "INSERT INTO empty_target DEFAULT VALUES",
+        "DELETE FROM empty_target",
+        "MERGE INTO empty_target t USING empty_target s ON true WHEN MATCHED THEN DELETE",
+    ] {
+        for (returning, valid) in [("*", false), ("*, 1 AS one", true)] {
+            let sql = format!("{command} RETURNING {returning}");
+            let mut plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+            let input = read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None);
+            let result = crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context);
+            if valid {
+                input.unwrap_or_else(|error| panic!("{sql}: {error}"));
+                let schema = result
+                    .unwrap_or_else(|error| panic!("{sql}: {error}"))
+                    .unwrap();
+                assert_eq!(schema.columns(), ["one"], "{sql}");
+                assert_eq!(schema.column_type(0), Some(&ColumnType::Integer), "{sql}");
+            } else {
+                for error in [input.unwrap_err(), result.unwrap_err()] {
+                    assert_eq!(error.sqlstate(), Some("42601"), "{sql}: {error}");
+                    assert_eq!(error.to_string(), "RETURNING must have at least one column");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn returning_collation_selections_keep_original_plan_addresses() {
     let context = binding();
     for source in [
