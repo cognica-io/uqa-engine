@@ -136,9 +136,12 @@ impl SystemRelation {
     pub const fn view_sources(self) -> &'static [Self] {
         use SystemRelation::Projected as P;
         use VirtualRelation::{
-            InformationColumnPrivileges, PgAttrdef, PgAttribute, PgClass, PgConstraint, PgIndex,
-            PgLanguage, PgNamespace, PgProc, PgRewrite, PgTrigger, PgType,
+            InformationColumnPrivileges, PgAttrdef, PgAttribute, PgClass, PgIndex, PgLanguage,
+            PgNamespace, PgProc, PgRewrite, PgTrigger, PgType,
         };
+        if let Some(sources) = self.constraint_view_sources() {
+            return sources;
+        }
         match self {
             P(VirtualRelation::InformationSchemata) => {
                 &[P(PgNamespace), Self::Projected(VirtualRelation::PgAuthid)]
@@ -195,20 +198,6 @@ impl SystemRelation {
                 Self::PgSequence,
                 P(VirtualRelation::PgDepend),
             ],
-            P(VirtualRelation::InformationTableConstraints) => &[
-                P(PgNamespace),
-                P(PgNamespace),
-                P(PgConstraint),
-                P(PgClass),
-                P(PgIndex),
-            ],
-            P(VirtualRelation::InformationKeyColumnUsage) => &[
-                P(PgAttribute),
-                P(PgNamespace),
-                P(PgClass),
-                P(PgNamespace),
-                P(PgConstraint),
-            ],
             P(VirtualRelation::PgRules) => &[P(PgRewrite), P(PgClass), P(PgNamespace)],
             P(VirtualRelation::PgTables | VirtualRelation::PgMatviews) => {
                 &[P(PgClass), P(PgNamespace), Self::PgTablespace]
@@ -229,6 +218,41 @@ impl SystemRelation {
             P(VirtualRelation::PgSequences) => &[Self::PgSequence, P(PgClass), P(PgNamespace)],
             Self::InformationEnabledRoles => &[Self::Projected(VirtualRelation::PgAuthid)],
             _ => &[],
+        }
+    }
+    const fn constraint_view_sources(self) -> Option<&'static [Self]> {
+        use SystemRelation::Projected as P;
+        use VirtualRelation::{PgAttribute, PgClass, PgConstraint, PgIndex, PgNamespace, PgType};
+        match self {
+            P(VirtualRelation::InformationTableConstraints) => Some(&[
+                P(PgNamespace),
+                P(PgNamespace),
+                P(PgConstraint),
+                P(PgClass),
+                P(PgIndex),
+            ]),
+            P(VirtualRelation::InformationCheckConstraints) => Some(&[
+                P(PgConstraint),
+                P(PgNamespace),
+                P(PgClass),
+                P(PgType),
+                P(PgConstraint),
+                P(PgNamespace),
+                P(PgClass),
+                P(PgType),
+                P(PgAttribute),
+            ]),
+            P(VirtualRelation::InformationDomainConstraints) => {
+                Some(&[P(PgNamespace), P(PgNamespace), P(PgConstraint), P(PgType)])
+            }
+            P(VirtualRelation::InformationKeyColumnUsage) => Some(&[
+                P(PgAttribute),
+                P(PgNamespace),
+                P(PgClass),
+                P(PgNamespace),
+                P(PgConstraint),
+            ]),
+            _ => None,
         }
     }
 }

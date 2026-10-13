@@ -45,6 +45,8 @@ virtual_relations! {
     InformationRoutines => ("information_schema", "routines", 13462),
     InformationSequences => ("information_schema", "sequences", 13471),
     InformationTableConstraints => ("information_schema", "table_constraints", 13496),
+    InformationCheckConstraints => ("information_schema", "check_constraints", 13346),
+    InformationDomainConstraints => ("information_schema", "domain_constraints", 13396),
     InformationKeyColumnUsage => ("information_schema", "key_column_usage", 13414),
     PgNamespace => ("pg_catalog", "pg_namespace", 2615),
     PgClass => ("pg_catalog", "pg_class", 1259),

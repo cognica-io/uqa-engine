@@ -197,6 +197,22 @@ impl VirtualRelation {
                 "enforced" => yes_or_no(),
                 "nulls_distinct" => yes_or_no(),
             ],
+            Self::InformationCheckConstraints => columns![
+                "constraint_catalog" => sql_identifier(),
+                "constraint_schema" => sql_identifier(),
+                "constraint_name" => sql_identifier(),
+                "check_clause" => character_data(),
+            ],
+            Self::InformationDomainConstraints => columns![
+                "constraint_catalog" => sql_identifier(),
+                "constraint_schema" => sql_identifier(),
+                "constraint_name" => sql_identifier(),
+                "domain_catalog" => sql_identifier(),
+                "domain_schema" => sql_identifier(),
+                "domain_name" => sql_identifier(),
+                "is_deferrable" => yes_or_no(),
+                "initially_deferred" => yes_or_no(),
+            ],
             Self::InformationKeyColumnUsage => columns![
                 "constraint_catalog" => sql_identifier(),
                 "constraint_schema" => sql_identifier(),

@@ -67,13 +67,14 @@ fn narrow_catalog_sources_do_not_construct_unused_expression_metadata() {
                 "data_type".into(),
             ]);
             let prune = BTreeMap::from([(qualifier.into(), wanted)]);
-            let request = crate::query::source_projection::catalog_request(
+            let mut request = crate::query::source_projection::catalog_request(
                 &columns,
                 &[],
                 qualifier,
                 Some(&prune),
                 None,
             );
+            request.require_name("table_schema".into(), "public".into());
             let rows = project(&catalog, "information_schema.columns", &request);
             assert_eq!(rows.len(), 3 * (unrelated + 1));
             assert!(rows.iter().all(|row| row["column_default"] == Value::Null
