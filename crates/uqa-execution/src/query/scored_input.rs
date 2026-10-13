@@ -635,6 +635,18 @@ impl ScoredDocumentSource {
         self
     }
 
+    /// Keep the catalog's whole-row identity alongside selected fields and hidden retrieval metadata.
+    pub fn with_row_type(
+        mut self,
+        qualifier: &str,
+        row_type: Option<uqa_sql::ColumnType>,
+    ) -> Result<Self, uqa_sql::SQLError> {
+        if let Some(row_type) = row_type {
+            self.schema = self.schema.with_relation_row_type(qualifier, row_type)?;
+        }
+        Ok(self)
+    }
+
     fn row_metadata(&self, doc_id: DocId, score: f64) -> ScoredRowMetadata {
         ScoredRowMetadata {
             doc_id,

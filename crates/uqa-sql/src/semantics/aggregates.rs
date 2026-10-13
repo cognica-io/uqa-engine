@@ -19,6 +19,7 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             collated_exprs_match(lhs, rhs)
         }
         (ScalarExpr::Star, ScalarExpr::Star) => true,
+        (ScalarExpr::QualifiedStar(a), ScalarExpr::QualifiedStar(b)) => a == b,
         (ScalarExpr::Column(a), ScalarExpr::Column(b)) => a == b,
         (
             ScalarExpr::QualifiedColumn {

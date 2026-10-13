@@ -213,6 +213,7 @@ mod arrays;
 mod clock_and_case;
 mod definitions;
 mod enums;
+mod introspection;
 mod namespaces;
 mod notifications;
 mod numeric;
@@ -281,6 +282,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     temporal::ROUTINES,
     arrays::ROUTINES,
     enums::ROUTINES,
+    introspection::ROUTINES,
     definitions::ROUTINES,
     namespaces::ROUTINES,
     records::ROUTINES,

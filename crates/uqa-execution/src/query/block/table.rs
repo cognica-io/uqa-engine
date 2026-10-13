@@ -6,6 +6,8 @@
 
 //! Single-table access-path execution.
 
+use uqa_sql::schema::ScalarTypeSchema;
+
 use super::{
     build_facet_output, combine_filter_parts, execute_mixed_where,
     execute_query_block_operator_output, expand_from_star_columns,
@@ -373,6 +375,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         table,
     )?)
     .with_qualifier(qualifier)
+    .with_row_type(qualifier, schema.whole_row_type(qualifier).cloned())?
     .with_lock_origin(lock_origin);
     let source = crate::query::scored_input::defer_entries(
         source,

@@ -198,7 +198,7 @@ pub(crate) fn match_routine_candidate(
         if routine_polymorphic_type(&effective_declared).is_none() {
             target.column_type = declared.or(target.column_type);
         }
-        if let Some(actual) = actual {
+        if let Some(actual) = actual.filter(|_| effective_declared != "any") {
             if routine_polymorphic_type(&effective_declared).is_none() {
                 let raw_actual = canonical_column_type_name(actual);
                 let base_actual = canonical_column_type_name(base_type(actual));

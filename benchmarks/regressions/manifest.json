@@ -4932,6 +4932,61 @@
       "capability": "Named relation expression scopes",
       "workload": "Joining independent empty and nonempty named relations, followed by aliasing the complete joined row.",
       "invariant": "Each independent source retains its type; a combined relation has an anonymous record rather than either source type."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unconstrained_any_retains_values_without_claiming_an_exact_signature_match",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/routine_signature/tests.rs",
+      "capability": "Unconstrained routine arguments",
+      "workload": "Typed, unknown, array and named-composite inputs to an unconstrained parameter, alongside a concrete overload.",
+      "invariant": "Argument values keep their actual types without conversion; unconstrained parameters do not claim an exact-match score."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_introspection_metadata_matches_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests.rs",
+      "capability": "Unconstrained routine arguments",
+      "workload": "Fourteen pg_typeof catalog fields captured from an independent PostgreSQL 18.4 instance.",
+      "invariant": "The ordinary builtin metadata retains the actual routine and pseudo-type identities, strictness, volatility, parallel safety and source name."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "type_introspection_values_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_type_introspection.rs",
+      "capability": "Unconstrained routine arguments",
+      "workload": "Sixteen independent PostgreSQL catalog, scalar, NULL, array, named-row, alias, join, grouping, derived-row and empty-relation observations on all four providers.",
+      "invariant": "All recorded values, type identities, command tags and diagnostics match the independent PostgreSQL reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scan_whole_row_identity_survives_aliases_and_empty_projection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/table_sources/scan/tests.rs",
+      "capability": "Named relation type introspection",
+      "workload": "Catalog row identity through aliased fields and a zero-field scan projection.",
+      "invariant": "The original row type is retained without adding or reading physical value slots; aliases replace the visible namespace only.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

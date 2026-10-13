@@ -10,6 +10,41 @@ use uqa_sql::catalog::analysis::{AnalysisCatalog, TableDefinition, ViewDefinitio
 use uqa_sql::{ColumnType, SQLError};
 
 impl AnalysisCatalog for CatalogReadView {
+    fn relation_row_type(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<uqa_sql::ast::CompositeTypeReference>, SQLError> {
+        let Some((canonical, _)) = self
+            .relation_kind_resolution(resolution, name)?
+            .into_found()
+        else {
+            return Ok(None);
+        };
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
+        let snapshot = self.snapshot();
+        let oids = snapshot
+            .tables
+            .get(&relation)
+            .map(|table| table.catalog_oids)
+            .or_else(|| {
+                snapshot
+                    .definitions
+                    .views
+                    .get(&relation)
+                    .map(|view| view.relation_oids())
+            })
+            .or_else(|| {
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .get(&relation)
+                    .map(super::foreign::StoredForeignTable::relation_oids)
+            });
+        Ok(oids.and_then(|oids| oids.row_type_reference(&relation)))
+    }
+
     fn relation_dependency(
         &self,
         resolution: &RelationNameResolution,
