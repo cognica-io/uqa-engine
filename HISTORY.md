@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Declare a table and its row/array types before binding defaults and constraints, so references to its own identity resolve with PostgreSQL search-path behavior. Preserve rollback, cross-session publication and persistent defaults. Inherit untyped partition column options before selecting collations, avoiding an unresolved-type panic.
+
 - Retain named relation types and stable whole-row or system attribute identities in SQL catalog expression nodes. Preserve exact PostgreSQL nodes and reconstructed SQL through declared column changes, quoted names and relation renames.
 
 - Reject external input to `pg_node_tree` with PostgreSQL diagnostics while preserving NULLs and already typed catalog values. Reject its nonexistent array type and preserve admitted memory ownership through typed assignments.

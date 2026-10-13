@@ -65,6 +65,7 @@ pub trait TableSchemaCatalog {
 
 pub struct SchemaPublicationContext<'a> {
     pub catalog: &'a dyn TableSchemaCatalog,
+    pub changes: &'a dyn dependencies::CatalogPublicationChanges,
     pub types: &'a dyn FunctionTypeResolver,
     pub bindings: SchemaDependencyBindingContext<'a>,
     pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
@@ -72,6 +73,24 @@ pub struct SchemaPublicationContext<'a> {
     /// The partition trees that the constraints a foreign key derives on referenced partitions follow.
     pub partitions: uqa_sql::semantics::partition::PartitionContext<'a>,
     pub referencing: &'a dyn referenced_partitions::ReferencingTableAccess,
+}
+
+/// Make a new relation's row type visible inside its creation transaction before its own defaults and constraints are analyzed.
+pub fn declare_row_columns(
+    context: &SchemaPublicationContext<'_>,
+    name: &str,
+    columns: Vec<ColumnDef>,
+) -> StorageBackendResult<()> {
+    let table = context
+        .catalog
+        .table_state(name)?
+        .ok_or_else(|| table_not_found(name))?;
+    let mut constraints = table.constraint_header();
+    constraints.columns_declared = Some(true);
+    table.persist_candidate(&columns, &constraints)?;
+    table.publish_columns(true, columns, constraints);
+    context.changes.table_catalog_changed();
+    Ok(())
 }
 
 impl<'a> SchemaPublicationContext<'a> {

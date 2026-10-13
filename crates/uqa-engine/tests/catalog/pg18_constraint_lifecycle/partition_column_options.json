@@ -1,0 +1,21 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}]},
+    {"sql":"CREATE SCHEMA partition_options","command_tags":["CREATE SCHEMA"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"SET search_path=partition_options,public","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"CREATE TABLE parent(id integer,value text COLLATE \"C\" DEFAULT 'parent') PARTITION BY LIST(id)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"CREATE TABLE child PARTITION OF parent(value DEFAULT 'child') FOR VALUES IN (1)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"INSERT INTO child(id) VALUES(1)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"SELECT * FROM child","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["id","value"],"type_oids":[23,25],"rows":[["1","child"]]}]},
+    {"sql":"SELECT attname,atttypid::regtype::text,attcollation::regcollation::text FROM pg_attribute WHERE attrelid='child'::regclass AND attnum>0 ORDER BY attnum","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["attname","atttypid","attcollation"],"type_oids":[19,25,25],"rows":[["id","integer","-"],["value","text","\"C\""]]}]},
+    {"sql":"CREATE TABLE numeric_child PARTITION OF parent(id DEFAULT 2) FOR VALUES IN(2)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"INSERT INTO numeric_child DEFAULT VALUES","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"SELECT * FROM numeric_child","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["id","value"],"type_oids":[23,25],"rows":[["2","parent"]]}]},
+    {"sql":"CREATE TABLE override_child PARTITION OF parent(value COLLATE \"POSIX\") FOR VALUES IN(3)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"CREATE TABLE missing_collation PARTITION OF parent(value COLLATE absent_collation) FOR VALUES IN(4)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"SELECT relname,a.attcollation::regcollation::text FROM pg_class c JOIN pg_attribute a ON a.attrelid=c.oid WHERE relname IN('override_child','missing_collation') AND a.attname='value' ORDER BY relname","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["relname","attcollation"],"type_oids":[19,25],"rows":[["missing_collation","\"C\""],["override_child","\"C\""]]}]},
+    {"sql":"CREATE TABLE missing_column PARTITION OF parent(missing DEFAULT 0) FOR VALUES IN(5)","command_tags":[],"error":{"sqlstate":"42703","message":"column \"missing\" does not exist","detail":null,"hint":null},"results":[]},
+    {"sql":"CREATE TABLE missing_parent PARTITION OF absent_parent(value DEFAULT 0) FOR VALUES IN(6)","command_tags":[],"error":{"sqlstate":"42P01","message":"relation \"absent_parent\" does not exist","detail":null,"hint":null},"results":[]}
+  ]
+}

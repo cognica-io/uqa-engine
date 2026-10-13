@@ -5042,6 +5042,118 @@
       "capability": "Constraint information views",
       "workload": "Eighty independent PostgreSQL observations of table/key visibility, column ALL grants and revocation, owner inheritance, foreign constraints and transaction rollback across four providers.",
       "invariant": "Exact result types, rows, command completion and key ordinals match PostgreSQL; column-only ALL grants remain scoped and retain grant-option and rollback behavior."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_columns_preserve_layout_without_publishing_expression_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/schema/table_creation/declaration/tests.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Retained and new column identities, durable attribute positions, type/collation layout and repeated declaration construction.",
+      "invariant": "Preserve existing identities and allocate each missing column once; preliminary metadata excludes pending defaults, CHECKs and NOT NULL definitions."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "declaration_expressions_see_their_own_relation_and_type",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Thirty PostgreSQL declaration/rollback observations on four providers and eleven further observations after reopening each persistent provider.",
+      "invariant": "Self regclass, row-type, composite and array defaults resolve the declared relation while preserving search-path precedence, failed-declaration cleanup and persistent identities."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_column_options_inherit_type_and_collation",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Sixteen PostgreSQL observations of untyped partition options, inherited types/collations, ignored explicit COLLATE, inserted defaults and invalid declarations on four providers.",
+      "invariant": "Inherit the parent column type before catalog collation projection and match PostgreSQL values and diagnostics without an unresolved-type panic."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "declared_relation_visibility_follows_transaction_commit",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Twenty-three observations captured from two independent PostgreSQL connections and replayed on three persistent-provider session pairs.",
+      "invariant": "The writer sees its declaration and self-referential defaults; the reader sees no uncommitted or rolled-back relation/row/array type, then observes the committed identities and values."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "table_creation_order_matches_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Existing independent PostgreSQL CREATE TABLE analysis-order transcript.",
+      "invariant": "Preserve written declaration order, inherited constraints and competing diagnostic precedence while making the row declaration available before expression binding."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "table_creation_oids_match_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_oids.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Existing independent PostgreSQL relation, default, constraint and inherited partition identity transcript.",
+      "invariant": "Preserve catalog OID allocation order and partition inheritance through the earlier relation declaration."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "table_creation_order_matches_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Existing independent PostgreSQL CREATE TABLE analysis-order transcript.",
+      "invariant": "Preserve written declaration order, inherited constraints and competing diagnostic precedence while making the row declaration available before expression binding."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "table_creation_oids_match_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_oids.rs",
+      "capability": "Table declaration identity and publication",
+      "workload": "Existing independent PostgreSQL relation, default, constraint and inherited partition identity transcript.",
+      "invariant": "Preserve catalog OID allocation order and partition inheritance through the earlier relation declaration."
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {"sql":"SET search_path=declaration_scope,declaration_later,public","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"INSERT INTO own_default(id) VALUES(7)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"INSERT INTO own_type(id) VALUES(8)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"INSERT INTO own_literal DEFAULT VALUES","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"INSERT INTO own_array DEFAULT VALUES","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+    {"sql":"SELECT id,marker='own_default'::regclass FROM own_default ORDER BY id","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["id","?column?"],"type_oids":[23,16],"rows":[["1","t"],["7","t"]]}]},
+    {"sql":"SELECT id,marker='own_type'::regtype::oid FROM own_type ORDER BY id","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["id","?column?"],"type_oids":[23,16],"rows":[["2","t"],["8","t"]]}]},
+    {"sql":"SELECT * FROM own_literal ORDER BY id","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["id"],"type_oids":[23],"rows":[["3"],["3"]]}]},
+    {"sql":"SELECT * FROM own_array ORDER BY id","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["id"],"type_oids":[23],"rows":[["4"],["4"]]}]},
+    {"sql":"SELECT id,marker='declaration_scope.same'::regclass FROM declaration_later.same","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["id","?column?"],"type_oids":[23,16],"rows":[["6","t"]]}]},
+    {"sql":"SELECT to_regclass('rejected') IS NULL,to_regtype('rejected') IS NULL,to_regtype('_rejected') IS NULL","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["?column?","?column?","?column?"],"type_oids":[16,16,16],"rows":[["t","t","t"]]}]}
+  ]
+}

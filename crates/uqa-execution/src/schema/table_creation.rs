@@ -158,7 +158,7 @@ fn preflight(
     }
     Ok(Some((name, persistence)))
 }
-/// Create the table in `DefineRelation`'s order, after the sequences of its columns: `MergeAttributes` and the relation's name, then the relation's OIDs as `heap_create_with_catalog` allocates them, its expressions and constraints, each taking its OIDs as it is defined, and then the relation and its catalog state. A statement that fails after the relation's OIDs has used them, as the counter advances outside the transaction.
+/// Create the table in `DefineRelation`'s order, after the sequences of its columns: `MergeAttributes` and the relation's name, then the relation and row type under the OIDs `heap_create_with_catalog` allocates, followed by its expressions and constraints, each taking its OIDs as it is defined. A statement that fails after the relation's OIDs has used them, as the counter advances outside the transaction.
 fn create_after_preflight(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
@@ -197,6 +197,7 @@ fn create_after_preflight(
         uqa_core::RelationIdentity::from_legacy_name(&table.name).map_err(SQLError::Internal)?;
     let mut allocator = context.identities.allocator(allocate_catalog_object_id);
     let catalog_oids = allocator.allocate_relation_oids(RelationOidKind::Table, &relation)?;
+    create_declared_relation(context, &mut table, owner, catalog_oids, &mut allocator)?;
     define_expressions_and_constraints(
         context,
         &mut table,
@@ -213,16 +214,6 @@ fn create_after_preflight(
             _ => {}
         }
     }
-    context
-        .publication
-        .create_table(
-            &table.name,
-            table.persistence,
-            table.on_commit,
-            owner,
-            catalog_oids,
-        )
-        .map_err(|error| storage_error("CREATE TABLE", error))?;
     for (field, dimensions) in vector_fields {
         context
             .publication
@@ -237,6 +228,32 @@ fn create_after_preflight(
     )?;
     publish_catalog_state(context, &table, table.columns.clone())?;
     Ok(SQLResult::empty())
+}
+
+fn create_declared_relation(
+    context: &CreateTableContext<'_>,
+    table: &mut CreateTable,
+    owner: &crate::catalog::security::roles::locking::RoleBinding,
+    catalog_oids: RelationCatalogOids,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<(), SQLError> {
+    let columns = declaration::declared_row_columns(&mut table.columns, allocate)?;
+    context
+        .publication
+        .create_table(
+            &table.name,
+            table.persistence,
+            table.on_commit,
+            owner,
+            catalog_oids,
+        )
+        .map_err(|error| storage_error("CREATE TABLE", error))?;
+    context
+        .schema_transactions
+        .with_schema_write(Box::new(|schema| {
+            publication::declare_row_columns(schema, &table.name, columns)
+        }))
+        .map_err(|error| storage_error("CREATE TABLE row type", error))
 }
 
 /// Publish the created relation's columns and constraints, the ownership of its sequences and its hierarchy, then persist its schema and refresh its indexes.
