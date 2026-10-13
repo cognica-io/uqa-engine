@@ -39,6 +39,7 @@
     "http.d.ts",
     "http-error.js",
     "http-diagnostic.js",
+    "http-limit.js",
     "http-json.js",
     "http-values.js",
     "http-transport.js",

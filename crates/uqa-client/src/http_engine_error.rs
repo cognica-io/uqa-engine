@@ -7,7 +7,7 @@
 use std::fmt;
 use std::io;
 
-use crate::SQLDiagnostic;
+use crate::{HttpLimit, SQLDiagnostic};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -46,13 +46,14 @@ pub enum HttpEngineError {
     BuildClient(#[source] reqwest::Error),
     #[error("UQA HTTP transport failed")]
     Transport(#[source] reqwest::Error),
-    #[error("UQA returned {status} with code {code}{detail}", detail = diagnostic_message(.diagnostic.as_deref()))]
+    #[error("UQA returned {status} with code {code}{detail}", detail = diagnostic_message(.diagnostic.as_deref(), .limit.as_deref()))]
     Server {
         status: StatusCode,
         code: String,
         message: String,
         request_id: Option<String>,
         diagnostic: Option<Box<SQLDiagnostic>>,
+        limit: Option<Box<HttpLimit>>,
     },
     #[error("UQA response exceeded the client safety limit")]
     ResponseTooLarge,
@@ -92,6 +93,7 @@ impl fmt::Debug for HttpEngineError {
                 code,
                 request_id,
                 diagnostic,
+                limit,
                 ..
             } => formatter
                 .debug_struct("HttpEngineError::Server")
@@ -99,6 +101,7 @@ impl fmt::Debug for HttpEngineError {
                 .field("code", code)
                 .field("request_id", request_id)
                 .field("diagnostic", diagnostic)
+                .field("limit", limit)
                 .finish(),
             Self::InvalidBaseURL => formatter.write_str("HttpEngineError::InvalidBaseURL"),
             Self::InsecureRemoteURL => formatter.write_str("HttpEngineError::InsecureRemoteURL"),
@@ -154,8 +157,13 @@ impl fmt::Debug for HttpEngineError {
     }
 }
 
-fn diagnostic_message(diagnostic: Option<&SQLDiagnostic>) -> String {
-    diagnostic.map_or_else(String::new, |value| format!(" ({value})"))
+fn diagnostic_message(diagnostic: Option<&SQLDiagnostic>, limit: Option<&HttpLimit>) -> String {
+    match (diagnostic, limit) {
+        (Some(diagnostic), Some(limit)) => format!(" ({diagnostic}) ({limit})"),
+        (Some(diagnostic), None) => format!(" ({diagnostic})"),
+        (None, Some(limit)) => format!(" ({limit})"),
+        (None, None) => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +179,7 @@ mod tests {
             message: secret.to_owned(),
             request_id: Some("qry_test".to_owned()),
             diagnostic: None,
+            limit: None,
         };
 
         let debug = format!("{error:?}");

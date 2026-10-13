@@ -331,6 +331,7 @@ async fn error_from_response(response: Response) -> HttpEngineError {
             message: "UQA returned a non-success response".to_owned(),
             request_id: Some(header_request_id),
             diagnostic: None,
+            limit: None,
         };
     };
     if header_request_id != envelope.request_id {
@@ -342,12 +343,19 @@ async fn error_from_response(response: Response) -> HttpEngineError {
         .and_then(|value| serde_json::from_value::<crate::SQLDiagnostic>(value).ok())
         .filter(|value| value.matches_code(&envelope.error.code))
         .map(Box::new);
+    let limit = envelope
+        .error
+        .limit
+        .and_then(|value| serde_json::from_value::<crate::HttpLimit>(value).ok())
+        .filter(|value| value.matches_code(&envelope.error.code))
+        .map(Box::new);
     HttpEngineError::Server {
         status,
         code: envelope.error.code,
         message: envelope.error.message,
         request_id: Some(envelope.request_id),
         diagnostic,
+        limit,
     }
 }
 

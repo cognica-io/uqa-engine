@@ -18,6 +18,7 @@ import { registerNotificationProtocolTests } from "./notifications/protocol.mjs"
 import { registerNotificationPortabilityTests } from "./notifications/portability.mjs";
 import { registerNotificationHTTPTests } from "./notifications/http.mjs";
 import { registerCLILifecycleTests, runCLIFixture } from "./http_cli.mjs";
+import { registerHTTPLimitTests } from "../parity/http_limits.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../../crates/uqa-node/", import.meta.url));
@@ -35,6 +36,7 @@ registerNotificationProtocolTests(packagePath);
 registerNotificationPortabilityTests(packagePath);
 registerNotificationHTTPTests(packagePath);
 registerCLILifecycleTests(packagePath);
+registerHTTPLimitTests("Node.js", uqa.HttpEngine, uqa.HttpEngineError);
 after(() => rmSync(directory, { recursive: true, force: true }));
 
 async function server(handler, run) {

@@ -12,6 +12,7 @@ const { TextDecoder } = require("node:util");
 const { HttpEngineError, invalidResponse } = require("./http-error.js");
 const { parseJSON, stringifyJSON } = require("./http-json.js");
 const { sqlDiagnostic, diagnosticMessage } = require("./http-diagnostic.js");
+const { httpLimit, limitMessage } = require("./http-limit.js");
 
 const MAX_JSON_BYTES = 65 * 1024 * 1024;
 const MAX_ERROR_BYTES = 64 * 1024;
@@ -124,8 +125,9 @@ async function jsonResponse(response) {
   if (!succeeded(response)) {
     const code = typeof body.error?.code === "string" ? body.error.code : "HTTP_ERROR";
     const diagnostic = sqlDiagnostic(code, body.error?.diagnostic);
-    throw new HttpEngineError("UQA returned " + response.statusCode + " with code " + code + diagnosticMessage(diagnostic), {
-      code, status: response.statusCode, requestId: id, diagnostic,
+    const limit = httpLimit(code, body.error?.limit);
+    throw new HttpEngineError("UQA returned " + response.statusCode + " with code " + code + diagnosticMessage(diagnostic) + limitMessage(limit), {
+      code, status: response.statusCode, requestId: id, diagnostic, limit,
     });
   }
   return { body, requestId: id };

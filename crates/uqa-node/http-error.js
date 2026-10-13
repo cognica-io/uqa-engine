@@ -7,13 +7,14 @@
 "use strict";
 
 class HttpEngineError extends Error {
-  constructor(message, { code, status, requestId, diagnostic } = {}) {
+  constructor(message, { code, status, requestId, diagnostic, limit } = {}) {
     super(message);
     this.name = "HttpEngineError";
     this.code = code;
     this.status = status;
     this.requestId = requestId;
     this.diagnostic = diagnostic;
+    this.limit = limit;
   }
 }
 

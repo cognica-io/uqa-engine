@@ -18,4 +18,6 @@ pub(crate) struct ServerErrorDetail {
     pub message: String,
     #[serde(default)]
     pub diagnostic: Option<serde_json::Value>,
+    #[serde(default)]
+    pub limit: Option<serde_json::Value>,
 }

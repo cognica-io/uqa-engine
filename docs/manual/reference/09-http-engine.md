@@ -173,6 +173,25 @@ engine
 
 An HTTP request does not preserve session state after its response. Use one atomic batch for a multi-statement transaction; long-lived remote sessions and embedded callbacks are not part of this interface.
 
+## Inspect HTTP resource limits
+
+A non-success JSON response can include an optional `error.limit` object. Rust exposes it as `HttpEngineError::Server { limit: Some(HttpLimit), .. }`; Python exposes `HttpEngineError.limit` as a dictionary or `None`; Node.js and the browser expose `HttpEngineError.limit` as a frozen object or `undefined`. The numeric fields are `kind`, `limit`, `actual`, and `actual_is_lower_bound` in Rust and Python, or `actualIsLowerBound` in JavaScript. Admission limits also carry `executing_limit` or `executingLimit`. A batch rejection can therefore report `batch_statements limit 128; observed 200` while preserving its original HTTP status, code and request ID.
+
+The closed kinds are `request_body_bytes`, `sql_bytes`, `parameters`, `batch_statements`, `result_bytes`, `query_admission`, and `authentication_admission`. Clients validate the corresponding error code, integer counts, exceeded boundary and lower-bound meaning before exposing the object. Counts must be within the exact JavaScript integer range, 0 through 2^53 - 1; unsupported larger values are omitted rather than rounded. Only a parameter limit may be zero. Body and admission observations are lower bounds; the other kinds carry exact counts. Admission evidence additionally requires a positive executing limit. Unknown fields, kinds, mismatched codes or malformed counts discard only the optional metadata.
+
+Default error formatting contains the validated numbers and explicitly says `at least` for a lower bound. It continues to hide arbitrary server message text, queries, identifiers and hints. Missing metadata preserves the existing generic error. The client never retries or splits a rejected batch; splitting would change the atomic transaction contract. The [HTTP limit preservation proof](../../design/http-limit-error-projection.md) defines the observation and privacy boundaries.
+
+```javascript
+try {
+  await engine.sqlBatch(statements);
+} catch (error) {
+  if (error.code === "TOO_MANY_STATEMENTS" && error.limit) {
+    console.error(`Statement limit: ${error.limit.limit}; submitted: ${error.limit.actual}`);
+  }
+  throw error;
+}
+```
+
 ## Stream rows
 
 `HttpEngine::sql_stream` calls `POST /v1/sql/stream` with `Accept: application/x-ndjson` and returns an incremental `SQLStream`. Call `next_frame` until it returns `None`. A valid sequence begins with `Metadata`, continues with zero or more `Row` frames, and ends with `Complete` or `Error`.
