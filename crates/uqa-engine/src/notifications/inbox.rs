@@ -33,6 +33,8 @@ pub(crate) struct SubscriptionInbox {
     identity: NotificationIdentity,
     pub(in crate::notifications) state: Mutex<InboxState>,
     pub(in crate::notifications) wake: Condvar,
+    #[cfg(test)]
+    pub(in crate::notifications) sql_wait_started: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 pub(in crate::notifications) struct InboxState {
@@ -95,6 +97,8 @@ impl SubscriptionInbox {
             memory,
             identity,
             wake: Condvar::new(),
+            #[cfg(test)]
+            sql_wait_started: Mutex::new(None),
         })
     }
 

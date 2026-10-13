@@ -781,7 +781,8 @@ impl Engine {
         if let Some(error) = self.notification_hub.cross_error.lock().take() {
             return Err(SQLError::Internal(error));
         }
-        if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().as_ref() {
+        let bounded = self.runtime.bounded_sql_notifications.lock().clone();
+        if let Some(inbox) = bounded {
             return inbox
                 .pending_count()
                 .map_err(|error| sql_session::sql_failure(&error));
@@ -803,7 +804,8 @@ impl Engine {
             if elapsed >= timeout {
                 return Ok(false);
             }
-            if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().clone() {
+            let bounded = self.runtime.bounded_sql_notifications.lock().clone();
+            if let Some(inbox) = bounded {
                 return inbox
                     .wait_ready(timeout.saturating_sub(elapsed))
                     .map_err(|error| sql_session::sql_failure(&error));
@@ -823,7 +825,8 @@ impl Engine {
         if self.transaction_depth() != 0 {
             return Vec::new();
         }
-        if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().clone() {
+        let bounded = self.runtime.bounded_sql_notifications.lock().clone();
+        if let Some(inbox) = bounded {
             // The checked API preserves the terminal error for a bounded adapter.
             return inbox.take_sql().unwrap_or_default();
         }

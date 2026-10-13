@@ -85,7 +85,8 @@ impl Engine {
             return Ok(Vec::new());
         }
         self.poll_sql_notifications()?;
-        if let Some(inbox) = self.runtime.bounded_sql_notifications.lock().clone() {
+        let bounded = self.runtime.bounded_sql_notifications.lock().clone();
+        if let Some(inbox) = bounded {
             return inbox.take_sql().map_err(|error| sql_failure(&error));
         }
         Ok(self.runtime.notifications.lock().drain(..).collect())
@@ -158,7 +159,59 @@ impl SubscriptionInbox {
             if remaining.is_zero() {
                 return Ok(false);
             }
+            #[cfg(test)]
+            if let Some(started) = self.sql_wait_started.lock().take() {
+                let _ = started.send(());
+            }
             self.wake.wait_for(&mut state, remaining);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{sync::Arc, time::Duration};
+
+    #[test]
+    fn sql_wait_releases_configuration_ownership_before_parking_the_inbox() {
+        let engine = Arc::new(Engine::new());
+        engine
+            .configure_sql_notifications(SQLNotificationOptions {
+                max_channels: 1,
+                max_queued_notifications: 2,
+                max_queued_bytes: 65_536,
+                max_registry_entries_per_poll: 2,
+            })
+            .unwrap();
+        engine.sql("LISTEN events", &[]).unwrap();
+        let inbox = engine
+            .runtime
+            .bounded_sql_notifications
+            .lock()
+            .clone()
+            .unwrap();
+        let (started, boundary) = std::sync::mpsc::channel();
+        *inbox.sql_wait_started.lock() = Some(started);
+        let waiting = engine.clone();
+        let task =
+            std::thread::spawn(move || waiting.wait_for_sql_notifications(Duration::from_secs(15)));
+        boundary.recv_timeout(Duration::from_secs(15)).unwrap();
+        let released = engine
+            .runtime
+            .bounded_sql_notifications
+            .try_lock()
+            .is_some();
+        if !released {
+            inbox.close();
+            let _ = task.join();
+            panic!("notification wait retained the configuration lock");
+        }
+        engine.sql("NOTIFY events, 'ready'", &[]).unwrap();
+        assert!(task.join().unwrap().unwrap());
+        assert_eq!(
+            engine.try_take_sql_notifications().unwrap()[0].payload,
+            "ready"
+        );
     }
 }
