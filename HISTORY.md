@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve the unlimited length of catalog-qualified `bpchar`, avoiding premature one-character truncation in character casts, enum and date input, stored values and analytical query results.
+
 - Dropping an ordinary or foreign column preserves CHECK constraints that do not depend on that attribute, including constant predicates and checks of another surviving column, with their original identities, flags and enforcement after rollback or reopening.
 
 - Make foreign-table relation and row/array identities visible while binding defaults, before the server association. Retain in-progress declarations across catalog refreshes and restore all foreign row descriptors before validating persisted expressions, preserving rollback, independent sessions and reopened composite defaults.
