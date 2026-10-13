@@ -1560,12 +1560,12 @@ Additional CHECK investigation captured twenty-one PostgreSQL messages, with raw
 
 ## Unconstrained routine argument identities
 
-The shared SQL signature matcher retains the concrete type of an `any` argument, including a named composite, array or unknown input, without substituting a common polymorphic type or adding a conversion. An unconstrained parameter does not earn an exact-match score, so a concrete overload keeps its precedence. Execution's existing builtin catalog includes the independently observed `pg_typeof(any)` declaration, OID 1619, returning `regtype` with its original non-strict, stable, parallel-safe metadata. This unit changes six owner source/fixture files and no Engine algorithm, dependency, Cargo feature or storage format.
+The shared SQL signature matcher retains the concrete type of an `any` argument, including a named composite, array or unknown input, without substituting a common polymorphic type or adding a conversion. An unconstrained parameter does not earn an exact-match score, so a concrete overload keeps its precedence. Execution's existing builtin catalog includes the independently observed `pg_typeof(any)` declaration, OID 1619, returning `regtype` with its original non-strict, stable, parallel-safe metadata. This unit changes seven owner source/fixture files and no Engine algorithm, dependency, Cargo feature or storage format.
 
 - [x] Capture the PostgreSQL 18.4 catalog declaration and scalar, unknown, array and named-row type observations in Docker.
 - [x] Retain unconstrained input identity and concrete-overload precedence in the shared SQL matcher.
 - [x] Project the actual `pg_typeof` catalog signature and compare its fourteen fields against the independent reference.
-- [x] Qualify the isolated six-file unit with all 1,844 SQL library tests, all eleven builtin-catalog owner tests and strict library/test Clippy.
+- [x] Qualify the isolated seven-file unit with all 1,844 SQL library tests, all eleven builtin-catalog owner tests and strict library/test Clippy.
 - [x] Add two automatic regressions, requiring 370 checks / 518 cases while retaining every existing limit.
 - [ ] Verify the actual automatic Linux/macOS artifacts and independent-process histories for the delivered source before merge and branch cleanup.
 - [ ] Continue CHECK declaration, reconstruction, restoration and provider acceptance under #119; this matcher/catalog unit does not publish that unfinished integration.
@@ -1576,4 +1576,4 @@ Let $x:T$ be an input whose selected parameter is `any`. Matching retains $T$ as
 
 ### Independent type-introspection evidence
 
-The pinned PostgreSQL 18.4 Docker collector produced raw SHA-256 `f782a4bcbfb904a95a46196636124e73f1a32d92a9693c3bc49ecd1622c081fb`; compact `crates/uqa-execution/src/catalog/projection/builtin_routines/tests/type_introspection.json` has SHA-256 `a429e1d6a25a3372490a9ae4f3b417ee2fdfd232fcccf11c5148fd2444b8aeba`. It retains five PostgreSQL observations. The catalog owner test compares the fourteen declaration fields; SQL owner tests cover actual input identity and overload precedence. The source is isolated from the unfinished CHECK integration before qualification. Automatic platform results are a separate gate, and no shared-runner timing acceptance is claimed.
+The pinned PostgreSQL 18.4 Docker collector produced raw SHA-256 `f782a4bcbfb904a95a46196636124e73f1a32d92a9693c3bc49ecd1622c081fb`; compact `crates/uqa-execution/src/catalog/projection/builtin_routines/tests/type_introspection.json` has SHA-256 `a429e1d6a25a3372490a9ae4f3b417ee2fdfd232fcccf11c5148fd2444b8aeba`. It retains five PostgreSQL observations. The catalog owner test compares the fourteen declaration fields; SQL owner tests cover actual input identity and overload precedence. The initial six-file source is isolated from the unfinished CHECK integration before qualification. A source review moves type-introspection metadata into its owning catalog module to keep every Rust source below the 1,000-line ceiling; the exact final seven-file owner source is checked again. Automatic platform results are a separate gate, and no shared-runner timing acceptance is claimed.
