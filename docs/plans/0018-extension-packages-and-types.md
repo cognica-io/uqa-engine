@@ -1567,7 +1567,7 @@ The shared SQL signature matcher retains each `any` argument's actual type witho
 - [x] Preserve named row metadata through source binding and physical scans and recognize equal whole-row grouping expressions.
 - [x] Isolate the delivered source from unfinished CHECK changes and qualify its SQL, catalog, scan and public API behavior.
 - [x] Register four automatic regressions, requiring 372 checks / 523 cases without relaxing existing limits.
-- [ ] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform for the delivered source before merge and branch cleanup.
+- [x] Verify actual automatic Linux/macOS [run 38372163031](https://github.com/cognica-io/uqa-engine/actions/runs/38372163031): each platform passed 372 checks / 523 cases and all eight independent-process histories, with zero failures/errors/skips and exact manifest/source hashes. Delivered `8cd0b70b48f4f611071e1da8618ffc3a9742baa0`, tested merge `9ef534887d66adbe92c557f84395dde0d6f75b8c` and [PR #816](https://github.com/cognica-io/uqa-engine/pull/816) squash `dce1bdafd481869fc3db9976fb5bacf44e6f488b` share tree `111273324b200a1b219a270dd64b057baf2eab6e`; #817 is closed.
 - [ ] Continue CHECK declaration, reconstruction, restoration and provider acceptance under #119.
 
 ### Argument and row preservation
@@ -1579,3 +1579,24 @@ Let a physical row be $r$ with layout $L$ and retained catalog row identity $T$.
 ### Independent type-introspection evidence
 
 The PostgreSQL 18.4 Docker capture has raw SHA-256 `819ab81d5c10d54847eb6e395e0e4b3e2e1d5edc35d50360703a601e0bc2fab4`; compact `crates/uqa-execution/src/catalog/projection/builtin_routines/tests/type_introspection.json` has SHA-256 `d6a27ea51b9692ae044a72ebb121b1b4a064c207223d5975ee9f85bb4b557667`. All sixteen observations run through the public SQL API on memory, native SQLite, SQLite Key/Value and redb. The catalog owner test separately compares the fourteen declaration fields. The original five-observation capture remains traceable by raw SHA-256 `f782a4bcbfb904a95a46196636124e73f1a32d92a9693c3bc49ecd1622c081fb`. Automatic platform evidence is a separate gate; no shared-runner timing claim is made.
+
+## Standalone composite catalog constants
+
+SQL's catalog codec now encodes named record constants through the same retained tuple encoder used by composite projection and array elements. Previously, a valid named composite constant reached the unsupported carrier branch; the pending foreign-table CHECK reopen tests exposed this with `'(1)'::foreign_literal`. Already physical composite values use the existing checked owned-field copy operation. The correction adds no new tuple format, dependency, Cargo feature or Engine algorithm. Runtime CHECK publication and restoration remain separate work under #119.
+
+- [x] Capture four complete PostgreSQL 18.4 constant nodes and both reconstructed SQL forms, covering ordinary and NULL fields, a signed integer and long variable-width text.
+- [x] Reuse retained tuple encoding for record carriers and checked owned-field copying for physical carriers, preserving the original constant source and descriptors.
+- [x] Qualify the isolated six-file SQL unit: all 1,845 library tests, rustfmt and strict library-and-test Clippy pass.
+- [x] Register the owning regression in the automatic inventory, requiring 373 checks / 524 cases without changing existing limits.
+- [x] Prepare this separate successor after PR #816 merged, preserving all 80 original #638 records.
+- [ ] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform before merge and branch cleanup.
+
+### Composite-constant preservation
+
+Let $D$ be the retained original composite descriptor, $v$ an admitted record value, and $E_D(v)$ the existing tuple encoder. A catalog constant retains $(t,D,v)$, where $t$ is the selected catalog type. The new record branch writes exactly $E_D(v)$; its wrapper returns the first component of the existing encoder without transforming the bytes. Thus attribute positions, dropped slots, NULL bitmap, field order, alignment, physical type identity and scalar representations have the same meaning as the already supported retained tuple. If a retained constant source is present, encoding selects its original $D$ and $v$ before examining the current projected value. Later descriptor changes therefore cannot cause this operation to reconstruct an original constant from a changed projection.
+
+For a physical carrier with an owned byte interval $B$, the existing checked copy operation returns precisely the admitted field interval in $B$ or its existing error. The new branch copies those bytes without evaluating fields, widening the interval or reading allocator contents; the approved out-of-bounds `XX001` contract remains unchanged. Both branches then use the existing catalog type metadata and reconstruction path. For every admitted input, the serialization denotes the same selected value and type; no expression is evaluated and no catalog or transaction state is published. Consequently existing relational values, decorated postings, payloads and ranked scores are unchanged, and any existing composition receives identical operands. The only corrected observation is that a standalone composite constant now has its PostgreSQL catalog representation instead of an unsupported-encoding error.
+
+### Independent composite-constant evidence
+
+The PostgreSQL 18.4 Docker capture uses image `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25` and collector SHA-256 `13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec`. It verifies command completion and removes its disposable database. Raw capture SHA-256 is `cbe7ecac663975fcfcc203d90afe04885b58e85d355b269082866e2ce0e08f49`; compact `crates/uqa-sql/src/catalog/node_tree/tests/composites.json` has SHA-256 `23d1102a6de4ff5ee946b95b06997d49e22313d3fa52045bcf5f32d06d4c8d83`. The owner test compares each complete parsed node and both reconstructed SQL forms, then verifies retained-source precedence and the same original bytes from an owned physical carrier. The isolated six-file source passes all 1,845 SQL owner tests, rustfmt and strict SQL library-and-test Clippy. Automatic platform qualification remains required; these observations make no timing claim and do not complete the separate CHECK integration.

@@ -4987,6 +4987,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_constants_match_postgresql_tuple_bytes_and_retained_sources",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/composites.rs",
+      "capability": "Typed composite catalog constants",
+      "workload": "Four independent PostgreSQL constant nodes and both reconstructed SQL forms, plus retained-source precedence and owned physical tuple copies.",
+      "invariant": "Catalog encoding preserves the original composite descriptor, tuple bytes, NULL fields, field order and selected type without re-encoding a changed projection."
     }
   ]
 }

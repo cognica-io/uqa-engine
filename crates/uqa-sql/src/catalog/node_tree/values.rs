@@ -175,10 +175,14 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
                     })?;
             varlena(&payload)?
         }
-        (Value::Datum(_), ColumnType::Array(_)) => {
+        (Value::Record(fields), ColumnType::Composite(reference)) => {
+            crate::expr::composites::retained::record_bytes(fields, reference.oid, descriptors)
+                .ok_or_else(|| invalid("composite constant has no retained tuple layout"))?
+        }
+        (Value::Datum(_), ColumnType::Array(_) | ColumnType::Composite(_)) => {
             let Value::Datum(owned) = crate::expr::datums::copy_constant_field(value, ty)? else {
                 return Err(SQLError::Internal(
-                    "physical array constant changed carrier".into(),
+                    "physical catalog constant changed carrier".into(),
                 ));
             };
             owned.bytes().to_vec()
