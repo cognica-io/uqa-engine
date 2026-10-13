@@ -8,9 +8,41 @@
 
 use super::RoutineInliningContext;
 use crate::{
-    ast::{BinaryOp, FunctionVolatility},
-    RowSchema, SQLParam, ScalarExpr,
+    ast::{BinaryOp, FunctionBinding, FunctionDispatch, FunctionVolatility},
+    ColumnType, RowSchema, SQLParam, ScalarExpr,
 };
+
+/// The SQL text/nonarray concatenation wrappers inline to textcat and the selected operand's text output cast.
+pub(super) fn concatenation_volatility(
+    context: &RoutineInliningContext<'_>,
+    binding: Option<&FunctionBinding>,
+    arguments: &[ScalarExpr],
+    parameters: &[SQLParam],
+    schema: &RowSchema,
+) -> Option<FunctionVolatility> {
+    let binding = binding.filter(|binding| binding.builtin)?;
+    let FunctionDispatch::Concat { oid: Some(oid) } = binding.dispatch? else {
+        return None;
+    };
+    let operator = crate::type_resolution::binary_operator_by_oid(i64::from(oid))?;
+    let position = match (operator.name, operator.operand_types) {
+        ("||", ["text", "anynonarray"]) => 1,
+        ("||", ["anynonarray", "text"]) => 0,
+        _ => return None,
+    };
+    let source = arguments.get(position).and_then(|argument| {
+        crate::scalar_type_with_resolver(argument, schema, parameters, context.routines)
+            .ok()
+            .flatten()
+    });
+    Some(
+        source
+            .as_ref()
+            .map_or(FunctionVolatility::Stable, |source| {
+                crate::type_resolution::cast_volatility(source, &ColumnType::Text)
+            }),
+    )
+}
 
 pub(super) fn volatility(
     context: &RoutineInliningContext<'_>,

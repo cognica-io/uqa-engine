@@ -4721,6 +4721,74 @@
       "capability": "Constraint information views",
       "workload": "Sixty-seven independently captured PostgreSQL observations across memory, SQLite, SQLite Key/Value and redb.",
       "invariant": "Result types and rows, duplicate names, foreign and inherited constraints, visibility, column metadata, renames and rollback match PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "planned_concatenation_uses_concrete_output_volatility",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/routines/inlining/tests/concatenation.rs",
+      "capability": "Planned text conversion mutability",
+      "workload": "Eighteen independently captured concrete text-output classifications in both operand orders.",
+      "invariant": "Planned native concatenation follows the selected output cast and never evaluates the expression during classification."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "casts_follow_postgresql_function_and_input_output_volatility",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/cast_compatibility/volatility.rs",
+      "capability": "Planned text conversion mutability",
+      "workload": "Selected scalar, array, enum and named composite input/output conversions.",
+      "invariant": "Immutable identity conversions stay immutable; session/catalog-dependent conversions retain stable volatility."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "generated_concatenation_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/generated_concatenation.rs",
+      "capability": "Planned text conversion mutability",
+      "workload": "Thirty-six independent PostgreSQL messages on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Generated concatenation admission and exact error priority match PostgreSQL for scalar, enum, composite and domain operands."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "default_cooking_matches_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/default_cooking.rs",
+      "capability": "Planned text conversion mutability",
+      "workload": "The existing 115-message PostgreSQL default and generation-expression oracle on memory.",
+      "invariant": "Assignment types, unknown inputs, expression eligibility and diagnostic order retain the independent PostgreSQL contract."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "default_cooking_matches_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/default_cooking.rs",
+      "capability": "Planned text conversion mutability",
+      "workload": "The existing 115-message PostgreSQL default and generation-expression oracle on sqlite.",
+      "invariant": "Assignment types, unknown inputs, expression eligibility and diagnostic order retain the independent PostgreSQL contract."
     }
   ]
 }

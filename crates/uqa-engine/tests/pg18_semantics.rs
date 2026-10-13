@@ -195,3 +195,6 @@ mod relation_attribute_slots;
 
 #[path = "pg18_semantics/zoned_interval.rs"]
 mod zoned_interval;
+
+#[path = "pg18_semantics/generated_concatenation.rs"]
+mod generated_concatenation;

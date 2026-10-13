@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Encode JSON extraction with the selected PostgreSQL catalog operator and operand casts. Preserve exact diagnostics and reconstructed coercion grouping, including binary-compatible domain inputs with length constraints.
 
-- Preserve native concatenation identity independently of ordinary routines and host callbacks. Retain selected scalar/array inputs, typed enum/composite and session-aware text output, exact catalog nodes and executable view definitions across reopening, including atomic restoration of predecessor native views.
+- Preserve native concatenation identity independently of ordinary routines and host callbacks. Retain selected scalar/array inputs, typed enum/composite and session-aware text output, exact catalog nodes and executable view definitions across reopening, including atomic restoration of predecessor native views. Classify planned text/nonarray concatenation by its concrete text conversion, admitting immutable generated expressions while preserving session-dependent output and PostgreSQL diagnostic order. Treat named composite text conversion as stable.
 
 - Preserve PostgreSQL JSON extraction syntax, result names, operand typing and original textual JSON bytes. Retain typed variadic path functions, empty and multidimensional paths, selected routine identities and executable view definitions through reopening; include implicit `pg_catalog` in routine candidate lookup.
 
