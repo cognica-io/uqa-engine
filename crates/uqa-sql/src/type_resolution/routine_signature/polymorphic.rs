@@ -572,6 +572,12 @@ pub(super) fn resolve_target(
         });
     }
     let type_name = canonical_routine_type_name(declared_type_name);
+    if type_name == "any" {
+        return Some(RoutineCoercionTarget {
+            type_name: actual.map_or_else(|| "unknown".into(), canonical_column_type_name),
+            column_type: actual.cloned(),
+        });
+    }
     let column_type = actual
         .filter(|actual| canonical_column_type_name(actual) == type_name)
         .cloned()

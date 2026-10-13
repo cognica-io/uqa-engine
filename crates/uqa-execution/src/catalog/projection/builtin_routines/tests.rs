@@ -11,6 +11,44 @@ use super::PG18_BUILTIN_ROUTINE_GROUPS;
 mod call_signatures;
 
 #[test]
+fn type_introspection_metadata_matches_postgresql() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("tests/type_introspection.json")).unwrap();
+    let expected = &reference["cases"][0]["results"][0]["rows"][0];
+    let oid = expected[0].as_str().unwrap().parse::<i64>().unwrap();
+    let routine = PG18_BUILTIN_ROUTINE_GROUPS
+        .iter()
+        .flat_map(|group| group.iter())
+        .find(|routine| routine.oid == oid)
+        .unwrap();
+    assert!(routine.argument_names.is_empty());
+    assert_eq!(
+        serde_json::json!([
+            routine.oid.to_string(),
+            routine.name,
+            routine.kind,
+            boolean_text(routine.strict),
+            routine.volatility,
+            routine.parallel,
+            boolean_text(routine.leakproof),
+            routine.return_type.to_string(),
+            routine
+                .argument_types
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+            null,
+            routine.default_arguments.to_string(),
+            routine.argument_defaults,
+            routine.source,
+            routine.language().to_string(),
+        ]),
+        *expected,
+    );
+}
+
+#[test]
 fn integer_series_metadata_matches_postgresql() {
     let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),

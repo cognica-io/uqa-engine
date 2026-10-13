@@ -36,6 +36,45 @@ fn match_types(
 }
 
 #[test]
+fn unconstrained_any_retains_values_without_claiming_an_exact_signature_match() {
+    let composite = ColumnType::Composite(crate::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "foreign_self".into(),
+        oid: 50_101,
+        array_oid: 50_102,
+        relation_oid: 50_100,
+    });
+    for actual in [
+        None,
+        Some(ColumnType::Integer),
+        Some(ColumnType::Text),
+        Some(ColumnType::Array(Box::new(ColumnType::Integer))),
+        Some(composite),
+    ] {
+        let matched = match_types(&[parameter("any")], std::slice::from_ref(&actual))
+            .unwrap()
+            .unwrap();
+        assert_eq!(matched.declared_identity, ["any"]);
+        assert_eq!(matched.coercion_targets[0].column_type, actual);
+        assert_eq!(matched.raw_exact_matches, 0);
+        assert_eq!(matched.exact_matches, 0);
+    }
+    let concrete = match_types(&[parameter("integer")], &[Some(ColumnType::Integer)])
+        .unwrap()
+        .unwrap();
+    let generic = match_types(&[parameter("any")], &[Some(ColumnType::Integer)])
+        .unwrap()
+        .unwrap();
+    let mut candidates = vec![generic, concrete];
+    assert!(rank_function_matches(
+        &mut candidates,
+        &[Some(ColumnType::Integer)]
+    ));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].declared_identity, ["int4"]);
+}
+
+#[test]
 fn parses_every_polymorphic_family() {
     for type_name in [
         "anyelement",

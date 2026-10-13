@@ -1520,7 +1520,7 @@ SQL owns input classification, type-name compilation and admitted assignment for
 - [x] Qualify the isolated nine-file SQL unit: all 1,838 library tests and strict library-and-test Clippy pass.
 - [x] Add three deterministic checks for exact diagnostics, missing array identity and reservation transfer, requiring 363 checks / 511 cases without relaxing existing allowances.
 - [x] Prepare `fix/catalog-node-input` from main after builtin metadata PR #813 merged as `e288260f97`; preserve all 80 original #638 records.
-- [ ] Verify actual Linux/macOS artifacts and eight independent-process histories per platform, merge and remove the completed branch.
+- [x] Verify source `2ed9863bad946603d76a6e6a09c21e87034708a5` against actual Linux/macOS artifacts from [run 38361428853](https://github.com/cognica-io/uqa-engine/actions/runs/38361428853): each platform passed 368 checks / 516 cases and eight independent-process histories, with exact source/manifest hashes and zero JUnit failures, errors or skips. Merge [PR #815](https://github.com/cognica-io/uqa-engine/pull/815) as `6196208f5595936d9cc74b6a24f7f83dec898adc`, update main and remove its local/remote branch.
 
 ### Input and assignment preservation
 
@@ -1543,7 +1543,7 @@ The catalog codec emits whole-row attribute zero with the actual row type OID, a
 - [x] Qualify the isolated nineteen-file SQL unit: all 1,843 library tests and strict library-and-test Clippy pass on catalog-input source `2637cc73f4bef5672ce506c4bbf87427d7557955`.
 - [x] Prepare five automatic regressions after the input unit, requiring 368 checks / 516 cases without relaxing existing bounds.
 - [x] Prepare the isolated successor on main after PR #814 merged, preserving all 80 original #638 records.
-- [ ] Verify actual Linux/macOS artifacts and eight independent-process histories per platform, merge and remove the completed branch.
+- [x] Verify source `2ed9863bad946603d76a6e6a09c21e87034708a5` against actual Linux/macOS artifacts from [run 38361428853](https://github.com/cognica-io/uqa-engine/actions/runs/38361428853): each platform passed 368 checks / 516 cases and eight independent-process histories, with exact source/manifest hashes and zero JUnit failures, errors or skips. Merge [PR #815](https://github.com/cognica-io/uqa-engine/pull/815) as `6196208f5595936d9cc74b6a24f7f83dec898adc`, update main and remove its local/remote branch.
 - [ ] Connect the qualified scope to CHECK declaration and retained runtime evaluation, using reserved CREATE row types and live relation identities.
 
 ### Relation-scope preservation
@@ -1557,3 +1557,23 @@ The catalog encoder maps this identity to a typed whole-row variable without exp
 The same pinned PostgreSQL 18.4 Docker image and collector produced raw SHA-256 `2ea0fdac0f137a7344aa687c561c93202bf4257053ad001da8bd8c4e7303b75f`; compact `catalog/node_tree/tests/relation_scope.json` has SHA-256 `20c7c0a059dab013ccc5614414556085517b0e2568e2f3881b29959a16daeab6`. Every parsed field, type identity and reconstructed expression is compared against that independent reference. Four physical-schema regressions additionally cover empty scopes, column precedence, shared copies, aliases, projection boundaries, joins and correlated shadowing. The isolated nineteen-file SQL source passes all 1,843 owner tests and strict library-and-test Clippy. Runtime declaration/enforcement is not included in that qualification; actual automatic platform acceptance remains required, with no timing claim.
 
 Additional CHECK investigation captured twenty-one PostgreSQL messages, with raw SHA-256 `065bcb9475792c03a50f4325a83a85803c94042bcde3bcc4eb71b6a1a1f6ca13` and compact SHA-256 `aad4978c112da8ff8e279e1534a2f4c7a68bc3166537e8dd07c17d701e16fe9f`. PostgreSQL rejects inheriting a whole-row CHECK with `0A000`, `cannot convert whole-row table reference`, and names the constraint and parent relation in DETAIL. It accepts same-declaration whole-row type introspection, whole-row field selection, empty named rows and foreign-table whole-row checks. These are implementation requirements for the pending CHECK runtime unit, not passing UQA acceptance claims.
+
+## Unconstrained routine argument identities
+
+The shared SQL signature matcher retains the concrete type of an `any` argument, including a named composite, array or unknown input, without substituting a common polymorphic type or adding a conversion. An unconstrained parameter does not earn an exact-match score, so a concrete overload keeps its precedence. Execution's existing builtin catalog includes the independently observed `pg_typeof(any)` declaration, OID 1619, returning `regtype` with its original non-strict, stable, parallel-safe metadata. This unit changes six owner source/fixture files and no Engine algorithm, dependency, Cargo feature or storage format.
+
+- [x] Capture the PostgreSQL 18.4 catalog declaration and scalar, unknown, array and named-row type observations in Docker.
+- [x] Retain unconstrained input identity and concrete-overload precedence in the shared SQL matcher.
+- [x] Project the actual `pg_typeof` catalog signature and compare its fourteen fields against the independent reference.
+- [x] Qualify the isolated six-file unit with all 1,844 SQL library tests, all eleven builtin-catalog owner tests and strict library/test Clippy.
+- [x] Add two automatic regressions, requiring 370 checks / 518 cases while retaining every existing limit.
+- [ ] Verify the actual automatic Linux/macOS artifacts and independent-process histories for the delivered source before merge and branch cleanup.
+- [ ] Continue CHECK declaration, reconstruction, restoration and provider acceptance under #119; this matcher/catalog unit does not publish that unfinished integration.
+
+### Argument preservation
+
+Let $x:T$ be an input whose selected parameter is `any`. Matching retains $T$ as the coercion target and leaves $x$ unchanged; an unknown input remains unknown. Different `any` parameters do not impose an equality constraint on their types. Structural argument positions, defaults, evaluation order and result typing use the existing matcher. Thus the input mapping is the identity on each admitted value and preserves every existing UQA operation applied by the selected function. Candidate ranking counts concrete exact matches only; accepting an unconstrained input does not create an exact match with the declared pseudo-type. Catalog projection evaluates no argument and preserves the function's independently observed identity and attributes.
+
+### Independent type-introspection evidence
+
+The pinned PostgreSQL 18.4 Docker collector produced raw SHA-256 `f782a4bcbfb904a95a46196636124e73f1a32d92a9693c3bc49ecd1622c081fb`; compact `crates/uqa-execution/src/catalog/projection/builtin_routines/tests/type_introspection.json` has SHA-256 `a429e1d6a25a3372490a9ae4f3b417ee2fdfd232fcccf11c5148fd2444b8aeba`. It retains five PostgreSQL observations. The catalog owner test compares the fourteen declaration fields; SQL owner tests cover actual input identity and overload precedence. The source is isolated from the unfinished CHECK integration before qualification. Automatic platform results are a separate gate, and no shared-runner timing acceptance is claimed.

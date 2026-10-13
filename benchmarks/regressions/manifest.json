@@ -4932,6 +4932,32 @@
       "capability": "Named relation expression scopes",
       "workload": "Joining independent empty and nonempty named relations, followed by aliasing the complete joined row.",
       "invariant": "Each independent source retains its type; a combined relation has an anonymous record rather than either source type."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unconstrained_any_retains_values_without_claiming_an_exact_signature_match",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/routine_signature/tests.rs",
+      "capability": "Unconstrained routine arguments",
+      "workload": "Typed, unknown, array and named-composite inputs to an unconstrained parameter, alongside a concrete overload.",
+      "invariant": "Argument values keep their actual types without conversion; unconstrained parameters do not claim an exact-match score."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_introspection_metadata_matches_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests.rs",
+      "capability": "Unconstrained routine arguments",
+      "workload": "Fourteen pg_typeof catalog fields captured from an independent PostgreSQL 18.4 instance.",
+      "invariant": "The ordinary builtin metadata retains the actual routine and pseudo-type identities, strictness, volatility, parallel safety and source name."
     }
   ]
 }
