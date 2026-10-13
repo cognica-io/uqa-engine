@@ -76,6 +76,20 @@ fn named_argument_value(argument: &Expr) -> Option<&Expr> {
     }
 }
 
+/// Borrow the name attached to a supplied call argument without evaluating its value.
+pub fn call_argument_name(argument: &Expr) -> Result<Option<&str>> {
+    let Expr::Func { binding, args, .. } = argument else {
+        return Ok(None);
+    };
+    if binding_dispatch(binding.as_ref()) != Some(FunctionDispatch::NamedArgument) {
+        return Ok(None);
+    }
+    let [Expr::Literal(Value::Str(name)), _] = args.as_slice() else {
+        return Err(SQLError::Internal("invalid named argument marker".into()));
+    };
+    Ok(Some(name))
+}
+
 /// Wrap the last actual argument of an explicit `VARIADIC` invocation while preserving a named-argument marker at the top level.
 #[must_use]
 pub fn wrap_variadic_argument(mut argument: Expr) -> Expr {

@@ -143,7 +143,7 @@ pub use builtin::{
     eval_bound_builtin_function_call,
 };
 pub use call_arguments::{
-    call_argument_value, evaluate_call_args, validate_named_argument_order,
+    call_argument_name, call_argument_value, evaluate_call_args, validate_named_argument_order,
     validate_named_argument_order_with_control, variadic_argument_value, wrap_variadic_argument,
 };
 pub use call_dispatch::{

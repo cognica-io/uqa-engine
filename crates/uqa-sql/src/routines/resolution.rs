@@ -632,7 +632,7 @@ fn routine_invocation_binding(
     }
 }
 
-pub(super) fn static_signature_error(
+pub(crate) fn static_signature_error(
     _kind: RoutineCallKind,
     _name: &str,
     error: RoutineSignatureMatchError,

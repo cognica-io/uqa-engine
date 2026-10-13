@@ -10,24 +10,27 @@ mod coercion;
 mod collations;
 mod constructs;
 mod fields;
+mod functions;
 mod operators;
+mod routines;
 mod rows;
 mod schema;
 mod subscripts;
+pub use routines::{select_routine, RoutineDeclaration};
 pub use schema::{ColumnReference, ExpressionSchema};
 
 use super::{values, Field, Node};
-use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax, FunctionDispatch};
+use crate::ast::{BinaryOp, Expr, FunctionBinding, RoutineInvocationBinding};
 use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
 use crate::type_resolution::{
     binary_operator_catalog_entry, binary_operator_types, common_context_expression_type,
-    FunctionTypeResolver,
+    FunctionTypeResolver, RoutineCallDescriptor,
 };
 use crate::{ColumnType, SQLError};
 
 pub struct RoutineIdentity {
     pub oid: i64,
-    pub argument_types: Vec<ColumnType>,
+    pub invocation: RoutineInvocationBinding,
     pub result_type: ColumnType,
 }
 
@@ -36,7 +39,7 @@ pub trait ExpressionRoutines {
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
-        argument_types: &[Option<ColumnType>],
+        call: RoutineCallDescriptor<'_>,
     ) -> Result<RoutineIdentity, SQLError>;
 }
 
@@ -63,7 +66,16 @@ impl TypedNode {
 
 impl ExpressionContext<'_> {
     pub fn check(&self, expression: &Expr) -> Result<Node, SQLError> {
-        let mut value = self.encode(expression, Some(&ColumnType::Boolean))?;
+        self.expression(expression, Some(&ColumnType::Boolean))
+    }
+
+    /// Encode a retained expression with the type selected by its declaration, if any.
+    pub fn expression(
+        &self,
+        expression: &Expr,
+        expected: Option<&ColumnType>,
+    ) -> Result<Node, SQLError> {
+        let mut value = self.encode(expression, expected)?;
         collations::assign(&mut value.node)?;
         Ok(value.node)
     }
@@ -354,85 +366,6 @@ impl ExpressionContext<'_> {
                 ],
             ),
             ty: Some(ColumnType::Boolean),
-        })
-    }
-
-    fn function(
-        &self,
-        name: &str,
-        binding: Option<&FunctionBinding>,
-        arguments: &[Expr],
-        syntax: FunctionCallSyntax,
-    ) -> Result<TypedNode, SQLError> {
-        let types = arguments
-            .iter()
-            .map(|arg| self.expression_type(arg))
-            .collect::<Result<Vec<_>, _>>()?;
-        let helper = if let Some(dispatch @ FunctionDispatch::PatternEscape { similar }) =
-            binding.and_then(|binding| binding.dispatch)
-        {
-            if !(1..=2).contains(&types.len()) {
-                return Err(SQLError::Internal("invalid pattern escape operands".into()));
-            }
-            let inputs = [
-                types.first().and_then(Option::as_ref),
-                types.get(1).and_then(Option::as_ref),
-            ];
-            let ty = crate::type_resolution::pattern::select_escape(
-                similar,
-                &inputs[..types.len()],
-                &uqa_core::memory::ProductionControl::uncontrolled(),
-            )?;
-            let mut selected = FunctionBinding::dispatched(dispatch);
-            selected.argument_types = vec![ty.sql_name(); types.len()];
-            Some(selected)
-        } else {
-            None
-        };
-        let name = helper
-            .as_ref()
-            .map_or(name, |binding| binding.name.as_str());
-        let binding = helper.as_ref().or(binding);
-        let routine = self.routines.resolve(name, binding, &types)?;
-        if routine.argument_types.len() != arguments.len() {
-            return Err(SQLError::Internal(
-                "catalog routine arity differs from bound arguments".into(),
-            ));
-        }
-        let arguments = arguments
-            .iter()
-            .zip(&routine.argument_types)
-            .map(|(arg, ty)| self.encode(arg, Some(ty)))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(TypedNode {
-            node: Node::new(
-                "FUNCEXPR",
-                [
-                    ("funcid", routine.oid.into()),
-                    ("funcresulttype", pg_type_oid(&routine.result_type).into()),
-                    ("funcretset", false.into()),
-                    ("funcvariadic", false.into()),
-                    (
-                        "funcformat",
-                        if syntax == FunctionCallSyntax::Extract {
-                            3.into()
-                        } else {
-                            0.into()
-                        },
-                    ),
-                    (
-                        "funccollid",
-                        pg_type_collation_oid(&routine.result_type).into(),
-                    ),
-                    ("inputcollid", 0.into()),
-                    (
-                        "args",
-                        Field::List(arguments.into_iter().map(|arg| arg.node.into()).collect()),
-                    ),
-                    ("location", (-1).into()),
-                ],
-            ),
-            ty: Some(routine.result_type),
         })
     }
 }

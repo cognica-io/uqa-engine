@@ -134,30 +134,41 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
     }
 }
 
+const ROUTINE_PSEUDO_TYPES: &[(&str, i64)] = &[
+    ("record", 2249),
+    ("cstring", 2275),
+    ("any", 2276),
+    ("anyarray", 2277),
+    ("void", 2278),
+    ("trigger", 2279),
+    ("internal", 2281),
+    ("fdw_handler", 3115),
+    ("anyelement", 2283),
+    ("anynonarray", 2776),
+    ("anyenum", 3500),
+    ("anyrange", 3831),
+    ("event_trigger", 3838),
+    ("anymultirange", 4537),
+    ("anycompatiblemultirange", 4538),
+    ("anycompatible", 5077),
+    ("anycompatiblearray", 5078),
+    ("anycompatiblenonarray", 5079),
+    ("anycompatiblerange", 5080),
+];
+
+/// The declared pseudo-type spelling for a `PostgreSQL` catalog routine signature.
+#[must_use]
+pub fn routine_pseudo_type_name(oid: i64) -> Option<&'static str> {
+    ROUTINE_PSEUDO_TYPES
+        .iter()
+        .find_map(|(name, candidate)| (*candidate == oid).then_some(*name))
+}
+
 pub fn routine_type_oid(type_name: &str) -> i64 {
     let canonical = canonical_routine_type_name(type_name);
-    let pseudo_type_oid = match canonical.as_str() {
-        "record" => Some(2249),
-        "cstring" => Some(2275),
-        "any" => Some(2276),
-        "anyarray" => Some(2277),
-        "void" => Some(2278),
-        "trigger" => Some(2279),
-        "internal" => Some(2281),
-        "fdw_handler" => Some(3115),
-        "anyelement" => Some(2283),
-        "anynonarray" => Some(2776),
-        "anyenum" => Some(3500),
-        "anyrange" => Some(3831),
-        "event_trigger" => Some(3838),
-        "anymultirange" => Some(4537),
-        "anycompatiblemultirange" => Some(4538),
-        "anycompatible" => Some(5077),
-        "anycompatiblearray" => Some(5078),
-        "anycompatiblenonarray" => Some(5079),
-        "anycompatiblerange" => Some(5080),
-        _ => None,
-    };
+    let pseudo_type_oid = ROUTINE_PSEUDO_TYPES
+        .iter()
+        .find_map(|(name, oid)| (*name == canonical).then_some(*oid));
     if let Some(oid) = pseudo_type_oid {
         return oid;
     }
@@ -191,7 +202,7 @@ pub fn routine_variadic_element_oid(type_name: &str) -> Result<i64, SQLError> {
 
 #[cfg(test)]
 mod routine_type_oid_tests {
-    use super::{routine_type_oid, routine_variadic_element_oid};
+    use super::{routine_pseudo_type_name, routine_type_oid, routine_variadic_element_oid};
 
     #[test]
     fn postgresql_18_routine_pseudo_type_oids_are_exact() {
@@ -216,6 +227,7 @@ mod routine_type_oid_tests {
             ("anycompatiblerange", 5080),
         ] {
             assert_eq!(routine_type_oid(type_name), oid, "{type_name}");
+            assert_eq!(routine_pseudo_type_name(oid), Some(type_name));
         }
     }
 

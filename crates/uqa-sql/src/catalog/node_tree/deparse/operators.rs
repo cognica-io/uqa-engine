@@ -125,10 +125,16 @@ impl Renderer<'_> {
             .map(|part| crate::expr::quote_ident(part))
             .collect::<Vec<_>>()
             .join(".");
-        let arguments = args
+        let mut arguments = args
             .iter()
             .map(|arg| self.field(arg, self.pretty))
             .collect::<Result<Vec<_>, _>>()?;
+        if node.boolean("funcvariadic")? {
+            let last = arguments
+                .last_mut()
+                .ok_or_else(|| invalid("variadic call has no argument"))?;
+            last.insert_str(0, "VARIADIC ");
+        }
         Ok(format!("{name}({})", arguments.join(", ")))
     }
 

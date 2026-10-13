@@ -4789,6 +4789,32 @@
       "capability": "Planned text conversion mutability",
       "workload": "The existing 115-message PostgreSQL default and generation-expression oracle on sqlite.",
       "invariant": "Assignment types, unknown inputs, expression eligibility and diagnostic order retain the independent PostgreSQL contract."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "supplied_routine_nodes_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/routine_calls.rs",
+      "capability": "Catalog routine call nodes",
+      "workload": "Fourteen independently captured PostgreSQL call nodes with exact Datum bytes and compact or pretty SQL.",
+      "invariant": "Declared OIDs remain separate from supplied defaults, named positions, polymorphic targets and expanded/explicit variadic shape; unknown wildcard inputs retain their type."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "postgresql_18_routine_pseudo_type_oids_are_exact",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/type_metadata.rs",
+      "capability": "Catalog routine call nodes",
+      "workload": "Nineteen PostgreSQL routine pseudo-type identities in both lookup directions.",
+      "invariant": "Forward declared names and reverse catalog identities share one canonical mapping."
     }
   ]
 }
