@@ -6,7 +6,8 @@
 
 //! Reconstruct typed array endpoints, retaining omitted syntax and NULL constants.
 
-use super::{implicit_cast_input, invalid, list, Field, Node, Renderer, SQLError};
+use super::coercions::implicit_cast_input;
+use super::{invalid, list, Field, Node, Renderer, SQLError};
 use std::fmt::Write as _;
 
 impl Renderer<'_> {

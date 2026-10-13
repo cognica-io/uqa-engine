@@ -116,7 +116,6 @@ pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
-pub(crate) use operators::named_binary_operator_types;
 #[doc(hidden)]
 pub use operators::{
     binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
@@ -126,6 +125,7 @@ pub use operators::{
     unary_operator_by_oid, BinaryOperatorCatalogEntry, NumericOperatorTypes,
     UnaryOperatorCatalogEntry,
 };
+pub(crate) use operators::{named_binary_operator_catalog_entry, named_binary_operator_types};
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,

@@ -128,7 +128,7 @@ pub fn binary_operator_catalog_entry(
     named_binary_operator_catalog_entry(name, operands)
 }
 
-fn named_binary_operator_catalog_entry(
+pub(crate) fn named_binary_operator_catalog_entry(
     name: &str,
     operands: [&ColumnType; 2],
 ) -> Result<BinaryOperatorCatalogEntry, SQLError> {

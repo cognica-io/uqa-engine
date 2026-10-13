@@ -4296,6 +4296,45 @@
       "capability": "Predecessor concatenation view restoration",
       "workload": "Predecessor native view metadata on all three persistent providers, opened twice through the existing catalog restoration transaction.",
       "invariant": "The first open restores selected operator identity and the second open preserves the complete stored definition and result."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_extraction_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/json_extraction.rs",
+      "capability": "Typed JSON extraction catalog expressions",
+      "workload": "Thirty independent PostgreSQL expressions cover JSON/JSONB keys, integer indexes, text-array paths, unknown and typed NULLs, nested extraction, casts, collations and composite fields.",
+      "invariant": "Shared operator selection retains exact OIDs, selected input conversions and both reconstructed SQL forms."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "json_extraction_catalog_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/json_extraction.rs",
+      "capability": "JSON extraction catalog diagnostics",
+      "workload": "Nine independent PostgreSQL signatures cover invalid Boolean, bigint and integer-array operands and ambiguous unknown inputs.",
+      "invariant": "Catalog analysis preserves complete SQLSTATE, primary message, detail and hint without invoking ordinary routine resolution."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_coercions_keep_postgresql_grouping_around_operator_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/coercions.rs",
+      "capability": "Typed coercion grouping",
+      "workload": "Fifteen independent PostgreSQL compositions cover JSON, concatenation, arithmetic, arrays, domains, CASE and composite fields.",
+      "invariant": "Original typed children determine grouping even when implicit casts are hidden; binary-compatible domain inputs avoid redundant relabeling while retaining modifier checks."
     }
   ]
 }

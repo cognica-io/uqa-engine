@@ -32,6 +32,16 @@ impl ExpressionContext<'_> {
             return self.concatenation(args).map(Some);
         }
         match binding.and_then(|binding| binding.dispatch) {
+            Some(dispatch @ FunctionDispatch::JsonExtract { .. }) => {
+                return self
+                    .named_binary_operator(
+                        dispatch
+                            .json_extraction_symbol()
+                            .expect("JSON extraction dispatch"),
+                        args,
+                    )
+                    .map(Some);
+            }
             Some(FunctionDispatch::FieldSelect) => {
                 return self
                     .field_select(binding.expect("field selection dispatch"), args)

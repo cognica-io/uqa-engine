@@ -117,29 +117,7 @@ impl ExpressionContext<'_> {
             return Self::modify_type(value, target, coercion, false);
         }
         if let ColumnType::Domain { base, .. } = target {
-            // The domain node owns the written cast; its base conversion is hidden, while explicit input/typmod semantics remain unchanged.
-            let value = Self::coerce_selected(
-                value,
-                base,
-                Coercion {
-                    format: 2,
-                    ..coercion
-                },
-            )?;
-            return Ok(TypedNode {
-                node: Node::new(
-                    "COERCETODOMAIN",
-                    [
-                        ("arg", value.node.into()),
-                        ("resulttype", pg_type_oid(target).into()),
-                        ("resulttypmod", (-1).into()),
-                        ("resultcollid", pg_type_collation_oid(target).into()),
-                        ("coercionformat", format.into()),
-                        ("location", (-1).into()),
-                    ],
-                ),
-                ty: Some(target.clone()),
-            });
+            return Self::domain_coercion(value, target, base, coercion);
         }
         if value.ty.is_none() {
             if coercion.explicit && is_string(target) {
@@ -189,6 +167,52 @@ impl ExpressionContext<'_> {
             CastMethod::InputOutput => input_output_cast(value, base_target, format),
         };
         Self::modify_type(value, target, coercion, true)
+    }
+
+    fn domain_coercion(
+        value: TypedNode,
+        target: &ColumnType,
+        base: &ColumnType,
+        coercion: Coercion,
+    ) -> Result<TypedNode, SQLError> {
+        let format = coercion.format;
+        // The domain node owns the written cast; its base conversion is hidden, while explicit input/typmod semantics remain unchanged.
+        let base_coercion = Coercion {
+            format: 2,
+            ..coercion
+        };
+        let binary = value.ty.as_ref().is_some_and(|mut source| {
+            while let ColumnType::Domain { base, .. } = source {
+                source = base;
+            }
+            pg_type_oid(source) == pg_type_oid(base)
+                || cast_catalog_entry(source, base).is_some_and(|entry| {
+                    entry.method == CastMethod::Binary
+                        && (coercion.explicit
+                            || entry.context == b'i'
+                            || (coercion.assignment && entry.context == b'a'))
+                })
+        });
+        let value = if binary {
+            // The enclosing domain already supplies the type identity for a binary-compatible input.
+            Self::modify_type(value, base, base_coercion, false)?
+        } else {
+            Self::coerce_selected(value, base, base_coercion)?
+        };
+        Ok(TypedNode {
+            node: Node::new(
+                "COERCETODOMAIN",
+                [
+                    ("arg", value.node.into()),
+                    ("resulttype", pg_type_oid(target).into()),
+                    ("resulttypmod", (-1).into()),
+                    ("resultcollid", pg_type_collation_oid(target).into()),
+                    ("coercionformat", format.into()),
+                    ("location", (-1).into()),
+                ],
+            ),
+            ty: Some(target.clone()),
+        })
     }
 
     fn array_coercion(

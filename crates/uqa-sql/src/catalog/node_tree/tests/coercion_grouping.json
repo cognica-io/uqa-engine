@@ -1,0 +1,131 @@
+{
+  "catalog": [
+    {
+      "oid": 29541,
+      "name": "parenth_int",
+      "kind": "d",
+      "array_oid": 29540,
+      "relation_oid": 0,
+      "base": "integer",
+      "labels": null,
+      "attributes": null
+    },
+    {
+      "oid": 29543,
+      "name": "parenth_text",
+      "kind": "d",
+      "array_oid": 29542,
+      "relation_oid": 0,
+      "base": "character varying(8)",
+      "labels": null,
+      "attributes": null
+    }
+  ],
+  "cases": [
+    {
+      "check": "((1 + 2)::text) = '3'",
+      "name": "coercion_check_0",
+      "conbin": "{OPEXPR :opno 98 :opfuncid 67 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCEVIAIO :arg {OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 51 ]}) :location -1}",
+      "sql": "(((1 + 2))::text = '3'::text)",
+      "pretty": "((1 + 2)::text) = '3'::text"
+    },
+    {
+      "check": "((1 + 2)::text)::varchar(4) IS NULL",
+      "name": "coercion_check_1",
+      "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {COERCEVIAIO :arg {OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} :resulttype 1043 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 8 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((((1 + 2))::text)::character varying(4) IS NULL)",
+      "pretty": "(((1 + 2)::text))::character varying(4) IS NULL"
+    },
+    {
+      "check": "(('1'::text || '2')::integer) > 0",
+      "name": "coercion_check_2",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((('1'::text || '2'::text))::integer > 0)",
+      "pretty": "(('1'::text || '2'::text)::integer) > 0"
+    },
+    {
+      "check": "(('{}'::json ->> 'n')::integer) > 0",
+      "name": "coercion_check_3",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 123 125 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 110 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((('{}'::json ->> 'n'::text))::integer > 0)",
+      "pretty": "(('{}'::json ->> 'n'::text)::integer) > 0"
+    },
+    {
+      "check": "('abc'::text)::varchar(2) IS NULL",
+      "name": "coercion_check_4",
+      "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 7 [ 28 0 0 0 97 98 99 ]} :resulttype 1043 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(('abc'::text)::character varying(2) IS NULL)",
+      "pretty": "'abc'::text::character varying(2) IS NULL"
+    },
+    {
+      "check": "((1 + 2)::numeric) > 0",
+      "name": "coercion_check_5",
+      "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+      "sql": "(((1 + 2))::numeric > (0)::numeric)",
+      "pretty": "(1 + 2)::numeric > 0::numeric"
+    },
+    {
+      "check": "(((1 + 2)::numeric)::text) > '0'",
+      "name": "coercion_check_6",
+      "conbin": "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCEVIAIO :arg {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} :resulttype 25 :resultcollid 100 :coerceformat 1 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 48 ]}) :location -1}",
+      "sql": "((((1 + 2))::numeric)::text > '0'::text)",
+      "pretty": "(1 + 2)::numeric::text > '0'::text"
+    },
+    {
+      "check": "((ARRAY[1] || ARRAY[2])::bigint[]) IS NULL",
+      "name": "coercion_check_7",
+      "conbin": "{NULLTEST :arg {ARRAYCOERCEEXPR :arg {OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1} :elemexpr {FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CASETESTEXPR :typeId 23 :typeMod -1 :collation 0}) :location -1} :resulttype 1016 :resulttypmod -1 :resultcollid 0 :coerceformat 1 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((ARRAY[1] || ARRAY[2]))::bigint[] IS NULL)",
+      "pretty": "((ARRAY[1] || ARRAY[2])::bigint[]) IS NULL"
+    },
+    {
+      "check": "COALESCE(('{}'::json ->> 'n')::integer, 0) > 0",
+      "name": "coercion_check_8",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 23 :coalescecollid 0 :args ({COERCEVIAIO :arg {OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 123 125 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 110 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(COALESCE((('{}'::json ->> 'n'::text))::integer, 0) > 0)",
+      "pretty": "COALESCE(('{}'::json ->> 'n'::text)::integer, 0) > 0"
+    },
+    {
+      "check": "(('{}'::json ->> 'n')::parenth_int) > 0",
+      "name": "coercion_check_9",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {COERCEVIAIO :arg {OPEXPR :opno 3963 :opfuncid 3948 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 114 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 123 125 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 110 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 2 :location -1} :resulttype 29541 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :resulttype 23 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(((('{}'::json ->> 'n'::text))::parenth_int)::integer > 0)",
+      "pretty": "(((('{}'::json ->> 'n'::text))::parenth_int)::integer) > 0"
+    },
+    {
+      "check": "((1 + 2)::parenth_int) > 0",
+      "name": "coercion_check_10",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({RELABELTYPE :arg {COERCETODOMAIN :arg {OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 29541 :resulttypmod -1 :resultcollid 0 :coercionformat 1 :location -1} :resulttype 23 :resulttypmod -1 :resultcollid 0 :relabelformat 2 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((((1 + 2))::parenth_int)::integer > 0)",
+      "pretty": "(((1 + 2)::parenth_int)::integer) > 0"
+    },
+    {
+      "check": "(('a' || 'b')::parenth_text) IS NULL",
+      "name": "coercion_check_11",
+      "conbin": "{NULLTEST :arg {COERCETODOMAIN :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({OPEXPR :opno 654 :opfuncid 1258 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 98 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 29543 :resulttypmod -1 :resultcollid 100 :coercionformat 1 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "((('a'::text || 'b'::text))::parenth_text IS NULL)",
+      "pretty": "('a'::text || 'b'::text)::parenth_text IS NULL"
+    },
+    {
+      "check": "((ROW(ARRAY[1] || ARRAY[2])).f1::bigint[]) IS NULL",
+      "name": "coercion_check_12",
+      "conbin": "{NULLTEST :arg {ARRAYCOERCEEXPR :arg {FIELDSELECT :arg {ROWEXPR :args ({OPEXPR :opno 375 :opfuncid 383 :opresulttype 1007 :opretset false :opcollid 0 :inputcollid 0 :args ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}) :row_typeid 2249 :row_format 2 :colnames (\"f1\") :location -1} :fieldnum 1 :resulttype 1007 :resulttypmod -1 :resultcollid 0} :elemexpr {FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CASETESTEXPR :typeId 23 :typeMod -1 :collation 0}) :location -1} :resulttype 1016 :resulttypmod -1 :resultcollid 0 :coerceformat 1 :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((ROW((ARRAY[1] || ARRAY[2]))).f1)::bigint[] IS NULL)",
+      "pretty": "(ROW(ARRAY[1] || ARRAY[2])).f1::bigint[] IS NULL"
+    },
+    {
+      "check": "((1 < 2)::text) IS NULL",
+      "name": "coercion_check_13",
+      "conbin": "{NULLTEST :arg {FUNCEXPR :funcid 2971 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 0 :args ({OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+      "sql": "(((1 < 2))::text IS NULL)",
+      "pretty": "(1 < 2)::text IS NULL"
+    },
+    {
+      "check": "(CASE WHEN true THEN '1' ELSE '2' END)::integer > 0",
+      "name": "coercion_check_14",
+      "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {CASEEXPR :casetype 25 :casecollid 100 :arg <> :args ({CASEWHEN :expr {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} :result {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]} :location -1}) :defresult {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]} :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "((\nCASE\n    WHEN true THEN '1'::text\n    ELSE '2'::text\nEND)::integer > 0)",
+      "pretty": "\nCASE\n    WHEN true THEN '1'::text\n    ELSE '2'::text\nEND::integer > 0"
+    }
+  ]
+}
