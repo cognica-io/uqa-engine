@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Expose CHECK and domain constraint information views with PostgreSQL ownership and type-usage visibility, duplicate names, inherited and foreign constraints, exact expression text and transactional renames. Include declared virtual-relation columns in information-schema discovery using their existing relation and column privileges.
+
 - Preserve native pattern operators independently of ordinary routines and callbacks, including PostgreSQL operand selection, bytea matching, character padding, strict escape evaluation, exact diagnostics and reconstructed views. Restore predecessor expressions once across retained catalogs, preserving secondary-session write exclusion and bounded matching resources. Retain exact typed catalog operators and nested helper routines, including stored operand conversions, collations and native versus ordinary call identity.
 
 - Encode JSON extraction with the selected PostgreSQL catalog operator and operand casts. Preserve exact diagnostics and reconstructed coercion grouping, including binary-compatible domain inputs with length constraints.

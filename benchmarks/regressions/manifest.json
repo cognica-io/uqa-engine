@@ -4666,6 +4666,61 @@
       "capability": "Typed pattern and range catalog expressions",
       "workload": "Twelve symmetric/ordinary positive/negative BETWEEN expressions and one incompatible-type diagnostic.",
       "invariant": "Exact expanded operator/Boolean trees, both SQL forms and the first analysis diagnostic match PostgreSQL."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constraint_views_preserve_owner_visibility_and_decoded_not_null_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/information_schema/constraints/tests.rs",
+      "capability": "Constraint information views",
+      "workload": "Relation and domain CHECK/NOT NULL definitions under owner and reader roles.",
+      "invariant": "Only enabled owners see CHECK text; decoded NOT NULL names and domain VALUE match PostgreSQL."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "domain_constraint_visibility_uses_the_retained_type_usage_acl",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/information_schema/constraints/tests.rs",
+      "capability": "Constraint information views",
+      "workload": "Original and restricted catalog generations with default PUBLIC type USAGE removed.",
+      "invariant": "Domain visibility follows the retained ACL while owner access survives; the original generation remains unchanged."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "requested_constraint_names_do_not_deparse_unselected_expressions",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/information_schema/constraints/tests.rs",
+      "capability": "Constraint information views",
+      "workload": "Narrow names and fields with an unrelated unresolved routine in a retained CHECK.",
+      "invariant": "Unselected expressions are never deparsed and selected metadata preserves its original value."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_information_views_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_information.rs",
+      "capability": "Constraint information views",
+      "workload": "Sixty-seven independently captured PostgreSQL observations across memory, SQLite, SQLite Key/Value and redb.",
+      "invariant": "Result types and rows, duplicate names, foreign and inherited constraints, visibility, column metadata, renames and rollback match PostgreSQL."
     }
   ]
 }

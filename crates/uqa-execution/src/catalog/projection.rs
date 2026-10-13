@@ -85,6 +85,12 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::InformationTableConstraints => {
             build_info_table_constraints(catalog, resolution)?
         }
+        VirtualRelation::InformationCheckConstraints => {
+            information_schema::build_info_check_constraints(context, catalog, resolution, request)?
+        }
+        VirtualRelation::InformationDomainConstraints => {
+            information_schema::build_info_domain_constraints(catalog, resolution, request)?
+        }
         VirtualRelation::InformationKeyColumnUsage => {
             build_info_key_column_usage(catalog, resolution)?
         }

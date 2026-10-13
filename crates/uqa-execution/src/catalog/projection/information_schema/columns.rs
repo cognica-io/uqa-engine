@@ -10,7 +10,64 @@ use super::{information_schema_column_row, view_columns_for};
 use crate::catalog::{
     context::CatalogContext, projection::CatalogRequest, CatalogReadView, RelationNameResolution,
 };
-use uqa_sql::{ResultRow, SQLError};
+use uqa_sql::{
+    ast::ColumnDef,
+    catalog::{
+        security::{
+            system_relations::{self, SystemRelationSecurityCatalog},
+            table::{TableAclPrivilege, TablePrivilegeCheck},
+        },
+        SystemRelation, VirtualRelation,
+    },
+    ResultRow, SQLError,
+};
+
+pub(super) fn append_virtual_columns(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    request: &CatalogRequest,
+    out: &mut Vec<ResultRow>,
+) -> Result<(), SQLError> {
+    for relation in VirtualRelation::ALL {
+        if !request.matches_relation(relation.namespace(), relation.name()) {
+            continue;
+        }
+        let system = SystemRelation::Projected(*relation);
+        let security =
+            catalog.relation_security_names(&catalog.system_relation_security(system))?;
+        let definitions = &catalog.snapshot().definitions;
+        for (index, (name, ty)) in relation.schema().into_iter().enumerate() {
+            if !request.matches_name("column_name", &name)
+                || !TableAclPrivilege::COLUMN_ALL.into_iter().any(|privilege| {
+                    system_relations::has_column_privilege(
+                        system,
+                        &security,
+                        &name,
+                        resolution.current_user(),
+                        TablePrivilegeCheck {
+                            privilege,
+                            grant_option: false,
+                        },
+                        &definitions.roles,
+                        &definitions.role_memberships,
+                    )
+                })
+            {
+                continue;
+            }
+            out.push(information_schema_column_row(
+                None,
+                (catalog, resolution, request),
+                (relation.namespace().into(), relation.name().into()),
+                index,
+                &ColumnDef::nullable(name, ty),
+                relation.kind() == "table",
+                None,
+            )?);
+        }
+    }
+    Ok(())
+}
 
 pub(super) fn append_view_columns(
     context: &CatalogContext<'_>,

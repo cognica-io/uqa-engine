@@ -102,13 +102,15 @@ fn stored_expression_outputs_share_one_catalog_across_columns_and_aliases() {
         let output = RegtypeOutputCache::default();
         let context = services.context(&catalog, &output);
         let before = OUTPUT_METADATA_BUILDS.get();
+        let mut request = crate::catalog::projection::CatalogRequest::default();
+        request.require_name("table_schema".into(), "public".into());
         for _ in 0..4 {
             let alias = catalog.clone();
             let rows = crate::catalog::projection::information_schema::build_info_columns(
                 &context,
                 &alias,
                 &services.resolution,
-                &crate::catalog::projection::CatalogRequest::default(),
+                &request,
             )
             .unwrap();
             assert_eq!(rows.len(), 2 * (unrelated + 1));

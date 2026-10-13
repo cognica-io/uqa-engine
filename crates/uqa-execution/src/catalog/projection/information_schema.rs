@@ -7,12 +7,14 @@
 //! Virtual `information_schema` relation builders.
 
 mod columns;
+mod constraints;
 mod foreign_tables;
 mod identity;
 mod routines;
 
 use std::collections::BTreeSet;
 
+pub use constraints::{build_info_check_constraints, build_info_domain_constraints};
 use foreign_tables::insert_foreign_table_column_privileges;
 use identity::{owned_identity_sequence, IdentityAttributes};
 pub use routines::build_info_routines;
@@ -453,6 +455,7 @@ pub(super) fn build_info_columns(
         }
     }
     columns::append_view_columns(context, catalog, resolution, request, &mut out)?;
+    columns::append_virtual_columns(catalog, resolution, request, &mut out)?;
     for (identity, foreign_table) in catalog.snapshot().definitions.foreign_tables.iter() {
         if !request.matches_relation(&identity.schema, &identity.name) {
             continue;
