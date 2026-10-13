@@ -17,6 +17,15 @@ fn constraint_information_views_match_postgresql(#[case] provider: usize) {
     verify(provider, include_str!("constraint_information.json"));
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn constraint_key_visibility_matches_postgresql(#[case] provider: usize) {
+    verify(provider, include_str!("constraint_key_visibility.json"));
+}
+
 fn verify(provider: usize, transcript: &str) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("constraint-expressions.db");

@@ -1589,7 +1589,7 @@ SQL's catalog codec now encodes named record constants through the same retained
 - [x] Qualify the isolated six-file SQL unit: all 1,845 library tests, rustfmt and strict library-and-test Clippy pass.
 - [x] Register the owning regression in the automatic inventory, requiring 373 checks / 524 cases without changing existing limits.
 - [x] Prepare this separate successor after PR #816 merged, preserving all 80 original #638 records.
-- [ ] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform before merge and branch cleanup.
+- [x] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform before merge and branch cleanup.
 
 ### Composite-constant preservation
 
@@ -1600,3 +1600,31 @@ For a physical carrier with an owned byte interval $B$, the existing checked cop
 ### Independent composite-constant evidence
 
 The PostgreSQL 18.4 Docker capture uses image `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25` and collector SHA-256 `13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec`. It verifies command completion and removes its disposable database. Raw capture SHA-256 is `cbe7ecac663975fcfcc203d90afe04885b58e85d355b269082866e2ce0e08f49`; compact `crates/uqa-sql/src/catalog/node_tree/tests/composites.json` has SHA-256 `23d1102a6de4ff5ee946b95b06997d49e22313d3fa52045bcf5f32d06d4c8d83`. The owner test compares each complete parsed node and both reconstructed SQL forms, then verifies retained-source precedence and the same original bytes from an owned physical carrier. The isolated six-file source passes all 1,845 SQL owner tests, rustfmt and strict SQL library-and-test Clippy. Automatic platform qualification remains required; these observations make no timing claim and do not complete the separate CHECK integration.
+
+PR #820 merged as `a0977b1e4bc26fd47bac18d6b1114d9baf93bf02` after actual automatic [run 38379127242](https://github.com/cognica-io/uqa-engine/actions/runs/38379127242) passed Linux x86_64 and macOS arm64: 373 checks / 524 cases, zero errors/failures/skips and eight independent-process histories per platform. Tested merge `a4704fdf10a7ce9c893c409d306546bbb2eaf872`, source `9aaf9de3b95182e77ef9eef4c4febbdfba113f83` and squash share tree `bf913751d2c3cf9f4541d629d675118fce541bac`; manifest, individual source hashes and exact selected cases match. Main is updated and the completed branch is removed.
+
+## Constraint view visibility and column privileges
+
+Table and key constraint information views now use PostgreSQL's distinct role, relation and column visibility predicates. Table constraint rows include their database name and exclude foreign-table constraints; key-column rows retain original ordinal and referenced-key positions after column filtering. SQL expands `ALL(column-list)` to the four existing column privileges without granting table-level privileges. SQL owns lowering, Execution owns catalog projection and Engine supplies the existing public integration entry point. CHECK node publication, usage views and restoration remain separate work under #119.
+
+- [x] Capture independent PostgreSQL visibility for owner inheritance, table and column grants, SELECT and MAINTAIN, foreign constraints and schema-USAGE removal.
+- [x] Capture column ALL grants, grant-option revocation, ordinary revocation and savepoint/rollback observations in the same 80-command reference.
+- [x] Reuse existing SQL role/ACL semantics and Execution retained catalog rows; preserve key ordinals, duplicate-name multiplicity and transaction state.
+- [x] Qualify the isolated seven-file source: 14 SQL owner tests, four Execution owner tests, eight provider tests and 119 existing catalog tests pass, along with rustfmt and strict SQL/Execution/Engine library-and-test Clippy.
+- [x] Validate the 376-check / 530-case automatic inventory, its 24 verifier tests and repository policies without changing limits.
+- [ ] Verify the actual automatic Linux/macOS regression artifacts before merge, close #818/#819 and remove the completed branch.
+
+### Visibility and privilege preservation
+
+Fix a retained catalog generation $C$ and invoking subject $s$. Each constraint identity contributes an existing catalog row to a bag $R(C)$. For table_constraints define $V_t(c,s)$ as ordinary-or-partitioned relation membership and either enabled ownership, one of INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER at table scope, or INSERT/UPDATE/REFERENCES on any live column. For key_column_usage define $V_k(c,a,s)$ as the same relation-kind condition, a key kind, and either enabled ownership or SELECT/INSERT/UPDATE/REFERENCES on that individual key column. The new projections retain each row if and only if the corresponding predicate holds. They do not group by visible names or deduplicate identities, so multiplicities and duplicate-name behavior are preserved. Filtering before emitting a key column preserves its original ordinal and referenced-key position rather than renumbering visible attributes.
+
+For any fixed $C$ and $s$, visibility selection distributes over bag union and commutes with projections that retain the predicate's inputs, because each row's multiplicity is multiplied by the same zero-or-one predicate. No statement, routine or document is evaluated by the predicate; it reads only the existing snapshot's owners and ACLs. Thus catalog reads preserve the transaction snapshot and produce no new mutation, ranked value, payload or document support. Existing SQL name and schema authorization for ordinary table access remain unchanged; catalog visibility deliberately follows PostgreSQL's catalog view predicates rather than repeating schema-USAGE checks.
+
+For a specified column list $A$, $\operatorname{ALL}(A)$ denotes the union of the four existing column privilege requests over each $a \in A$. Lowering expands exactly that finite set while retaining each column name, statement target, grantee, grant-option flag and revoke behavior. Existing privilege validation and ACL transition code then applies the same request as an explicit list of SELECT(A), INSERT(A), UPDATE(A), REFERENCES(A). Duplicate requests retain existing set semantics. The ordinary table-level ALL sentinel is unchanged. Therefore grant paths, rollback/savepoint restoration, cascaded grant-option revocation and authorization observations coincide with explicit privilege requests; no table-level privilege is introduced by a column-only clause.
+
+
+### Independent visibility evidence
+
+PostgreSQL 18.4 Docker image `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25` and collector SHA-256 `13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec` produced the 80-command reference. The database and temporary roles were removed after capture. Raw capture SHA-256 is `6cfb623fec196c73bfdc855454197cbac2ab0c8e7faa2e635c9c650ecf1a6505`; compact `constraint_key_visibility.json` has SHA-256 `ef9330a6f316a1f1b67447bc0c5b5934c595a93868ecf5e98aae40e53fcea613`. The compact fixture retains every captured field and case; its parsed JSON is identical to the raw reference. The initial 66-command reference differed in 22 observations before the fixes. The owner test separately checks every table and column privilege against the view's read/write visibility rule. Automatic platform acceptance remains required; no local timing claim or altered resource limit is involved.
+
+The isolated source passes all 80 new reference observations on memory, native SQLite, SQLite Key/Value and redb (320 comparisons), and the prior 67-observation information-view reference remains passing (268 comparisons). All 14 SQL privilege owner tests, four Execution constraint-view owner tests and 119 existing information-schema tests pass. Rustfmt, strict SQL/Execution/Engine library-and-test Clippy, the inventory verifier and repository policies pass. Automatic regression results remain required before merge.
