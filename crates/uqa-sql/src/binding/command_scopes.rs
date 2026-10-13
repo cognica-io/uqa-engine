@@ -81,7 +81,7 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<CommandScopes, SQLError> {
-        let (target, returning) =
+        let (target, returning, _) =
             self.command_expression_schema(routines, command, params, outer)?;
         let source = command
             .source_input()

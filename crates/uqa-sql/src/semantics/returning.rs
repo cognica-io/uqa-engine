@@ -74,14 +74,14 @@ pub fn expanded_returning_projections(
     returning: &[ProjectionPlan],
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
     let target = returning_target_schema(catalog, table)?;
-    expand_returning_target_stars(target.columns(), target_qualifier, aliases, returning)
-        .map(Cow::into_owned)
+    expand_returning_target_stars(target.columns(), target_qualifier, aliases, returning, true)
+        .map(|projections| projections.into_iter().map(Cow::into_owned).collect())
 }
 
 pub(crate) fn command_returning_projections<'a>(
     command: &'a crate::plan::CommandPlan,
     target: &RowSchema,
-) -> Result<Cow<'a, [ProjectionPlan]>, SQLError> {
+) -> Result<Vec<Cow<'a, ProjectionPlan>>, SQLError> {
     let aliases = command
         .returning_aliases()
         .ok_or_else(|| SQLError::Internal("command has no RETURNING namespace".into()))?;
@@ -90,7 +90,35 @@ pub(crate) fn command_returning_projections<'a>(
         command.target_qualifier().unwrap_or_default(),
         aliases,
         command.returning().unwrap_or_default(),
+        !matches!(command, crate::plan::CommandPlan::Merge(_)),
     )
+}
+
+pub(crate) fn command_returning_star_schema(
+    command: &crate::plan::CommandPlan,
+    target: &RowSchema,
+    source: Option<&RowSchema>,
+) -> Result<RowSchema, SQLError> {
+    if matches!(command, crate::plan::CommandPlan::Merge(_)) {
+        let source = source
+            .ok_or_else(|| SQLError::Internal("MERGE has no declared source scope".into()))?;
+        Ok(RowSchema::join(source, target, std::iter::empty()))
+    } else {
+        Ok(target.clone())
+    }
+}
+
+pub(crate) fn validate_returning_width(
+    returning: &[ProjectionPlan],
+    width: usize,
+) -> Result<(), SQLError> {
+    if !returning.is_empty() && width == 0 {
+        return Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "RETURNING must have at least one column".into(),
+        });
+    }
+    Ok(())
 }
 
 /// All RETURNING consumers expand target and image wildcards from the declared user columns. System columns remain individually addressable but are never wildcard outputs.
@@ -99,23 +127,17 @@ fn expand_returning_target_stars<'a>(
     target_qualifier: &str,
     aliases: &ReturningAliases,
     returning: &'a [ProjectionPlan],
-) -> Result<Cow<'a, [ProjectionPlan]>, SQLError> {
-    if !returning.iter().any(|projection| match &projection.expr {
-        crate::ScalarExpr::Star => true,
-        crate::ScalarExpr::QualifiedStar(qualifier) => {
-            qualifier == target_qualifier || qualifier == &aliases.old || qualifier == &aliases.new
-        }
-        _ => false,
-    }) {
-        return Ok(Cow::Borrowed(returning));
-    }
+    expand_bare_star: bool,
+) -> Result<Vec<Cow<'a, ProjectionPlan>>, SQLError> {
     let mut projections = Vec::with_capacity(returning.len().max(columns.len()));
     for projection in returning {
         match &projection.expr {
-            crate::ScalarExpr::Star => {
-                projections.extend(columns.iter().map(|column| ProjectionPlan {
-                    expr: crate::ScalarExpr::Column(column.clone()),
-                    alias: Some(column.clone()),
+            crate::ScalarExpr::Star if expand_bare_star => {
+                projections.extend(columns.iter().map(|column| {
+                    Cow::Owned(ProjectionPlan {
+                        expr: crate::ScalarExpr::qualified_column(target_qualifier, column),
+                        alias: Some(column.clone()),
+                    })
                 }));
             }
             crate::ScalarExpr::QualifiedStar(qualifier)
@@ -123,24 +145,18 @@ fn expand_returning_target_stars<'a>(
                     || qualifier == &aliases.old
                     || qualifier == &aliases.new =>
             {
-                projections.extend(columns.iter().map(|column| ProjectionPlan {
-                    expr: crate::ScalarExpr::QualifiedColumn {
-                        qualifier: qualifier.clone(),
-                        column: column.clone(),
-                    },
-                    alias: Some(column.clone()),
+                projections.extend(columns.iter().map(|column| {
+                    Cow::Owned(ProjectionPlan {
+                        expr: crate::ScalarExpr::qualified_column(qualifier, column),
+                        alias: Some(column.clone()),
+                    })
                 }));
             }
-            _ => projections.push(projection.clone()),
+            _ => projections.push(Cow::Borrowed(projection)),
         }
     }
-    if !returning.is_empty() && projections.is_empty() {
-        return Err(SQLError::Routine {
-            sqlstate: "42601".into(),
-            message: "RETURNING must have at least one column".into(),
-        });
-    }
-    Ok(Cow::Owned(projections))
+    validate_returning_width(returning, projections.len())?;
+    Ok(projections)
 }
 
 pub fn dml_statement_returning_schema(

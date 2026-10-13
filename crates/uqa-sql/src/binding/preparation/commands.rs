@@ -105,7 +105,7 @@ impl Preparation<'_> {
                 if let Some(predicate) = &update.predicate {
                     self.require_boolean(predicate, &input, subqueries, "WHERE")?;
                 }
-                let result = self.command_result(command, &target, &input)?;
+                let result = self.command_result(command, &target, &input, source.as_ref())?;
                 self.assignments(
                     &update.table,
                     &update.assignments,
@@ -122,13 +122,13 @@ impl Preparation<'_> {
             }
             CommandPlan::Merge(merge) => {
                 self.require_boolean(&merge.join_condition, &input, subqueries, "JOIN/ON")?;
-                let result = self.command_result(command, &target, &input)?;
+                let result = self.command_result(command, &target, &input, source.as_ref())?;
                 self.merge(merge, &target, &input, subqueries)?;
                 return Ok(result);
             }
             _ => {}
         }
-        self.command_result(command, &target, &input)
+        self.command_result(command, &target, &input, source.as_ref())
     }
 
     fn command_result(
@@ -136,6 +136,7 @@ impl Preparation<'_> {
         command: &CommandPlan,
         target: &RowSchema,
         input: &RowSchema,
+        source: Option<&RowSchema>,
     ) -> Result<Option<RowSchema>, SQLError> {
         let returning = command.returning().unwrap_or_default();
         if returning.is_empty() {
@@ -143,11 +144,22 @@ impl Preparation<'_> {
         }
         let returning =
             crate::semantics::returning::command_returning_projections(command, target)?;
+        let star =
+            crate::semantics::returning::command_returning_star_schema(command, target, source)?;
         let previous = self.scope.merge_returning;
         self.scope.merge_returning |= matches!(command, CommandPlan::Merge(_));
-        let result = self.projections(&returning, target, input, command.scalar_subqueries());
+        let result = self.projections(
+            returning.iter().map(AsRef::as_ref),
+            &star,
+            input,
+            command.scalar_subqueries(),
+        );
         self.scope.merge_returning = previous;
         let mut output = result?;
+        crate::semantics::returning::validate_returning_width(
+            command.returning().unwrap_or_default(),
+            output.columns.len(),
+        )?;
         self.resolve_targets(&mut output)?;
         Ok(Some(output.schema()))
     }

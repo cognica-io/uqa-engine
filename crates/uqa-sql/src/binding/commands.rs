@@ -7,8 +7,8 @@
 //! Static RETURNING schemas for command CTEs.
 
 use super::{
-    projection_columns, projection_star_columns, ColumnType, RowSchema, SQLError, SQLParam,
-    ScalarExpr, SchemaScope, SourcePlan,
+    projection_star_columns, ColumnType, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
+    SourcePlan,
 };
 use crate::plan::{CommandPlan, CtePlanBody};
 use crate::routines::RoutineResolution;
@@ -26,7 +26,7 @@ pub fn analyze_prepared_command_schema(
     scope.set_command_lookup_mode(command);
     let previous = scope.bind_cte_schemas(routines, command.ctes(), params, None)?;
     let result = (|| {
-        let (target, expression) =
+        let (target, expression, _) =
             scope.command_expression_schema(routines, command, params, None)?;
         let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
         let conflict_input = RowSchema::join(&expression, &excluded, std::iter::empty::<String>());
@@ -173,7 +173,7 @@ impl SchemaScope {
         command: &CommandPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
-    ) -> Result<(RowSchema, RowSchema), SQLError> {
+    ) -> Result<(RowSchema, RowSchema, RowSchema), SQLError> {
         let target = self.bind_command_target(routines, command, params)?;
         let source = command
             .source_input()
@@ -182,7 +182,12 @@ impl SchemaScope {
             })
             .transpose()?;
         let expression = Self::command_input_schema(command, &target, source.as_ref())?;
-        Ok((target, expression))
+        let star = crate::semantics::returning::command_returning_star_schema(
+            command,
+            &target,
+            source.as_ref(),
+        )?;
+        Ok((target, expression, star))
     }
 
     pub(super) fn command_input_schema(
@@ -213,7 +218,7 @@ impl SchemaScope {
     ) -> Result<RowSchema, SQLError> {
         let previous = self.bind_cte_schemas(routines, command.ctes(), params, None)?;
         let result = (|| {
-            let (target, expression) =
+            let (target, expression, star) =
                 self.command_expression_schema(routines, command, params, None)?;
             if let CommandPlan::Insert(insert) = command {
                 if let Some(source) = &insert.source {
@@ -222,16 +227,15 @@ impl SchemaScope {
             }
             let returning =
                 crate::semantics::returning::command_returning_projections(command, &target)?;
-            let labels = projection_columns(&returning);
             let mut columns = Vec::new();
             let mut types: Vec<Option<ColumnType>> = Vec::new();
             let mut records = Vec::new();
             let mut collations = super::projection::OutputCollations::default();
-            for (position, projection) in returning.iter().enumerate() {
+            for projection in &returning {
                 let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                     &expression
                 } else {
-                    &target
+                    &star
                 };
                 if let Some(star) = projection_star_columns(&projection.expr, expansion)? {
                     records.extend(
@@ -244,7 +248,7 @@ impl SchemaScope {
                         types.push(ty);
                     }
                 } else {
-                    columns.push(labels[position].clone());
+                    columns.push(crate::semantics::projection_label_at(projection));
                     let metadata = self.bind_projection_metadata(
                         routines,
                         &projection.expr,
@@ -257,6 +261,10 @@ impl SchemaScope {
                     records.push(metadata.record);
                 }
             }
+            crate::semantics::returning::validate_returning_width(
+                command.returning().unwrap_or_default(),
+                columns.len(),
+            )?;
             if let Some(error) = crate::semantics::virtual_relation_mutation_error(
                 self.catalog.as_ref(),
                 &self.resolution,
@@ -264,7 +272,7 @@ impl SchemaScope {
             )? {
                 return Err(error);
             }
-            for projection in returning.iter() {
+            for projection in &returning {
                 self.collations.validate_expression(&projection.expr)?;
             }
             Ok(collations

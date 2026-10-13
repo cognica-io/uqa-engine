@@ -6,7 +6,7 @@
 
 //! Query analysis follows `PostgreSQL`'s source, target, clause, and coercion order.
 
-use super::super::{analysis, overlay_outer_schema, projection_columns, projection_star_columns};
+use super::super::{analysis, overlay_outer_schema, projection_star_columns};
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
@@ -319,21 +319,20 @@ impl Preparation<'_> {
         result
     }
 
-    pub(super) fn projections(
+    pub(super) fn projections<'a>(
         &mut self,
-        projections: &[ProjectionPlan],
+        projections: impl IntoIterator<Item = &'a ProjectionPlan>,
         source: &RowSchema,
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<QueryOutput, SQLError> {
-        let labels = projection_columns(projections);
         let mut output = QueryOutput {
             columns: Vec::new(),
             types: Vec::new(),
             open: false,
             key_origins: Vec::new(),
         };
-        for (projection, label) in projections.iter().zip(labels) {
+        for projection in projections {
             let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                 input
             } else {
@@ -387,7 +386,9 @@ impl Preparation<'_> {
                         .collations
                         .record_target(&projection.expr, value.derivation);
                 }
-                output.columns.push(label);
+                output
+                    .columns
+                    .push(crate::semantics::projection_label_at(projection));
                 output.types.push(value);
             }
         }
