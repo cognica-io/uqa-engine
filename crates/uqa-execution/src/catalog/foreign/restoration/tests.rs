@@ -34,6 +34,10 @@ fn table(name: &str, persistence: RelationPersistence) -> StoredForeignTable {
     .unwrap()
     .0;
     table.persistence = persistence;
+    table.server_reference = Some(crate::catalog::foreign::ForeignServerReference {
+        oid: 70_000,
+        object_id: [8; 16],
+    });
     table
 }
 
@@ -98,7 +102,7 @@ fn durable_refresh_preserves_only_temporary_foreign_definitions_and_security() {
     );
     current.security.insert(removed.clone(), security);
     let mut restored = registry();
-    restored.retain_temporary(&current).unwrap();
+    restored.retain_session_relations(&current).unwrap();
     assert_eq!(restored.tables.len(), 1);
     assert_eq!(
         restored.tables[&temporary].persistence,
@@ -127,5 +131,27 @@ fn durable_refresh_preserves_only_temporary_foreign_definitions_and_security() {
     assert_eq!(merged.security[&temporary], current.security[&temporary]);
     assert!(!merged.definitions.contains_key(&removed));
     current.security.remove(&temporary);
-    assert!(restored.retain_temporary(&current).is_err());
+    assert!(restored.retain_session_relations(&current).is_err());
+}
+
+#[test]
+fn refresh_retains_an_unbound_declaration_until_its_server_is_attached() {
+    let relation = RelationIdentity::new("public", "declared");
+    let security = BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP);
+    let mut declared = table("public.declared", RelationPersistence::Permanent);
+    declared.server_reference = None;
+    let object_id = declared.object_id;
+    let mut current = registry();
+    current.tables.insert(relation.clone(), declared);
+    current.security.insert(relation.clone(), security.clone());
+    let mut restored = registry();
+    restored.retain_session_relations(&current).unwrap();
+    assert_eq!(restored.tables[&relation].object_id, object_id);
+    assert_eq!(restored.security[&relation], security);
+    current.tables.get_mut(&relation).unwrap().server_reference =
+        table("public.declared", RelationPersistence::Permanent).server_reference;
+    let mut restored = registry();
+    restored.retain_session_relations(&current).unwrap();
+    assert!(restored.tables.is_empty());
+    assert!(restored.security.is_empty());
 }

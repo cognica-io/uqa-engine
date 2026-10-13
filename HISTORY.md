@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Make foreign-table relation and row/array identities visible while binding defaults, before the server association. Retain in-progress declarations across catalog refreshes and restore all foreign row descriptors before validating persisted expressions, preserving rollback, independent sessions and reopened composite defaults.
+
 - Declare a table and its row/array types before binding defaults and constraints, so references to its own identity resolve with PostgreSQL search-path behavior. Preserve rollback, cross-session publication and persistent defaults. Inherit untyped partition column options before selecting collations, avoiding an unresolved-type panic.
 
 - Retain named relation types and stable whole-row or system attribute identities in SQL catalog expression nodes. Preserve exact PostgreSQL nodes and reconstructed SQL through declared column changes, quoted names and relation renames.

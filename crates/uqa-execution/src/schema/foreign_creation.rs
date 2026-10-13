@@ -5,16 +5,14 @@
 //
 
 //! Foreign server and table creation inside the caller's existing catalog transaction.
-use crate::catalog::{foreign::StoredForeignTable, security::BoundTableSecurity};
 use crate::schema::{
     foreign_table_alteration::ForeignTableAlterPublication,
     publication::dependencies::CatalogPublicationChanges,
     sequences::{
         implicit::{self, ImplicitSequenceContext},
-        ownership::{self, ImplicitOwnershipContext},
+        ownership::ImplicitOwnershipContext,
     },
 };
-use crate::statement::prepared::invalidation::PreparedCatalogChange;
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -26,6 +24,7 @@ use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub mod entry;
 mod servers;
+mod tables;
 mod wrapper_functions;
 mod wrappers;
 pub use crate::catalog::foreign::reads::{
@@ -221,87 +220,40 @@ impl ForeignCreationContext<'_> {
             &mut statement.columns,
             persistence,
         )?;
-        let catalog_oids = self.prepare_foreign_table_definition(&relation, &mut statement)?;
-        let server_reference = self
-            .registry
-            .servers()
-            .get(&statement.server_name)
-            .map(crate::catalog::foreign::ForeignServerReference::from)
-            .ok_or_else(|| {
-                uqa_sql::schema::foreign_servers::missing_server(&statement.server_name)
-            })?;
+        let (mut table, declaration) =
+            self.declare_foreign_relation(&relation, &target.owner, &mut statement, persistence)?;
+        self.prepare_foreign_table_definition(&relation, &mut statement, table.relation_oids())?;
+        table.server_reference = Some(
+            self.registry
+                .servers()
+                .get(&statement.server_name)
+                .map(crate::catalog::foreign::ForeignServerReference::from)
+                .ok_or_else(|| {
+                    uqa_sql::schema::foreign_servers::missing_server(&statement.server_name)
+                })?,
+        );
         self.validate_foreign_table_options(&statement, target.sql_options)?;
-        self.creation.reserve_row_type_name(name)?;
-        let object_id = (self.allocate_identity)().map_err(|error| {
-            uqa_sql::SQLError::Internal(format!(
-                "allocate foreign table `{name}` object identity: {error}"
-            ))
-        })?;
-        let owner_columns = statement.columns.clone();
-        let options: BTreeMap<_, _> = statement.options.iter().cloned().collect();
-        let option_order = if target.sql_options {
+        table.option_order = if target.sql_options {
             statement
                 .options
                 .into_iter()
                 .map(|(name, _)| name)
                 .collect()
         } else {
-            options.keys().cloned().collect()
+            table.options.keys().cloned().collect()
         };
-        let table = StoredForeignTable {
-            dropped_attributes: Vec::new(),
-            name: name.to_string(),
-            persistence,
-            object_id,
-            catalog_oids: Some(catalog_oids),
-            row_type_array_name: Some(crate::schema::types::arrays::reserve_array_name(
-                &self.creation,
-                &relation.schema,
-                &relation.name,
-            )?),
-            server_name: statement.server_name,
-            server_reference: Some(server_reference),
-            columns: statement.columns,
-            checks: statement.checks,
-            options,
-            option_order,
-        };
-        let security = BoundTableSecurity::owner(target.owner.identity());
-        let mut tables = self.publication.tables_write();
-        let mut table_security = self.publication.security_write();
-        if tables.contains_key(&relation) || table_security.contains_key(&relation) {
-            return Err(uqa_sql::SQLError::Internal(format!(
-                "foreign table `{name}` changed during creation"
-            )));
-        }
-        table
-            .persist(self.catalog, &relation, &security)
-            .map_err(|error| {
-                uqa_sql::SQLError::Internal(format!("persist foreign table `{name}`: {error}"))
-            })?;
-        tables.insert(relation.clone(), table);
-        table_security.insert(relation, security);
-        drop(table_security);
-        drop(tables);
-        ownership::attach_column_owners(&self.ownership, name, object_id, &owner_columns)?;
-        self.changes.catalog_registry_changed();
-        self.changes
-            .prepared_catalog_changed(PreparedCatalogChange::Relation(catalog_oids.relation));
+        table.columns = statement.columns;
+        table.checks = statement.checks;
+        self.publish_foreign_relation(&relation, &target.owner, table)?;
+        declaration.finish();
         Ok(())
     }
     fn prepare_foreign_table_definition(
         &self,
         relation: &RelationIdentity,
         statement: &mut uqa_sql::ast::CreateForeignTable,
-    ) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, SQLError> {
-        // `DefineRelation` allocates the relation's OIDs before those of its constraints.
-        let catalog_oids = self
-            .identities
-            .allocator(crate::catalog::identity::allocate_catalog_object_id)
-            .allocate_relation_oids(
-                uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
-                relation,
-            )?;
+        catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
+    ) -> Result<(), SQLError> {
         let not_nulls = statement.not_null_declarations.take().map(|declarations| {
             uqa_sql::schema::foreign_tables::ForeignTableNotNulls {
                 relation_oid: catalog_oids.relation,
@@ -324,7 +276,7 @@ impl ForeignCreationContext<'_> {
             ),
             not_nulls,
         )?;
-        Ok(catalog_oids)
+        Ok(())
     }
     pub fn register_deferred_foreign_table(
         &self,

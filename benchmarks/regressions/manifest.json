@@ -5154,6 +5154,76 @@
       "capability": "Table declaration identity and publication",
       "workload": "Existing independent PostgreSQL relation, default, constraint and inherited partition identity transcript.",
       "invariant": "Preserve catalog OID allocation order and partition inheritance through the earlier relation declaration."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "foreign_declarations_bind_defaults_before_the_server",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Foreign declaration identity and publication",
+      "workload": "Thirty-one PostgreSQL foreign declaration observations on four providers and five observations after actual persistent reopen.",
+      "invariant": "The actual relation, row and array types resolve before default analysis; failed declarations and outer rollback remove names while committed defaults survive reopen."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "foreign_declaration_visibility_follows_commit",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/table_creation_order.rs",
+      "capability": "Foreign declaration identity and publication",
+      "workload": "Twenty-four observations from two PostgreSQL sessions replayed on all three persistent providers.",
+      "invariant": "Peers cannot see uncommitted or rolled-back foreign declarations; committed names, identities and defaults become visible at transaction completion."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporary_foreign_publication_leaves_durable_definitions_unchanged",
+      "cases": 1,
+      "case_names": [
+        "temporary_foreign_publication_leaves_durable_definitions_unchanged"
+      ],
+      "source": "crates/uqa-execution/src/catalog/foreign/restoration/tests.rs",
+      "capability": "Foreign declaration identity and publication",
+      "workload": "Retained session declarations, temporary and durable foreign definitions with their security metadata.",
+      "invariant": "Temporary publication preserves durable data; same-session refresh retains unbound declarations and security while replacing bound permanent definitions from the selected durable view."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_refresh_preserves_only_temporary_foreign_definitions_and_security",
+      "cases": 1,
+      "case_names": [
+        "durable_refresh_preserves_only_temporary_foreign_definitions_and_security"
+      ],
+      "source": "crates/uqa-execution/src/catalog/foreign/restoration/tests.rs",
+      "capability": "Foreign declaration identity and publication",
+      "workload": "Retained session declarations, temporary and durable foreign definitions with their security metadata.",
+      "invariant": "Temporary publication preserves durable data; same-session refresh retains unbound declarations and security while replacing bound permanent definitions from the selected durable view."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "refresh_retains_an_unbound_declaration_until_its_server_is_attached",
+      "cases": 1,
+      "case_names": [
+        "refresh_retains_an_unbound_declaration_until_its_server_is_attached"
+      ],
+      "source": "crates/uqa-execution/src/catalog/foreign/restoration/tests.rs",
+      "capability": "Foreign declaration identity and publication",
+      "workload": "Retained session declarations, temporary and durable foreign definitions with their security metadata.",
+      "invariant": "Temporary publication preserves durable data; same-session refresh retains unbound declarations and security while replacing bound permanent definitions from the selected durable view."
     }
   ]
 }

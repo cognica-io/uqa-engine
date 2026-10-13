@@ -81,7 +81,7 @@ pub fn merge_private_foreign(
             }
         }
     }
-    crate::catalog::foreign::restoration::merge_temporary(
+    crate::catalog::foreign::restoration::merge_session_relations(
         current_definitions,
         current,
         Arc::make_mut(&mut latest_definitions),

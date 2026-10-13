@@ -778,7 +778,7 @@ impl Engine {
         self.durable.named_analyzers.write().clear();
         self.durable.foreign_wrappers.write().clear();
         self.durable.foreign_servers.write().clear();
-        uqa_execution::catalog::foreign::restoration::retain_temporary_registry(self);
+        uqa_execution::catalog::foreign::restoration::retain_session_registry(self);
         self.durable.builtin_routine_security.write().clear();
         self.durable.system_relation_security.write().clear();
         self.durable.sql_user_functions.write().clear();
