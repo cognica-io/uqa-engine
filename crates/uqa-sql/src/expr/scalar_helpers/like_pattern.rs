@@ -19,6 +19,7 @@ use uqa_core::{
 /// A LIKE/ILIKE pattern compiled once for repeated evaluation. ASCII values use a byte matcher; Unicode retains character-oriented `_` semantics and contextual lowercase rules.
 pub struct CompiledLikePattern {
     case_insensitive: bool,
+    binary: bool,
     pattern_chars: Produced<Vec<LikePatternToken<char>>>,
     pattern_ascii: Option<Produced<Vec<LikePatternToken<u8>>>>,
 }
@@ -39,10 +40,75 @@ impl CompiledLikePattern {
     }
 
     pub fn from_value(pattern: &Value, case_insensitive: bool) -> Result<Self> {
-        Ok(Self::new(
-            &crate::expr::value_to_string(pattern)?,
+        Self::from_value_with_escape_with_control(
+            pattern,
             case_insensitive,
-        ))
+            None,
+            &ProductionControl::uncontrolled(),
+        )
+    }
+
+    /// Compile the selected text or bytea pattern without converting binary data to display text.
+    pub fn from_value_with_escape_with_control(
+        pattern: &Value,
+        case_insensitive: bool,
+        escape: Option<&Value>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        if let Some(pattern) = crate::expr::datums::binary_payload(pattern, control)? {
+            if case_insensitive {
+                return Err(SQLError::Internal("bytea has no ILIKE operator".into()));
+            }
+            let escape = escape
+                .map(|value| crate::expr::datums::binary_payload(value, control))
+                .transpose()?;
+            let escape = match escape.as_ref() {
+                None => Some(b'\\'),
+                Some(Some(bytes)) => match bytes.bytes() {
+                    [] => None,
+                    [byte] => Some(*byte),
+                    _ => return Err(invalid_escape()),
+                },
+                Some(None) => {
+                    return Err(SQLError::Internal(
+                        "bytea escape has an invalid carrier".into(),
+                    ))
+                }
+            };
+            let mut tokens = ProductionVec::new(*control);
+            let mut bytes = pattern.bytes().iter().copied();
+            while let Some(byte) = bytes.next() {
+                control.check()?;
+                let token = if escape == Some(byte) {
+                    bytes
+                        .next()
+                        .map_or(LikePatternToken::DanglingEscape, LikePatternToken::Literal)
+                } else {
+                    match byte {
+                        b'%' => LikePatternToken::AnyMany,
+                        b'_' => LikePatternToken::AnyOne,
+                        other => LikePatternToken::Literal(other),
+                    }
+                };
+                tokens.push_copy(token)?;
+            }
+            return Ok(Self {
+                case_insensitive,
+                binary: true,
+                pattern_chars: ProductionVec::new(*control).finish()?,
+                pattern_ascii: Some(tokens.finish()?),
+            });
+        }
+        let pattern = value_to_string_with_control(pattern, control)?;
+        let escape = escape
+            .map(|value| value_to_string_with_control(value, control))
+            .transpose()?;
+        Self::with_escape_with_control(
+            &pattern,
+            case_insensitive,
+            escape.as_deref().map(String::as_str),
+            control,
+        )
     }
 
     pub fn with_escape(
@@ -93,6 +159,7 @@ impl CompiledLikePattern {
         };
         Ok(Self {
             case_insensitive,
+            binary: false,
             pattern_chars,
             pattern_ascii,
         })
@@ -122,7 +189,7 @@ impl CompiledLikePattern {
         if let Some(pattern) = self
             .pattern_ascii
             .as_deref()
-            .filter(|_| haystack.is_ascii())
+            .filter(|_| self.binary || haystack.is_ascii())
         {
             return wildcard_match(haystack.as_bytes(), pattern, control);
         }
@@ -147,10 +214,26 @@ impl CompiledLikePattern {
         haystack: &Value,
         control: &ProductionControl<'_>,
     ) -> Result<bool> {
+        if self.binary {
+            let bytes =
+                crate::expr::datums::binary_payload(haystack, control)?.ok_or_else(|| {
+                    SQLError::Internal("bytea LIKE source has an invalid carrier".into())
+                })?;
+            return wildcard_match(
+                bytes.bytes(),
+                self.pattern_ascii
+                    .as_deref()
+                    .expect("binary pattern tokens"),
+                control,
+            );
+        }
         match haystack {
-            Value::Str(text) => self.try_is_match_with_control(text, control),
-            Value::FixedChar(text) => {
-                self.try_is_match_with_control(text.trim_end_matches(' '), control)
+            Value::Datum(datum) => self.try_matches_value_with_control(
+                &*crate::expr::datums::read_with_control(datum, control)?,
+                control,
+            ),
+            Value::Str(text) | Value::FixedChar(text) => {
+                self.try_is_match_with_control(text, control)
             }
             Value::Null => self.try_is_match_with_control("", control),
             other => self
@@ -159,19 +242,25 @@ impl CompiledLikePattern {
     }
 }
 
-pub(super) fn escape_character(escape: Option<&str>) -> Result<Option<char>> {
+pub(in crate::expr) fn escape_character(escape: Option<&str>) -> Result<Option<char>> {
     let Some(escape) = escape else {
         return Ok(Some('\\'));
     };
     let mut characters = escape.chars();
     let first = characters.next();
     if characters.next().is_some() {
-        return Err(SQLError::Routine {
-            sqlstate: "22025".into(),
-            message: "invalid escape string".into(),
-        });
+        return Err(invalid_escape());
     }
     Ok(first)
+}
+
+pub(in crate::expr) fn invalid_escape() -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "22025".into(),
+        message: "invalid escape string".into(),
+        detail: None,
+        hint: Some("Escape string must be empty or one character.".into()),
+    }
 }
 
 fn compile(

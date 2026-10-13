@@ -49,7 +49,8 @@ pub(super) fn eval_core_functions_with_control(
         "upper" | "lower" | "casefold" | "length" | "char_length" | "character_length"
         | "octet_length" | "trim" | "btrim" | "ltrim" | "rtrim" | "initcap" | "reverse"
         | "concat_op" | "replace" | "substring" | "substr" | "left" | "right" | "starts_with"
-        | "position" | "strpos" | "ascii" | "like" | "ilike" | "chr" => text::evaluate,
+        | "position" | "strpos" | "ascii" | "like" | "ilike" | "chr" | "like_escape"
+        | "similar_to_escape" => text::evaluate,
         _ => return None,
     };
     Some(

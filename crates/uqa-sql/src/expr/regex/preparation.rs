@@ -139,13 +139,25 @@ fn postgres_character_class_regex(
     while let Some(&character) = characters.get(position) {
         position += 1;
         if character == '\\' {
-            output.push(character)?;
             if let Some(&escaped) = characters.get(position) {
                 position += 1;
-                output.push(escaped)?;
+                match escaped {
+                    'b' => output.push_str(r"\x08")?,
+                    'B' => output.push_str(r"\\")?,
+                    escaped => {
+                        if escaped.is_ascii_alphanumeric()
+                            || regex_syntax::is_meta_character(escaped)
+                        {
+                            output.push('\\')?;
+                        }
+                        output.push(escaped)?;
+                    }
+                }
                 if in_bracket {
                     bracket_can_close = true;
                 }
+            } else {
+                output.push('\\')?;
             }
             continue;
         }

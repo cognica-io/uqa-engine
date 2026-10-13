@@ -110,6 +110,8 @@ mod numeric_power_statistics;
 mod ordered_mode;
 #[path = "pg18_semantics/pattern_escape.rs"]
 mod pattern_escape;
+#[path = "pg18_semantics/pattern_operators.rs"]
+mod pattern_operators;
 #[path = "pg18_semantics/pg18_additions.rs"]
 mod pg18_additions;
 #[path = "pg18_semantics/range_elements.rs"]

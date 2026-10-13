@@ -27,12 +27,19 @@ FROM predictions;
 
 The conditions of `WHERE`, `HAVING`, `JOIN ... ON`, a searched `CASE`, `AND`, `OR`, `NOT`, and an aggregate's `FILTER` must be `boolean` or a domain over it, as in PostgreSQL: any other type is `42804` (`argument of WHERE must be type boolean, not type integer`), and a quoted literal whose type is not yet known is read as boolean input, so `'false'`, `'no'`, `'off'`, `'0'`, and their prefixes are false and text that is not a boolean is `22P02`. The operand of a simple `CASE` is compared with each value instead. The retrieval predicates in [Retrieval](06-retrieval.md) are conditions as well.
 
-`LIKE`, `ILIKE`, and `SIMILAR TO` accept `ESCAPE` with a runtime text expression. Omitting the clause uses PostgreSQL's default backslash escape, `ESCAPE ''` disables escaping, `ESCAPE NULL` produces NULL, and every nonempty escape must contain exactly one character. Escaped wildcard and regular-expression metacharacters are treated literally, while escaped alphanumeric characters in `SIMILAR TO` retain the implemented PostgreSQL regular-expression escape behavior.
+`LIKE`, `ILIKE`, `SIMILAR TO`, `~`, `~*`, `!~` and `!~*` select their PostgreSQL operator from the declared operands. Invalid operand types report `42883`. Character input retains its padding for native pattern matching. `LIKE` also accepts bytea operands: `_` consumes one byte, including a non-UTF-8 byte, and `%` consumes any byte sequence. SQL functions and host callbacks with pattern-like names retain their ordinary call semantics. Stored views preserve both kinds of identity and the distinction between a negative operator and an explicit outer `NOT`.
+
+`LIKE`, `ILIKE`, and `SIMILAR TO` accept a runtime `ESCAPE` expression; bytea LIKE requires a bytea escape. Omitting the clause uses PostgreSQL's default backslash escape, `ESCAPE ''` disables escaping, and `ESCAPE NULL` produces NULL. A nonempty text escape contains exactly one character; a binary escape contains one byte. Invalid escapes report `22025` with PostgreSQL's hint. Escaped wildcard and regular-expression metacharacters are literal, while escaped alphanumeric characters in `SIMILAR TO` retain PostgreSQL regular-expression escape behavior. Escape helpers remain independently evaluated strict expressions, including when the match input is NULL.
 
 ```sql execute
 SELECT value
 FROM (VALUES ('a_b'), ('axb')) AS candidates(value)
 WHERE value LIKE 'a!_b' ESCAPE '!';
+```
+
+```sql execute
+SELECT '\xff'::bytea LIKE '_'::bytea AS binary_match,
+       'a'::character(4) LIKE 'a' AS padded_match;
 ```
 
 ## Concatenation

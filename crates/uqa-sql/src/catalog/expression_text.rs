@@ -54,6 +54,11 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
             filter,
             ..
         } => {
+            if let Some(crate::ast::FunctionDispatch::Pattern { operator, .. }) =
+                binding.as_ref().and_then(|binding| binding.dispatch)
+            {
+                return crate::render::pattern_sql(operator, args, schema_expr_text);
+            }
             if binding
                 .as_ref()
                 .and_then(|binding| binding.dispatch)

@@ -33,7 +33,27 @@ pub fn bind_routine_definition_dependencies(
     def: &mut CreateFunction,
     mode: RoutineCompilationMode,
 ) -> Result<bool, SQLError> {
-    let mut changed = bind_sql_standard_body_relations(context, sources, def, mode)?;
+    let mut changed = false;
+    if matches!(mode, RoutineCompilationMode::Persisted) {
+        if let FunctionBody::Statements(statements) = &mut def.body {
+            for statement in statements {
+                changed |= crate::binding::legacy_patterns::restore_statement(
+                    statement,
+                    context.routines,
+                )?;
+            }
+        }
+        for default in def
+            .params
+            .iter_mut()
+            .filter_map(|parameter| parameter.default.as_mut())
+        {
+            changed |=
+                crate::binding::legacy_patterns::restore_expression(default, context.routines)
+                    .map_err(SQLError::Internal)?;
+        }
+    }
+    changed |= bind_sql_standard_body_relations(context, sources, def, mode)?;
     for parameter in &mut def.params {
         let Some(default) = &mut parameter.default else {
             continue;

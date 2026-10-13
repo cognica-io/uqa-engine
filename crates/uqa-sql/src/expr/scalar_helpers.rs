@@ -82,7 +82,7 @@ pub(super) fn point_xy(v: &Value, control: &ProductionControl<'_>) -> Result<(f6
 }
 
 pub(super) mod casing;
-mod like_pattern;
+pub(in crate::expr) mod like_pattern;
 pub use like_pattern::CompiledLikePattern;
 
 #[cfg(test)]
@@ -348,38 +348,7 @@ pub(super) fn similar_to_regex_with_control(
 }
 
 fn push_similar_escaped(output: &mut ProductionString<'_>, character: char) -> Result<()> {
-    match character {
-        'b' => {
-            output.push_str(r"\x08")?;
-            return Ok(());
-        }
-        'B' => {
-            output.push_str(r"\\")?;
-            return Ok(());
-        }
-        _ => {}
-    }
-    if character.is_ascii_alphanumeric()
-        || matches!(
-            character,
-            '\\' | '.'
-                | '^'
-                | '$'
-                | '|'
-                | '?'
-                | '*'
-                | '+'
-                | '('
-                | ')'
-                | '{'
-                | '}'
-                | '['
-                | ']'
-                | '-'
-        )
-    {
-        output.push('\\')?;
-    }
+    output.push('\\')?;
     output.push(character)?;
     Ok(())
 }

@@ -151,9 +151,13 @@ pub fn fdw_predicate(expr: &ScalarExpr, params: &[SQLParam]) -> Option<uqa_fdw::
             },
             value: Value::Null,
         }),
-        ScalarExpr::Func { name, args, .. } => fdw_like_predicate(name, args, false, params),
+        ScalarExpr::Func { binding, args, .. } => {
+            fdw_like_predicate(binding.as_ref(), args, false, params)
+        }
         ScalarExpr::Not(inner) => match inner.as_ref() {
-            ScalarExpr::Func { name, args, .. } => fdw_like_predicate(name, args, true, params),
+            ScalarExpr::Func { binding, args, .. } => {
+                fdw_like_predicate(binding.as_ref(), args, true, params)
+            }
             _ => None,
         },
         _ => None,
@@ -161,7 +165,7 @@ pub fn fdw_predicate(expr: &ScalarExpr, params: &[SQLParam]) -> Option<uqa_fdw::
 }
 
 pub fn fdw_like_predicate(
-    name: &str,
+    binding: Option<&uqa_sql::ast::FunctionBinding>,
     args: &[ScalarExpr],
     negated: bool,
     params: &[SQLParam],
@@ -169,13 +173,17 @@ pub fn fdw_like_predicate(
     if args.len() != 2 {
         return None;
     }
-    let lower = name.to_ascii_lowercase();
-    let operator = match (lower.as_str(), negated) {
-        ("like", false) => uqa_fdw::PredicateOp::Like,
-        ("like", true) => uqa_fdw::PredicateOp::NotLike,
-        ("ilike", false) => uqa_fdw::PredicateOp::ILike,
-        ("ilike", true) => uqa_fdw::PredicateOp::NotILike,
-        _ => return None,
+    let uqa_sql::ast::FunctionDispatch::Pattern { operator, .. } = binding?.dispatch? else {
+        return None;
+    };
+    if !operator.is_like() {
+        return None;
+    }
+    let operator = match (operator.case_insensitive(), operator.negated() != negated) {
+        (false, false) => uqa_fdw::PredicateOp::Like,
+        (false, true) => uqa_fdw::PredicateOp::NotLike,
+        (true, false) => uqa_fdw::PredicateOp::ILike,
+        (true, true) => uqa_fdw::PredicateOp::NotILike,
     };
     let value = fdw_const_value(&args[1], params)?;
     let Value::Str(pattern) = &value else {

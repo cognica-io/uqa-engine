@@ -63,6 +63,9 @@ pub(super) fn evaluate(
             string(output.finish()?, control)
         }
         "like" | "ilike" => like(args, name == "ilike", control),
+        "like_escape" | "similar_to_escape" => {
+            crate::expr::pattern::escape(name == "similar_to_escape", args, control)
+        }
         _ => unreachable!("text family membership was checked"),
     }
 }
@@ -468,15 +471,10 @@ fn like(
     if matches!(args[1], Value::Null) || matches!(args.get(2), Some(Value::Null)) {
         return plain(Value::Null, control);
     }
-    let escape = args
-        .get(2)
-        .map(|value| value_to_string_with_control(value, control))
-        .transpose()?;
-    let source = value_to_string_with_control(&args[1], control)?;
-    let pattern = CompiledLikePattern::with_escape_with_control(
-        &source,
+    let pattern = CompiledLikePattern::from_value_with_escape_with_control(
+        &args[1],
         insensitive,
-        escape.as_deref().map(String::as_str),
+        args.get(2),
         control,
     )?;
     if matches!(args[0], Value::Null) {

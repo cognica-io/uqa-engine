@@ -106,6 +106,8 @@ impl ForeignSchemaContext<'_> {
         allocate: &mut CatalogIdentityAllocator<'_>,
     ) -> Result<(), SQLError> {
         validate_foreign_table_schema_envelope(columns)?;
+        crate::binding::legacy_patterns::restore_schema(columns, checks, self.types)
+            .map_err(SQLError::Internal)?;
         for column in columns.iter_mut() {
             for expression in [column.default.as_mut(), column.check.as_mut()]
                 .into_iter()

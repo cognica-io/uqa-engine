@@ -79,7 +79,11 @@ pub(super) fn evaluate(
     if args.iter().any(|value| matches!(value, Value::Null)) {
         return plain(Value::Null, control);
     }
-    let input = value_to_string_with_control(&args[0], control)?;
+    let input = if matches!(name, "regex_match_op" | "regex_imatch_op") {
+        pattern_input(&args[0], control)?
+    } else {
+        value_to_string_with_control(&args[0], control)?
+    };
     let pattern = value_to_string_with_control(&args[1], control)?;
     match name {
         "regexp_count" => count(&input, &pattern, args, control),
@@ -206,7 +210,18 @@ fn similar(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
     if matches!(args[0], Value::Null) {
         return plain(Value::Null, control);
     }
-    let input = value_to_string_with_control(&args[0], control)?;
+    let input = pattern_input(&args[0], control)?;
     let regex = compile(&pattern, "", false, control)?;
     plain(Value::Bool(regex.is_match(&input)), control)
+}
+
+fn pattern_input(value: &Value, control: &ProductionControl<'_>) -> Result<Produced<String>> {
+    match value {
+        Value::FixedChar(text) => control.copy_text(text).map_err(Into::into),
+        Value::Datum(datum) => pattern_input(
+            &*crate::expr::datums::read_with_control(datum, control)?,
+            control,
+        ),
+        _ => value_to_string_with_control(value, control),
+    }
 }

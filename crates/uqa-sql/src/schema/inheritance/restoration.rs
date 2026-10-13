@@ -106,9 +106,13 @@ pub fn restore_composite_constructors(
     {
         for expression in &mut spec.keys {
             changed |= expression.upgrade_legacy_serialized_dispatches();
-            if crate::type_resolution::composite_rows::expression_requires_binding(
-                expression, catalog,
-            )? {
+            let pattern = crate::binding::legacy_patterns::restore_expression(expression, catalog)
+                .map_err(SQLError::Internal)?;
+            if pattern
+                || crate::type_resolution::composite_rows::expression_requires_binding(
+                    expression, catalog,
+                )?
+            {
                 *expression = catalog
                     .plan_schema_expression(expression, columns)?
                     .expression;

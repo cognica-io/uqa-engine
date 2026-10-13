@@ -39,6 +39,77 @@ fn schema(names: &[&str]) -> RowSchema {
 }
 
 #[test]
+fn native_pattern_helpers_keep_compiled_projection_matching_and_one_field_read() {
+    for (source, ty, value, expected) in [
+        (
+            "x LIKE 'a!_b' ESCAPE '!'",
+            ColumnType::Text,
+            Value::Str("a_b".into()),
+            true,
+        ),
+        (
+            "x ILIKE 'a!_b' ESCAPE '!'",
+            ColumnType::Text,
+            Value::Str("A_B".into()),
+            true,
+        ),
+        (
+            "x NOT LIKE 'a%'",
+            ColumnType::Text,
+            Value::Str("A_b".into()),
+            true,
+        ),
+        (
+            "x LIKE 'a'",
+            ColumnType::Character(4),
+            Value::FixedChar("a   ".into()),
+            false,
+        ),
+        (
+            "x LIKE '_'::bytea",
+            ColumnType::Bytea,
+            Value::Bytes(vec![0xff]),
+            true,
+        ),
+        (
+            "x NOT LIKE '_'::bytea",
+            ColumnType::Bytea,
+            Value::Bytes(vec![0, 1]),
+            true,
+        ),
+    ] {
+        let schema = RowSchema::with_types(vec!["x".into()], vec![Some(ty)]);
+        let predicate = ProjectedPredicate::compile_with_schema(&expression(source), &schema, &[])
+            .unwrap()
+            .unwrap();
+        for _ in 0..3 {
+            let fields = CountedFields {
+                values: std::slice::from_ref(&value),
+                reads: Cell::new(0),
+            };
+            assert_eq!(
+                keep_fields(&predicate.expression, &fields).unwrap(),
+                expected,
+                "{source}"
+            );
+            assert_eq!(fields.reads.get(), 1, "{source}");
+        }
+    }
+}
+
+#[test]
+fn ordinary_pattern_named_calls_do_not_become_projection_matchers() {
+    let schema = RowSchema::with_types(vec!["x".into()], vec![Some(ColumnType::Text)]);
+    for source in ["like(x, 'a%')", "ilike(x, 'a%')", "public.like(x, 'a%')"] {
+        assert!(
+            ProjectedPredicate::compile_bound(&expression(source), &schema, &[])
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+#[test]
 fn parsed_analytical_ranges_read_each_needed_field_once() {
     let schema = schema(&["ship_day", "discount", "quantity"]);
     // The compiler expands BETWEEN before binding, and Planner flattens AND.

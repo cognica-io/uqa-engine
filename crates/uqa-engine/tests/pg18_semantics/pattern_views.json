@@ -1,0 +1,982 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE TABLE pattern_source(id integer PRIMARY KEY, t text, c character(4), b bytea, n name)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO pattern_source VALUES (1,'a_b','a','\\xff','a'), (2,'A_b','A','\\x0001','A'), (3,NULL,NULL,NULL,NULL)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW native_patterns AS SELECT id,t LIKE 'a%' AS l,t NOT LIKE 'a%' AS nl,t ILIKE 'a%' AS il,t NOT ILIKE 'a%' AS nil,t ~ '^a' AS r,t !~ '^a' AS nr,t ~* '^a' AS ri,t !~* '^a' AS nri,t LIKE 'a!_b' ESCAPE '!' AS e,t SIMILAR TO 'a!_b' ESCAPE '!' AS s,c LIKE 'a' AS padded,b LIKE '_'::bytea AS binary,n LIKE 'a' AS named FROM pattern_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM native_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "nl",
+            "il",
+            "nil",
+            "r",
+            "nr",
+            "ri",
+            "nri",
+            "e",
+            "s",
+            "padded",
+            "binary",
+            "named"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "t",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE t LIKE 'a%' ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE t NOT LIKE 'a%' ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE t ILIKE 'a%' ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE t NOT ILIKE 'a%' ORDER BY id",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE t LIKE 'a!_b' ESCAPE '!' ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE c LIKE 'a' ORDER BY id",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE b LIKE '_'::bytea ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM pattern_source WHERE b NOT LIKE '_'::bytea ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('native_patterns'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (t ~~ 'a%'::text) AS l,\n    (t !~~ 'a%'::text) AS nl,\n    (t ~~* 'a%'::text) AS il,\n    (t !~~* 'a%'::text) AS nil,\n    (t ~ '^a'::text) AS r,\n    (t !~ '^a'::text) AS nr,\n    (t ~* '^a'::text) AS ri,\n    (t !~* '^a'::text) AS nri,\n    (t ~~ like_escape('a!_b'::text, '!'::text)) AS e,\n    (t ~ similar_to_escape('a!_b'::text, '!'::text)) AS s,\n    (c ~~ 'a'::text) AS padded,\n    (b ~~ '\\x5f'::bytea) AS \"binary\",\n    (n ~~ 'a'::text) AS named\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('native_patterns'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    t ~~ 'a%'::text AS l,\n    t !~~ 'a%'::text AS nl,\n    t ~~* 'a%'::text AS il,\n    t !~~* 'a%'::text AS nil,\n    t ~ '^a'::text AS r,\n    t !~ '^a'::text AS nr,\n    t ~* '^a'::text AS ri,\n    t !~* '^a'::text AS nri,\n    t ~~ like_escape('a!_b'::text, '!'::text) AS e,\n    t ~ similar_to_escape('a!_b'::text, '!'::text) AS s,\n    c ~~ 'a'::text AS padded,\n    b ~~ '\\x5f'::bytea AS \"binary\",\n    n ~~ 'a'::text AS named\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.\"like\"(text,text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.regex_match_op(text,text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.like_escape(text,text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT $1 $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW ordinary_patterns AS SELECT id,public.\"like\"(t,t) AS l,public.regex_match_op(t,t) AS r FROM pattern_source",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM native_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "nl",
+            "il",
+            "nil",
+            "r",
+            "nr",
+            "ri",
+            "nri",
+            "e",
+            "s",
+            "padded",
+            "binary",
+            "named"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "t",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM ordinary_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f",
+              "f"
+            ],
+            [
+              "2",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a' LIKE public.like_escape('a','ignored')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE binary_pattern(bytea,bytea) AS SELECT $1 LIKE $2 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE binary_pattern('\\xff','_')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE binary_pattern('\\x0001','_')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE binary_pattern",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION public.\"like\"(text,text) RENAME TO ordinary_like",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM ordinary_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f",
+              "f"
+            ],
+            [
+              "2",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM native_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "nl",
+            "il",
+            "nil",
+            "r",
+            "nr",
+            "ri",
+            "nri",
+            "e",
+            "s",
+            "padded",
+            "binary",
+            "named"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "t",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('ordinary_patterns'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    ordinary_like(t, t) AS l,\n    regex_match_op(t, t) AS r\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM native_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "nl",
+            "il",
+            "nil",
+            "r",
+            "nr",
+            "ri",
+            "nri",
+            "e",
+            "s",
+            "padded",
+            "binary",
+            "named"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "f",
+              "t",
+              "t",
+              "f",
+              "t",
+              "t"
+            ],
+            [
+              "2",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "t",
+              "t",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT * FROM ordinary_patterns ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "l",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f",
+              "f"
+            ],
+            [
+              "2",
+              "f",
+              "f"
+            ],
+            [
+              "3",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('native_patterns'::regclass,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    (t ~~ 'a%'::text) AS l,\n    (t !~~ 'a%'::text) AS nl,\n    (t ~~* 'a%'::text) AS il,\n    (t !~~* 'a%'::text) AS nil,\n    (t ~ '^a'::text) AS r,\n    (t !~ '^a'::text) AS nr,\n    (t ~* '^a'::text) AS ri,\n    (t !~* '^a'::text) AS nri,\n    (t ~~ like_escape('a!_b'::text, '!'::text)) AS e,\n    (t ~ similar_to_escape('a!_b'::text, '!'::text)) AS s,\n    (c ~~ 'a'::text) AS padded,\n    (b ~~ '\\x5f'::bytea) AS \"binary\",\n    (n ~~ 'a'::text) AS named\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('native_patterns'::regclass,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_viewdef"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT id,\n    t ~~ 'a%'::text AS l,\n    t !~~ 'a%'::text AS nl,\n    t ~~* 'a%'::text AS il,\n    t !~~* 'a%'::text AS nil,\n    t ~ '^a'::text AS r,\n    t !~ '^a'::text AS nr,\n    t ~* '^a'::text AS ri,\n    t !~* '^a'::text AS nri,\n    t ~~ like_escape('a!_b'::text, '!'::text) AS e,\n    t ~ similar_to_escape('a!_b'::text, '!'::text) AS s,\n    c ~~ 'a'::text AS padded,\n    b ~~ '\\x5f'::bytea AS \"binary\",\n    n ~~ 'a'::text AS named\n   FROM pattern_source;"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    }
+  ]
+}

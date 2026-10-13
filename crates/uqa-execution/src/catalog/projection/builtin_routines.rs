@@ -211,6 +211,7 @@ mod enums;
 mod namespaces;
 mod notifications;
 mod numeric;
+mod pattern;
 mod privileges;
 mod ranges;
 mod records;
@@ -265,6 +266,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
         json_path_entry(JSON_PATH_FUNCTIONS[3]),
     ],
     support::ROUTINES,
+    pattern::ROUTINES,
     scalar::ROUTINES,
     aggregate_windows::ROUTINES,
     clock_and_case::ROUTINES,

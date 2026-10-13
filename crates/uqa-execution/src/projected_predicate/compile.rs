@@ -93,52 +93,42 @@ pub(super) fn compile(
             negated: *negated,
         },
         ScalarExpr::Func {
-            name,
+            binding: Some(binding),
             args,
             distinct,
             order_by,
             filter,
             ..
         } if !distinct && order_by.is_empty() && filter.is_none() => {
-            let normalized = name.strip_prefix("pg_catalog.").unwrap_or(name);
-            if !normalized.eq_ignore_ascii_case("like") && !normalized.eq_ignore_ascii_case("ilike")
-            {
+            let Some(uqa_sql::ast::FunctionDispatch::Pattern { operator, .. }) = binding.dispatch
+            else {
+                return Ok(None);
+            };
+            if !operator.is_like() {
                 return Ok(None);
             }
-            let (expression, pattern, escape) = match args.as_slice() {
-                [expression, pattern] => (expression, pattern, None),
-                [expression, pattern, escape] => (expression, pattern, Some(escape)),
-                _ => return Ok(None),
+            let [expression, pattern] = args.as_slice() else {
+                return Ok(None);
             };
-            let pattern = match pattern {
-                ScalarExpr::Literal(value) => value.clone(),
-                ScalarExpr::Param(index) => parameter(*index, params)?,
-                _ => return Ok(None),
+            let Some(pattern) = pattern_literal(pattern, params)? else {
+                return Ok(None);
             };
             if matches!(&pattern, Value::Null) {
                 return Ok(Some(ProjectedExpr::Literal(Value::Null)));
             }
-            let escape = match escape {
-                Some(ScalarExpr::Literal(value)) => Some(value.clone()),
-                Some(ScalarExpr::Param(index)) => Some(parameter(*index, params)?),
-                Some(_) => return Ok(None),
-                None => None,
-            };
-            if matches!(&escape, Some(Value::Null)) {
-                return Ok(Some(ProjectedExpr::Literal(Value::Null)));
-            }
-            let pattern_text = uqa_sql::expr::value_to_string(&pattern)?;
-            let escape_text = escape
-                .as_ref()
-                .map(uqa_sql::expr::value_to_string)
-                .transpose()?;
-            ProjectedExpr::Like {
+            let compiled = ProjectedExpr::Like {
                 expression: Box::new(require(expression, schema, params)?),
-                pattern: uqa_sql::expr::CompiledLikePattern::with_escape(
-                    &pattern_text,
-                    normalized.eq_ignore_ascii_case("ilike"),
-                    escape_text.as_deref(),
+                pattern: uqa_sql::expr::CompiledLikePattern::from_value_with_escape_with_control(
+                    &pattern,
+                    operator.case_insensitive(),
+                    None,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
                 )?,
+            };
+            if operator.negated() {
+                ProjectedExpr::Not(Box::new(compiled))
+            } else {
+                compiled
             }
         }
         ScalarExpr::Cast { expr, ty, .. } => {
@@ -392,6 +382,58 @@ fn require_all(
         .iter()
         .map(|expression| require(expression, schema, params))
         .collect()
+}
+
+/// Evaluate constant parser-owned escape helpers once while preparing the projection matcher.
+fn pattern_literal(
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+) -> Result<Option<Value>, SQLError> {
+    match expression {
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            Ok(Some(value.clone()))
+        }
+        ScalarExpr::Param(index) => parameter(*index, params).map(Some),
+        ScalarExpr::Collated { expr, .. } => pattern_literal(expr, params),
+        ScalarExpr::Cast { expr, ty, .. } => {
+            if uqa_sql::ColumnType::from_sql_name(ty)
+                .map_or(true, |ty| uqa_sql::type_resolution::catalog_input_type(&ty))
+            {
+                return Ok(None);
+            }
+            pattern_literal(expr, params)?
+                .map(|value| cast_value(&value, ty))
+                .transpose()
+        }
+        ScalarExpr::Func {
+            binding: Some(binding),
+            args,
+            distinct: false,
+            order_by,
+            filter: None,
+            ..
+        } if order_by.is_empty()
+            && matches!(
+                binding.dispatch,
+                Some(uqa_sql::ast::FunctionDispatch::PatternEscape { .. })
+            ) =>
+        {
+            let mut values = Vec::with_capacity(args.len());
+            for argument in args {
+                let Some(value) = pattern_literal(argument, params)? else {
+                    return Ok(None);
+                };
+                values.push((None, value));
+            }
+            uqa_sql::expr::eval_bound_builtin_function_call(
+                binding,
+                values,
+                &uqa_sql::expr::EvalContext::new(None, params),
+            )
+            .map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 fn parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {

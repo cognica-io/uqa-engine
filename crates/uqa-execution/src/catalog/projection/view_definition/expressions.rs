@@ -480,7 +480,7 @@ impl Deparser<'_> {
             _ => {}
         }
         if let [left, right] = args {
-            if let Some((operator, precedence)) = binary_function_operator(name, binding) {
+            if let Some((operator, precedence)) = binary_function_operator(binding) {
                 return Ok(self.parenthesize(format!(
                     "{} {operator} {}",
                     self.operand(left, precedence, false, scope, subqueries)?,
@@ -547,10 +547,10 @@ impl Deparser<'_> {
         {
             return Ok(local.to_ascii_uppercase());
         }
-        if let Some(binding) = binding.filter(|binding| binding.builtin) {
-            if schema
+        if let Some(binding) = binding {
+            if let Some(schema) = schema
                 .as_deref()
-                .is_none_or(|schema| schema == "pg_catalog")
+                .or_else(|| binding.builtin.then_some("pg_catalog"))
             {
                 let argument_types = binding
                     .argument_types
@@ -559,7 +559,7 @@ impl Deparser<'_> {
                     .collect::<Vec<_>>();
                 if let Some(parts) =
                     self.alias_output()?
-                        .routine_name_parts("pg_catalog", &local, &argument_types)
+                        .routine_name_parts(schema, &local, &argument_types)
                 {
                     return Ok(parts
                         .iter()
@@ -567,7 +567,9 @@ impl Deparser<'_> {
                         .collect::<Vec<_>>()
                         .join("."));
                 }
-                return Ok(quote_ident(&local));
+                if binding.builtin && schema == "pg_catalog" {
+                    return Ok(quote_ident(&local));
+                }
             }
         }
         let Some(schema) = schema else {
@@ -597,25 +599,6 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
-        if let ScalarExpr::Func { name, args, .. } = inner {
-            if let [left, right] = args.as_slice() {
-                // A negated pattern or regular expression match is its own operator.
-                let negated = match name.as_str() {
-                    "like" => Some("!~~"),
-                    "ilike" => Some("!~~*"),
-                    "regex_match_op" => Some("!~"),
-                    "regex_imatch_op" => Some("!~*"),
-                    _ => None,
-                };
-                if let Some(operator) = negated {
-                    return Ok(self.parenthesize(format!(
-                        "{} {operator} {}",
-                        self.operand(left, 40, false, scope, subqueries)?,
-                        self.operand(right, 40, true, scope, subqueries)?
-                    )));
-                }
-            }
-        }
         Ok(self.parenthesize(format!(
             "NOT {}",
             self.operand(inner, 30, false, scope, subqueries)?
@@ -887,13 +870,9 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         {
             0
         }
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } if args.len() == 2 => binary_function_operator(name, binding.as_ref())
-            .map_or(100, |(_, precedence)| precedence),
+        ScalarExpr::Func { binding, args, .. } if args.len() == 2 => {
+            binary_function_operator(binding.as_ref()).map_or(100, |(_, precedence)| precedence)
+        }
         ScalarExpr::InList { list, .. } if list.len() > 1 => 0,
         ScalarExpr::Or(_) => 10,
         ScalarExpr::And(_) | ScalarExpr::Between { .. } => 20,
@@ -941,34 +920,23 @@ fn operator(op: BinaryOp) -> &'static str {
 }
 
 /// The operator and its precedence that a function of two arguments prints as.
-fn binary_function_operator(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-) -> Option<(&'static str, u8)> {
+fn binary_function_operator(binding: Option<&FunctionBinding>) -> Option<(&'static str, u8)> {
+    if let Some(FunctionDispatch::Pattern { operator, .. }) =
+        binding.and_then(|binding| binding.dispatch)
+    {
+        return Some((operator.symbol(), 40));
+    }
     if binding
         .and_then(|binding| binding.dispatch)
         .is_some_and(FunctionDispatch::is_concatenation)
     {
         return Some(("||", 45));
     }
-    if binding.is_some_and(|binding| !binding.builtin) {
-        return None;
-    }
-    match name {
-        "like" => Some(("~~", 40)),
-        "ilike" => Some(("~~*", 40)),
-        "regex_match_op" => Some(("~", 40)),
-        "regex_imatch_op" => Some(("~*", 40)),
-        _ => None,
-    }
+    None
 }
 
 /// Whether a function node prints as a call, `name(arguments)`, rather than as subscripts or an operator.
-pub(super) fn prints_as_call(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
-) -> bool {
+pub(super) fn prints_as_call(binding: Option<&FunctionBinding>, args: &[ScalarExpr]) -> bool {
     let printed_otherwise = matches!(
         binding.and_then(|binding| binding.dispatch),
         Some(
@@ -979,7 +947,6 @@ pub(super) fn prints_as_call(
                 | FunctionDispatch::JsonExtract { .. }
                 | FunctionDispatch::Collate { .. }
         )
-    ) || (args.len() == 2
-        && binary_function_operator(name, binding).is_some());
+    ) || (args.len() == 2 && binary_function_operator(binding).is_some());
     !printed_otherwise
 }

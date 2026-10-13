@@ -175,7 +175,8 @@ pub fn restore_views_from_catalog(
         })? {
             revised_rows.insert(row.relation.clone());
         }
-        if query_plan_has_legacy_routine_identity_with_types(&view.query, Some(context.types))
+        if uqa_sql::binding::legacy_patterns::restore_query(&mut view.query, context.types)
+            || query_plan_has_legacy_routine_identity_with_types(&view.query, Some(context.types))
             || uqa_sql::type_resolution::composite_rows::query_requires_binding(
                 &mut view.query,
                 context.types,

@@ -65,6 +65,8 @@ fn is_intrinsic_scalar_syntax(binding: Option<&FunctionBinding>) -> bool {
             binding.and_then(|binding| binding.dispatch),
             Some(
                 crate::ast::FunctionDispatch::NumericOperator(_)
+                    | crate::ast::FunctionDispatch::Pattern { .. }
+                    | crate::ast::FunctionDispatch::PatternEscape { .. }
                     | crate::ast::FunctionDispatch::Collate { .. }
                     | crate::ast::FunctionDispatch::BooleanTest(_)
                     | crate::ast::FunctionDispatch::ArraySubscripts

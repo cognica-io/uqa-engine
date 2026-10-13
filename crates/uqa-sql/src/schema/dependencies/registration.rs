@@ -79,10 +79,11 @@ fn schema_expr_may_require_routine_identity_binding(
     walk_schema_expr_mut(&mut expression, &mut |node| {
         if let crate::ast::Expr::Func { binding, .. } = node {
             legacy |= binding.as_ref().is_none_or(|binding| {
-                !binding.builtin
-                    && binding.dispatch.is_none()
-                    && binding.resolution_error.is_none()
-                    && binding.object_id.is_none()
+                crate::binding::legacy_patterns::requires_binding(binding)
+                    || !binding.builtin
+                        && binding.dispatch.is_none()
+                        && binding.resolution_error.is_none()
+                        && binding.object_id.is_none()
             });
         }
         Ok(())

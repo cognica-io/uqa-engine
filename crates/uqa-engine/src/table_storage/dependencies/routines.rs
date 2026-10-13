@@ -36,7 +36,10 @@ impl Engine {
         for (table_name, table) in self.table_entries() {
             let mut columns = table.columns.read().clone();
             let mut checks = table.table_checks.read().clone();
-            let mut generated_requires_migration = false;
+            let patterns =
+                uqa_sql::binding::legacy_patterns::restore_schema(&mut columns, &mut checks, self)
+                    .map_err(StorageBackendError::Other)?;
+            let mut generated_requires_migration = patterns.generated;
             for column in &columns {
                 if let Some(generated) = column.generated.as_ref() {
                     generated_requires_migration |= generated.function_dependencies.iter().any(
@@ -58,7 +61,8 @@ impl Engine {
             }
             let relation_requires_migration =
                 self.bind_table_schema_regclass_constants(&mut columns, &mut checks, true)?;
-            let expression_requires_migration = relation_requires_migration
+            let expression_requires_migration = patterns.changed
+                | relation_requires_migration
                 | self.bind_table_schema_routine_identities(
                     &table_name,
                     &mut columns,

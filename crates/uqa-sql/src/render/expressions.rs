@@ -40,6 +40,9 @@ pub(super) fn render_expr_in(
         ..
     } = expression
     {
+        if let Some(crate::ast::FunctionDispatch::Pattern { operator, .. }) = binding.dispatch {
+            return super::pattern_sql(operator, args, render_expr);
+        }
         if binding
             .dispatch
             .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
