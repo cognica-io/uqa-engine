@@ -116,9 +116,7 @@ impl RowSchema {
         let rows = &mut Arc::make_mut(&mut self.index).cold.row_types;
         rows.insert(qualifier, ty);
         let rows = Arc::make_mut(rows.0.as_mut().unwrap());
-        if rows.types.len() == 1 {
-            rows.source = Some(qualifier.into());
-        }
+        rows.source = (rows.types.len() == 1).then(|| qualifier.into());
         Ok(self)
     }
 }

@@ -98,6 +98,20 @@ fn named_empty_relations_shadow_outer_relation_types_and_qualified_fields() {
 #[test]
 fn joins_keep_independent_relation_types_without_inventing_a_combined_named_row() {
     let left = source("a", 20_000, &[]);
+    let two_empty_sources = left
+        .clone()
+        .with_relation_row_type("b", row_type("b", 30_000))
+        .unwrap();
+    assert_eq!(
+        two_empty_sources.whole_row_type("a"),
+        left.whole_row_type("a")
+    );
+    assert_eq!(
+        two_empty_sources.whole_row_type("b"),
+        Some(&row_type("b", 30_000))
+    );
+    let alias = RowSchema::with_relation_qualifier(&two_empty_sources, "combined");
+    assert_eq!(alias.whole_row_type("combined"), None);
     let right = source("b", 30_000, &["n"]);
     let joined = RowSchema::join(&left, &right, Vec::new());
     assert_eq!(joined.whole_row_type("a"), left.whole_row_type("a"));
