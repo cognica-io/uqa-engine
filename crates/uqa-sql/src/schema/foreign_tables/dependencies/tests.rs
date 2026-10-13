@@ -96,7 +96,7 @@ fn column_removal_clears_dependent_checks_and_preserves_other_identities() {
     columns[2].object_id = Some([3; 16]);
     let kept = serde_json::to_string(&columns[2]).unwrap();
     let kept_check = serde_json::to_string(&checks[1]).unwrap();
-    remove_foreign_column(&mut columns, &mut checks, 0, "id");
+    remove_foreign_column(&mut columns, &mut checks, "id");
     assert_eq!(columns.len(), 2);
     assert_eq!(columns[0].object_id, Some([1; 16]));
     assert!(columns[0].check.is_none() && columns[0].check_object_id.is_none());
@@ -110,7 +110,7 @@ fn quoted_column_names_remain_atomic_during_dependency_removal() {
     let (mut columns, mut checks) =
         definition("\"a.b\" integer, a integer, dependent integer CHECK (\"a.b\" > 0)");
     let before = serde_json::to_string(&columns[2]).unwrap();
-    remove_foreign_column(&mut columns, &mut checks, 1, "a");
+    remove_foreign_column(&mut columns, &mut checks, "a");
     assert_eq!(columns[0].name, "a.b");
     assert_eq!(serde_json::to_string(&columns[1]).unwrap(), before);
 }

@@ -139,8 +139,13 @@ pub fn drop_column(
     state.write_dropped_attributes().push(dropped);
     uqa_sql::schema::columns::publication::remove_local_column(&mut hierarchy, column);
     state.publish_hierarchy(hierarchy);
-    removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
-    removal_metadata::remove_column_checks(&mut state.write_checks(), column);
+    let retained_checks =
+        removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
+    {
+        let mut checks = state.write_checks();
+        checks.extend(retained_checks);
+        removal_metadata::remove_column_checks(&mut checks, column);
+    }
     removal_metadata::remove_column_keys(
         &mut state.write_columns(),
         &mut state.write_keys(),

@@ -703,6 +703,8 @@ SELECT renamed_amount_reader();
 
 `ALTER TABLE name DROP COLUMN [IF EXISTS] column [RESTRICT | CASCADE]` takes a column identifier and defaults to RESTRICT. It returns the `ALTER TABLE` command tag without rows. SQL-standard function and procedure bodies retain dependencies on columns read by queries and INSERT, UPDATE, DELETE, and MERGE expressions; INSERT and UPDATE destination columns also establish dependencies. A dependent routine blocks RESTRICT with `2BP01`. Missing columns report `42703`, while `IF EXISTS` skips a missing column after relation and owner validation.
 
+CHECK constraints follow their expression dependencies, including when written beside a column declaration. Dropping that column keeps a constant CHECK or a CHECK of another surviving column, with the same constraint identity and enforcement flags. A retained `CHECK(false)` continues to reject new rows. Checks that depend on the attribute actually removed are dropped. Ordinary and foreign tables preserve this rule through transaction rollback and persistent reopening.
+
 A surviving column keeps its positive `pg_attribute.attnum` after DROP, RENAME and ALTER TYPE. DROP retains a slot marked `attisdropped`; a later ADD receives the next number and does not reuse a deleted slot, even when it reuses the old name. `pg_class.relnatts` includes these slots, and `information_schema.columns.ordinal_position` preserves the surviving numbers while omitting deleted columns. Defaults, constraints, indexes, column privileges and stored routine targets use the same numbers. Deleted slots count toward PostgreSQL’s 1600-column table limit.
 
 ```sql execute

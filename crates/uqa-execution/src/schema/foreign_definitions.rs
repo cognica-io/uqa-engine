@@ -135,12 +135,7 @@ impl ForeignDefinitionContext<'_> {
             )
             .map_err(|error| StorageBackendError::backend("dropped foreign attribute", error))?,
         );
-        declarations::remove_foreign_column(
-            &mut table.columns,
-            &mut table.checks,
-            column_index,
-            column_name,
-        );
+        declarations::remove_foreign_column(&mut table.columns, &mut table.checks, column_name);
         let mut security = self
             .registry
             .security()
