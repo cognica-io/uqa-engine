@@ -32,6 +32,11 @@ impl ExpressionContext<'_> {
             return self.concatenation(args).map(Some);
         }
         match binding.and_then(|binding| binding.dispatch) {
+            Some(FunctionDispatch::Pattern { operator, .. }) => {
+                return self
+                    .named_binary_operator(operator.symbol(), args)
+                    .map(Some);
+            }
             Some(dispatch @ FunctionDispatch::JsonExtract { .. }) => {
                 return self
                     .named_binary_operator(
@@ -88,6 +93,15 @@ impl ExpressionContext<'_> {
         if !matches!(name, "coalesce" | "greatest" | "least") {
             return Ok(None);
         }
+        self.coalesce_or_minmax(expression, name, args).map(Some)
+    }
+
+    fn coalesce_or_minmax(
+        &self,
+        expression: &Expr,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<TypedNode, SQLError> {
         let ty = self
             .expression_type(expression)?
             .unwrap_or(ColumnType::Text);
@@ -118,7 +132,7 @@ impl ExpressionContext<'_> {
                 ],
             )
         };
-        Ok(Some(TypedNode { node, ty: Some(ty) }))
+        Ok(TypedNode { node, ty: Some(ty) })
     }
 
     fn quantified_operator(&self, args: &[Expr], any: bool) -> Result<TypedNode, SQLError> {

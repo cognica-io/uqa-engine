@@ -1,0 +1,108 @@
+[
+  {
+    "base": "integer",
+    "check": "VALUE BETWEEN SYMMETRIC '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop and :args ({OPEXPR :opno 525 :opfuncid 150 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 523 :opfuncid 149 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {BOOLEXPR :boolop and :args ({OPEXPR :opno 525 :opfuncid 150 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 523 :opfuncid 149 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(((VALUE >= 1) AND (VALUE <= 2)) OR ((VALUE >= 2) AND (VALUE <= 1)))",
+    "pretty": "VALUE >= 1 AND VALUE <= 2 OR VALUE >= 2 AND VALUE <= 1"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE NOT BETWEEN SYMMETRIC '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop and :args ({BOOLEXPR :boolop or :args ({OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {BOOLEXPR :boolop or :args ({OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(((VALUE < 1) OR (VALUE > 2)) AND ((VALUE < 2) OR (VALUE > 1)))",
+    "pretty": "(VALUE < 1 OR VALUE > 2) AND (VALUE < 2 OR VALUE > 1)"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE BETWEEN '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop and :args ({OPEXPR :opno 525 :opfuncid 150 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 523 :opfuncid 149 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE >= 1) AND (VALUE <= 2))",
+    "pretty": "VALUE >= 1 AND VALUE <= 2"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE NOT BETWEEN '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop or :args ({OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE < 1) OR (VALUE > 2))",
+    "pretty": "VALUE < 1 OR VALUE > 2"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE BETWEEN SYMMETRIC '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop and :args ({OPEXPR :opno 1757 :opfuncid 1721 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 1 0 ]}) :location -1} {OPEXPR :opno 1755 :opfuncid 1723 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 2 0 ]}) :location -1}) :location -1} {BOOLEXPR :boolop and :args ({OPEXPR :opno 1757 :opfuncid 1721 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 2 0 ]}) :location -1} {OPEXPR :opno 1755 :opfuncid 1723 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 1 0 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(((VALUE >= '1'::numeric) AND (VALUE <= '2'::numeric)) OR ((VALUE >= '2'::numeric) AND (VALUE <= '1'::numeric)))",
+    "pretty": "VALUE >= '1'::numeric AND VALUE <= '2'::numeric OR VALUE >= '2'::numeric AND VALUE <= '1'::numeric"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE NOT BETWEEN SYMMETRIC '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop and :args ({BOOLEXPR :boolop or :args ({OPEXPR :opno 1754 :opfuncid 1722 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 1 0 ]}) :location -1} {OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 2 0 ]}) :location -1}) :location -1} {BOOLEXPR :boolop or :args ({OPEXPR :opno 1754 :opfuncid 1722 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 2 0 ]}) :location -1} {OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 1 0 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(((VALUE < '1'::numeric) OR (VALUE > '2'::numeric)) AND ((VALUE < '2'::numeric) OR (VALUE > '1'::numeric)))",
+    "pretty": "(VALUE < '1'::numeric OR VALUE > '2'::numeric) AND (VALUE < '2'::numeric OR VALUE > '1'::numeric)"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE BETWEEN '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop and :args ({OPEXPR :opno 1757 :opfuncid 1721 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 1 0 ]}) :location -1} {OPEXPR :opno 1755 :opfuncid 1723 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 2 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE >= '1'::numeric) AND (VALUE <= '2'::numeric))",
+    "pretty": "VALUE >= '1'::numeric AND VALUE <= '2'::numeric"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE NOT BETWEEN '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop or :args ({OPEXPR :opno 1754 :opfuncid 1722 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 1 0 ]}) :location -1} {OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 0 128 2 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE < '1'::numeric) OR (VALUE > '2'::numeric))",
+    "pretty": "VALUE < '1'::numeric OR VALUE > '2'::numeric"
+  },
+  {
+    "base": "text",
+    "check": "VALUE BETWEEN SYMMETRIC '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop and :args ({OPEXPR :opno 667 :opfuncid 743 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]}) :location -1} {OPEXPR :opno 665 :opfuncid 741 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1}) :location -1} {BOOLEXPR :boolop and :args ({OPEXPR :opno 667 :opfuncid 743 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1} {OPEXPR :opno 665 :opfuncid 741 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(((VALUE >= '1'::text) AND (VALUE <= '2'::text)) OR ((VALUE >= '2'::text) AND (VALUE <= '1'::text)))",
+    "pretty": "VALUE >= '1'::text AND VALUE <= '2'::text OR VALUE >= '2'::text AND VALUE <= '1'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE NOT BETWEEN SYMMETRIC '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop and :args ({BOOLEXPR :boolop or :args ({OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]}) :location -1} {OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1}) :location -1} {BOOLEXPR :boolop or :args ({OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1} {OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(((VALUE < '1'::text) OR (VALUE > '2'::text)) AND ((VALUE < '2'::text) OR (VALUE > '1'::text)))",
+    "pretty": "(VALUE < '1'::text OR VALUE > '2'::text) AND (VALUE < '2'::text OR VALUE > '1'::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE BETWEEN '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop and :args ({OPEXPR :opno 667 :opfuncid 743 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]}) :location -1} {OPEXPR :opno 665 :opfuncid 741 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE >= '1'::text) AND (VALUE <= '2'::text))",
+    "pretty": "VALUE >= '1'::text AND VALUE <= '2'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE NOT BETWEEN '1' AND '2'",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop or :args ({OPEXPR :opno 664 :opfuncid 740 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 49 ]}) :location -1} {OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 50 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE < '1'::text) OR (VALUE > '2'::text))",
+    "pretty": "VALUE < '1'::text OR VALUE > '2'::text"
+  },
+  {
+    "base": "integer",
+    "check": "VALUE BETWEEN SYMMETRIC true AND 2",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer >= boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  }
+]

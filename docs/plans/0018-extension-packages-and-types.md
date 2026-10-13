@@ -1345,7 +1345,8 @@ This #803 successor separates SQL-native `LIKE`, `ILIKE`, `SIMILAR TO` and regul
 - [x] Restore previous native markers through the existing SQL-owned expression/statement walkers and atomic initial-open catalog publication across every retained definition owner.
 - [x] Compare PostgreSQL output across memory, native SQLite, SQLite Key/Value and redb; verify identical definitions after a second persistent open.
 - [x] Pass strict SQL/Execution/Planner/Engine library-and-test Clippy, secondary-session migration refusal and the 344-check / 486-case automatic regression inventory validation.
-- [ ] Publish after the JSON catalog predecessor is merged, qualify the actual Linux/macOS artifacts, merge, close #803 and remove the completed branch.
+- [x] Publish PR #805 after the JSON catalog predecessor is merged, preserving all 80 original #638 task records.
+- [x] Qualify the actual Linux/macOS artifacts, merge, close #803 and remove the completed branch.
 
 ### Pattern preservation argument
 
@@ -1373,4 +1374,38 @@ All references use the pinned PostgreSQL 18.4 Docker image and collector recorde
 
 The last capture includes 21 setup statements and 25 observations covering views, stored routine bodies and parameters, defaults, generated columns, CHECK constraints, domains, expression/partial indexes, partition keys, foreign declarations, rules and triggers. Predecessor fixtures reproduce the old compiler's unbound marker shapes and flatten only its historical helper wrapper; ordinary selected functions stay unchanged. Local qualification and automatic platform acceptance are recorded separately. No timing claim is made.
 
-The combined local SQL suite passes 1,830 tests, including the separately retained BETWEEN catalog fixture; that fixture is excluded from this delivery. All 26 focused Engine provider/callback/restore/load-only tests and 13 Execution projected-predicate tests pass. Shared expression size guards, output admission/release and exact field-read checks pass without raising any allowance. Strict SQL/Execution/Planner/Engine library-and-test Clippy passes. The executed manual SQL harness, inventory validation, all 24 inventory-verifier tests, dependency/ownership, header/file-ceiling and single-harness checks pass. Automatic platform qualification is pending.
+The combined local SQL suite passes 1,830 tests, including the separately retained BETWEEN catalog fixture; that fixture is excluded from this delivery. All 26 focused Engine provider/callback/restore/load-only tests and 13 Execution projected-predicate tests pass. Shared expression size guards, output admission/release and exact field-read checks pass without raising any allowance. Strict SQL/Execution/Planner/Engine library-and-test Clippy passes. The executed manual SQL harness, inventory validation, all 24 inventory-verifier tests, dependency/ownership, header/file-ceiling and single-harness checks pass. Automatic platform qualification is complete.
+
+PR #805 merged as `cc0021a2c7450cbe786a7a51dd9956184215dc00`; #803 is closed. Automatic run [38330907898](https://github.com/cognica-io/uqa-engine/actions/runs/38330907898) tests source `8e2003747eee71bbd46c0722ea712a7b04fcb342` through merge `52ee31bd3bc6e1ed5ae5ba9814c9b32146de4649`. Source, tested merge and final squash share tree `774def5ac686d4a7c92fead5791173c3bd76aa31`. Actual Linux x86_64 and macOS arm64 artifacts each pass 344 checks / 486 cases and eight independent-process histories, with zero failures, errors or skipped cases. Every selected case, source hash, manifest hash and JUnit count was checked against that source. CodeRabbit reviewed the exact source without actionable comments or unresolved review threads. Main is updated and the completed local and remote branch is removed. The typed catalog successor remains separate.
+
+## Native pattern catalog nodes and comparison expansion
+
+This #119 unit connects SQL's structural native-pattern identity to the existing typed catalog operator encoder. Native operators use the shared binary signature selector; strict ESCAPE and SIMILAR helpers acquire a selected builtin signature before the borrowed catalog adapter supplies their routine OID. Ordinary calls continue through routine lookup. No algorithm moves to Engine or Execution, and no dependency, Cargo feature, durable format marker, test target or resource allowance changes. General runtime constraint projection remains a separate unit.
+
+- [x] Reproduce native operators reaching ordinary routine lookup, then encode their selected operator/function identities and implicit inputs.
+- [x] Preserve nested strict helper calls, binary/text overloads, explicit collations, NULL inputs, native negation versus outer NOT and ordinary LIKE function calls.
+- [x] Compare 68 independent pattern observations, all 56 accepted definitions after serialization and repeated binding, and thirteen BETWEEN observations.
+- [x] Pass all 1,833 SQL owner tests, strict SQL library-and-test Clippy, repository ownership checks and the inventory verifier.
+- [ ] Publish the small successor after #805, verify both automatic platform artifacts, merge and remove its branch.
+
+### Pattern catalog preservation argument
+
+Fix a catalog and type environment $\Gamma$. For native pattern operator $p$ and input expressions $a,b$, the existing SQL selector returns a signature $s=(o,f,T_a,T_b,\mathrm{bool})$, where $o$ and $f$ identify the selected PostgreSQL operator and its support routine. Let $C_\Gamma$ encode an expression and $\operatorname{cast}_{T}$ denote the selector's required input coercion. The new branch constructs
+
+$$
+C_\Gamma(p(a,b))=\operatorname{OpExpr}_{o,f,\mathrm{bool}}\bigl(C_\Gamma(\operatorname{cast}_{T_a}(a)),C_\Gamma(\operatorname{cast}_{T_b}(b))\bigr).
+$$
+
+The child encoders preserve their types, constant bytes, field identities and selected collations. The shared final collation pass derives the enclosing input collation from those children. Therefore the constructed node retains the same operator, support function, Boolean result and typed inputs as PostgreSQL analysis. Reconstructing it reads the recorded operator OID and recursively reconstructs those same children; it neither substitutes an ordinary routine nor reevaluates an input.
+
+An ESCAPE or SIMILAR helper $h$ remains a nested `FUNCEXPR`. Its structural dispatch selects the existing fixed builtin signature first, including the distinct text and bytea alternatives and the one-input SIMILAR form. The catalog adapter receives that explicit signature, so an unknown parser input does not become an empty bound signature and a same-named ordinary function cannot replace the native helper. Each child is encoded with its selected argument type; its NULL constant, collation and conversion remain present. The enclosing pattern operator consumes this helper node, preserving $p(a,h(b,e))$ rather than replacing it with a different-arity call. Native negative operators preserve their own $o,f$ pair; written outer NOT remains a `BOOLEXPR`. Ordinary LIKE calls retain routine OIDs and `FUNCEXPR` structure independently.
+
+For BETWEEN, no product transformation changes: the independently captured reference verifies the existing conjunction/disjunction structure and each comparison's own selected input conversions, including the symmetric and negated forms. No input is reordered, evaluated or constant-folded by this catalog integration. By structural induction over the verified child forms and these constructors, encoding and reconstruction preserve the typed observations of the affected expressions and their enclosing compositions. This adds a representation path, not a new algebraic operation or an optimizer rewrite; runtime matching resources and evaluation effects keep their existing owners.
+
+### Independent pattern catalog evidence
+
+Capture uses PostgreSQL 18.4 Docker image `sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25` and collector SHA-256 `13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec`. Each run verifies the image, collector and server version, creates a fresh database and removes it afterward. Original raw capture SHA-256 is `c18505dbcd4d52c681a29cf807f3aa691d9577494545228a36ab8ff03aac263a`; the additional capture is `87862034f9711a9cf038ff80d415445e377ad3f5fd47041163625ba240b08655`. Only expected fixtures and compact provenance are retained in Git; raw reports remain outside it.
+
+The pattern fixture contains 56 accepted complete nodes with both SQL forms and twelve full SQLSTATE/message/DETAIL/HINT comparisons. It covers text, name, bpchar, varchar and bytea, all eight native operator variants, strict helpers, ordinary calls, operator qualification, explicit collation conflicts and typed/unknown NULLs. The companion seven-routine fixture records independent PostgreSQL builtin identities. Thirteen BETWEEN cases cover twelve exact typed-node/two-form observations and the first incompatible-type diagnostic. Rebinding all accepted pattern expressions after serialization must preserve identical bytes on the second pass and continue matching the independent PostgreSQL nodes and SQL. The automatic inventory adds four output-correctness checks without changing existing limits.
+
+Fixture SHA-256 values are `d862e8d42ee922d37b9be6487d22a65f86edf4d799a26d2f713972de0f89a6fe` for `patterns.json`, `4d993ab7b342f23ec5d5058339bc412ea8950d58ca862f6777ea6e87862a3dd1` for `pattern_helpers.json`, and `1c151eb8dffe5b17306ced5d52b758b23915277c2cff91f4d62a9f148088ac5c` for `between.json`. All 1,833 SQL owner tests and strict SQL library-and-test Clippy pass. The dependency and capability checks, single-harness registration, Rust file limits, inventory validation and all 24 verifier tests pass. The inventory now requires 348 checks / 490 cases. Automatic qualification of this successor remains pending.

@@ -4614,6 +4614,58 @@
       "capability": "Native pattern semantics and retained resources",
       "workload": "Predecessor table/view/routine/domain/index/partition/foreign/rule/trigger definitions on all three persistent providers.",
       "invariant": "Initial open restores PostgreSQL output once, a second open preserves full definition bytes, and secondary sessions refuse migration without publishing changes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "pattern_catalog_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/patterns.rs",
+      "capability": "Typed pattern and range catalog expressions",
+      "workload": "Fifty-six PostgreSQL nodes and both SQL forms across text, name, bpchar, varchar and bytea, native/ordinary calls, nested strict helpers, explicit collations and NULL inputs.",
+      "invariant": "Selected operator and routine OIDs, input casts, collations and negation grouping match independent PostgreSQL observations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "pattern_catalog_diagnostics_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/patterns.rs",
+      "capability": "Typed pattern and range catalog expressions",
+      "workload": "Twelve invalid operator/helper signatures and conflicting explicit collations.",
+      "invariant": "Exact SQLSTATE, message, DETAIL and HINT match PostgreSQL; structural helpers retain their fixed builtin selection."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_pattern_catalog_nodes_preserve_selected_inputs_and_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/patterns.rs",
+      "capability": "Typed pattern and range catalog expressions",
+      "workload": "Fifty-six bound definitions, serialization and two binding passes.",
+      "invariant": "Second binding is byte-identical; native operators, ordinary calls and nested helpers retain exact PostgreSQL typed nodes and both SQL forms."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "between_catalog_nodes_and_sql_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/between.rs",
+      "capability": "Typed pattern and range catalog expressions",
+      "workload": "Twelve symmetric/ordinary positive/negative BETWEEN expressions and one incompatible-type diagnostic.",
+      "invariant": "Exact expanded operator/Boolean trees, both SQL forms and the first analysis diagnostic match PostgreSQL."
     }
   ]
 }

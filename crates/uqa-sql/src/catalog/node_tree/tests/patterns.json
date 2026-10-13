@@ -1,0 +1,570 @@
+[
+  {
+    "base": "text",
+    "check": "VALUE LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~ 'a%'::text)",
+    "pretty": "VALUE ~~ 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE NOT LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1210 :opfuncid 851 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~ 'a%'::text)",
+    "pretty": "VALUE !~~ 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1627 :opfuncid 1633 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~* 'a%'::text)",
+    "pretty": "VALUE ~~* 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE NOT ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1628 :opfuncid 1634 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~* 'a%'::text)",
+    "pretty": "VALUE !~~* 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE 'a!_%' ESCAPE '!'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~ like_escape('a!_%'::text, '!'::text))",
+    "pretty": "VALUE ~~ like_escape('a!_%'::text, '!'::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE SIMILAR TO 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 641 :opfuncid 1254 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~ similar_to_escape('a%'::text))",
+    "pretty": "VALUE ~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE NOT SIMILAR TO 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 642 :opfuncid 1256 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE !~ similar_to_escape('a%'::text))",
+    "pretty": "VALUE !~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE ~ 'a'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 641 :opfuncid 1254 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+    "sql": "(VALUE ~ 'a'::text)",
+    "pretty": "VALUE ~ 'a'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE !~* 'a'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1229 :opfuncid 1239 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+    "sql": "(VALUE !~* 'a'::text)",
+    "pretty": "VALUE !~* 'a'::text"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1211 :opfuncid 1631 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~ 'a%'::text)",
+    "pretty": "VALUE ~~ 'a%'::text"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE NOT LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1212 :opfuncid 1632 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~ 'a%'::text)",
+    "pretty": "VALUE !~~ 'a%'::text"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1629 :opfuncid 1660 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~* 'a%'::text)",
+    "pretty": "VALUE ~~* 'a%'::text"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE NOT ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1630 :opfuncid 1661 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~* 'a%'::text)",
+    "pretty": "VALUE !~~* 'a%'::text"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE LIKE 'a!_%' ESCAPE '!'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1211 :opfuncid 1631 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~ like_escape('a!_%'::text, '!'::text))",
+    "pretty": "VALUE ~~ like_escape('a!_%'::text, '!'::text)"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE SIMILAR TO 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1055 :opfuncid 1658 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~ similar_to_escape('a%'::text))",
+    "pretty": "VALUE ~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE NOT SIMILAR TO 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1056 :opfuncid 1659 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE !~ similar_to_escape('a%'::text))",
+    "pretty": "VALUE !~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE ~ 'a'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1055 :opfuncid 1658 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+    "sql": "(VALUE ~ 'a'::text)",
+    "pretty": "VALUE ~ 'a'::text"
+  },
+  {
+    "base": "character(8)",
+    "check": "VALUE !~* 'a'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1235 :opfuncid 1657 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+    "sql": "(VALUE !~* 'a'::text)",
+    "pretty": "VALUE !~* 'a'::text"
+  },
+  {
+    "base": "name",
+    "check": "VALUE LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1207 :opfuncid 858 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~ 'a%'::text)",
+    "pretty": "VALUE ~~ 'a%'::text"
+  },
+  {
+    "base": "name",
+    "check": "VALUE NOT LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1208 :opfuncid 859 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~ 'a%'::text)",
+    "pretty": "VALUE !~~ 'a%'::text"
+  },
+  {
+    "base": "name",
+    "check": "VALUE ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1625 :opfuncid 1635 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~* 'a%'::text)",
+    "pretty": "VALUE ~~* 'a%'::text"
+  },
+  {
+    "base": "name",
+    "check": "VALUE NOT ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1626 :opfuncid 1636 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~* 'a%'::text)",
+    "pretty": "VALUE !~~* 'a%'::text"
+  },
+  {
+    "base": "name",
+    "check": "VALUE LIKE 'a!_%' ESCAPE '!'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1207 :opfuncid 858 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~ like_escape('a!_%'::text, '!'::text))",
+    "pretty": "VALUE ~~ like_escape('a!_%'::text, '!'::text)"
+  },
+  {
+    "base": "name",
+    "check": "VALUE SIMILAR TO 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 639 :opfuncid 79 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~ similar_to_escape('a%'::text))",
+    "pretty": "VALUE ~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "name",
+    "check": "VALUE NOT SIMILAR TO 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 640 :opfuncid 1252 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE !~ similar_to_escape('a%'::text))",
+    "pretty": "VALUE !~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "name",
+    "check": "VALUE ~ 'a'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 639 :opfuncid 79 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+    "sql": "(VALUE ~ 'a'::text)",
+    "pretty": "VALUE ~ 'a'::text"
+  },
+  {
+    "base": "name",
+    "check": "VALUE !~* 'a'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1227 :opfuncid 1241 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+    "sql": "(VALUE !~* 'a'::text)",
+    "pretty": "VALUE !~* 'a'::text"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 2016 :opfuncid 2005 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~ '\\x6125'::bytea)",
+    "pretty": "VALUE ~~ '\\x6125'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE NOT LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 2017 :opfuncid 2006 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE !~~ '\\x6125'::bytea)",
+    "pretty": "VALUE !~~ '\\x6125'::bytea"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE ILIKE 'a%'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea ~~* unknown",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE NOT ILIKE 'a%'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea !~~* unknown",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE LIKE 'a!_%' ESCAPE '!'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea ~~ text",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE SIMILAR TO 'a%'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea ~ text",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE NOT SIMILAR TO 'a%'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea !~ text",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE ~ 'a'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea ~ unknown",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE !~* 'a'",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: bytea !~* unknown",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE NULL",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1}",
+    "sql": "(VALUE ~~ NULL::text)",
+    "pretty": "VALUE ~~ NULL::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE NULL::text ESCAPE NULL",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~ like_escape(NULL::text, NULL::text))",
+    "pretty": "VALUE ~~ like_escape(NULL::text, NULL::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE ILIKE 'a!_%' ESCAPE '!'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1627 :opfuncid 1633 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~* like_escape('a!_%'::text, '!'::text))",
+    "pretty": "VALUE ~~* like_escape('a!_%'::text, '!'::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE SIMILAR TO 'a!_%' ESCAPE '!'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 641 :opfuncid 1254 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1986 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~ similar_to_escape('a!_%'::text, '!'::text))",
+    "pretty": "VALUE ~ similar_to_escape('a!_%'::text, '!'::text)"
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE 'a%' COLLATE \"C\"",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {COLLATEEXPR :arg {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]} :collOid 950 :location -1}) :location -1}",
+    "sql": "(VALUE ~~ ('a%'::text COLLATE \"C\"))",
+    "pretty": "VALUE ~~ ('a%'::text COLLATE \"C\")"
+  },
+  {
+    "base": "text",
+    "check": "(NULL LIKE NULL) IS NULL",
+    "error": null,
+    "conbin": "{NULLTEST :arg {OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1} :nulltesttype 0 :argisrow false :location -1}",
+    "sql": "((NULL::text ~~ NULL::text) IS NULL)",
+    "pretty": "(NULL::text ~~ NULL::text) IS NULL"
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE 1",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: text ~~ integer",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "1 LIKE VALUE",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: integer ~~ text",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE ILIKE true",
+    "error": {
+      "sqlstate": "42883",
+      "message": "operator does not exist: text ~~* boolean",
+      "detail": null,
+      "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE 'a%' ESCAPE 1",
+    "error": {
+      "sqlstate": "42883",
+      "message": "function pg_catalog.like_escape(unknown, integer) does not exist",
+      "detail": null,
+      "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+    }
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text ~~ 'a%'::text)",
+    "pretty": "VALUE::text ~~ 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE NOT LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1210 :opfuncid 851 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text !~~ 'a%'::text)",
+    "pretty": "VALUE::text !~~ 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1627 :opfuncid 1633 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text ~~* 'a%'::text)",
+    "pretty": "VALUE::text ~~* 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE NOT ILIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1628 :opfuncid 1634 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text !~~* 'a%'::text)",
+    "pretty": "VALUE::text !~~* 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE ~ 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 641 :opfuncid 1254 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text ~ 'a%'::text)",
+    "pretty": "VALUE::text ~ 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE !~ 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 642 :opfuncid 1256 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text !~ 'a%'::text)",
+    "pretty": "VALUE::text !~ 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE ~* 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1228 :opfuncid 1238 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text ~* 'a%'::text)",
+    "pretty": "VALUE::text ~* 'a%'::text"
+  },
+  {
+    "base": "character varying(8)",
+    "check": "VALUE !~* 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1229 :opfuncid 1239 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {COERCETODOMAINVALUE :typeId 1043 :typeMod 12 :collation 100 :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "((VALUE)::text !~* 'a%'::text)",
+    "pretty": "VALUE::text !~* 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "NOT (VALUE LIKE 'a%')",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop not :args ({OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "(NOT (VALUE ~~ 'a%'::text))",
+    "pretty": "NOT VALUE ~~ 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "NOT (VALUE SIMILAR TO 'a%')",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop not :args ({OPEXPR :opno 641 :opfuncid 1254 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1987 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}) :location -1}",
+    "sql": "(NOT (VALUE ~ similar_to_escape('a%'::text)))",
+    "pretty": "NOT VALUE ~ similar_to_escape('a%'::text)"
+  },
+  {
+    "base": "text",
+    "check": "NOT (VALUE ~* 'A')",
+    "error": null,
+    "conbin": "{BOOLEXPR :boolop not :args ({OPEXPR :opno 1228 :opfuncid 1238 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 65 ]}) :location -1}) :location -1}",
+    "sql": "(NOT (VALUE ~* 'A'::text))",
+    "pretty": "NOT VALUE ~* 'A'::text"
+  },
+  {
+    "base": "text",
+    "check": "pg_catalog.like(VALUE, 'a%')",
+    "error": null,
+    "conbin": "{FUNCEXPR :funcid 1569 :funcresulttype 16 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "\"like\"(VALUE, 'a%'::text)",
+    "pretty": "\"like\"(VALUE, 'a%'::text)"
+  },
+  {
+    "base": "text",
+    "check": "(VALUE LIKE 'a%') = pg_catalog.like(VALUE, 'a%')",
+    "error": null,
+    "conbin": "{OPEXPR :opno 91 :opfuncid 60 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1} {FUNCEXPR :funcid 1569 :funcresulttype 16 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE ~~ 'a%'::text) = \"like\"(VALUE, 'a%'::text))",
+    "pretty": "(VALUE ~~ 'a%'::text) = \"like\"(VALUE, 'a%'::text)"
+  },
+  {
+    "base": "text",
+    "check": "pg_catalog.like_escape(VALUE, '!') LIKE 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(like_escape(VALUE, '!'::text) ~~ 'a%'::text)",
+    "pretty": "like_escape(VALUE, '!'::text) ~~ 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE OPERATOR(pg_catalog.~~) 'a%'",
+    "error": null,
+    "conbin": "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "(VALUE ~~ 'a%'::text)",
+    "pretty": "VALUE ~~ 'a%'::text"
+  },
+  {
+    "base": "text",
+    "check": "VALUE LIKE 'a%' COLLATE \"POSIX\" ESCAPE '!' COLLATE \"C\"",
+    "error": {
+      "sqlstate": "42P21",
+      "message": "collation mismatch between explicit collations \"POSIX\" and \"C\"",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE LIKE 'a!_%'::bytea ESCAPE '!'::bytea",
+    "error": null,
+    "conbin": "{OPEXPR :opno 2016 :opfuncid 2005 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 2009 :funcresulttype 17 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~ like_escape('\\x61215f25'::bytea, '\\x21'::bytea))",
+    "pretty": "VALUE ~~ like_escape('\\x61215f25'::bytea, '\\x21'::bytea)"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE NOT LIKE 'a!_%'::bytea ESCAPE '!'::bytea",
+    "error": null,
+    "conbin": "{OPEXPR :opno 2017 :opfuncid 2006 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 2009 :funcresulttype 17 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE !~~ like_escape('\\x61215f25'::bytea, '\\x21'::bytea))",
+    "pretty": "VALUE !~~ like_escape('\\x61215f25'::bytea, '\\x21'::bytea)"
+  },
+  {
+    "base": "bytea",
+    "check": "VALUE LIKE NULL::bytea ESCAPE NULL::bytea",
+    "error": null,
+    "conbin": "{OPEXPR :opno 2016 :opfuncid 2005 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 2009 :funcresulttype 17 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :location -1}) :location -1}",
+    "sql": "(VALUE ~~ like_escape(NULL::bytea, NULL::bytea))",
+    "pretty": "VALUE ~~ like_escape(NULL::bytea, NULL::bytea)"
+  },
+  {
+    "base": "bytea",
+    "check": "pg_catalog.like(VALUE, 'a%'::bytea)",
+    "error": null,
+    "conbin": "{FUNCEXPR :funcid 2007 :funcresulttype 16 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 17 :typeMod -1 :collation 0 :location -1} {CONST :consttype 17 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "\"like\"(VALUE, '\\x6125'::bytea)",
+    "pretty": "\"like\"(VALUE, '\\x6125'::bytea)"
+  },
+  {
+    "base": "name",
+    "check": "pg_catalog.like(VALUE, 'a%')",
+    "error": null,
+    "conbin": "{FUNCEXPR :funcid 1571 :funcresulttype 16 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 950 :args ({COERCETODOMAINVALUE :typeId 19 :typeMod -1 :collation 950 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "\"like\"(VALUE, 'a%'::text)",
+    "pretty": "\"like\"(VALUE, 'a%'::text)"
+  },
+  {
+    "base": "character(8)",
+    "check": "pg_catalog.like(VALUE, 'a%')",
+    "error": null,
+    "conbin": "{FUNCEXPR :funcid 1569 :funcresulttype 16 :funcretset false :funcvariadic false :funcformat 0 :funccollid 0 :inputcollid 100 :args ({FUNCEXPR :funcid 401 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1042 :typeMod 12 :collation 100 :location -1}) :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 37 ]}) :location -1}",
+    "sql": "\"like\"((VALUE)::text, 'a%'::text)",
+    "pretty": "\"like\"(VALUE::text, 'a%'::text)"
+  }
+]

@@ -17,7 +17,7 @@ mod subscripts;
 pub use schema::{ColumnReference, ExpressionSchema};
 
 use super::{values, Field, Node};
-use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax};
+use crate::ast::{BinaryOp, Expr, FunctionBinding, FunctionCallSyntax, FunctionDispatch};
 use crate::catalog::type_metadata::{pg_type_collation_oid, pg_type_modifier, pg_type_oid};
 use crate::type_resolution::{
     binary_operator_catalog_entry, binary_operator_types, common_context_expression_type,
@@ -368,6 +368,31 @@ impl ExpressionContext<'_> {
             .iter()
             .map(|arg| self.expression_type(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        let helper = if let Some(dispatch @ FunctionDispatch::PatternEscape { similar }) =
+            binding.and_then(|binding| binding.dispatch)
+        {
+            if !(1..=2).contains(&types.len()) {
+                return Err(SQLError::Internal("invalid pattern escape operands".into()));
+            }
+            let inputs = [
+                types.first().and_then(Option::as_ref),
+                types.get(1).and_then(Option::as_ref),
+            ];
+            let ty = crate::type_resolution::pattern::select_escape(
+                similar,
+                &inputs[..types.len()],
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
+            let mut selected = FunctionBinding::dispatched(dispatch);
+            selected.argument_types = vec![ty.sql_name(); types.len()];
+            Some(selected)
+        } else {
+            None
+        };
+        let name = helper
+            .as_ref()
+            .map_or(name, |binding| binding.name.as_str());
+        let binding = helper.as_ref().or(binding);
         let routine = self.routines.resolve(name, binding, &types)?;
         if routine.argument_types.len() != arguments.len() {
             return Err(SQLError::Internal(

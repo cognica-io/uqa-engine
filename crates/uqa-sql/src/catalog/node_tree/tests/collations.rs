@@ -246,7 +246,7 @@ fn nonvalidating_introspection_preserves_collation_errors_for_analysis() {
     }
 }
 
-fn retain_expression(
+pub(super) fn retain_expression(
     expression: &mut crate::ast::Expr,
     schema: &RowSchema,
     catalog: &dyn FunctionTypeResolver,

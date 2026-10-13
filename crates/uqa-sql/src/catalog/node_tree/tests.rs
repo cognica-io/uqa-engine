@@ -7,12 +7,14 @@
 use super::*;
 
 mod arrays;
+mod between;
 mod catalog;
 mod coercions;
 mod collations;
 mod concatenation;
 mod fields;
 mod json_extraction;
+mod patterns;
 mod rows;
 mod scalar;
 mod subscripts;
@@ -104,23 +106,23 @@ fn rejects_truncated_ambiguous_and_excessively_nested_node_trees() {
 
 struct Routines;
 
-struct StringSettings(bool);
+struct StringSettings<'a>(&'a dyn deparse::ExpressionNames, bool);
 
-impl deparse::ExpressionNames for StringSettings {
+impl deparse::ExpressionNames for StringSettings<'_> {
     fn column(&self, attribute: i64) -> Result<String, SQLError> {
-        deparse::ExpressionNames::column(&Routines, attribute)
+        self.0.column(attribute)
     }
 
     fn routine(&self, oid: i64) -> Result<Vec<String>, SQLError> {
-        deparse::ExpressionNames::routine(&Routines, oid)
+        self.0.routine(oid)
     }
 
     fn type_name(&self, oid: i64, modifier: i64) -> Result<String, SQLError> {
-        deparse::ExpressionNames::type_name(&Routines, oid, modifier)
+        self.0.type_name(oid, modifier)
     }
 
     fn standard_conforming_strings(&self) -> Result<bool, SQLError> {
-        Ok(self.0)
+        Ok(self.1)
     }
 }
 
@@ -249,6 +251,13 @@ fn explicit_collation_nodes_and_sql_match_postgresql() {
 }
 
 fn check_typed_nodes(fixtures: &str) {
+    check_typed_nodes_with(fixtures, &Routines);
+}
+
+fn check_typed_nodes_with<R: expressions::ExpressionRoutines + deparse::ExpressionNames>(
+    fixtures: &str,
+    routines: &R,
+) {
     #[derive(serde::Deserialize)]
     struct Fixture {
         base: String,
@@ -294,7 +303,7 @@ fn check_typed_nodes(fixtures: &str) {
             schema: &schema,
             domain_value: Some(&base),
             types: None,
-            routines: &Routines,
+            routines,
         };
         match context.check(&domain.checks[0].expression) {
             Ok(node) => {
@@ -313,8 +322,11 @@ fn check_typed_nodes(fixtures: &str) {
                     (true, false, fixture.pretty_nonstandard),
                 ] {
                     let Some(expected) = expected else { continue };
-                    let output =
-                        deparse::expression(&actual, &StringSettings(standard_strings), pretty);
+                    let output = deparse::expression(
+                        &actual,
+                        &StringSettings(routines, standard_strings),
+                        pretty,
+                    );
                     if output.as_ref().ok() != Some(&expected) {
                         failures.push(format!(
                             "{} (pretty={pretty}, standard_strings={standard_strings}): {output:?}, expected {expected}",
