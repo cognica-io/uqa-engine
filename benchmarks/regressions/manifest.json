@@ -5253,6 +5253,123 @@
       "capability": "CHECK dependency lifetime",
       "workload": "Thirty-seven PostgreSQL lifecycle commands across four providers and seven observations after actual persistent reopen.",
       "invariant": "Column removal preserves independent ordinary/foreign CHECK identities, flags and enforcement through savepoints, rollback and persistent reopening."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_names_retain_bpchar_input_length_and_type_modifiers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/ast/types/production/tests.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "Quoted/qualified bpchar, explicit character lengths, internal char and array types under a fixed allocation allowance.",
+      "invariant": "Preserve exact declared types and release each allocation without changing cancellation or dimension validation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "char_and_varchar_casts_truncate",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/arithmetic_and_casts.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "Fixed-character and varying-character input with explicit length modifiers.",
+      "invariant": "Truncation and padding match PostgreSQL; unmodified bpchar never imposes a one-character limit."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "all_tpch_queries_match_postgresql_18",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_tpch.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed TPC-H fixture and all 22 independently captured PostgreSQL query results.",
+      "invariant": "Every result column and canonical row agrees with PostgreSQL, including complete fixed-character strings."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "enum_semantics_match_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_enums.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed 328-command PostgreSQL enum fixture on memory.",
+      "invariant": "Values, types, errors and catalog state match the independent reference, including bpchar enum input."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "enum_semantics_match_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_enums.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed 328-command PostgreSQL enum fixture on sqlite.",
+      "invariant": "Values, types, errors and catalog state match the independent reference, including bpchar enum input."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "enum_semantics_match_postgresql_sqlite_key_value",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_enums.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed 328-command PostgreSQL enum fixture on sqlite_key_value.",
+      "invariant": "Values, types, errors and catalog state match the independent reference, including bpchar enum input."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "enum_semantics_match_postgresql_redb",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_enums.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed 328-command PostgreSQL enum fixture on redb.",
+      "invariant": "Values, types, errors and catalog state match the independent reference, including bpchar enum input."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "datetime_input_matches_postgresql_memory",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_datetime_input.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed 142-command PostgreSQL datetime fixture on memory.",
+      "invariant": "Temporal values, types and errors match the independent reference, including CHAR(10) to date."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "datetime_input_matches_postgresql_sqlite",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_datetime_input.rs",
+      "capability": "Catalog-qualified character type identity",
+      "workload": "The fixed 142-command PostgreSQL datetime fixture on sqlite.",
+      "invariant": "Temporal values, types and errors match the independent reference, including CHAR(10) to date."
     }
   ]
 }

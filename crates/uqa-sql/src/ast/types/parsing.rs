@@ -72,6 +72,10 @@ impl ColumnType {
             let ty = crate::catalog::type_metadata::builtin_scalar_type_by_name(name).ok_or_else(
                 || crate::SQLError::Unsupported(format!("SQL type `{}` is not supported", &**base)),
             )?;
+            // Catalog identity without a modifier already determines the type. Regtype output is display syntax: bpchar prints as character, whose input spelling implies a length of one.
+            if modifier.is_none() && !matches!(ty, Self::Vector(_) | Self::Tensor(_)) {
+                return ty.clone_with_control(control).map_err(Into::into);
+            }
             catalog_type = ty.regtype_name_with_control(control)?;
             catalog_type.as_str()
         } else {

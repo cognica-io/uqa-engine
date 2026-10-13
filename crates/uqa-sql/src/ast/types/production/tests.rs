@@ -142,3 +142,40 @@ fn type_production_checks_both_tokens_and_releases_partial_results() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn catalog_names_retain_bpchar_input_length_and_type_modifiers() {
+    let budget = MemoryBudget::new(1 << 16);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (spelling, expected) in [
+        ("bpchar", ColumnType::Bpchar),
+        (r#""bpchar""#, ColumnType::Bpchar),
+        ("pg_catalog.bpchar", ColumnType::Bpchar),
+        (r#"pg_catalog."bpchar""#, ColumnType::Bpchar),
+        (r#""pg_catalog"."bpchar""#, ColumnType::Bpchar),
+        (
+            "pg_catalog.bpchar[]",
+            ColumnType::Array(Box::new(ColumnType::Bpchar)),
+        ),
+        ("pg_catalog.bpchar(7)", ColumnType::Character(7)),
+        (
+            r#"pg_catalog."bpchar"(7)[]"#,
+            ColumnType::Array(Box::new(ColumnType::Character(7))),
+        ),
+        ("character", ColumnType::Character(1)),
+        ("character(7)", ColumnType::Character(7)),
+        (r#"pg_catalog."char""#, ColumnType::InternalChar),
+    ] {
+        assert_eq!(
+            ColumnType::from_sql_name(spelling).unwrap(),
+            expected,
+            "{spelling}"
+        );
+        let actual = ColumnType::from_sql_name_with_control(spelling, &control).unwrap();
+        assert_eq!(*actual, expected, "{spelling}");
+        assert_eq!(budget.used(), actual.reserved_bytes());
+        drop(actual);
+        assert_eq!(budget.used(), 0);
+    }
+}
