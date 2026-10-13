@@ -1,0 +1,58 @@
+[
+  {
+    "oid": 1569,
+    "name": "like",
+    "args": "text, text",
+    "result_type": "boolean",
+    "strict": true,
+    "volatility": "i"
+  },
+  {
+    "oid": 1571,
+    "name": "like",
+    "args": "name, text",
+    "result_type": "boolean",
+    "strict": true,
+    "volatility": "i"
+  },
+  {
+    "oid": 1637,
+    "name": "like_escape",
+    "args": "text, text",
+    "result_type": "text",
+    "strict": true,
+    "volatility": "i"
+  },
+  {
+    "oid": 1986,
+    "name": "similar_to_escape",
+    "args": "text, text",
+    "result_type": "text",
+    "strict": true,
+    "volatility": "i"
+  },
+  {
+    "oid": 1987,
+    "name": "similar_to_escape",
+    "args": "text",
+    "result_type": "text",
+    "strict": true,
+    "volatility": "i"
+  },
+  {
+    "oid": 2007,
+    "name": "like",
+    "args": "bytea, bytea",
+    "result_type": "boolean",
+    "strict": true,
+    "volatility": "i"
+  },
+  {
+    "oid": 2009,
+    "name": "like_escape",
+    "args": "bytea, bytea",
+    "result_type": "bytea",
+    "strict": true,
+    "volatility": "i"
+  }
+]
