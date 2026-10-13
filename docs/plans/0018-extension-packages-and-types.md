@@ -1475,7 +1475,7 @@ The SQL-owned routine codec separates declared catalog identity from the existin
 - [x] Qualify the isolated SQL-only source: all 1,835 library tests, strict library-and-test Clippy, formatting and repository ownership/harness/header/file-size checks pass.
 - [x] Add two deterministic checks, requiring 359 checks / 507 cases with existing allowances unchanged.
 - [x] Prepare this independent unit on `fix/catalog-call-arguments` after merged PR #809, preserving all original #638 records.
-- [ ] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform, merge and remove the branch.
+- [x] Verify actual automatic Linux/macOS artifacts and eight independent-process histories per platform, merge PR #811 as `18bd3acf69` and remove the local and remote branch.
 - [ ] Deliver builtin signature metadata and retained-catalog runtime integration separately before closing #119.
 
 ### Call representation preservation
@@ -1490,4 +1490,24 @@ The equality follows from the shared position/coercion mapping and ordered varia
 
 ### Independent call-node evidence
 
-The pinned PostgreSQL 18.4 Docker image and collector recorded above captured fourteen nodes covering omitted defaults, named argument order, named and positional explicit VARIADIC arrays, expanded arrays, polymorphic input/results, mixed wildcard types and unknown strings/NULLs. Raw capture SHA-256 is `5cdaf7b66d36d311d8feae70e46f51e78bf6fae8ecf2cd18b9b06e613ad0f3cb`; compact SQL fixture `routine_calls.json` has SHA-256 `17450921c6bcad2e71f5e145bdea3f473b2c8d0f847c9f9871665be3825da0b1`. The test compares the complete parsed nodes, every physical byte and compact/pretty SQL against the captured values. The actual isolated source passes all 1,835 SQL library tests and strict SQL library-and-test Clippy. Raw reports remain outside Git. The broader local runtime checks are not used as isolated qualification for this unit, and automatic platform acceptance remains pending; no timing claim is made.
+The pinned PostgreSQL 18.4 Docker image and collector recorded above captured fourteen nodes covering omitted defaults, named argument order, named and positional explicit VARIADIC arrays, expanded arrays, polymorphic input/results, mixed wildcard types and unknown strings/NULLs. Raw capture SHA-256 is `5cdaf7b66d36d311d8feae70e46f51e78bf6fae8ecf2cd18b9b06e613ad0f3cb`; compact SQL fixture `routine_calls.json` has SHA-256 `17450921c6bcad2e71f5e145bdea3f473b2c8d0f847c9f9871665be3825da0b1`. The test compares the complete parsed nodes, every physical byte and compact/pretty SQL against the captured values. The actual isolated source passes all 1,835 SQL library tests and strict SQL library-and-test Clippy. Raw reports remain outside Git. Actual automatic run [38345578370](https://github.com/cognica-io/uqa-engine/actions/runs/38345578370) passes 359 checks / 507 cases and eight independent-process histories on each Linux x86_64 and macOS arm64 platform, with zero JUnit failures/errors/skips. Exact case identities, committed manifest and test-source hashes match source `b577adca04990d1083b17d567fbb0c437a35ffe1`; tested merge `f2da6050fc978822c0c5712dc5d3e4e29ab4b8fb` and squash `18bd3acf69adb2737d46df4767c23be5922432bb` share tree `20640d1848ce77893b973f7f4109a2848d658c98`. CodeRabbit reviewed all nineteen files at that source without actionable findings; no review thread remains unresolved. PR #811 is merged and its completed local and remote branch is removed. The broader runtime is not part of this qualification, and no timing claim is made.
+
+## Builtin call signature metadata
+
+The Execution-owned builtin catalog supplies the declared signatures of `array_append`, `concat` and `concat_ws`. It records the polymorphic array/element pair and wildcard variadic argument modes alongside PostgreSQL strictness, volatility, parallel safety, leakproof status and native source names. Existing SQL implementations and invocation matching are unchanged. Typed runtime catalog integration remains a separate unit under #119.
+
+- [x] Capture four exact PostgreSQL `pg_proc` rows, including the existing `array_length` signature as a retained observation.
+- [x] Qualify the six-file unit independently of unfinished SQL and Engine runtime changes: 311 Execution catalog tests and strict library-and-test Clippy pass.
+- [x] Register the signature regression in the automatic inventory, requiring 360 checks / 508 cases with existing allowances unchanged.
+- [x] Prepare `fix/builtin-call-metadata` after merged PR #811, preserving all 80 original #638 records.
+- [ ] Verify actual Linux/macOS regression artifacts and eight independent-process histories per platform, merge and remove the branch.
+
+### Signature projection preservation
+
+Let $C$ be the retained builtin declaration catalog and let $P(C)$ project its `pg_proc` rows. Let $D$ contain the three corrected declarations, whose identities and complete projected fields are fixed by the independently captured PostgreSQL rows. This change substitutes $D$ in the declaration projection; it does not alter expression evaluation, invocation matching or any retained user declaration. For every builtin outside $D$, its projected row remains identical. For each member of $D$, projection returns the captured declaration rather than inferring a concrete signature from supplied runtime arguments.
+
+The correction reads immutable metadata and executes no routine or catalog mutation. Therefore the evaluation map on every existing UQA document, row, graph and score carrier is unchanged. Each existing composition has the same operands, operations and results, so its closure, identity and associativity laws are preserved. The only changed observation is the intended correction of these catalog rows; transaction, storage and resource contracts remain unchanged.
+
+### Independent signature evidence
+
+The PostgreSQL 18.4 Docker image and collector recorded above captured the four rows alongside the call-node reference. Raw capture SHA-256 is `5cdaf7b66d36d311d8feae70e46f51e78bf6fae8ecf2cd18b9b06e613ad0f3cb`; compact `builtin_routines/tests/call_signatures.json` has SHA-256 `7e89f7ca5eed76aa3da97e22a75bb2914d6e81bf76efcd98511e305474a764ae`. The owner test compares all twelve captured fields per row. The actual six-file source was isolated on `b577adca04990d1083b17d567fbb0c437a35ffe1`; all 311 Execution catalog tests and strict Execution library-and-test Clippy pass. Raw reports remain outside Git. Automatic platform acceptance remains pending; no timing claim is made.

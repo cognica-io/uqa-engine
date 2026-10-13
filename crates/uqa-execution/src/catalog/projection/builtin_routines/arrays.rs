@@ -46,6 +46,10 @@ const fn inspection(
 }
 
 pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
+    BuiltinRoutineCatalogEntry {
+        strict: false,
+        ..inspection(378, "array_append", 5078, &[5078, 5077], "array_append")
+    },
     inspection(747, "array_dims", 25, &[2277], "array_dims"),
     inspection(748, "array_ndims", 23, &[2277], "array_ndims"),
     inspection(2091, "array_lower", 23, &[2277, 23], "array_lower"),

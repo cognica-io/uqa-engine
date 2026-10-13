@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Expose PostgreSQL catalog signatures for `array_append`, `concat` and `concat_ws`, including polymorphic inputs, wildcard variadic metadata, strictness, volatility and native source names.
+
 - Preserve supplied routine arguments in typed catalog expression nodes: omitted defaults, named positions, concrete polymorphic types and explicit or expanded variadic calls. Retain unknown wildcard literals, selected collations and PostgreSQL reconstructed call syntax.
 
 - Expose CHECK and domain constraint information views with PostgreSQL ownership and type-usage visibility, duplicate names, inherited and foreign constraints, exact expression text and transactional renames. Include declared virtual-relation columns in information-schema discovery using their existing relation and column privileges.

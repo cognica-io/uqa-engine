@@ -4815,6 +4815,19 @@
       "capability": "Catalog routine call nodes",
       "workload": "Nineteen PostgreSQL routine pseudo-type identities in both lookup directions.",
       "invariant": "Forward declared names and reverse catalog identities share one canonical mapping."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_call_signatures_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/builtin_routines/tests/call_signatures.rs",
+      "capability": "Builtin routine signature metadata",
+      "workload": "Four independently captured PostgreSQL pg_proc signatures: array_append, array_length, concat and concat_ws.",
+      "invariant": "Declared argument/result OIDs, wildcard variadic modes, strictness, volatility, parallel safety, leakproof status and native source names match PostgreSQL without changing invocation or resource allowances."
     }
   ]
 }

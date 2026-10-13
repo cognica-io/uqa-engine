@@ -88,6 +88,7 @@ impl BuiltinRoutineCatalogEntry {
             return 25;
         }
         match self.oid {
+            3058 | 3059 => 2276,
             4282 => 3904,
             4285 => 3906,
             4288 => 3908,
@@ -103,6 +104,8 @@ impl BuiltinRoutineCatalogEntry {
             return Some(entry.argument_oids);
         }
         match self.oid {
+            3058 => Some(&[2276]),
+            3059 => Some(&[25, 2276]),
             3078 => Some(&[26, 20, 20, 20, 20, 16, 20, 26]),
             6427 => Some(&[2205, 20, 16]),
             1689 => Some(&[1034, 26, 26, 25, 16]),
@@ -115,6 +118,8 @@ impl BuiltinRoutineCatalogEntry {
             return Some(&["i", "v"]);
         }
         match self.oid {
+            3058 => Some(&["v"]),
+            3059 => Some(&["i", "v"]),
             3078 => Some(&["i", "o", "o", "o", "o", "o", "o", "o"]),
             6427 => Some(&["i", "o", "o"]),
             1689 => Some(&["i", "o", "o", "o", "o"]),
