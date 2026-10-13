@@ -1,0 +1,63 @@
+{
+  "catalog": [
+    {
+      "oid": 31382,
+      "name": "record_constant",
+      "array_oid": 31381,
+      "relation_oid": 31380,
+      "kind": "c",
+      "base": null,
+      "labels": null,
+      "attributes": [
+        {
+          "name": "n",
+          "number": 1,
+          "type": "integer",
+          "dropped": false,
+          "length": 4,
+          "alignment": "i",
+          "collation_oid": 0
+        },
+        {
+          "name": "t",
+          "number": 2,
+          "type": "text",
+          "dropped": false,
+          "length": -1,
+          "alignment": "i",
+          "collation_oid": 100
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "input": "(7,word)",
+      "check": "'(7,word)'::record_constant IS NOT NULL",
+      "conbin": "{NULLTEST :arg {CONST :consttype 31382 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 33 [ 132 0 0 0 255 255 255 255 150 122 0 0 255 255 255 255 0 0 2 0 2 0 24 0 7 0 0 0 11 119 111 114 100 ]} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "('(7,word)'::record_constant IS NOT NULL)",
+      "pretty": "'(7,word)'::record_constant IS NOT NULL"
+    },
+    {
+      "input": "(,word)",
+      "check": "'(,word)'::record_constant IS NOT NULL",
+      "conbin": "{NULLTEST :arg {CONST :consttype 31382 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 29 [ 116 0 0 0 255 255 255 255 150 122 0 0 255 255 255 255 0 0 2 0 3 0 24 2 11 119 111 114 100 ]} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "('(,word)'::record_constant IS NOT NULL)",
+      "pretty": "'(,word)'::record_constant IS NOT NULL"
+    },
+    {
+      "input": "(-7,)",
+      "check": "'(-7,)'::record_constant IS NOT NULL",
+      "conbin": "{NULLTEST :arg {CONST :consttype 31382 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 28 [ 112 0 0 0 255 255 255 255 150 122 0 0 255 255 255 255 0 0 2 0 1 0 24 1 249 255 255 255 ]} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "('(-7,)'::record_constant IS NOT NULL)",
+      "pretty": "'(-7,)'::record_constant IS NOT NULL"
+    },
+    {
+      "input": "(7,\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\")",
+      "check": "'(7,\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\")'::record_constant IS NOT NULL",
+      "conbin": "{NULLTEST :arg {CONST :consttype 31382 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 172 [ 176 2 0 0 255 255 255 255 150 122 0 0 255 255 255 255 0 0 2 0 2 0 24 0 7 0 0 0 64 2 0 0 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 ]} :nulltesttype 1 :argisrow true :location -1}",
+      "sql": "('(7,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)'::record_constant IS NOT NULL)",
+      "pretty": "'(7,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)'::record_constant IS NOT NULL"
+    }
+  ]
+}

@@ -14,6 +14,14 @@ use uqa_core::{DatumValue, Value};
 mod encoding;
 pub(crate) use encoding::array_payload;
 
+pub(crate) fn record_bytes(
+    fields: &[(String, Value)],
+    type_oid: u32,
+    descriptors: &super::Descriptors,
+) -> Option<Vec<u8>> {
+    encoding::encode(fields, descriptors.get(&type_oid)?, descriptors).map(|(bytes, _, _)| bytes)
+}
+
 pub(super) fn project(
     fields: &[(String, Value)],
     before: &CompositeTypeDescriptor,

@@ -11,6 +11,7 @@ mod between;
 mod catalog;
 mod coercions;
 mod collations;
+mod composites;
 mod concatenation;
 mod fields;
 mod json_extraction;
