@@ -22,6 +22,49 @@ fn statement(sql: &str) -> GrantTableStmt {
     };
     statement
 }
+
+#[test]
+fn all_column_privileges_preserve_column_scope_and_grant_options() {
+    for (sql, is_grant, grant_option_only) in [
+        (
+            "GRANT ALL (id, \"Has Space\") ON items TO reader WITH GRANT OPTION",
+            true,
+            false,
+        ),
+        (
+            "REVOKE ALL PRIVILEGES (id, \"Has Space\") ON items FROM reader",
+            false,
+            false,
+        ),
+        (
+            "REVOKE GRANT OPTION FOR ALL (id, \"Has Space\") ON items FROM reader CASCADE",
+            false,
+            true,
+        ),
+    ] {
+        let statement = statement(sql);
+        assert_eq!(statement.is_grant, is_grant);
+        assert_eq!(statement.grant_option_only, grant_option_only);
+        assert_eq!(statement.grant_option, is_grant || grant_option_only);
+        let requested = requested_acl_privileges(&statement.privileges).unwrap();
+        assert!(requested.table.is_empty());
+        for column in ["id", "Has Space"] {
+            let privileges = requested
+                .columns
+                .iter()
+                .filter_map(|(privilege, name)| (name == column).then_some(*privilege))
+                .collect::<Vec<_>>();
+            assert_eq!(privileges, TableAclPrivilege::COLUMN_ALL);
+        }
+        assert_eq!(requested.columns.len(), 8);
+    }
+    assert_eq!(
+        requested_acl_privileges(&statement("GRANT ALL ON items TO reader").privileges)
+            .unwrap()
+            .table,
+        TableAclPrivilege::ALL,
+    );
+}
 fn roles() -> BTreeMap<String, RoleDefinition> {
     let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
     for (index, name) in ["alice", "reader", "independent"].into_iter().enumerate() {
