@@ -37,6 +37,7 @@ impl Engine {
     pub(crate) fn schema_publication_context(&self) -> SchemaPublicationContext<'_> {
         SchemaPublicationContext {
             catalog: self,
+            changes: self,
             types: self,
             bindings: self.schema_dependency_binding_context(),
             identities: self.catalog_identity_reservation_context(),

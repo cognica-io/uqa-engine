@@ -20,6 +20,9 @@ use crate::type_resolution::FunctionTypeResolver;
 use crate::SQLError;
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+mod tests;
+
 pub struct CreateTableAnalysisContext<'a> {
     pub types: &'a dyn FunctionTypeResolver,
     pub schema: &'a dyn SchemaExpressionCatalog,
@@ -27,6 +30,31 @@ pub struct CreateTableAnalysisContext<'a> {
     pub inheritance: InheritanceContext<'a>,
     pub index_names: &'a dyn IndexNameCatalog,
     pub foreign_keys: ForeignKeyDefinitionContext<'a>,
+}
+
+/// Materialize the declared row layout before binding its expressions. Column identities and attribute numbers belong to the relation; defaults and constraints acquire their own identities only when they are defined.
+pub fn declared_row_columns(
+    columns: &mut [ColumnDef],
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> Result<Vec<ColumnDef>, SQLError> {
+    crate::catalog::relation_attributes::materialize(columns, &[])?;
+    columns
+        .iter_mut()
+        .map(|column| {
+            if column.object_id.is_none() {
+                column.object_id = Some(
+                    allocate
+                        .allocate_object_id("column")
+                        .map_err(ConstraintMetadataError::into_sql_error)?,
+                );
+            }
+            let mut declared = ColumnDef::nullable(column.name.clone(), column.ty.clone());
+            declared.object_id = column.object_id;
+            declared.attribute_number = column.attribute_number;
+            declared.collation_oid = column.collation_oid;
+            Ok(declared)
+        })
+        .collect()
 }
 
 /// Examine the statement's elements in written order as `transformCreateStmt` does while it analyzes the statement, before the relation's name is checked: each column's type and then its clauses, and each NOT NULL table constraint; then validate the declared keys.
