@@ -148,13 +148,15 @@ pub fn convert_value_to_column_type_with_control(
         | ColumnType::Regcollation
         | ColumnType::Regnamespace
         | ColumnType::Regtype
-        | ColumnType::PgNodeTree
         | ColumnType::AclItem => {
             if matches!(&*value, Value::Int(_) | Value::Str(_)) {
                 Ok(value)
             } else {
                 text_value(value_to_text_with_control(&value, control)?, false, control)
             }
+        }
+        ColumnType::PgNodeTree => {
+            cast_value_from_with_control(&value, "pg_node_tree", None, control)
         }
         ColumnType::Regrole => match &*value {
             Value::Int(number) => {

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reject external input to `pg_node_tree` with PostgreSQL diagnostics while preserving NULLs and already typed catalog values. Reject its nonexistent array type and preserve admitted memory ownership through typed assignments.
+
 - Expose PostgreSQL catalog signatures for `array_append`, `concat` and `concat_ws`, including polymorphic inputs, wildcard variadic metadata, strictness, volatility and native source names.
 
 - Preserve supplied routine arguments in typed catalog expression nodes: omitted defaults, named positions, concrete polymorphic types and explicit or expanded variadic calls. Retain unknown wildcard literals, selected collations and PostgreSQL reconstructed call syntax.

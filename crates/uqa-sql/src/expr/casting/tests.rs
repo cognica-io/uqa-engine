@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod node_tree;
+
 #[test]
 fn array_literal_rejects_postgresql_unrepresentable_upper_bound() {
     let error = parse_pg_array_literal("[2147483647:2147483647]={1}").unwrap_err();

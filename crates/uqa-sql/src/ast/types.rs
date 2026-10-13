@@ -182,7 +182,6 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_jsonb" => "jsonb",
         "_regtype" => "regtype",
         "_xid" => "xid",
-        "_pg_node_tree" => "pg_node_tree",
         "_int4range" => "int4range",
         "_int8range" => "int8range",
         "_numrange" => "numrange",

@@ -8,6 +8,38 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn typed_node_tree_assignments_keep_the_admitted_value_and_lease() {
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let expected = Value::Str("{CONST :consttype 23}".into());
+    let input = control.copy_value(&expected).unwrap();
+    let bytes = input.reserved_bytes();
+    let result = convert_value_to_column_type_from_with_control(
+        input,
+        &ColumnType::PgNodeTree,
+        Some(&ColumnType::PgNodeTree),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(*result, expected);
+    assert_eq!(result.reserved_bytes(), bytes);
+    assert_eq!(budget.used(), bytes);
+    drop(result);
+    assert_eq!(budget.used(), 0);
+    let input = control.copy_value(&expected).unwrap();
+    let error = convert_value_to_column_type_from_with_control(
+        input,
+        &ColumnType::PgNodeTree,
+        None,
+        &control,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn typed_byte_assignments_preserve_every_carrier_and_its_original_lease() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();

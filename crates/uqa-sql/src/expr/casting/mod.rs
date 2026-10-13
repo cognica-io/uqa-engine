@@ -49,14 +49,21 @@ pub fn cast_value_from_with_control(
             control,
         );
     }
-    if array_scalar_type_name(ty).is_some_and(|element| {
-        element.trim().eq_ignore_ascii_case("void")
-            || element.trim().eq_ignore_ascii_case("pg_catalog.void")
-    }) {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: "type \"void[]\" does not exist".into(),
-        });
+    if let Some(element) = array_scalar_type_name(ty) {
+        let element = element.trim();
+        let element = element
+            .split_once('.')
+            .filter(|(schema, _)| schema.eq_ignore_ascii_case("pg_catalog"))
+            .map_or(element, |(_, name)| name);
+        if let Some(name) = ["void", "pg_node_tree"]
+            .into_iter()
+            .find(|name| element.eq_ignore_ascii_case(name))
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("type \"{name}[]\" does not exist"),
+            });
+        }
     }
     if matches!(v, Value::Null) {
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
@@ -200,6 +207,19 @@ pub fn cast_value_from_with_control(
         "regproc" | "regprocedure" | "regrole" | "regtype" if matches!(v, Value::Int(_)) => {
             Ok(v.clone())
         }
+        "pg_node_tree" => {
+            let source = canonical_cast_source_with_control(source_ty, v, control)?;
+            return match source.as_str() {
+                "pg_node_tree" => Ok(control.copy_value(v)?),
+                "unknown" | "text" | "varchar" | "bpchar" | "name" => Err(SQLError::Unsupported(
+                    "cannot accept a value of type pg_node_tree".into(),
+                )),
+                _ => Err(undefined_cast(
+                    postgres_type_display_name(&source),
+                    "pg_node_tree",
+                )),
+            };
+        }
         "text"
         | "refcursor"
         | "pg_catalog.refcursor"
@@ -207,7 +227,6 @@ pub fn cast_value_from_with_control(
         | "regproc"
         | "regprocedure"
         | "regtype"
-        | "pg_node_tree"
         | "aclitem" => {
             let source = source_ty
                 .map(str::trim)
