@@ -178,4 +178,28 @@ fn catalog_names_retain_bpchar_input_length_and_type_modifiers() {
         drop(actual);
         assert_eq!(budget.used(), 0);
     }
+
+    for (name, diagnostic) in [
+        ("vector", "VECTOR requires a dimension"),
+        ("tensor", "TENSOR requires a dimension"),
+    ] {
+        for spelling in [
+            format!("pg_catalog.{name}"),
+            format!(r#""{name}""#),
+            format!(r#"pg_catalog."{name}""#),
+            format!(r#""pg_catalog"."{name}""#),
+            format!("pg_catalog.{name}[]"),
+        ] {
+            for error in [
+                ColumnType::from_sql_name(&spelling).unwrap_err(),
+                ColumnType::from_sql_name_with_control(&spelling, &control).unwrap_err(),
+            ] {
+                assert!(
+                    matches!(error, crate::SQLError::TypeMismatch(ref message) if message == diagnostic),
+                    "{spelling}: {error}",
+                );
+            }
+            assert_eq!(budget.used(), 0);
+        }
+    }
 }
