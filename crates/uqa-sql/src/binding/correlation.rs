@@ -704,13 +704,21 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
             .rev()
             .any(|scope| scope.internal_relations.contains(&column.relation())),
         ScalarExpr::Func {
+            binding,
             args,
             order_by,
             filter,
             ..
         } => {
-            args.iter()
-                .any(|expr| expression_has_external_reference(expr, scopes))
+            binding
+                .as_ref()
+                .and_then(crate::semantics::function_implicit_row_input)
+                .is_some_and(|column| {
+                    expression_has_external_reference(&ScalarExpr::InternalColumn(column), scopes)
+                })
+                || args
+                    .iter()
+                    .any(|expr| expression_has_external_reference(expr, scopes))
                 || order_by
                     .iter()
                     .any(|order| expression_has_external_reference(&order.expr, scopes))
@@ -830,6 +838,42 @@ fn frame_bound_has_external_reference(bound: &ScalarFrameBound, scopes: &[QueryS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn implicit_action_inputs_preserve_their_enclosing_row_identity() {
+        let binding = crate::binding::fixture::empty_binding_context();
+        let context = CorrelationContext {
+            catalog: binding.catalog.as_ref(),
+            resolution: &binding.resolution,
+        };
+        for (sql, expected) in [
+            ("SELECT merge_action()", true),
+            ("SELECT lower(merge_action())", true),
+            ("SELECT (SELECT merge_action())", true),
+            ("SELECT public.merge_action()", false),
+            ("SELECT \"merge_action\"()", false),
+            ("SELECT lower('constant')", false),
+        ] {
+            let crate::plan::UnifiedPlan::Query(query) =
+                crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+            else {
+                panic!("query")
+            };
+            assert_eq!(
+                query_depends_on_outer_row(context, &query).unwrap(),
+                expected,
+                "{sql}"
+            );
+            let mut enclosing = QueryScope::default();
+            enclosing
+                .internal_relations
+                .insert(crate::semantics::merge_action_attribute().relation());
+            assert!(
+                !query_has_external_reference(context, &query, &mut vec![enclosing]).unwrap(),
+                "{sql}"
+            );
+        }
+    }
 
     #[test]
     fn table_range_aliases_replace_physical_correlation_names() {

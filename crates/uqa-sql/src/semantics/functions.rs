@@ -17,6 +17,19 @@ pub fn merge_action_attribute() -> crate::ast::InternalColumnRef {
         LazyLock::new(|| crate::ast::InternalRelationId::allocate().column(0));
     *ATTRIBUTE
 }
+/// Whether a selected builtin reads the current row through an implicit executor attribute. Such a call is not a constant even when it has no explicit operands; this dependency is independent of routine volatility.
+pub fn function_has_implicit_row_input(binding: &crate::ast::FunctionBinding) -> bool {
+    function_implicit_row_input(binding).is_some()
+}
+
+/// The owned internal identity read by a native call with no written row operand.
+pub fn function_implicit_row_input(
+    binding: &crate::ast::FunctionBinding,
+) -> Option<crate::ast::InternalColumnRef> {
+    (binding.builtin && binding.dispatch == Some(crate::ast::FunctionDispatch::MergeAction))
+        .then(merge_action_attribute)
+}
+
 /// Resolve reserved system-schema aliases only when the local name belongs to
 /// that schema's built-in surface. Ordinary qualified names stay intact for
 /// runtime callbacks and user-defined routine lookup.

@@ -87,18 +87,84 @@ fn notification_text_argument<'a>(value: &'a Value, label: &str) -> Result<&'a s
 }
 
 pub fn merge_action_value(args: &[ScalarExpr], row: &dyn RowLookup) -> Result<Value, SQLError> {
-    if !args.is_empty() {
+    Ok(merge_action_value_with_control(
+        args.len(),
+        row,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary MERGE action output has no reservation"))
+}
+
+pub(crate) fn merge_action_value_with_control(
+    argument_count: usize,
+    row: &dyn RowLookup,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+    control.check()?;
+    if argument_count != 0 {
         return Err(SQLError::BadArity {
             name: "merge_action".into(),
             expected: "0".into(),
-            actual: args.len(),
+            actual: argument_count,
         });
     }
     let action = row
         .internal_column(super::merge_action_attribute())
-        .cloned()
         .ok_or_else(|| {
             SQLError::Unsupported("merge_action() is only valid in MERGE RETURNING".into())
         })?;
-    Ok(action)
+    Ok(control.copy_value(action)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_core::memory::{MemoryBudget, ProductionControl};
+    use uqa_core::CancellationToken;
+
+    struct ActionRow(Value);
+    impl RowLookup for ActionRow {
+        fn column(&self, _: &str) -> Option<&Value> {
+            None
+        }
+        fn qualified_column(&self, _: &str, _: &str) -> Option<&Value> {
+            None
+        }
+        fn internal_column(&self, column: crate::ast::InternalColumnRef) -> Option<&Value> {
+            (column == crate::semantics::merge_action_attribute()).then_some(&self.0)
+        }
+    }
+
+    #[test]
+    fn merge_action_output_retains_its_allowance_and_honors_cancellation() {
+        let row = ActionRow(Value::Str("UPDATE".into()));
+        let budget = MemoryBudget::new(256);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let output = merge_action_value_with_control(0, &row, &control).unwrap();
+        assert_eq!(*output, row.0);
+        assert!(budget.used() > 0);
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+        let tiny = MemoryBudget::new(0);
+        let limited = ProductionControl::new(&tiny, &original, &invoking);
+        assert_eq!(
+            merge_action_value_with_control(0, &row, &limited)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+        assert_eq!(tiny.used(), 0);
+        invoking.cancel();
+        assert_eq!(
+            merge_action_value_with_control(0, &row, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(budget.used(), 0);
+    }
 }

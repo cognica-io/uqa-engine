@@ -381,6 +381,11 @@ impl<'a> ParameterTypes<'a> {
         }
     }
 
+    /// Fixed output binding can describe a subtree after ordered statement analysis, without its enclosing SQL clause.
+    pub(super) fn is_output_binding(&self) -> bool {
+        self.fixed_values.is_some()
+    }
+
     pub(super) fn with_input_constants(
         types: &[Option<ColumnType>],
         aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,

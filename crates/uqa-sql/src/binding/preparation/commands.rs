@@ -143,8 +143,11 @@ impl Preparation<'_> {
         }
         let returning =
             crate::semantics::returning::command_returning_projections(command, target)?;
-        let mut output =
-            self.projections(&returning, target, input, command.scalar_subqueries())?;
+        let previous = self.scope.merge_returning;
+        self.scope.merge_returning |= matches!(command, CommandPlan::Merge(_));
+        let result = self.projections(&returning, target, input, command.scalar_subqueries());
+        self.scope.merge_returning = previous;
+        let mut output = result?;
         self.resolve_targets(&mut output)?;
         Ok(Some(output.schema()))
     }

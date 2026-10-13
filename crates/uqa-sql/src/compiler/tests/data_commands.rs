@@ -275,3 +275,56 @@ fn merge_rejects_a_clause_after_an_unconditional_clause_of_the_same_kind() {
     assert_eq!(error.sqlstate(), Some("42601"));
     assert!(error.to_string().contains("unreachable WHEN clause"));
 }
+
+#[test]
+fn merge_action_syntax_retains_identity_without_binding_ordinary_calls() {
+    let statement = first(
+        r#"MERGE INTO target USING source ON target.id = source.id
+           WHEN MATCHED THEN DELETE
+           RETURNING merge_action(), "merge_action"(), app.merge_action()"#,
+    );
+    let Statement::Merge(merge) = &statement else {
+        panic!("expected MERGE");
+    };
+    let Expr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = &merge.returning[0].expr
+    else {
+        panic!("MERGE_ACTION syntax must retain its parser-selected identity");
+    };
+    assert!(binding.builtin);
+    assert_eq!(
+        binding.dispatch,
+        Some(crate::ast::FunctionDispatch::MergeAction)
+    );
+    assert!(binding.object_id.is_none());
+    assert_eq!(binding.name, "merge_action");
+    assert!(binding.argument_types.is_empty());
+    assert!(args.is_empty());
+    for (projection, expected_name) in merge.returning[1..]
+        .iter()
+        .zip(["\"merge_action\"", "app.merge_action"])
+    {
+        assert!(
+            matches!(&projection.expr, Expr::Func { name, binding: None, .. } if name == expected_name)
+        );
+    }
+
+    let serialized = serde_json::to_value(&statement).unwrap();
+    let mut restored: Statement = serde_json::from_value(serialized.clone()).unwrap();
+    assert!(!restored.upgrade_legacy_serialized_dispatches());
+    let Statement::Merge(merge) = &mut restored else {
+        unreachable!();
+    };
+    let Expr::Func { binding, .. } = &mut merge.returning[0].expr else {
+        unreachable!();
+    };
+    *binding = None;
+    let mut legacy: Statement =
+        serde_json::from_value(serde_json::to_value(restored).unwrap()).unwrap();
+    assert!(legacy.upgrade_legacy_serialized_dispatches());
+    assert!(!legacy.upgrade_legacy_serialized_dispatches());
+    assert_eq!(serde_json::to_value(legacy).unwrap(), serialized);
+}

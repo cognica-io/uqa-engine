@@ -836,3 +836,35 @@ fn admitted_constant_group_keys_preserve_empty_input_grouping() {
         assert!(matches!(block.compute, ComputePlan::Aggregate));
     }
 }
+
+#[test]
+fn merge_action_remains_a_row_input_during_constant_folding() {
+    let UnifiedPlan::Command(command) = optimized(
+        "MERGE INTO target USING source ON target.id = source.id
+         WHEN MATCHED THEN DELETE
+         RETURNING merge_action(), length(merge_action()), 1 + 2 AS folded",
+    ) else {
+        panic!("expected command");
+    };
+    let CommandPlan::Merge(merge) = command.as_ref() else {
+        panic!("expected MERGE");
+    };
+    assert!(matches!(
+        &merge.returning[0].expr,
+        ScalarExpr::Func { binding: Some(binding), .. }
+            if uqa_sql::semantics::function_has_implicit_row_input(binding)
+    ));
+    assert!(matches!(
+        &merge.returning[1].expr,
+        ScalarExpr::Func { args, .. }
+            if matches!(args.as_slice(), [ScalarExpr::Func { binding: Some(binding), .. }]
+                if uqa_sql::semantics::function_has_implicit_row_input(binding))
+    ));
+    assert!(matches!(
+        &merge.returning[2].expr,
+        ScalarExpr::TypedLiteral {
+            value: Value::Int(3),
+            ..
+        }
+    ));
+}

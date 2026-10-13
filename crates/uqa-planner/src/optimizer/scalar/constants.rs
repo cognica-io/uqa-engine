@@ -194,6 +194,7 @@ fn is_constant(
             order_by,
             filter: None,
         } if binding.builtin
+            && !uqa_sql::semantics::function_has_implicit_row_input(binding)
             && order_by.is_empty()
             && !uqa_sql::semantics::is_builtin_aggregate(expression)
             && !uqa_sql::semantics::sets::validation::builtin_returns_set(

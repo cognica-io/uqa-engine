@@ -118,7 +118,8 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         return Err(SQLError::Internal("function call has an empty name".into()));
     }
     // An unqualified syntax keyword reaches FuncCall only when it was quoted; preserve that distinction after libpg_query has removed the quote token.
-    if FunctionBinding::is_polymorphic_builtin_syntax_name(&raw_name) {
+    if FunctionBinding::is_polymorphic_builtin_syntax_name(&raw_name) || raw_name == "merge_action"
+    {
         raw_name = format!("\"{raw_name}\"");
     }
     crate::expr::validate_named_argument_order(f.args.iter().map(|argument| {

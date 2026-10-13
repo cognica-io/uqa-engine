@@ -155,6 +155,8 @@ pub enum FunctionDispatch {
         operation: EnumFunctionOperation,
         type_oid: u32,
     },
+    /// The current MERGE action, read from the executor-owned row attribute.
+    MergeAction,
 }
 
 /// The six predicates over SQL's true, false and NULL Boolean inputs.
@@ -244,6 +246,7 @@ impl FunctionDispatch {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
+            Self::MergeAction => "merge_action",
             Self::NumericOperator(operator) => operator.symbol(),
             Self::Pattern { operator, .. } => operator.syntax(),
             Self::PatternEscape { similar: false } => "pg_catalog.like_escape",
@@ -325,11 +328,12 @@ impl FunctionDispatch {
         }
     }
 
-    /// Decode the compiler-private function spellings written into durable expressions by releases through 0.1.6. This is a catalog migration primitive, never a SQL routine lookup path.
+    /// Decode function spellings in older durable expressions. This is a catalog migration primitive, never a SQL routine lookup path.
     #[doc(hidden)]
     #[must_use]
     pub fn from_legacy_serialized_name(name: &str) -> Option<Self> {
         let fixed = match name {
+            "merge_action" => Self::MergeAction,
             "__named_arg" => Self::NamedArgument,
             "__variadic_arg" => Self::VariadicArgument,
             "__array_subscripts" => Self::ArraySubscripts,
@@ -584,7 +588,7 @@ impl FunctionBinding {
         }
     }
 
-    /// Upgrade one function node deserialized from the catalog format written by releases through 0.1.6. Bound user routines are deliberately left untouched even when their SQL names resemble an old compiler marker.
+    /// Upgrade one function node from older serialized catalog syntax. Bound user routines are left untouched even when their SQL names resemble an old compiler marker.
     #[doc(hidden)]
     pub fn upgrade_legacy_serialized_dispatch(
         display_name: &mut String,
