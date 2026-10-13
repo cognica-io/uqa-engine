@@ -5192,7 +5192,7 @@
       "test": "temporary_foreign_publication_leaves_durable_definitions_unchanged",
       "cases": 1,
       "case_names": [
-        "temporary_foreign_publication_leaves_durable_definitions_unchanged"
+        ""
       ],
       "source": "crates/uqa-execution/src/catalog/foreign/restoration/tests.rs",
       "capability": "Foreign declaration identity and publication",
@@ -5205,7 +5205,7 @@
       "test": "durable_refresh_preserves_only_temporary_foreign_definitions_and_security",
       "cases": 1,
       "case_names": [
-        "durable_refresh_preserves_only_temporary_foreign_definitions_and_security"
+        ""
       ],
       "source": "crates/uqa-execution/src/catalog/foreign/restoration/tests.rs",
       "capability": "Foreign declaration identity and publication",
@@ -5218,7 +5218,7 @@
       "test": "refresh_retains_an_unbound_declaration_until_its_server_is_attached",
       "cases": 1,
       "case_names": [
-        "refresh_retains_an_unbound_declaration_until_its_server_is_attached"
+        ""
       ],
       "source": "crates/uqa-execution/src/catalog/foreign/restoration/tests.rs",
       "capability": "Foreign declaration identity and publication",
