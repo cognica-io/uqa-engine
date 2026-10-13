@@ -13,6 +13,8 @@
 mod cli_connection;
 mod http_engine;
 mod http_engine_error;
+mod http_limit;
+mod http_limit_kind;
 pub mod notifications;
 mod server_error_envelope;
 mod sql_batch_execution;
@@ -26,6 +28,8 @@ mod sql_stream_frame;
 
 pub use http_engine::HttpEngine;
 pub use http_engine_error::HttpEngineError;
+pub use http_limit::HttpLimit;
+pub use http_limit_kind::HttpLimitKind;
 pub use secrecy::SecretString;
 pub use sql_batch_execution::SQLBatchExecution;
 pub use sql_diagnostic::SQLDiagnostic;

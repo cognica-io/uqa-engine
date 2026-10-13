@@ -11,7 +11,7 @@
 // database into IndexedDB and `UQA.load()` restores them on startup.
 
 import createUQAModule from "./uqa.js";
-import { subscribe, subscribeDirect, HttpNotificationSubscription, NotificationSubscription, NotificationError } from "./notification-core.mjs";
+import { httpLimit, limitMessage, subscribe, subscribeDirect, HttpNotificationSubscription, NotificationSubscription, NotificationError } from "./notification-core.mjs";
 import { fetchRuntime } from "./notification-fetch.mjs";
 import { WASMNotificationHandle } from "./notification-wasm.mjs";
 
@@ -367,12 +367,13 @@ const MAX_HTTP_STREAM_FRAME_BYTES = 64 * 1024 * 1024;
 
 /** Redacted local/Cloud HTTP client error. */
 export class HttpEngineError extends Error {
-  constructor(message, { code, status, requestId } = {}) {
+  constructor(message, { code, status, requestId, limit } = {}) {
     super(message);
     this.name = "HttpEngineError";
     this.code = code;
     this.status = status;
     this.requestId = requestId;
+    this.limit = limit;
   }
 }
 
@@ -887,10 +888,12 @@ async function decodeHTTPJSONResponse(response) {
     if (body?.request_id !== undefined && body.request_id !== requestId) {
       throw new HttpEngineError("UQA response request IDs do not match");
     }
-    throw new HttpEngineError(`UQA returned ${response.status} with code ${code}`, {
+    const limit = httpLimit(code, body?.error?.limit);
+    throw new HttpEngineError(`UQA returned ${response.status} with code ${code}${limitMessage(limit)}`, {
       code,
       status: response.status,
       requestId,
+      limit,
     });
   }
   if (body?.request_id !== requestId) {

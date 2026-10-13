@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 import { runDirectNotifications } from "./notifications/direct.mjs";
+import { registerHTTPLimitTests } from "../parity/http_limits.mjs";
 
 const {
   Engine,
@@ -31,6 +32,7 @@ const {
 } = await import(process.env.UQA_TEST_PACKAGE
   ? pathToFileURL(resolve(process.env.UQA_TEST_PACKAGE)).href
   : "../../crates/uqa-wasm/js/index.mjs");
+registerHTTPLimitTests("Browser", HttpEngine, HttpEngineError);
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 
 test("direct WASM notification acceptance", { timeout: 60000 }, async () => {

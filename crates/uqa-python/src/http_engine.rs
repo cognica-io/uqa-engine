@@ -265,6 +265,7 @@ fn http_runtime_error(error: CoreHttpEngineError) -> PyErr {
                 code,
                 request_id,
                 diagnostic,
+                limit,
                 ..
             } = error
             {
@@ -277,8 +278,12 @@ fn http_runtime_error(error: CoreHttpEngineError) -> PyErr {
                         .map(|value| diagnostic_to_py(py, &value))
                         .transpose()?,
                 )?;
+                value.setattr(
+                    "limit",
+                    limit.map(|value| limit_to_py(py, &value)).transpose()?,
+                )?;
             } else {
-                for name in ["status", "code", "request_id", "diagnostic"] {
+                for name in ["status", "code", "request_id", "diagnostic", "limit"] {
                     value.setattr(name, py.None())?;
                 }
             }
@@ -289,6 +294,21 @@ fn http_runtime_error(error: CoreHttpEngineError) -> PyErr {
             Err(error) => error,
         }
     })
+}
+
+fn limit_to_py<'py>(
+    py: Python<'py>,
+    value: &uqa_client::HttpLimit,
+) -> PyResult<Bound<'py, PyDict>> {
+    let result = PyDict::new(py);
+    result.set_item("kind", value.kind.as_str())?;
+    result.set_item("limit", value.limit)?;
+    result.set_item("actual", value.actual)?;
+    result.set_item("actual_is_lower_bound", value.actual_is_lower_bound)?;
+    if let Some(executing) = value.executing_limit {
+        result.set_item("executing_limit", executing)?;
+    }
+    Ok(result)
 }
 
 fn diagnostic_to_py<'py>(

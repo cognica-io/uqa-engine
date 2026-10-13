@@ -5,9 +5,19 @@ export {
 } from "./index";
 export * from "./notifications";
 
+export interface HttpLimit {
+  readonly kind: "request_body_bytes" | "sql_bytes" | "parameters" | "batch_statements" |
+    "result_bytes" | "query_admission" | "authentication_admission";
+  readonly limit: number;
+  readonly actual: number;
+  readonly actualIsLowerBound: boolean;
+  readonly executingLimit?: number;
+}
+
 export declare class HttpEngineError extends Error {
   readonly code?: string;
   readonly status?: number;
+  readonly limit?: HttpLimit;
   readonly requestId?: string;
   readonly diagnostic?: HttpSQLDiagnostic;
 }

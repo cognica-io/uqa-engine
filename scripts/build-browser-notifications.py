@@ -20,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULES = (
     "http-error.js",
     "http-json.js",
+    "http-limit.js",
     "notification-bytes.js",
     "notification-error.js",
     "notification-request.js",
@@ -32,6 +33,7 @@ MODULES = (
     "notification-direct.js",
 )
 EXPORTS = {
+    "http-limit.js": "httpLimit, limitMessage",
     "notification-error.js": "NotificationError, NotificationEvent, protocol, cancelled, timeout",
     "notification-request.js": "MAX_WIRE_BYTES",
     "notification-direct.js": "subscribeDirect, NotificationSubscription",

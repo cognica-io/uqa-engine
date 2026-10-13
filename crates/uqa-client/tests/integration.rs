@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod http_limits;
 mod notifications;
 #[path = "sql_diagnostics/mod.rs"]
 mod sql_diagnostics;
@@ -252,12 +253,14 @@ async fn server_error_keeps_diagnostics_but_redacts_customer_message() {
             message: response_message,
             request_id,
             diagnostic,
+            limit,
         } => {
             assert_eq!(*status, StatusCode::BAD_REQUEST);
             assert_eq!(code, "SQL_EXECUTION_FAILED");
             assert_eq!(response_message, message);
             assert_eq!(request_id.as_deref(), Some(REQUEST_ID));
             assert!(diagnostic.is_none());
+            assert!(limit.is_none());
         }
         other => panic!("unexpected error: {other:?}"),
     }
