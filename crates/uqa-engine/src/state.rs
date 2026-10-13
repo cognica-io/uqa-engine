@@ -539,6 +539,8 @@ pub(super) struct QueryRuntime {
     pub(super) cancellation: uqa_core::CancellationToken,
     pub(super) notices: Arc<uqa_execution::query::NoticeQueue>,
     pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
+    pub(super) bounded_sql_notifications:
+        Mutex<Option<Arc<crate::notifications::SQLNotificationInbox>>>,
     /// The terminations the session has scheduled for its idle period and transaction.
     pub(super) terminations: crate::session::SessionTerminations,
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
@@ -577,6 +579,7 @@ impl QueryRuntime {
             cancellation,
             notices: Arc::new(uqa_execution::query::NoticeQueue::new(client_level)),
             notifications: Arc::new(Mutex::new(VecDeque::new())),
+            bounded_sql_notifications: Mutex::new(None),
             terminations: crate::session::SessionTerminations::new(true),
             notification_wake: Arc::new(parking_lot::Condvar::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
