@@ -5000,6 +5000,48 @@
       "capability": "Typed composite catalog constants",
       "workload": "Four independent PostgreSQL constant nodes and both reconstructed SQL forms, plus retained-source precedence and owned physical tuple copies.",
       "invariant": "Catalog encoding preserves the original composite descriptor, tuple bytes, NULL fields, field order and selected type without re-encoding a changed projection."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "all_column_privileges_preserve_column_scope_and_grant_options",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/security/table_grants/tests.rs",
+      "capability": "Column privilege expansion",
+      "workload": "GRANT ALL(column-list), REVOKE ALL PRIVILEGES(column-list), grant-option-only revoke and ordinary table ALL.",
+      "invariant": "Expand exactly four column privileges per named column without table privileges, preserving grant and revoke flags and the ordinary table-level ALL contract."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_constraint_visibility_distinguishes_read_and_write_privileges",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/projection/information_schema/constraints/tests.rs",
+      "capability": "Constraint information views",
+      "workload": "A retained CHECK and NOT NULL relation under a reader with each of eight table privileges and four column privileges.",
+      "invariant": "Only qualifying write privileges expose table constraints; SELECT and MAINTAIN alone do not. Visible rows carry the database name and the source snapshot remains unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_key_visibility_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_information.rs",
+      "capability": "Constraint information views",
+      "workload": "Eighty independent PostgreSQL observations of table/key visibility, column ALL grants and revocation, owner inheritance, foreign constraints and transaction rollback across four providers.",
+      "invariant": "Exact result types, rows, command completion and key ordinals match PostgreSQL; column-only ALL grants remain scoped and retain grant-option and rollback behavior."
     }
   ]
 }

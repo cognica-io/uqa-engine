@@ -14,19 +14,21 @@ mod routines;
 
 use std::collections::BTreeSet;
 
-pub use constraints::{build_info_check_constraints, build_info_domain_constraints};
+pub use constraints::{
+    build_info_check_constraints, build_info_domain_constraints, build_info_key_column_usage,
+    build_info_table_constraints,
+};
 use foreign_tables::insert_foreign_table_column_privileges;
 use identity::{owned_identity_sequence, IdentityAttributes};
 pub use routines::build_info_routines;
 
-use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
 use super::helpers::information_schema_types::{
     info_character_maximum_length, info_character_octet_length, info_data_type,
     info_datetime_precision, info_interval_type, info_numeric_precision, info_numeric_scale,
     info_udt_name,
 };
 use super::helpers::oids::{current_user_name, split_schema_name};
-use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
+use super::helpers::rows::{catalog_name, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{services::CatalogSession, CatalogReadView, RelationNameResolution};
@@ -823,107 +825,4 @@ pub fn build_info_sequences(
             ])
         })
         .collect())
-}
-
-pub fn build_info_table_constraints(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(constraint_catalog_rows(catalog, resolution)?
-        .iter()
-        .map(|constraint| {
-            let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
-                "CHECK"
-            } else {
-                constraint.kind.label()
-            };
-            let nulls_distinct = constraint
-                .kind
-                .nulls_distinct()
-                .map_or(Value::Null, |value| {
-                    str_value(if value { "YES" } else { "NO" })
-                });
-            row([
-                ("constraint_catalog", catalog_name()),
-                ("constraint_schema", str_value(constraint.schema.clone())),
-                ("constraint_name", str_value(constraint.name.as_str())),
-                ("table_schema", str_value(constraint.schema.as_str())),
-                ("table_name", str_value(constraint.table.as_str())),
-                ("constraint_type", str_value(constraint_type)),
-                (
-                    "is_deferrable",
-                    str_value(if constraint.state.deferrable() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                (
-                    "initially_deferred",
-                    str_value(if constraint.state.initially_deferred() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                (
-                    "enforced",
-                    str_value(if constraint.state.enforced() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                ("nulls_distinct", nulls_distinct),
-            ])
-        })
-        .collect())
-}
-
-pub fn build_info_key_column_usage(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows = Vec::new();
-    for constraint in constraint_catalog_rows(catalog, resolution)? {
-        if !matches!(
-            constraint.kind,
-            ConstraintCatalogKind::PrimaryKey
-                | ConstraintCatalogKind::Unique { .. }
-                | ConstraintCatalogKind::ForeignKey
-        ) {
-            continue;
-        }
-        for (index, column) in constraint.columns.iter().enumerate() {
-            let position_in_unique_constraint = constraint
-                .foreign_key
-                .as_ref()
-                .and_then(|foreign_key| {
-                    foreign_key
-                        .positions_in_unique_constraint
-                        .get(index)
-                        .copied()
-                        .flatten()
-                })
-                .map_or(Value::Null, int_value);
-            rows.push(row([
-                ("constraint_catalog", catalog_name()),
-                ("constraint_schema", str_value(constraint.schema.clone())),
-                ("constraint_name", str_value(constraint.name.clone())),
-                ("table_catalog", catalog_name()),
-                ("table_schema", str_value(constraint.schema.clone())),
-                ("table_name", str_value(constraint.table.clone())),
-                ("column_name", str_value(column.name.clone())),
-                (
-                    "ordinal_position",
-                    int_value(catalog_ordinal(index, "key constraint column")?),
-                ),
-                (
-                    "position_in_unique_constraint",
-                    position_in_unique_constraint,
-                ),
-            ]));
-        }
-    }
-    Ok(rows)
 }

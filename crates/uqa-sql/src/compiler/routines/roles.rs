@@ -251,12 +251,24 @@ fn compile_grant_table_privileges(
                 Ok(column.sval.clone())
             })
             .collect::<Result<Vec<_>>>()?;
-        let spec = TablePrivilegeSpec {
-            privilege: privilege_name,
-            columns,
+        let names = if privilege.priv_name.is_empty() && !columns.is_empty() {
+            vec![
+                TablePrivilege::Select,
+                TablePrivilege::Insert,
+                TablePrivilege::Update,
+                TablePrivilege::References,
+            ]
+        } else {
+            vec![privilege_name]
         };
-        if !privileges.contains(&spec) {
-            privileges.push(spec);
+        for name in names {
+            let spec = TablePrivilegeSpec {
+                privilege: name,
+                columns: columns.clone(),
+            };
+            if !privileges.contains(&spec) {
+                privileges.push(spec);
+            }
         }
     }
     Ok(privileges)

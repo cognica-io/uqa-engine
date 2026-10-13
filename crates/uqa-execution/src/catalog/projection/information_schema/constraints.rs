@@ -4,19 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! CHECK and domain constraint views, including the distinct owner and type-usage visibility rules of `information_schema`.
+//! Constraint information views with their distinct role, relation, column and type-usage visibility rules.
 
 use super::super::{
     helpers::{
         constraints::{constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow},
-        rows::{catalog_name, row, str_value},
+        rows::{catalog_name, catalog_ordinal, int_value, row, str_value},
     },
     view_definition::{stored_domain_expression_definition, stored_expression_definition},
     CatalogOutput, CatalogRequest,
 };
 use crate::catalog::{context::CatalogContext, CatalogReadView, RelationNameResolution};
 use uqa_core::{RelationIdentity, Value};
-use uqa_sql::{catalog::security::object_acl, ResultRow, SQLError};
+use uqa_sql::{
+    catalog::security::{object_acl, table::TableAclPrivilege},
+    ResultRow, SQLError,
+};
 
 #[cfg(test)]
 mod tests;
@@ -200,4 +203,152 @@ fn check_row(schema: &str, name: &str, clause: Value) -> ResultRow {
         ("constraint_name", str_value(name)),
         ("check_clause", clause),
     ])
+}
+
+pub fn build_info_table_constraints(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(constraint_catalog_rows(catalog, resolution)?
+        .iter()
+        .filter(|constraint| table_constraint_is_visible(catalog, resolution, constraint))
+        .map(|constraint| {
+            let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
+                "CHECK"
+            } else {
+                constraint.kind.label()
+            };
+            let nulls_distinct = constraint
+                .kind
+                .nulls_distinct()
+                .map_or(Value::Null, |value| {
+                    str_value(if value { "YES" } else { "NO" })
+                });
+            row([
+                ("constraint_catalog", catalog_name()),
+                ("constraint_schema", str_value(constraint.schema.clone())),
+                ("constraint_name", str_value(constraint.name.as_str())),
+                ("table_catalog", catalog_name()),
+                ("table_schema", str_value(constraint.schema.as_str())),
+                ("table_name", str_value(constraint.table.as_str())),
+                ("constraint_type", str_value(constraint_type)),
+                (
+                    "is_deferrable",
+                    str_value(if constraint.state.deferrable() {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
+                ),
+                (
+                    "initially_deferred",
+                    str_value(if constraint.state.initially_deferred() {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
+                ),
+                (
+                    "enforced",
+                    str_value(if constraint.state.enforced() {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
+                ),
+                ("nulls_distinct", nulls_distinct),
+            ])
+        })
+        .collect())
+}
+
+pub fn build_info_key_column_usage(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for constraint in constraint_catalog_rows(catalog, resolution)? {
+        if !matches!(
+            constraint.kind,
+            ConstraintCatalogKind::PrimaryKey
+                | ConstraintCatalogKind::Unique { .. }
+                | ConstraintCatalogKind::ForeignKey
+        ) {
+            continue;
+        }
+        let relation = RelationIdentity::new(&constraint.schema, &constraint.table);
+        let Some(table) = catalog.snapshot().tables.get(&relation) else {
+            continue;
+        };
+        let subject = resolution.current_user();
+        let owner = catalog.role_is_enabled_for(subject, &table.security.role_owner);
+        for (index, column) in constraint.columns.iter().enumerate() {
+            if !owner && !catalog.table_column_is_visible_to(table, &column.name, subject) {
+                continue;
+            }
+            let position_in_unique_constraint = constraint
+                .foreign_key
+                .as_ref()
+                .and_then(|foreign_key| {
+                    foreign_key
+                        .positions_in_unique_constraint
+                        .get(index)
+                        .copied()
+                        .flatten()
+                })
+                .map_or(Value::Null, int_value);
+            rows.push(row([
+                ("constraint_catalog", catalog_name()),
+                ("constraint_schema", str_value(constraint.schema.clone())),
+                ("constraint_name", str_value(constraint.name.clone())),
+                ("table_catalog", catalog_name()),
+                ("table_schema", str_value(constraint.schema.clone())),
+                ("table_name", str_value(constraint.table.clone())),
+                ("column_name", str_value(column.name.clone())),
+                (
+                    "ordinal_position",
+                    int_value(catalog_ordinal(index, "key constraint column")?),
+                ),
+                (
+                    "position_in_unique_constraint",
+                    position_in_unique_constraint,
+                ),
+            ]));
+        }
+    }
+    Ok(rows)
+}
+
+fn table_constraint_is_visible(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    constraint: &ConstraintCatalogRow,
+) -> bool {
+    let relation = RelationIdentity::new(&constraint.schema, &constraint.table);
+    let Some(table) = catalog.snapshot().tables.get(&relation) else {
+        return false;
+    };
+    let subject = resolution.current_user();
+    catalog.role_is_enabled_for(subject, &table.security.role_owner)
+        || [
+            TableAclPrivilege::Insert,
+            TableAclPrivilege::Update,
+            TableAclPrivilege::Delete,
+            TableAclPrivilege::Truncate,
+            TableAclPrivilege::References,
+            TableAclPrivilege::Trigger,
+        ]
+        .into_iter()
+        .any(|privilege| catalog.table_has_privilege_to(table, subject, privilege))
+        || table.columns.iter().any(|column| {
+            [
+                TableAclPrivilege::Insert,
+                TableAclPrivilege::Update,
+                TableAclPrivilege::References,
+            ]
+            .into_iter()
+            .any(|privilege| {
+                catalog.table_column_has_privilege_to(table, &column.name, subject, privilege)
+            })
+        })
 }

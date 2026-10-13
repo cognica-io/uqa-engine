@@ -168,3 +168,58 @@ fn requested_constraint_names_do_not_deparse_unselected_expressions() {
         str_value("Has Space IS NOT NULL")
     );
 }
+
+#[test]
+fn table_constraint_visibility_distinguishes_read_and_write_privileges() {
+    let original = fixture();
+    let mut resolution = CatalogServices::default().resolution;
+    resolution.current_user = "reader".into();
+    assert!(build_info_table_constraints(&original, &resolution)
+        .unwrap()
+        .is_empty());
+    for (column, privileges) in [
+        (None, TableAclPrivilege::ALL.as_slice()),
+        (Some("Has Space"), TableAclPrivilege::COLUMN_ALL.as_slice()),
+    ] {
+        for privilege in privileges {
+            let mut snapshot = original.snapshot().clone();
+            let reader = &snapshot.definitions.roles["reader"];
+            let entry = uqa_sql::catalog::security::table_binding::BoundTableAclEntry {
+                role: Some(RoleIdentity {
+                    oid: reader.oid,
+                    object_id: reader.object_id,
+                }),
+                grantor: RoleIdentity::BOOTSTRAP,
+                privileges: privilege.mask(),
+                grant_options: uqa_core::catalog_acl::TablePrivileges::default(),
+            };
+            let security = Arc::make_mut(
+                &mut snapshot
+                    .tables
+                    .get_mut(&RelationIdentity::new("public", "items"))
+                    .unwrap()
+                    .security,
+            );
+            if let Some(column) = column {
+                security.column_acls.insert(column.into(), vec![entry]);
+            } else {
+                security.acl = Some(vec![entry]);
+            }
+            let catalog = CatalogReadView::new(snapshot);
+            let rows = build_info_table_constraints(&catalog, &resolution).unwrap();
+            let read_only = matches!(
+                privilege,
+                TableAclPrivilege::Select | TableAclPrivilege::Maintain
+            );
+            assert_eq!(
+                rows.len(),
+                if read_only { 0 } else { 2 },
+                "{column:?} {privilege:?}"
+            );
+            for row in rows {
+                assert_eq!(row["table_catalog"], row["constraint_catalog"]);
+                assert_eq!(row["table_catalog"], str_value("uqa"));
+            }
+        }
+    }
+}
