@@ -62,6 +62,51 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "completed_ddl_batch_keeps_unrelated_stores_and_rolls_back_atomically",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Persistent DDL catalog retention",
+      "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
+      "invariant": "Seven DDL statements retain unrelated store identity through both SQL string and array batch boundaries; failed batches roll back atomically and persistent reopen preserves results.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "own_ddl_commits_keep_stores_but_intervening_commits_refresh_them",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Persistent DDL catalog retention",
+      "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
+      "invariant": "Successful own table, index, column, view and function commits retain unrelated store identity; intervening peer commits use ordinary refresh.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_lock_refresh_retains_own_definitions_and_observes_other_commits",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Persistent DDL catalog retention",
+      "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
+      "invariant": "Lock rechecks retain each unrelated table handle until committed visibility changes; private declarations, peer commits, savepoint rollback and reopen remain correct.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "shared_sessions_open_each_store_once_and_keep_current_counts",
       "cases": 3,
       "source": "crates/uqa-engine/src/open/tests/session_stores.rs",

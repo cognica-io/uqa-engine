@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain session-maintained catalogs and unrelated table stores across successful DDL statements and commits, preserving refresh after peer changes and rollback.
+
 - Read bound table identities directly for mutation row images and RETURNING, avoiding whole-catalog captures per row while preserving retained, partition and foreign-table identities.
 
 - Match PostgreSQL stored generated-column dependency selection during UPDATE, preserving unrelated values and using destination expressions when rows move between partitions.

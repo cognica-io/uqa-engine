@@ -16,6 +16,8 @@ use uqa_sql::plan::{
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 use super::context::StatementExecutionContext;
+
+mod completion;
 use crate::schema::view_creation::{self, MaterializedViewRegistration, ViewRegistration};
 
 use crate::query::output::QueryOutput;
@@ -83,21 +85,6 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     pub fn with_source_sql(mut self, sql: &str) -> Self {
         self.source_sql = Some(sql.to_string());
         self
-    }
-
-    pub fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
-        super::validation::validate_plan(
-            &self.context.validation,
-            self.context.runtime.cancellation,
-            plan,
-        )?;
-        let transaction_failed = self.context.controls.transaction_failed();
-        let mut result = match plan {
-            UnifiedPlan::Query(query) => self.execute_query(query),
-            UnifiedPlan::Command(command) => self.execute_command(command),
-        }?;
-        uqa_sql::result::completion::set_command_completion(plan, &mut result, transaction_failed);
-        Ok(result)
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
