@@ -44,6 +44,7 @@ def main():
         verify(package, default=False, features=("fdw",))
         verify(package, default=False, features=("duckdb",))
     verify("uqa-execution", default=False, features=("fdw",))
+    verify("uqa-engine", default=False, features=("uqa-execution/fdw",))
     verify("uqa-fdw")
     verify("uqa-fdw", default=False, features=("duckdb",))
     for package in ("uqa-fdw", "uqa-engine"):

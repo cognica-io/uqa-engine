@@ -16,6 +16,8 @@ SQL owns wrapper/server declarations and identities. Execution owns durable fore
 
 The Rust handler projection APIs `foreign_server`, `foreign_table` and `load_memory_foreign_table` require `fdw`. The always-available `foreign_server_definition` and `foreign_table_definition` methods expose the retained native SQL definitions. Listing, column lookup, DDL, permissions, transactional changes and persistence remain available without handlers.
 
+Cargo may unify `uqa-execution/fdw` through another dependency without selecting `uqa-engine/fdw`. The SQL scan capability therefore has one feature-independent interface, and an Engine without handlers supplies no adapter. The enabled adapter calls Execution's existing predicate preparation before invoking the retained source. Dependency feature unification cannot change the shared context's shape or enable an Engine handler implicitly.
+
 An unavailable scan returns SQLSTATE `0A000`. Without `fdw`, its message is `FDW support is not available in this build`; with `fdw` but without `duckdb`, the existing DuckDB-specific unavailable-build error remains. Validation of a bound server and wrapper still precedes source dispatch. Missing handlers never produce a fabricated empty relation or discard a stored definition.
 
 ## Preservation argument
@@ -31,6 +33,7 @@ Every relational, retrieval and ranked operator above the scan receives that sam
 ## Verification contract
 
 - Check resolved native, development and Emscripten dependency graphs: default Engine and downstream builds exclude `uqa-fdw`, DuckDB and its native library; explicit `fdw` and `duckdb` select exactly their intended dependencies.
+- Check Engine compilation when only its Execution dependency enables `fdw`; unavailable Engine scans retain the same catalog and error behavior in this unified dependency graph.
 - Run foreign catalog creation, rollback, inspection, deletion and persistent reopening without handlers on memory, SQLite, SQLite Key/Value and redb. Exercise direct and joined scans to verify explicit unavailability.
 - Run existing memory/Arrow behavior, PostgreSQL catalog/ACL/lifetime fixtures and runtime projection tests with `fdw`, and real DuckDB owner and Engine tests with `duckdb`, on Linux and macOS.
 - Keep the analytical comparison's DuckDB dependency explicit through the benchmark's required features. Historical reference revisions without a feature declaration retain their original build arguments; build provenance records the actual selected features.

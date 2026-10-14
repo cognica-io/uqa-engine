@@ -63,12 +63,12 @@ pub trait SourcePlanning<S: Clone>: Sync {
 pub type ForeignSourceRows<'a> = Box<dyn Iterator<Item = Result<ResultRow, String>> + Send + 'a>;
 
 /// A foreign table scan bound to the caller's catalog generation and FDW registrations.
-#[cfg(feature = "fdw")]
 pub trait ForeignTableScan: Sync {
     fn scan_foreign_source(
         &self,
         name: &str,
-        predicates: &[uqa_fdw::FDWPredicate],
+        filter: Option<&ScalarExpr>,
+        params: &[SQLParam],
     ) -> Result<ForeignSourceRows<'_>, String>;
 }
 
@@ -81,8 +81,7 @@ pub struct SourceContext<'a, S: Clone + 'static> {
     pub locking: RowLockContext<'a, S>,
     pub catalog: CatalogContext<'a>,
     pub planning: &'a dyn SourcePlanning<S>,
-    #[cfg(feature = "fdw")]
-    pub foreign_tables: &'a dyn ForeignTableScan,
+    pub foreign_tables: Option<&'a dyn ForeignTableScan>,
     pub volatility: &'a (dyn VolatilityCatalog + Sync),
     pub types: &'a dyn FunctionTypeResolver,
     pub documents: &'a dyn crate::query::block::context::QueryDocumentRead,
@@ -98,16 +97,8 @@ impl<'a, S: Clone + 'static> SourceContext<'a, S> {
         filter: Option<&ScalarExpr>,
         params: &[SQLParam],
     ) -> Result<ForeignSourceRows<'a>, String> {
-        #[cfg(feature = "fdw")]
-        {
-            let predicates =
-                crate::query::block::foreign::fdw_predicates_from_where(filter, params);
-            self.foreign_tables.scan_foreign_source(name, &predicates)
-        }
-        #[cfg(not(feature = "fdw"))]
-        {
-            let _ = (name, filter, params);
-            Err("FDW support is not available in this build".into())
-        }
+        self.foreign_tables
+            .ok_or_else(|| "FDW support is not available in this build".to_owned())?
+            .scan_foreign_source(name, filter, params)
     }
 }

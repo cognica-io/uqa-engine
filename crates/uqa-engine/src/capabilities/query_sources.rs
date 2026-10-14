@@ -32,7 +32,9 @@ impl Engine {
             catalog: self.catalog_execution(),
             planning: self,
             #[cfg(feature = "fdw")]
-            foreign_tables: self,
+            foreign_tables: Some(self),
+            #[cfg(not(feature = "fdw"))]
+            foreign_tables: None,
             volatility: self,
             types: self,
             text_indexes: self,
@@ -97,8 +99,11 @@ impl ForeignTableScan for Engine {
     fn scan_foreign_source(
         &self,
         name: &str,
-        predicates: &[uqa_fdw::FDWPredicate],
+        filter: Option<&ScalarExpr>,
+        params: &[uqa_sql::SQLParam],
     ) -> Result<ForeignSourceRows<'_>, String> {
-        self.scan_foreign_table_stream(name, None, predicates, None)
+        let predicates =
+            uqa_execution::query::block::foreign::fdw_predicates_from_where(filter, params);
+        self.scan_foreign_table_stream(name, None, &predicates, None)
     }
 }
