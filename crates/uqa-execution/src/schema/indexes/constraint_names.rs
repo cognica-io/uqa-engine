@@ -29,20 +29,28 @@ pub(crate) fn rebind_current_key_names<'a>(
     candidate: impl Iterator<Item = &'a mut TableKeyConstraint>,
     current: &crate::catalog::CatalogTableSnapshot,
 ) {
+    rebind_key_names(
+        candidate,
+        current
+            .keys
+            .iter()
+            .chain(&current.hierarchy.partition_inherited_key_constraints),
+    );
+}
+
+pub(crate) fn rebind_key_names<'a, 'b>(
+    candidate: impl Iterator<Item = &'a mut TableKeyConstraint>,
+    current: impl Iterator<Item = &'b TableKeyConstraint> + Clone,
+) {
     for key in candidate {
         let Some(identity) = key.catalog_identity else {
             continue;
         };
-        if let Some(retained) = current
-            .keys
-            .iter()
-            .chain(&current.hierarchy.partition_inherited_key_constraints)
-            .find(|other| {
-                other
-                    .catalog_identity
-                    .is_some_and(|other| other.object_id == identity.object_id)
-            })
-        {
+        if let Some(retained) = current.clone().find(|other| {
+            other
+                .catalog_identity
+                .is_some_and(|other| other.object_id == identity.object_id)
+        }) {
             key.name.clone_from(&retained.name);
         }
     }

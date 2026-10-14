@@ -54,6 +54,8 @@ pub trait IndexRegistryPublication {
 #[derive(Clone, Copy)]
 pub struct IndexRegistryContext<'a> {
     pub identities: CatalogIdentityReservationContext<'a>,
+    pub constraint_catalog:
+        &'a dyn crate::schema::constraints::names::catalog::ConstraintNameCatalog,
     pub publication: &'a dyn IndexRegistryPublication,
     pub builds: &'a dyn super::creation::IndexCreationPublication,
     pub retirement: &'a dyn super::removal::IndexRemovalPublication,

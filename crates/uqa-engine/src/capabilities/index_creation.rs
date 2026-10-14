@@ -28,6 +28,7 @@ impl Engine {
     pub(crate) fn index_registry_context(&self) -> IndexRegistryContext<'_> {
         IndexRegistryContext {
             identities: self.catalog_identity_reservation_context(),
+            constraint_catalog: self,
             publication: self,
             builds: self,
             retirement: self,

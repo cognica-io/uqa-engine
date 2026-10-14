@@ -6592,6 +6592,74 @@
       "capability": "Current relation-array name metadata",
       "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
       "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "constraint_names_avoid_unrelated_catalog_captures",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/constraint_names.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "constraint_names_keep_current_identity_across_rename_rollback_and_replacement",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/constraint_names.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "reservations_recheck_current_owners_and_release_failed_locks",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/constraints/names/tests.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "reservation_refresh_preserves_the_current_owned_index_name",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/constraints/names/tests.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "owned_index_name_wait_preserves_other_constraint_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/constraint_names.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Three sessions interleave two owned-index renames with a rolled-back CHECK name reservation on native SQLite, SQLite K/V and redb.",
+      "invariant": "A successful rename retains independently committed owned-index names after a destination-name wait and rollback; it never republishes stale names."
     }
   ]
 }

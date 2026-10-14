@@ -16,6 +16,7 @@ thread_local! {
 
 mod catalog_allocation;
 mod catalog_indexes;
+mod constraint_names;
 mod generated_rewrite;
 mod mutation_rows;
 mod relation_arrays;

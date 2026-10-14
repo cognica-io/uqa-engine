@@ -17,7 +17,7 @@ pub(super) fn reserve_constraints(
     descendants: &mut [super::schema::OwnerChange],
 ) -> StorageBackendResult<()> {
     let names = crate::schema::constraints::names::ConstraintNameContext {
-        catalog: context.identities.catalog,
+        catalog: context.constraint_catalog,
         locks: context.identities.locks,
     };
     for (object_id, columns, constraints) in std::iter::once((object_id, columns, constraints))

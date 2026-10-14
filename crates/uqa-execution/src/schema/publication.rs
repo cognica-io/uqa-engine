@@ -96,7 +96,7 @@ pub fn declare_row_columns(
 impl<'a> SchemaPublicationContext<'a> {
     pub fn constraint_names(&self) -> super::constraints::names::ConstraintNameContext<'a> {
         super::constraints::names::ConstraintNameContext {
-            catalog: self.identities.catalog,
+            catalog: self.indexes.constraint_catalog,
             locks: self.identities.locks,
         }
     }
