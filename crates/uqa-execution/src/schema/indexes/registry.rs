@@ -246,11 +246,16 @@ pub fn prepare_constraint_indexes(
     Ok(change)
 }
 
-fn difference(
+struct IndexRegistryRows {
+    upserts: Vec<CatalogIndexRow>,
+    removals: Vec<CatalogIndexRow>,
+}
+
+fn changed_rows(
     previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
     rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
-) -> StorageBackendResult<IndexRegistryChange> {
-    Ok(IndexRegistryChange {
+) -> IndexRegistryRows {
+    IndexRegistryRows {
         upserts: rows
             .iter()
             .filter(|(name, row)| previous.get(*name).is_none_or(|old| !same_row(old, row)))
@@ -264,6 +269,17 @@ fn difference(
             })
             .map(|(_, row)| row.clone())
             .collect(),
+    }
+}
+
+fn difference(
+    previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+) -> StorageBackendResult<IndexRegistryChange> {
+    let IndexRegistryRows { upserts, removals } = changed_rows(previous, rows);
+    Ok(IndexRegistryChange {
+        upserts,
+        removals,
         schema: Vec::new(),
         physical_builds: builds::new_physical_indexes(previous, rows)?,
     })

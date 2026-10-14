@@ -13,6 +13,11 @@ use super::{
 use crate::catalog::CatalogReadView;
 use uqa_sql::catalog::index::{can_attach_index, IndexAttachmentShape};
 
+#[cfg(test)]
+std::thread_local! {
+    pub(super) static PARTITION_TABLE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn validated_addresses<'a>(
     catalog: &CatalogReadView,
     rows: &'a BTreeMap<RelationIdentity, CatalogIndexRow>,
@@ -177,16 +182,26 @@ fn validate_parents(
                 .parent_index;
         }
     }
-    for (id, (row, _)) in objects {
-        for (name, child) in &catalog.snapshot().tables {
-            if child.hierarchy.is_partition()
-                && child.hierarchy.parents.first() == Some(&row.table_name)
-                && !attached.contains(&(*id, name.clone()))
-            {
-                return Err(invalid("partition has no attached child index"));
+    let mut children = BTreeMap::<&str, Vec<&RelationIdentity>>::new();
+    for (name, table) in &catalog.snapshot().tables {
+        #[cfg(test)]
+        PARTITION_TABLE_VISITS.set(PARTITION_TABLE_VISITS.get() + 1);
+        if table.hierarchy.is_partition() {
+            if let Some(parent) = table.hierarchy.parents.first() {
+                children.entry(parent).or_default().push(name);
             }
         }
     }
+    for (id, (row, _)) in objects {
+        if let Some(children) = children.get(row.table_name.as_str()) {
+            for &name in children {
+                if !attached.contains(&(*id, name.clone())) {
+                    return Err(invalid("partition has no attached child index"));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

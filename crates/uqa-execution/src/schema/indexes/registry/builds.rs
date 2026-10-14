@@ -11,10 +11,17 @@ use super::{
     StorageBackendError, StorageBackendResult,
 };
 
+#[cfg(test)]
+std::thread_local! {
+    pub(super) static PHYSICAL_BUILD_SELECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(in crate::schema::indexes) fn new_physical_indexes(
     previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
     rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
 ) -> StorageBackendResult<Vec<CatalogIndexRow>> {
+    #[cfg(test)]
+    PHYSICAL_BUILD_SELECTIONS.set(PHYSICAL_BUILD_SELECTIONS.get() + 1);
     let identities = previous
         .values()
         .map(|row| {

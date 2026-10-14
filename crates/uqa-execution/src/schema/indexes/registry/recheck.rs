@@ -7,7 +7,7 @@
 //! Recheck every prepared table and index after address reservations may have waited.
 
 use super::{
-    difference, same_row, validation, BTreeMap, BTreeSet, CatalogIndexRow, IndexRegistryContext,
+    changed_rows, same_row, validation, BTreeMap, BTreeSet, CatalogIndexRow, IndexRegistryContext,
     RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 use crate::catalog::{CatalogReadView, CatalogTableSnapshot};
@@ -31,7 +31,7 @@ fn validate_snapshots(
     root: &RelationIdentity,
     current: &CatalogReadView,
 ) -> StorageBackendResult<()> {
-    let change = difference(&before.snapshot().definitions.catalog_indexes, rows)?;
+    let change = changed_rows(&before.snapshot().definitions.catalog_indexes, rows);
     let mut affected = BTreeSet::from([root.clone()]);
     loop {
         let children = before
