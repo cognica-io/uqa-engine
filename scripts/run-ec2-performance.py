@@ -14,14 +14,24 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 from performance_qualification import QualificationError, verified_document
+from performance_ec2_capacity import describe_instance, start_controller, validate_instance
 
 
 def aws(*args):
     result = subprocess.run(["aws", *args, "--output", "json"], capture_output=True, text=True, check=True)
     return json.loads(result.stdout) if result.stdout.strip() else None
+
+
+def failure_detail(error):
+    """Keep the provider's reason, which CalledProcessError.__str__ omits."""
+    detail = {"type": type(error).__name__, "message": str(error)}
+    if isinstance(error, subprocess.CalledProcessError):
+        detail.update(returncode=error.returncode, stderr=(error.stderr or "")[-16384:])
+    return detail
 
 
 def await_online(instance):
@@ -61,13 +71,34 @@ def main():
     run_id = os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
     args.output.mkdir(parents=True, exist_ok=True)
     invocation = None
+    failure = None
+    lifecycle = {"head_revision": revision, "run_id": run_id, "timing_acceptance": False,
+                 "capacity_attempts": [], "errors": []}
+    stage = "start-instance"
+
+    def record_failure(error, failed_stage):
+        lifecycle["errors"].append({"stage": failed_stage, **failure_detail(error)})
+        print(json.dumps(lifecycle["errors"][-1]), file=sys.stderr)
+
+    def retain(name, document):
+        nonlocal failure
+        try:
+            (args.output / name).write_text(json.dumps(document, indent=2) + "\n")
+        except Exception as error:
+            failure = failure or error
+            record_failure(error, "retain-" + name)
+
     try:
-        aws("ec2", "start-instances", "--instance-ids", instance)
+        selected_type = start_controller(aws, instance, lifecycle["capacity_attempts"])
+        stage = "await-controller"
         await_online(instance)
+        validate_instance(describe_instance(aws, instance), state="running", expected_type=selected_type)
+        stage = "submit-controller"
         response = aws("ssm", "send-command", "--instance-ids", instance,
                        "--document-name", "UQAEngineControlledPerformance", "--timeout-seconds", "120",
                        "--parameters", json.dumps({"headRevision": [revision], "runId": [run_id]}))
         command_id = response["Command"]["CommandId"]
+        stage = "await-result"
         for attempt in range(540):
             time.sleep(10)
             try:
@@ -80,15 +111,31 @@ def main():
                 break
         else:
             raise QualificationError("controlled run exceeded its fixed 90-minute CI deadline")
+    except Exception as error:
+        failure = error
+        record_failure(error, stage)
     finally:
+        if invocation is not None:
+            retain("ssm-invocation.json", invocation)
+        # Persist startup errors before collection or cleanup can fail as well.
+        retain("ci-lifecycle.json", lifecycle)
         try:
             subprocess.run(["aws", "s3", "cp", f"s3://{bucket}/runs/{run_id}/", str(args.output),
-                            "--recursive", "--only-show-errors"], check=True)
+                            "--recursive", "--only-show-errors"], capture_output=True, text=True, check=True)
+        except Exception as error:
+            failure = failure or error
+            record_failure(error, "collect-artifacts")
         finally:
-            aws("ec2", "stop-instances", "--instance-ids", instance)
-            aws("ec2", "wait", "instance-stopped", "--instance-ids", instance)
-    if invocation is not None:
-        (args.output / "ssm-invocation.json").write_text(json.dumps(invocation, indent=2) + "\n")
+            for stop_stage, command in (("stop-instance", ("stop-instances",)),
+                                        ("await-stopped", ("wait", "instance-stopped"))):
+                try:
+                    aws("ec2", *command, "--instance-ids", instance)
+                except Exception as error:
+                    failure = failure or error
+                    record_failure(error, stop_stage)
+            retain("ci-lifecycle.json", lifecycle)
+    if failure is not None:
+        raise failure
     result = verify_result(args.output, os.environ["PERFORMANCE_ISSUER_PUBLIC_KEY"].encode(), revision, run_id)
     if invocation is None or invocation["Status"] != "Success":
         raise QualificationError("SSM did not complete the fixed controller successfully")

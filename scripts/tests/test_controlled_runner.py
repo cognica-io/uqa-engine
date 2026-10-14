@@ -99,9 +99,86 @@ class ControlledRunnerTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, environment), \
                     patch.object(sys, "argv", ["run-ec2-performance.py", "--output", temporary]), \
                     patch.object(ci, "aws", side_effect=aws), patch.object(ci, "await_online"), \
+                    patch.object(ci, "start_controller", return_value="c7g.4xlarge"), patch.object(ci, "validate_instance"), \
+                    patch.object(ci, "describe_instance"), \
                     patch.object(ci.subprocess, "run", side_effect=RuntimeError("S3 unavailable") if upload_failed else None), \
                     self.assertRaises(RuntimeError):
                 ci.main()
+            self.assertIn(("ec2", "stop-instances", "--instance-ids", "instance"), calls)
+            self.assertIn(("ec2", "wait", "instance-stopped", "--instance-ids", "instance"), calls)
+
+    def test_capacity_failure_survives_artifact_and_shutdown_failures(self):
+        capacity = ci.subprocess.CalledProcessError(
+            254, ["aws", "ec2", "start-instances"], stderr="InsufficientInstanceCapacity: unavailable")
+        calls = []
+
+        def aws(*args):
+            calls.append(args)
+            if args[:2] == ("ec2", "start-instances"):
+                raise capacity
+            if args[:2] == ("ec2", "stop-instances"):
+                raise RuntimeError("stop unavailable")
+
+        environment = {"PERFORMANCE_INSTANCE_ID": "instance", "PERFORMANCE_ARTIFACT_BUCKET": "bucket",
+                       "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, environment), \
+                patch.object(sys, "argv", ["run-ec2-performance.py", "--output", temporary]), \
+                patch.object(ci, "aws", side_effect=aws), patch.object(ci, "verify_result") as verify, \
+                patch.object(ci, "start_controller", side_effect=capacity), \
+                patch.object(ci.subprocess, "run", side_effect=RuntimeError("S3 unavailable")), \
+                patch.object(sys, "stderr") as stderr:
+            with self.assertRaises(ci.subprocess.CalledProcessError) as raised:
+                ci.main()
+            self.assertIs(raised.exception, capacity)
+            result = json.loads((Path(temporary) / "ci-lifecycle.json").read_text())
+            self.assertEqual([entry["stage"] for entry in result["errors"]],
+                             ["start-instance", "collect-artifacts", "stop-instance"])
+            self.assertEqual(result["errors"][0]["stderr"], capacity.stderr)
+            self.assertEqual(result["errors"][0]["returncode"], 254)
+            self.assertFalse(result["timing_acceptance"])
+            self.assertIn("InsufficientInstanceCapacity", "".join(call.args[0] for call in stderr.write.call_args_list))
+            verify.assert_not_called()
+        self.assertIn(("ec2", "wait", "instance-stopped", "--instance-ids", "instance"), calls)
+        self.assertFalse(any(call[0] == "ssm" for call in calls))
+
+    def test_cleanup_failure_retains_invocation_and_cannot_pass_qualification(self):
+        environment = {"PERFORMANCE_INSTANCE_ID": "instance", "PERFORMANCE_ARTIFACT_BUCKET": "bucket",
+                       "PERFORMANCE_ISSUER_PUBLIC_KEY": "operator test key",
+                       "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}
+        for stage in ("collect-artifacts", "stop-instance", "await-stopped", None):
+            error = RuntimeError("cleanup unavailable")
+            calls = []
+
+            def aws(*args):
+                calls.append(args)
+                if args[:2] == ("ssm", "send-command"):
+                    return {"Command": {"CommandId": "command"}}
+                if args[:2] == ("ssm", "get-command-invocation"):
+                    return {"Status": "Success"}
+                if ((stage == "stop-instance" and args[:2] == ("ec2", "stop-instances"))
+                        or (stage == "await-stopped" and args[:3] == ("ec2", "wait", "instance-stopped"))):
+                    raise error
+
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as temporary, \
+                    patch.dict(os.environ, environment), \
+                    patch.object(sys, "argv", ["run-ec2-performance.py", "--output", temporary]), \
+                    patch.object(ci, "aws", side_effect=aws), patch.object(ci, "await_online"), \
+                    patch.object(ci, "start_controller", return_value="c7g.4xlarge"), patch.object(ci, "validate_instance"), \
+                    patch.object(ci, "describe_instance"), \
+                    patch.object(ci.time, "sleep"), patch.object(sys, "stdout"), patch.object(sys, "stderr"), \
+                    patch.object(ci, "verify_result", return_value={"accepted": True}) as verify, \
+                    patch.object(ci.subprocess, "run", side_effect=error if stage == "collect-artifacts" else None):
+                if stage is None:
+                    ci.main()
+                    verify.assert_called_once()
+                else:
+                    with self.assertRaises(RuntimeError) as raised:
+                        ci.main()
+                    self.assertIs(raised.exception, error)
+                    verify.assert_not_called()
+                result = json.loads((Path(temporary) / "ci-lifecycle.json").read_text())
+                self.assertEqual([entry["stage"] for entry in result["errors"]], [] if stage is None else [stage])
+                self.assertEqual(json.loads((Path(temporary) / "ssm-invocation.json").read_text()), {"Status": "Success"})
             self.assertIn(("ec2", "stop-instances", "--instance-ids", "instance"), calls)
             self.assertIn(("ec2", "wait", "instance-stopped", "--instance-ids", "instance"), calls)
 
