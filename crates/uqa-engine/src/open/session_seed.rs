@@ -54,7 +54,7 @@ impl Engine {
                 continue;
             }
             let name = relation.qualified_name();
-            let table = Self::bind_shared_session_table(storage, &name, source)?;
+            let table = Self::bind_shared_session_table(storage, &name, source);
             session
                 .storage
                 .tables
@@ -95,9 +95,9 @@ impl Engine {
         storage: &PersistentStorageSession,
         name: &str,
         source: &TableState,
-    ) -> StorageBackendResult<Arc<TableState>> {
+    ) -> Arc<TableState> {
         let analyzer = source.analyzer.read().clone();
-        Ok(Arc::new(TableState {
+        Arc::new(TableState {
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
             security: CatalogCell::from_snapshot(source.security.snapshot()),
@@ -130,6 +130,6 @@ impl Engine {
             catalog_oids: source.recorded_catalog_oids(),
             row_type_array_name: CatalogCell::from_snapshot(source.row_type_array_name.snapshot()),
             dropped_attributes: CatalogCell::from_snapshot(source.dropped_attributes.snapshot()),
-        }))
+        })
     }
 }
