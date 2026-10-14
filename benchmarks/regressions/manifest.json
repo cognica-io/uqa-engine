@@ -6983,6 +6983,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_recheck_validates_metadata_without_planning_physical_builds",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
+      "capability": "Index registry recheck work",
+      "workload": "An unchanged index registry followed by malformed current index metadata.",
+      "invariant": "Catalog rechecks select zero physical build plans and still reject malformed metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_recheck_partition_validation_visits_unrelated_tables_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
+      "capability": "Index registry recheck work",
+      "workload": "Valid catalogs with zero or sixty unrelated nonpartitioned tables, with and without indexes.",
+      "invariant": "Partition coverage traverses each table once for a nonempty index graph and visits no tables for an empty graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_recheck_keeps_missing_partition_index_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
+      "capability": "Index registry recheck work",
+      "workload": "A partitioned parent index whose child table lacks an attached child index.",
+      "invariant": "Rechecks reject the missing child index with the existing diagnostic before publication.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
