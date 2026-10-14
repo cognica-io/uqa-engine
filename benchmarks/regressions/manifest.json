@@ -7022,6 +7022,74 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "update_source_qualification_prepares_once_for_fixed_statement_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/update/from/tests.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "One hundred target rows and one hundred source rows, with memory and disk-backed source materialization.",
+      "invariant": "Exactly one predicate preparation serves 10,000 candidate pairs under one schema; all selected sources and qualification counts remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_update_qualification_keeps_lazy_errors_nulls_and_schema_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/update/from/tests.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "A lazy arithmetic predicate over NULL and error-producing rows, then equal-column schemas with different declared types.",
+      "invariant": "Row errors remain lazy, NULL does not qualify, and the single retained preparation is replaced whenever the complete schema changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_update_qualification_keeps_source_counts_order_and_rechecks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/update/from/tests.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "Empty and spilled duplicate source rows, source-only qualification counts, and changed row values at recheck.",
+      "invariant": "Empty inputs prepare nothing; duplicate counts and first-source order remain exact, and rechecks evaluate current values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "update_predicate_preparation_preserves_postgresql_evaluation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_update_from_delete_using/predicate_preparation.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "Four providers; prepared JSON source rows, volatile sequence calls, empty sources, lazy arithmetic, rollback, independent sessions and persistent reopen.",
+      "invariant": "Exact rows, aggregates and sequence effects match PostgreSQL 18 while the original payloads and transaction boundaries survive.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "update_from_recheck_keeps_the_source_row_selected_by_the_command_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_row_locks_recheck/writer_order/update_from_source.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "Joined UPDATE waits for a competing writer after selecting a source row from its command snapshot.",
+      "invariant": "The lock recheck uses the updated target with the originally selected source row and preserves writer order.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
