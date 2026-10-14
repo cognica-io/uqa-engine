@@ -8,7 +8,7 @@
 
 use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use uqa_graph::GraphStoreHandle;
 use uqa_sql::catalog::graph_oids::GraphCatalogOids;
 use uqa_sql::catalog::roles::identity::RoleSubject;
@@ -106,6 +106,7 @@ use uqa_core::RelationIdentity;
 use uqa_execution::schema::namespaces::relations::{
     RelationCreationContext, RelationCreationRuntime,
 };
+use uqa_execution::schema::types::relation_arrays::RelationArrayMetadata;
 use uqa_sql::catalog::resolution::creation::{CreationRelationGuards, CreationRelationNames};
 use uqa_storage::StorageBackendResult;
 
@@ -125,11 +126,38 @@ impl CreationRelationGuards for Engine {
             self.durable.composites.read().values(),
             identity,
         );
-        user_type
-            || uqa_execution::schema::types::relation_arrays::type_name_exists(
-                &self.restored_catalog_read_view(),
-                identity,
+        if user_type {
+            return true;
+        }
+        let views = self.durable.views.snapshot();
+        let foreign = self.durable.foreign_tables.snapshot();
+        // Release the registry lock before reading individual table metadata.
+        let tables = self.storage.tables.read().clone();
+        let tables = tables
+            .iter()
+            .map(|(name, table)| (name, table_array_metadata(table)));
+        let views = views.iter().map(|(name, view)| {
+            (
+                name,
+                RelationArrayMetadata {
+                    array_oid: view.relation_oids().array_type,
+                    recorded_name: view.row_type_array_name.as_deref().map(Cow::Borrowed),
+                },
             )
+        });
+        let foreign = foreign.iter().map(|(name, table)| {
+            (
+                name,
+                RelationArrayMetadata {
+                    array_oid: table.relation_oids().array_type,
+                    recorded_name: table.row_type_array_name.as_deref().map(Cow::Borrowed),
+                },
+            )
+        });
+        uqa_execution::schema::types::relation_arrays::type_name_exists(
+            tables.chain(views).chain(foreign),
+            identity,
+        )
     }
     fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.storage.tables.read()))
@@ -162,9 +190,23 @@ impl<G: std::ops::Deref<Target = uqa_execution::catalog::composite_type::Composi
 }
 impl RelationCreationRuntime for Engine {
     fn relation_array_name(&self, relation: &RelationIdentity, array_oid: u32) -> Option<String> {
+        let views = self.durable.views.snapshot();
+        let foreign = self.durable.foreign_tables.snapshot();
+        let table = self.storage.tables.read().get(relation).cloned();
         uqa_execution::schema::types::relation_arrays::current_array_name(
-            &self.restored_catalog_read_view(),
-            relation,
+            [
+                table.as_deref().map(table_array_metadata),
+                views.get(relation).map(|view| RelationArrayMetadata {
+                    array_oid: view.relation_oids().array_type,
+                    recorded_name: view.row_type_array_name.as_deref().map(Cow::Borrowed),
+                }),
+                foreign.get(relation).map(|table| RelationArrayMetadata {
+                    array_oid: table.relation_oids().array_type,
+                    recorded_name: table.row_type_array_name.as_deref().map(Cow::Borrowed),
+                }),
+            ]
+            .into_iter()
+            .flatten(),
             array_oid,
         )
     }
@@ -207,6 +249,13 @@ impl RelationCreationRuntime for Engine {
             })?;
         self.session.state.write().temporary_namespace = Some(oids);
         Ok(())
+    }
+}
+
+fn table_array_metadata(table: &crate::TableState) -> RelationArrayMetadata<'_> {
+    RelationArrayMetadata {
+        array_oid: table.relation_oids().array_type,
+        recorded_name: table.row_type_array_name.read().clone().map(Cow::Owned),
     }
 }
 impl Engine {

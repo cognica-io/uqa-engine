@@ -6537,6 +6537,61 @@
       "capability": "Current and retained index registries",
       "workload": "Thirty-two repeated index lookups with zero/thirty-two unrelated tables on four providers, shadowed and temporary schemas, quoted names, missing indexes and a retained constraint index.",
       "invariant": "Index lookup makes zero full-table metadata captures once the current registry is refreshed, preserving exact index rows, namespace precedence, missing results, bound-name errors and retained query fallback."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_array_lookups_avoid_unrelated_catalog_captures",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_arrays.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_array_names_use_current_definitions_with_a_retained_query_view",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_arrays.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "array_name_projection_preserves_missing_oid_schema_and_generated_fallback",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/types/relation_arrays/tests.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "current_array_projection_keeps_order_exact_identity_and_absent_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/types/relation_arrays/tests.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
     }
   ]
 }
