@@ -24,6 +24,8 @@ pub trait StatementTransactions {
     }
     fn current_transaction_is_read_only(&self) -> bool;
     fn mark_transaction_snapshot_set(&self);
+    /// Successful execution leaves session-owned caches current. Adapters may retain that exact private read view; an error, undo or later external change must still require ordinary refresh.
+    fn retain_completed_statement_snapshot(&self) {}
     fn abort_after_error(&self, error: SQLError) -> SQLError;
     fn rollback(&self) -> Result<(), SQLError>;
 }

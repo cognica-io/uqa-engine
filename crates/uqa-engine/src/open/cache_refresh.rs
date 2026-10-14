@@ -43,8 +43,41 @@ fn observed_private_data(
 }
 
 impl Engine {
+    /// The successful statement boundary certifies that Engine's adapters finished applying their private definitions. Record only the exact current view and only while its committed base is already observed; the next command still detects external commits and undo.
+    pub(crate) fn retain_completed_statement_catalog(&self) {
+        if !self.epochs.table_catalog.dirty.load(Ordering::Acquire)
+            && !self.epochs.catalog_registry.dirty.load(Ordering::Acquire)
+        {
+            return;
+        }
+        let Some(backend) = self.storage.backend.as_ref().filter(|backend| {
+            backend.transaction_model().is_versioned() && backend.in_transaction()
+        }) else {
+            return;
+        };
+        let Ok(Some(current)) = backend.read_view_revision() else {
+            return;
+        };
+        let mut seen = self.epochs.seen_storage_read_view.lock();
+        if seen
+            .as_ref()
+            .is_some_and(|previous| current.same_committed_state(previous))
+        {
+            *seen = Some(current);
+        }
+    }
+
     /// After this session's own data commit, keep its table caches when that commit is the only one since the view they reflect. Its writes already maintained them, so the next statement need not rebuild them as it must after another writer. Any other commit, or a catalog, registry, graph or schema revision change, leaves the observed state behind for the ordinary refresh. A catalog that reports no cache revisions, before as after, relies on the caller, which adopts only a commit whose dirty state shows data changes alone. A failure to observe the committed view has the same effect as another commit: the next statement's refresh reads it again and reports any persistent error.
     pub(crate) fn adopt_own_commit_revisions(&self) {
+        self.adopt_own_transaction_revisions(false);
+    }
+
+    /// Retain definitions maintained by a completed Engine DDL transaction only when its commit alone follows the cached committed base. The ordinary refresh still handles an intervening peer commit, unknown history or failed observation.
+    pub(crate) fn adopt_own_catalog_commit_revisions(&self) {
+        self.adopt_own_transaction_revisions(true);
+    }
+
+    fn adopt_own_transaction_revisions(&self, retain_definitions: bool) {
         let Some(backend) = self.storage.backend.as_ref() else {
             return;
         };
@@ -60,15 +93,23 @@ impl Engine {
         }
         // Observed before the view: a sibling that publishes later remains unobserved.
         let data_epoch = self.epochs.table_data.published.load(Ordering::Acquire);
-        if let Ok(Some(committed)) = backend.committed_data_revision() {
-            if committed.revision.follows_by_one_commit(&previous_view) {
-                // The provider certified that this exact commit preserved definitions. Retain the older data-generation baseline: a later foreign commit can then cause an extra refresh, but cannot hide a changed table. The receipt is this session's view, never a claim to have observed a later writer.
-                self.adopt_committed_view(
-                    committed.revision,
-                    Some(committed.change_version),
-                    data_epoch,
-                );
-                return;
+        let catalog_epoch = self.epochs.table_catalog.published.load(Ordering::Acquire);
+        let registry_epoch = self
+            .epochs
+            .catalog_registry
+            .published
+            .load(Ordering::Acquire);
+        if !retain_definitions {
+            if let Ok(Some(committed)) = backend.committed_data_revision() {
+                if committed.revision.follows_by_one_commit(&previous_view) {
+                    // The provider certified that this exact commit preserved definitions. Retain the older data-generation baseline: a later foreign commit can then cause an extra refresh, but cannot hide a changed table. The receipt is this session's view, never a claim to have observed a later writer.
+                    self.adopt_committed_view(
+                        committed.revision,
+                        Some(committed.change_version),
+                        data_epoch,
+                    );
+                    return;
+                }
             }
         }
         let previous = self.epochs.storage_cache_revisions.lock().clone();
@@ -105,10 +146,11 @@ impl Engine {
         }
         match (&previous, &current) {
             (Some(previous), Some(current)) => {
-                if current.table_catalog != previous.table_catalog
-                    || current.registries != previous.registries
-                    || current.graphs != previous.graphs
-                    || current.storage_schema != previous.storage_schema
+                if !retain_definitions
+                    && (current.table_catalog != previous.table_catalog
+                        || current.registries != previous.registries
+                        || current.graphs != previous.graphs
+                        || current.storage_schema != previous.storage_schema)
                 {
                     return;
                 }
@@ -118,6 +160,16 @@ impl Engine {
         }
         *self.epochs.storage_cache_revisions.lock() = current;
         self.adopt_committed_view(view, version, data_epoch);
+        if retain_definitions {
+            self.epochs
+                .table_catalog
+                .seen
+                .store(catalog_epoch, Ordering::Release);
+            self.epochs
+                .catalog_registry
+                .seen
+                .store(registry_epoch, Ordering::Release);
+        }
     }
 
     fn adopt_committed_view(

@@ -47,6 +47,9 @@ impl StatementTransactions for Engine {
     fn mark_transaction_snapshot_set(&self) {
         Engine::mark_transaction_snapshot_set(self);
     }
+    fn retain_completed_statement_snapshot(&self) {
+        self.retain_completed_statement_catalog();
+    }
     fn abort_after_error(&self, error: SQLError) -> SQLError {
         self.abort_sql_transaction_after_error(error)
     }

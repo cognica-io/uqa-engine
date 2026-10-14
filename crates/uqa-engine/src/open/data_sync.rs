@@ -36,10 +36,7 @@ impl Engine {
             .table_catalog
             .dirty
             .store(false, std::sync::atomic::Ordering::Release);
-        // The writer's physical stores are current, but cached optimized and
-        // prepared plans may retain a removed access path or old schema.
-        // Leave `seen_table_catalog_epoch` behind so its next statement also
-        // crosses the same reload/re-optimization boundary as siblings.
+        // Invalidate plans even when a proven own commit retains its current physical stores. Until that commit is observed, leave the epoch behind so unknown or intervening changes retain the ordinary refresh.
         self.clear_sql_statement_cache();
     }
 

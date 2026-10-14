@@ -16,6 +16,7 @@ use super::Engine;
 use crate::tests::native_storage;
 
 mod cache_refresh;
+mod command_catalog;
 mod external_refresh;
 mod internal_reads;
 mod key_identities;

@@ -97,6 +97,10 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             UnifiedPlan::Command(command) => self.execute_command(command),
         }?;
         uqa_sql::result::completion::set_command_completion(plan, &mut result, transaction_failed);
+        self.context
+            .validation
+            .transactions
+            .retain_completed_statement_snapshot();
         Ok(result)
     }
 
