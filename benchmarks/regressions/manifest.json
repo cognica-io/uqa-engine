@@ -2,6 +2,35 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "mutation_row_identity_catalog_captures_do_not_grow_with_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
+      "capability": "Mutation relation identity reads",
+      "workload": "One versus nine updated rows, with and without RETURNING, on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Catalog captures do not grow with affected row count; every RETURNING tableoid and the final row values remain correct.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "mutation_identity_uses_bound_ordinary_foreign_and_quoted_names",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
+      "capability": "Retained mutation relation identities",
+      "workload": "Ordinary, foreign and quoted relations under a shadowing search path, then replacement of a relation held by a retained snapshot.",
+      "invariant": "Exact bound identities and retained incarnations are read with zero full-catalog captures; invalid or missing bound names remain errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "unrelated_updates_evaluate_no_stored_expressions_across_a_row_batch",
@@ -39,7 +68,11 @@
       "capability": "Independent session construction",
       "workload": "Native SQLite, SQLite K/V and redb; two tables, a keyword analyzer and an HNSW field, followed by another writer and rollback.",
       "invariant": "Exactly one document and inverted store per table and one vector store per field; valid row counts, independent handles, catalog-selected retrieval and later commit visibility remain correct.",
-      "case_names": ["case_1_sqlite", "case_2_sqlite_kv", "case_3_redb"]
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     },
     {
       "package": "uqa-engine",
