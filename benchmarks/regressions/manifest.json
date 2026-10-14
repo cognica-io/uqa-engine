@@ -4,6 +4,32 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "prepared_document_writes_check_presence_without_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/storage_consistency.rs",
+      "capability": "Prepared document publication",
+      "workload": "Four prepared writes with unknown identities, covering insertion and replacement over a 256KB starting document.",
+      "invariant": "Presence checks copy zero payloads; documents and row counts remain correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "prepared_document_presence_failure_does_not_publish_a_write",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/storage_consistency.rs",
+      "capability": "Prepared document publication",
+      "workload": "A provider rejects the metadata-only presence lookup before a replacement.",
+      "invariant": "The provider error reaches the caller, no full row read occurs, and the prior document survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "empty_generated_rewrites_prepare_their_constant_expressions",
       "cases": 1,
       "source": "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",
