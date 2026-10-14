@@ -63,7 +63,7 @@ def main() -> int:
     for target, used in sizes:
         if used > LIMIT_BYTES:
             print(
-                f"{target} exceeds 100 GB: {used:,} allocated bytes "
+                f"target/ exceeds 100 GB at {target}: {used:,} allocated bytes "
                 f"(limit {LIMIT_BYTES:,}). Remove unused build artifacts before committing.",
                 file=sys.stderr,
             )
