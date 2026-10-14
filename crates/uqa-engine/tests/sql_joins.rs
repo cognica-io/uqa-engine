@@ -476,6 +476,31 @@ fn nested_join_using_rebinds_the_merged_row_type() {
     assert_eq!(result.rows[0]["right_id"], Value::Int(1));
     assert_eq!(result.rows[0]["third_id"], Value::Int(1));
     assert_eq!(result.rows[0]["t_only"], Value::Str("t1".into()));
+
+    let nested = query(
+        &engine,
+        "SELECT id, a.id AS a_id, b.id AS b_id, c.id AS c_id, d.id AS d_id, pg_typeof(id) AS ty
+         FROM ((VALUES ('a1',1::integer),('a2',2)) a(payload,id)
+               FULL JOIN (VALUES ('b1',1::integer),('b3',3)) b(payload,id) USING(id))
+         FULL JOIN ((VALUES ('c1',1::bigint),('c4',4)) c(payload,id)
+               FULL JOIN (VALUES ('d1',1::bigint),('d5',5)) d(payload,id) USING(id)) USING(id)
+         ORDER BY id",
+    );
+    let expected = [
+        (1, [Some(1), Some(1), Some(1), Some(1)]),
+        (2, [Some(2), None, None, None]),
+        (3, [None, Some(3), None, None]),
+        (4, [None, None, Some(4), None]),
+        (5, [None, None, None, Some(5)]),
+    ];
+    assert_eq!(nested.rows.len(), expected.len());
+    for (row, (id, values)) in nested.rows.iter().zip(expected) {
+        assert_eq!(row["id"], Value::Int(id));
+        assert_eq!(row["ty"], Value::Int(20));
+        for (column, value) in ["a_id", "b_id", "c_id", "d_id"].into_iter().zip(values) {
+            assert_eq!(row[column], value.map_or(Value::Null, Value::Int));
+        }
+    }
 }
 
 #[test]

@@ -6,9 +6,7 @@
 
 //! Select physical join keys from the statement's declared SQL operators.
 
-use super::{
-    decide_join_sides, join_conjuncts, JoinKind, RowSchema, SQLError, SQLParam, ScalarExpr,
-};
+use super::{bind_join_sides, join_conjuncts, JoinKind, RowSchema, SQLError, SQLParam, ScalarExpr};
 use uqa_sql::type_resolution::ComparisonKeySupport;
 use uqa_sql::{ast::BinaryOp, FunctionTypeResolver};
 
@@ -76,7 +74,7 @@ pub(super) fn join_keys(
                 let ScalarExpr::Binary { lhs, rhs, .. } = bound else {
                     unreachable!("binding preserves a comparison operator")
                 };
-                let Some((left_key, right_key)) = decide_join_sides(left, right, &lhs, &rhs) else {
+                let Some((left_key, right_key)) = bind_join_sides(left, right, &lhs, &rhs) else {
                     // Constants remain predicates; they cannot make a non-joinable record clause into a hash join.
                     merge_supported &= uqa_sql::type_resolution::comparison_key_is_constant(&lhs)
                         && uqa_sql::type_resolution::comparison_key_is_constant(&rhs);
@@ -84,8 +82,8 @@ pub(super) fn join_keys(
                     continue;
                 };
                 let mut support = ComparisonKeySupport::default();
-                for key in [left_key, right_key] {
-                    match crate::scalar_type_with_resolver(key, &schema, params, types)? {
+                for (key, input) in [(left_key.as_ref(), left), (right_key.as_ref(), right)] {
+                    match crate::scalar_type_with_resolver(key, input, params, types)? {
                         Some(ty) => support.include(&ty, types)?,
                         None => {
                             // Schemaless UQA inputs require runtime comparison; absent type metadata is not a declared lack of operators.
@@ -96,8 +94,8 @@ pub(super) fn join_keys(
                 merge_supported &= support.ordering;
                 all_hashed &= support.hashing;
                 if support.hashing {
-                    keys.left.push(left_key.clone());
-                    keys.right.push(right_key.clone());
+                    keys.left.push(left_key.into_owned());
+                    keys.right.push(right_key.into_owned());
                 }
             }
             if all_hashed {
@@ -204,6 +202,53 @@ mod tests {
             )
             .unwrap();
             assert_eq!(selected.is_some(), hashing);
+        }
+    }
+
+    #[test]
+    fn positional_using_keys_retain_hash_selection_and_each_input_type() {
+        let left = RowSchema::with_qualified_types(
+            "l",
+            vec!["payload".into(), "id".into()],
+            vec![Some(ColumnType::Text), Some(ColumnType::Integer)],
+        );
+        let right = RowSchema::with_qualified_types(
+            "r",
+            vec!["id".into()],
+            vec![Some(ColumnType::BigInteger)],
+        );
+        let using = uqa_sql::semantics::resolve_join_using(
+            Some(&uqa_sql::ast::JoinUsing {
+                columns: vec!["id".into()],
+                alias: None,
+            }),
+            false,
+            &left,
+            &right,
+        )
+        .unwrap()
+        .unwrap();
+        let predicate = uqa_sql::semantics::join_using_predicate(&using, &left, &right).unwrap();
+        for kind in [
+            JoinKind::Inner,
+            JoinKind::Left,
+            JoinKind::Right,
+            JoinKind::Full,
+        ] {
+            let keys = join_keys(kind, Some(&predicate), &left, &right, &[], &Types, &Types)
+                .unwrap()
+                .expect("USING equality remains hash-joinable");
+            assert_eq!(keys.left.len(), 1);
+            assert_eq!(keys.right.len(), 1);
+            assert!(keys.residual.is_none());
+            assert_eq!(
+                crate::scalar_type_with_resolver(&keys.left[0], &left, &[], &Types).unwrap(),
+                Some(ColumnType::BigInteger)
+            );
+            assert_eq!(
+                crate::scalar_type_with_resolver(&keys.right[0], &right, &[], &Types).unwrap(),
+                Some(ColumnType::BigInteger)
+            );
         }
     }
 

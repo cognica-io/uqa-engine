@@ -5959,6 +5959,149 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "nested_using_predicate_preserves_resolved_input_positions",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/join_using.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "joined_positions_are_rebased_only_to_their_own_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/join_predicates.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "positional_using_keys_retain_hash_selection_and_each_input_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/query/sources/join_keys.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "nested_join_using_rebinds_the_merged_row_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "deeply_nested_join_binding_composes_each_level_schema",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_using_outer_variants_choose_the_postgresql_merged_value",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_using_alias_names_only_the_merged_columns",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_using_and_natural_bind_a_lateral_row_type",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_using_resolves_postgresql_common_types_before_execution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "join_using_preserves_types_through_tables_subqueries_and_cte_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "ordinary_join_rejects_an_ambiguous_unqualified_column",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_joins.rs",
+      "capability": "Nested qualified join key identity",
+      "workload": "Fixed nested and outer USING/NATURAL joins, input rebasing, coercion, lateral and spill histories.",
+      "invariant": "Resolved logical columns retain original values/types and hash eligibility; qualified source access, NULL extension and ambiguous user-input errors remain correct."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "merge_action_scope_follows_returning_ancestry_and_analysis_order",
       "cases": 1,
       "case_names": [

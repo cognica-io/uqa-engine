@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain resolved `JOIN USING` keys through nested and FULL joins, preserving hash execution, implicit key types and access to original input columns.
+
 - Preserve contextual types for untyped string parameters during output analysis, restoring JSON function calls while retaining errors for explicitly typed incompatible inputs.
 
 - Preserve original scalar inputs beside `RETURNING` wildcards during preparation, retain MERGE source-before-target column order and avoid ambiguous target references or lost prepared constants.
