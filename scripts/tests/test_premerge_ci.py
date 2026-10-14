@@ -43,6 +43,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - ".cargo/**"\n'
             "      - .github/workflows/ci.yml\n"
             "      - .github/workflows/workspace-tests.yml\n"
+            "      - .github/workflows/fdw-features.yml\n"
             '      - ".github/actions/setup-nextest/**"\n'
             "      - .config/nextest.toml\n"
         )
