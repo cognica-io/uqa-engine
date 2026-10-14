@@ -6927,6 +6927,62 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "independent_sessions_reuse_physical_index_preparation",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/session_indexes.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "Fresh independent SQLite, SQLite K/V and redb sessions with zero or sixty unrelated indexed tables.",
+      "invariant": "The exact immutable registry yields one shared preparation while each session retains independent stores and correct PK output.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "shared_index_preparation_preserves_private_and_committed_definitions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/session_indexes.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "Private index creation, rollback, peer commit and retained definition consumers on all three persistent providers.",
+      "invariant": "Private and committed registries select their own definitions; retained consumers remain unchanged and cancellation stays session-local.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_physical_index_preparation_is_single_and_preserves_retained_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/tests.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "Eight simultaneous first readers share one immutable registry, then sibling consumers replace and restore it.",
+      "invariant": "One successful preparation serves all simultaneous readers and prior physical keys and predicates remain correct after replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_physical_index_preparation_does_not_publish_invalid_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/tests.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "A sibling cache rejects malformed stored index JSON after a valid registry has been prepared.",
+      "invariant": "Failed preparation leaves the existing immutable definition entry available to every reader.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -23,6 +23,7 @@ mod key_identities;
 mod own_commits;
 mod read_view;
 mod resource_lifetime;
+mod session_indexes;
 mod session_stores;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {

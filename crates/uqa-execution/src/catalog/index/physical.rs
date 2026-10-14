@@ -47,10 +47,10 @@ struct CacheEntry {
     prepared: Arc<PhysicalIndexDefinitions>,
 }
 
-/// Arc identity follows copy-on-write catalog publication, refresh and rollback; no independent invalidation counter can omit a mutation path.
-#[derive(Default)]
+/// Clones share one immutable derivation selected by Arc identity. Copy-on-write publication, refresh and rollback select their exact registry without sharing physical handles or session state.
+#[derive(Clone, Default)]
 pub struct PhysicalIndexCache {
-    entry: Mutex<Option<CacheEntry>>,
+    entry: Arc<Mutex<Option<CacheEntry>>>,
 }
 
 impl PhysicalIndexCache {
@@ -58,16 +58,15 @@ impl PhysicalIndexCache {
         &self,
         source: Arc<IndexRows>,
     ) -> StorageBackendResult<Arc<PhysicalIndexDefinitions>> {
-        if let Some(entry) = self
-            .entry
-            .lock()
+        let mut retained = self.entry.lock();
+        if let Some(entry) = retained
             .as_ref()
             .filter(|entry| Arc::ptr_eq(&entry.source, &source))
         {
             return Ok(entry.prepared.clone());
         }
         let prepared = Arc::new(PhysicalIndexDefinitions::prepare(&source)?);
-        *self.entry.lock() = Some(CacheEntry {
+        *retained = Some(CacheEntry {
             source,
             prepared: prepared.clone(),
         });
