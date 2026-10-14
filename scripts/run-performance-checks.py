@@ -16,8 +16,10 @@ import os
 import pathlib
 import platform
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -136,8 +138,53 @@ def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
     return results
 
 
-def capture(*command: str) -> str:
-    return subprocess.check_output(command, cwd=ROOT, text=True).strip()
+def report_process_group(group: int) -> None:
+    """Report only names and states of this invocation's children, never arguments or environment."""
+    if os.name != "posix":
+        return
+    try:
+        snapshot = subprocess.check_output(
+            ["ps", "-axo", "pid=,ppid=,pgid=,stat=,comm="],
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    for line in snapshot.splitlines():
+        fields = line.split(None, 4)
+        if len(fields) == 5 and fields[2] == str(group):
+            print(f"discovery process {fields[0]} parent {fields[1]} state {fields[3]} executable {pathlib.Path(fields[4]).name}", file=sys.stderr, flush=True)
+
+
+def capture(*command: str, timeout: float | None = None) -> str:
+    if timeout is None:
+        return subprocess.check_output(command, cwd=ROOT, text=True).strip()
+    # A file prevents a descendant retaining stdout from extending the deadline.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+        process = subprocess.Popen(command, cwd=ROOT, stdout=output, start_new_session=os.name == "posix")
+        try:
+            process.wait(timeout=timeout)
+        except BaseException as error:
+            if isinstance(error, subprocess.TimeoutExpired):
+                report_process_group(process.pid)
+            try:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            if isinstance(error, subprocess.TimeoutExpired):
+                raise subprocess.TimeoutExpired(command[:3], timeout) from error
+            raise
+        output.seek(0)
+        text = output.read().strip()
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, command, output=text)
+        return text
 
 
 def report(output: pathlib.Path, result: dict) -> None:
@@ -190,17 +237,31 @@ def main() -> int:
         "run_id": os.environ.get("GITHUB_RUN_ID"),
         "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
         "timing_acceptance": False,
-        "status": "failed", "checks": [],
+        "status": "failed", "stage": "discovery", "checks": [],
     }
     try:
         selection = arguments(checks, args.archive_file)
         # A build/selection failure must never publish JUnit from an earlier run.
         (ROOT / "target/nextest/ci/junit.xml").unlink(missing_ok=True)
-        listing = json.loads(capture("cargo", "nextest", "list", "--message-format", "json", *selection))
+        discovered = args.output / "test-inventory.json"
+        discovered.unlink(missing_ok=True)
+        print("Discovering the exact regression inventory", file=sys.stderr, flush=True)
+        listing_text = capture(
+            "cargo", "nextest", "list", "--message-format", "json", *selection,
+            timeout=120 if args.archive_file is not None else None,
+        )
+        args.output.mkdir(parents=True, exist_ok=True)
+        discovered.write_text(listing_text + "\n", encoding="utf-8")
+        result["stage"] = "selection"
+        print("Validating the discovered case identities", file=sys.stderr, flush=True)
+        listing = json.loads(listing_text)
         result["checks"] = verify_selection(checks, listing)
+        result["stage"] = "execution"
+        print(f"Executing {sum(check['selected_cases'] for check in result['checks'])} verified regression cases", file=sys.stderr, flush=True)
         subprocess.run(["cargo", "nextest", "run", *selection], cwd=ROOT, check=True)
         result["status"] = "passed"
-    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+        result["stage"] = "completed"
+    except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         result["error"] = str(error)
         print(error, file=sys.stderr)
     finally:
