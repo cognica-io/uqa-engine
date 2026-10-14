@@ -39,7 +39,7 @@ impl Engine {
         let epochs = self.epochs.published_epochs();
         let cache_revisions = self.epochs.storage_cache_revisions.lock().clone();
         let read_view = self.epochs.seen_storage_read_view.lock().clone();
-        let session = Self::empty_persistent_session(
+        let mut session = Self::empty_persistent_session(
             PersistentStorageSession::new(
                 Arc::clone(&storage.catalog),
                 Arc::clone(&storage.backend),
@@ -47,6 +47,7 @@ impl Engine {
             Some(Arc::clone(provider)),
         );
         session.durable.restore(&self.durable.snapshot());
+        session.runtime.physical_index_cache = self.runtime.physical_index_cache.clone();
         uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session);
         session.rebind_graph_stores()?;
         for (relation, source) in self.storage.tables.read().iter() {

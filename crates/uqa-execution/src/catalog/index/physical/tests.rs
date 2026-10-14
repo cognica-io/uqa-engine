@@ -327,3 +327,60 @@ fn composite_unique_keys_retain_the_same_complete_tuple_in_storage_and_commands(
         assert_eq!(staged["opaque:4"], expected);
     }
 }
+
+#[test]
+fn shared_physical_index_preparation_is_single_and_preserves_retained_definitions() {
+    let cache = PhysicalIndexCache::default();
+    let source = rows(2, true);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let prepared = std::thread::scope(|scope| {
+        let workers = (0..8)
+            .map(|_| {
+                let cache = cache.clone();
+                let source = source.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    cache.bind(source).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert!(prepared
+        .iter()
+        .all(|value| Arc::ptr_eq(value, &prepared[0])));
+    let sibling = cache.clone();
+    let changed = sibling.bind(rows(3, false)).unwrap();
+    let old_key = ValueIndexKey::Index("opaque:2".into());
+    let new_key = ValueIndexKey::Index("opaque:3".into());
+    assert_eq!(values(&changed, &new_key).unwrap(), Value::Null);
+    assert_eq!(
+        values(&prepared[0], &old_key).unwrap(),
+        Value::Row(vec![Value::Int(7)].into())
+    );
+    assert_eq!(
+        values(&cache.bind(source.clone()).unwrap(), &old_key).unwrap(),
+        Value::Row(vec![Value::Int(7)].into())
+    );
+    assert!(Arc::ptr_eq(
+        &cache.bind(source.clone()).unwrap(),
+        &sibling.bind(source).unwrap()
+    ));
+}
+
+#[test]
+fn shared_physical_index_preparation_does_not_publish_invalid_definitions() {
+    let cache = PhysicalIndexCache::default();
+    let source = rows(2, true);
+    let prepared = cache.bind(source.clone()).unwrap();
+    let mut invalid = source.as_ref().clone();
+    invalid.values_mut().next().unwrap().definition_json = Some("invalid JSON".into());
+    let sibling = cache.clone();
+    assert!(sibling.bind(Arc::new(invalid)).is_err());
+    assert!(Arc::ptr_eq(&prepared, &cache.bind(source.clone()).unwrap()));
+    assert!(Arc::ptr_eq(&prepared, &sibling.bind(source).unwrap()));
+}
