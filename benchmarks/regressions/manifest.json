@@ -6228,6 +6228,35 @@
       "capability": "MERGE action clause and row identity",
       "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
       "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "missing_retained_type_identity_uses_the_missing_type_diagnostic",
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained type identity after removal",
+      "workload": "Missing scalar/array type identities and the 153-observation PostgreSQL composite-removal reference across four providers and durable reopen.",
+      "invariant": "A deleted selected type reports 42704 with its original OID; live lookup, attribute changes, lazy reads, rollback and retained tuple bounds keep their existing contracts."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "composite_attribute_removals_match_postgresql",
+      "source": "crates/uqa-engine/tests/queries/sql_composites/removal.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Retained type identity after removal",
+      "workload": "Missing scalar/array type identities and the 153-observation PostgreSQL composite-removal reference across four providers and durable reopen.",
+      "invariant": "A deleted selected type reports 42704 with its original OID; live lookup, attribute changes, lazy reads, rollback and retained tuple bounds keep their existing contracts."
     }
   ]
 }
