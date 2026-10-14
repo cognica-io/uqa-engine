@@ -11,17 +11,26 @@ use crate::catalog::{
     projection::{builtin_routine_identities, catalog_routine_type_oid, BuiltinRoutineIdentity},
     CatalogReadView,
 };
+use std::collections::BTreeMap;
 use uqa_sql::{
     ast::FunctionBinding,
     catalog::{
-        roles::{identity::RoleSubject, role_inherits, RoleReference},
-        security::{builtin_routines::BuiltinRoutineExecution, object_acl},
+        roles::{identity::RoleSubject, role_inherits, RoleDefinition, RoleReference},
+        security::{
+            builtin_routines::{BuiltinRoutineExecution, BuiltinRoutineSecurities},
+            object_acl,
+        },
     },
     SQLError,
 };
 
 #[derive(Clone)]
 pub struct BuiltinRoutinePermissions {
+    restricted: Option<RestrictedAuthority>,
+}
+
+#[derive(Clone)]
+struct RestrictedAuthority {
     catalog: CatalogReadView,
     current_role: RoleReference,
 }
@@ -37,28 +46,47 @@ impl std::fmt::Debug for BuiltinRoutinePermissions {
 impl BuiltinRoutinePermissions {
     #[must_use]
     pub fn new(catalog: CatalogReadView, current_role: RoleReference) -> Self {
+        let definitions = &catalog.snapshot().definitions;
+        if let Some(authority) = Self::try_unrestricted(
+            &definitions.builtin_routine_security,
+            &definitions.roles,
+            &current_role,
+        ) {
+            return authority;
+        }
         Self {
-            catalog,
-            current_role,
+            restricted: Some(RestrictedAuthority {
+                catalog,
+                current_role,
+            }),
         }
     }
 
     #[must_use]
     pub fn capture(context: &CatalogContext<'_>) -> Self {
-        Self::new(context.catalog_read_view(), context.current_role())
+        context
+            .catalog
+            .builtin_routine_permissions(context.current_role())
     }
 
     #[must_use]
     pub fn unrestricted(&self) -> bool {
-        let definitions = &self.catalog.snapshot().definitions;
-        definitions.builtin_routine_security.is_empty()
-            || self
-                .current_role
-                .role_definition(&definitions.roles)
-                .is_some_and(|role| {
-                    role.attributes
-                        .contains(&uqa_sql::ast::RoleAttribute::Superuser)
-                })
+        self.restricted.is_none()
+    }
+
+    /// The unrestricted decision uses only immutable ACL overrides and role attributes; table and type definitions cannot change it.
+    #[must_use]
+    pub fn try_unrestricted(
+        security: &BuiltinRoutineSecurities,
+        roles: &BTreeMap<String, RoleDefinition>,
+        current_role: &RoleReference,
+    ) -> Option<Self> {
+        (security.is_empty()
+            || current_role.role_definition(roles).is_some_and(|role| {
+                role.attributes
+                    .contains(&uqa_sql::ast::RoleAttribute::Superuser)
+            }))
+        .then_some(Self { restricted: None })
     }
 
     pub fn require_analyzed_set_call(
@@ -84,7 +112,10 @@ impl BuiltinRoutinePermissions {
     }
 
     fn require_selected(&self, routine: BuiltinRoutineIdentity) -> Result<(), SQLError> {
-        let definitions = &self.catalog.snapshot().definitions;
+        let Some(authority) = &self.restricted else {
+            return Ok(());
+        };
+        let definitions = &authority.catalog.snapshot().definitions;
         let acl = definitions
             .builtin_routine_security
             .get(&routine.oid)
@@ -93,12 +124,12 @@ impl BuiltinRoutinePermissions {
             &uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
             acl,
             false,
-            self.unrestricted(),
+            false,
             |role| {
                 role_inherits(
                     &definitions.roles,
                     &definitions.role_memberships,
-                    &self.current_role,
+                    &authority.current_role,
                     role,
                 )
             },
@@ -119,6 +150,7 @@ impl BuiltinRoutinePermissions {
 
     /// Match the declaration carried by the selected binding, not argument values or the caller's current search path. User identities and compiler syntax dispatch never borrow the ACL of a same-named catalog function.
     fn selected(&self, binding: &FunctionBinding) -> Option<BuiltinRoutineIdentity> {
+        let authority = self.restricted.as_ref()?;
         if !binding.builtin || binding.object_id.is_some() || binding.resolution_error.is_some() {
             return None;
         }
@@ -136,7 +168,7 @@ impl BuiltinRoutinePermissions {
                     .argument_types
                     .iter()
                     .zip(&binding.argument_types)
-                    .all(|(oid, name)| *oid == catalog_routine_type_oid(&self.catalog, name))
+                    .all(|(oid, name)| *oid == catalog_routine_type_oid(&authority.catalog, name))
         })
     }
 }

@@ -14,6 +14,7 @@ thread_local! {
     static CATALOG_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+mod builtin_authority;
 mod catalog_allocation;
 mod catalog_indexes;
 mod constraint_names;
