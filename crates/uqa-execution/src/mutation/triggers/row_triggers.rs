@@ -20,7 +20,7 @@ use super::context::TriggerContext;
 struct Resolved {
     timing: TriggerTiming,
     event: TriggerEvent,
-    updated_columns: Vec<String>,
+    updated_columns: Option<Vec<String>>,
     triggers: Rc<[StoredTrigger]>,
 }
 
@@ -48,7 +48,7 @@ pub(super) fn resolve(
     table: &str,
     timing: TriggerTiming,
     event: TriggerEvent,
-    updated_columns: &[String],
+    updated_columns: Option<&[String]>,
 ) -> Result<Rc<[StoredTrigger]>> {
     let known = STATEMENTS.with(|statements| {
         let statements = statements.borrow();
@@ -59,7 +59,7 @@ pub(super) fn resolve(
             .find(|resolved| {
                 resolved.timing == timing
                     && resolved.event == event
-                    && resolved.updated_columns == updated_columns
+                    && resolved.updated_columns.as_deref() == updated_columns
             })
             .map(|resolved| Rc::clone(&resolved.triggers))
     });
@@ -78,7 +78,7 @@ pub(super) fn resolve(
                 .push(Resolved {
                     timing,
                     event,
-                    updated_columns: updated_columns.to_vec(),
+                    updated_columns: updated_columns.map(<[String]>::to_vec),
                     triggers: Rc::clone(&triggers),
                 });
         }

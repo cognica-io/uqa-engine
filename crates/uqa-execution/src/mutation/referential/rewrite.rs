@@ -20,7 +20,7 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
     referenced_relation: &str,
     doc_id: DocId,
     old_document: Document,
-    mut new_document: Document,
+    new_document: Document,
 ) -> Result<PreparedDocumentRewrite, SQLError> {
     context
         .locking
@@ -41,7 +41,6 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         doc_id,
         update_lock_strength(context.locking.catalog, table, &changed_columns),
     )?;
-    refresh_stored_generated_columns(context.assignment, table, &mut new_document)?;
     let _key_locks = lock_document_key_dependencies(
         context.constraints,
         table,
@@ -103,31 +102,24 @@ pub fn prepare_referential_document_rewrite<S: Clone + 'static>(
     else {
         return Ok(None);
     };
-    let route = if let Some(root) = uqa_sql::semantics::partition::partition_hierarchy_root(
+    let root = uqa_sql::semantics::partition::partition_hierarchy_root(
         context.constraints.partitions.catalog,
         table,
-    )? {
-        let Some(route) = prepare_partition_update_route(
-            context,
-            ConstraintStatement::referential_action(constraint_table, &updated_columns),
-            table,
-            doc_id,
-            &old_document,
-            new_document,
-            &root,
-            params,
-            true,
-        )?
-        else {
-            return Ok(None);
-        };
-        route
-    } else {
-        PartitionUpdateRoute::Rewrite {
-            document: new_document,
-            destination: None,
-            moved_through: None,
-        }
+    )?;
+    let Some(route) = prepare_partition_update_route(
+        context,
+        ConstraintStatement::referential_action(constraint_table, &updated_columns),
+        table,
+        doc_id,
+        &old_document,
+        new_document,
+        root.as_deref().unwrap_or(table),
+        params,
+        true,
+        &updated_columns,
+    )?
+    else {
+        return Ok(None);
     };
     let mut prepared =
         prepare_routed_document_rewrite(context, table, doc_id, old_document, route)?;
@@ -171,6 +163,26 @@ fn retarget_prepared_document_rewrite<S: Clone + 'static>(
     Ok(())
 }
 
+/// Finish the UPDATE row after its BEFORE triggers, using `PostgreSQL`'s relation trigger descriptor and statement target columns.
+pub fn refresh_updated_generated_columns<S: Clone + 'static>(
+    context: &ReferentialContext<'_, S>,
+    table: &str,
+    document: &mut Document,
+    updated_columns: &[String],
+) -> Result<(), SQLError> {
+    let before_update = crate::mutation::triggers::has_before_row_triggers(
+        &context.triggers,
+        table,
+        uqa_sql::ast::TriggerEvent::Update,
+    )?;
+    crate::mutation::assignment::refresh_updated_stored_generated_columns(
+        context.assignment,
+        table,
+        document,
+        (!before_update).then_some(updated_columns),
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "keeps DML row-image inputs aligned"
@@ -181,11 +193,13 @@ pub fn prepare_partition_update_route<S: Clone + 'static>(
     storage_table: &str,
     doc_id: DocId,
     old_document: &Document,
-    document: Document,
+    mut document: Document,
     routing_table: &str,
     params: &[SQLParam],
     include_descendants: bool,
+    updated_columns: &[String],
 ) -> Result<Option<PartitionUpdateRoute>, SQLError> {
+    refresh_updated_generated_columns(context, storage_table, &mut document, updated_columns)?;
     let hierarchy = context
         .constraints
         .partitions
@@ -241,7 +255,7 @@ pub fn prepare_partition_update_route<S: Clone + 'static>(
         &destination,
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
-    let Some(triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
+    let Some(mut triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
         &context.triggers,
         &destination,
         uqa_sql::ast::TriggerEvent::Insert,
@@ -255,6 +269,8 @@ pub fn prepare_partition_update_route<S: Clone + 'static>(
             attempted_document: document,
         }));
     };
+    // A partition move inserts into the destination, whose generated expressions run after its BEFORE INSERT triggers.
+    refresh_stored_generated_columns(context.assignment, &destination, &mut triggered_document)?;
     validate_partition_constraint(
         context.constraints,
         statement,

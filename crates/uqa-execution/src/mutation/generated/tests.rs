@@ -49,6 +49,50 @@ impl AssignmentContext for Assignment {
 }
 
 #[test]
+fn unrelated_updates_evaluate_no_stored_expressions_across_a_row_batch() {
+    let definitions = (0..20)
+        .map(|index| format!("g{index} int GENERATED ALWAYS AS(source+{index}) STORED"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("CREATE TABLE t(source int,unrelated int,{definitions})");
+    let uqa_sql::Statement::CreateTable(table) = uqa_sql::compile(&sql).unwrap().remove(0) else {
+        panic!("table")
+    };
+    for (updated, expected) in [("unrelated", 0), ("source", 2_000)] {
+        let selected = uqa_sql::semantics::generated_values::stored_columns_for_update(
+            &table.columns,
+            &[updated.into()],
+        );
+        let mut calls = 0;
+        for row in 0..100 {
+            let mut document = ResultRow::from([
+                ("source".into(), Value::Int(row)),
+                ("unrelated".into(), Value::Int(1)),
+            ]);
+            for index in 0..20 {
+                document.insert(format!("g{index}"), Value::Int(row + index));
+            }
+            refresh_stored_generated_columns(
+                &Assignment,
+                &table.columns,
+                Some(&selected),
+                &mut document,
+                &mut |_, _, _| {
+                    calls += 1;
+                    Ok((Value::Int(42), Some(ColumnType::Integer)))
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                document["g19"],
+                Value::Int(if expected == 0 { row + 19 } else { 42 })
+            );
+        }
+        assert_eq!(calls, expected);
+    }
+}
+
+#[test]
 fn selective_rewrite_preserves_other_stored_values_and_full_column_scope() {
     let uqa_sql::Statement::CreateTable(table) = uqa_sql::compile("CREATE TABLE t(v int,g int GENERATED ALWAYS AS(v+1) STORED,h int GENERATED ALWAYS AS(v+2) STORED,z int GENERATED ALWAYS AS(v+3) VIRTUAL)").unwrap().remove(0) else {panic!("table")};
     for (selected, expected_calls) in [

@@ -12,6 +12,25 @@ use crate::{
 };
 use std::collections::BTreeSet;
 
+/// The union of target columns of every MERGE UPDATE action, which `PostgreSQL` uses when selecting generated-column dependencies even if a different action is selected for a particular row.
+#[must_use]
+pub fn merge_update_columns(statement: &MergePlan) -> Vec<String> {
+    statement
+        .when_clauses
+        .iter()
+        .filter_map(|clause| match clause {
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => Some(assignments),
+            _ => None,
+        })
+        .flatten()
+        .flat_map(|assignment| assignment.target.column_names())
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "validates clause-specific schemas and FULL JOIN requirements"

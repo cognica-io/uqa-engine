@@ -63,7 +63,7 @@ impl EventLookupContext<'_> {
         let relation = self.analysis.resolve_trigger_table(table)?;
         let replica = self.state.session_replication_role_is_replica();
         Ok(self
-            .matching_triggers(&relation, timing, event, row, updated_columns)?
+            .matching_triggers(&relation, timing, event, row, Some(updated_columns))?
             .into_iter()
             .filter(|trigger| {
                 if replica {
@@ -82,7 +82,7 @@ impl EventLookupContext<'_> {
         timing: TriggerTiming,
         event: TriggerEvent,
         row: bool,
-        updated_columns: &[String],
+        updated_columns: Option<&[String]>,
     ) -> Result<Vec<StoredTrigger>, SQLError> {
         let relation = self.analysis.resolve_trigger_table(table)?;
         self.matching_triggers(&relation, timing, event, row, updated_columns)
@@ -94,7 +94,7 @@ impl EventLookupContext<'_> {
         timing: TriggerTiming,
         event: TriggerEvent,
         row: bool,
-        updated_columns: &[String],
+        updated_columns: Option<&[String]>,
     ) -> Result<Vec<StoredTrigger>, SQLError> {
         let relations = if row {
             self.partition_trigger_sources(&relation.qualified_name())?
@@ -121,12 +121,11 @@ impl EventLookupContext<'_> {
                     && trigger.definition.row == row
                     && trigger.definition.events.contains(&event)
                     && (event != TriggerEvent::Update
+                        || updated_columns.is_none()
                         || trigger.definition.update_columns.is_empty()
-                        || trigger
-                            .definition
-                            .update_columns
-                            .iter()
-                            .any(|column| updated_columns.contains(column)))
+                        || trigger.definition.update_columns.iter().any(|column| {
+                            updated_columns.is_some_and(|columns| columns.contains(column))
+                        }))
             })
             .collect())
     }

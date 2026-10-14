@@ -33,6 +33,9 @@ pub fn refresh_stored_generated_columns(
             document.remove(&column.name);
         }
     }
+    if selected.is_some_and(<[String]>::is_empty) {
+        return Ok(());
+    }
     let schema = RowSchema::with_types(
         columns.iter().map(|column| column.name.clone()).collect(),
         columns

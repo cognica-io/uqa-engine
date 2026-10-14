@@ -406,7 +406,7 @@ pub fn has_before_row_triggers(
     table: &str,
     event: TriggerEvent,
 ) -> Result<bool> {
-    Ok(!row_triggers::resolve(context, table, TriggerTiming::Before, event, &[])?.is_empty())
+    Ok(!row_triggers::resolve(context, table, TriggerTiming::Before, event, None)?.is_empty())
 }
 
 pub fn fire_before_row_triggers(
@@ -423,7 +423,7 @@ pub fn fire_before_row_triggers(
         table,
         TriggerTiming::Before,
         event,
-        updated_columns,
+        Some(updated_columns),
     )?;
     let original = if event == TriggerEvent::Delete {
         old_document
@@ -614,8 +614,13 @@ impl AfterRowTriggerEvent {
             mut foreign_key_checks,
         } = input;
         crate::mutation::referential::checks::ForeignKeyCheck::sort(&mut foreign_key_checks);
-        let candidates =
-            row_triggers::resolve(context, table, TriggerTiming::After, event, updated_columns)?;
+        let candidates = row_triggers::resolve(
+            context,
+            table,
+            TriggerTiming::After,
+            event,
+            Some(updated_columns),
+        )?;
         let capture_transition =
             transition_capture_required(context, table, event, updated_columns)?;
         // The role is read when the row's events are queued, as `PostgreSQL` checks each trigger in `AfterTriggerSaveEvent`.
