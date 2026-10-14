@@ -18,6 +18,7 @@ mod catalog_allocation;
 mod catalog_indexes;
 mod generated_rewrite;
 mod mutation_rows;
+mod relation_arrays;
 mod scoped_catalog;
 
 pub(super) fn record_catalog_capture() {

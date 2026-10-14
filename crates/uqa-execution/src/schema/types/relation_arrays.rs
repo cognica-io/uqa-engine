@@ -8,6 +8,8 @@
 
 pub mod restoration;
 
+use std::borrow::Cow;
+
 use super::super::{
     foreign_table_alteration::{ForeignTableAlterCatalog, ForeignTableAlterPublication},
     namespaces::relations::RelationCreationContext,
@@ -49,21 +51,34 @@ struct Holder {
     array_oid: u32,
 }
 
+/// The only relation metadata needed for generated array name inquiries.
+pub struct RelationArrayMetadata<'a> {
+    pub array_oid: Option<u32>,
+    pub recorded_name: Option<Cow<'a, str>>,
+}
+
+fn matches(
+    relation: &RelationIdentity,
+    oid: Option<u32>,
+    recorded: Option<&str>,
+    requested: &RelationIdentity,
+) -> bool {
+    oid.is_some()
+        && relation.schema == requested.schema
+        && recorded.map_or_else(
+            || array_type_name(&relation.name, 0) == requested.name,
+            |name| name == requested.name,
+        )
+}
+
 fn holder(catalog: &CatalogReadView, requested: &RelationIdentity) -> Option<Holder> {
-    let matches = |relation: &RelationIdentity, oid: Option<u32>, recorded: Option<&str>| {
-        oid.is_some()
-            && relation.schema == requested.schema
-            && recorded.map_or_else(
-                || array_type_name(&relation.name, 0) == requested.name,
-                |name| name == requested.name,
-            )
-    };
     let snapshot = catalog.snapshot();
     for (relation, table) in &snapshot.tables {
         if matches(
             relation,
             table.catalog_oids.array_type,
             table.row_type_array_name.as_deref(),
+            requested,
         ) {
             return Some(Holder {
                 relation: relation.clone(),
@@ -78,6 +93,7 @@ fn holder(catalog: &CatalogReadView, requested: &RelationIdentity) -> Option<Hol
             relation,
             view.relation_oids().array_type,
             view.row_type_array_name.as_deref(),
+            requested,
         ) {
             return Some(Holder {
                 relation: relation.clone(),
@@ -92,6 +108,7 @@ fn holder(catalog: &CatalogReadView, requested: &RelationIdentity) -> Option<Hol
             relation,
             foreign.relation_oids().array_type,
             foreign.row_type_array_name.as_deref(),
+            requested,
         ) {
             return Some(Holder {
                 relation: relation.clone(),
@@ -104,8 +121,18 @@ fn holder(catalog: &CatalogReadView, requested: &RelationIdentity) -> Option<Hol
     None
 }
 
-pub fn type_name_exists(catalog: &CatalogReadView, requested: &RelationIdentity) -> bool {
-    holder(catalog, requested).is_some()
+pub fn type_name_exists<'a>(
+    arrays: impl IntoIterator<Item = (&'a RelationIdentity, RelationArrayMetadata<'a>)>,
+    requested: &RelationIdentity,
+) -> bool {
+    arrays.into_iter().any(|(relation, array)| {
+        matches(
+            relation,
+            array.array_oid,
+            array.recorded_name.as_deref(),
+            requested,
+        )
+    })
 }
 
 pub fn displace(
@@ -278,31 +305,17 @@ pub fn rename(
 }
 
 /// Read the current name of one relation's fixed array identity after a catalog wait or displacement.
-pub fn current_array_name(
-    catalog: &CatalogReadView,
-    relation: &RelationIdentity,
+pub fn current_array_name<'a>(
+    candidates: impl IntoIterator<Item = RelationArrayMetadata<'a>>,
     oid: u32,
 ) -> Option<String> {
-    let snapshot = catalog.snapshot();
-    snapshot
-        .tables
-        .get(relation)
-        .filter(|table| table.catalog_oids.array_type == Some(oid))
-        .and_then(|table| table.row_type_array_name.clone())
-        .or_else(|| {
-            snapshot
-                .definitions
-                .views
-                .get(relation)
-                .filter(|view| view.relation_oids().array_type == Some(oid))
-                .and_then(|view| view.row_type_array_name.clone())
-        })
-        .or_else(|| {
-            snapshot
-                .definitions
-                .foreign_tables
-                .get(relation)
-                .filter(|table| table.relation_oids().array_type == Some(oid))
-                .and_then(|table| table.row_type_array_name.clone())
-        })
+    candidates.into_iter().find_map(|array| {
+        (array.array_oid == Some(oid))
+            .then_some(array.recorded_name)
+            .flatten()
+            .map(Cow::into_owned)
+    })
 }
+
+#[cfg(test)]
+mod tests;
