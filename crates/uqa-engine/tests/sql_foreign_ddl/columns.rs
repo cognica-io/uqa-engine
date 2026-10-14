@@ -56,6 +56,7 @@ fn foreign_column_drop_matches_postgresql_and_reopen(#[case] provider: usize) {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn column_drop_keeps_foreign_row_values_and_rollback_restores_the_projection() {
     let engine = Engine::new();
     engine.sql("CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE items(a integer,b integer,c text) SERVER source; PREPARE kept AS SELECT b,c FROM items", &[]).unwrap();

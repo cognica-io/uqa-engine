@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Make the entire foreign-handler crate optional and disabled by default. Enable `fdw` for memory and native Arrow sources, or `duckdb` for those handlers plus DuckDB. Preserve foreign-table SQL declarations, catalog inspection, rollback and persistent reopening without handlers; unavailable scans fail explicitly. Rust metadata inspection uses `foreign_server_definition` and `foreign_table_definition` independently of the optional handler projection APIs.
+
 ### Fixed
 
 - Reuse a current catalog view across object-ID reservations while preserving collision checks after private DDL, lock waits and rollback, including memory and temporary tables.

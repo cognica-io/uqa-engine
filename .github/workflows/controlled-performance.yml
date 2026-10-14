@@ -12,6 +12,7 @@ on:
       - 'benchmarks/regressions/claim-timing.json'
       - 'scripts/*performance*.py'
       - 'scripts/controlled_runner_host.py'
+      - 'scripts/benchmark_features.py'
       - 'scripts/check-analytical-benchmark.py'
       - '.github/workflows/controlled-performance.yml'
 

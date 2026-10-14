@@ -5,7 +5,9 @@
 //
 
 use crate::Engine;
+#[cfg(feature = "fdw")]
 use std::sync::Arc;
+#[cfg(feature = "fdw")]
 use uqa_core::{RelationIdentity, Value};
 
 #[test]
@@ -16,15 +18,26 @@ fn pinned_foreign_catalog_retains_definitions_and_does_not_fall_back_to_live_ent
     let query = engine.statement_read_snapshot_engine(&snapshot);
     engine.sql("ALTER FOREIGN TABLE items RENAME TO renamed; CREATE FOREIGN TABLE added(id integer) SERVER a_source; CREATE SERVER new_source FOREIGN DATA WRAPPER memory_fdw",&[]).unwrap();
     assert_eq!(
-        query.foreign_table("items").unwrap().unwrap().name,
+        query
+            .foreign_table_definition("items")
+            .unwrap()
+            .unwrap()
+            .name,
         "public.items"
     );
     assert_eq!(query.foreign_table_columns("items").unwrap(), vec!["id"]);
-    assert!(query.foreign_table("renamed").unwrap().is_none());
-    assert!(query.foreign_table("added").unwrap().is_none());
-    assert!(query.foreign_server("new_source").unwrap().is_none());
+    assert!(query.foreign_table_definition("renamed").unwrap().is_none());
+    assert!(query.foreign_table_definition("added").unwrap().is_none());
+    assert!(query
+        .foreign_server_definition("new_source")
+        .unwrap()
+        .is_none());
     assert_eq!(
-        query.foreign_server("z_source").unwrap().unwrap().fdw_type,
+        query
+            .foreign_server_definition("z_source")
+            .unwrap()
+            .unwrap()
+            .fdw_type,
         "memory_fdw"
     );
     assert_eq!(
@@ -32,7 +45,7 @@ fn pinned_foreign_catalog_retains_definitions_and_does_not_fall_back_to_live_ent
         vec!["a_source", "z_source"]
     );
     assert_eq!(query.list_foreign_tables().unwrap(), vec!["public.items"]);
-    assert!(engine.foreign_table("items").unwrap().is_none());
+    assert!(engine.foreign_table_definition("items").unwrap().is_none());
     assert_eq!(
         engine.list_foreign_servers().unwrap(),
         vec!["a_source", "new_source", "z_source"]
@@ -43,6 +56,7 @@ fn pinned_foreign_catalog_retains_definitions_and_does_not_fall_back_to_live_ent
     );
 }
 
+#[cfg(feature = "fdw")]
 #[test]
 fn memory_stream_reads_current_rows_and_reports_removed_loaded_data() {
     let engine = Engine::new();
@@ -67,6 +81,7 @@ fn memory_stream_reads_current_rows_and_reports_removed_loaded_data() {
     );
 }
 
+#[cfg(feature = "fdw")]
 #[test]
 fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication() {
     let directory = tempfile::tempdir().unwrap();
@@ -119,6 +134,7 @@ fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication(
         .insert(relation, security);
 }
 
+#[cfg(feature = "fdw")]
 #[test]
 fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state() {
     let directory = tempfile::tempdir().unwrap();
@@ -147,7 +163,7 @@ fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state
         error.hint(),
         Some("Use DROP ... CASCADE to drop the dependent objects too.")
     );
-    assert!(engine.foreign_table("items").unwrap().is_some());
+    assert!(engine.foreign_table_definition("items").unwrap().is_some());
     assert_eq!(
         engine.extensions.foreign_memory_tables.read()[&relation].len(),
         1

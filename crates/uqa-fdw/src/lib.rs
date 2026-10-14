@@ -13,14 +13,13 @@
 //! stores pre-loaded rows and applies projection, pushdown predicate
 //! filtering, and a row limit before returning.
 
-// The DuckDB and Arrow handlers wrap native C/C++ engines that do not
-// exist on the browser (emscripten) target; the registry types and the
-// in-memory handler below stay available everywhere.
+// Native handlers are unavailable on emscripten; DuckDB is also opt-in.
+// Registry types and the in-memory handler stay available everywhere.
 #[cfg(not(target_os = "emscripten"))]
 pub mod arrow_flight;
 #[cfg(not(target_os = "emscripten"))]
 pub mod arrow_ipc;
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
 pub mod duckdb;
 
 #[cfg(not(target_os = "emscripten"))]
@@ -33,7 +32,7 @@ pub use arrow_flight::{
 pub use arrow_ipc::ArrowIpcHandler as ArrowHandler;
 #[cfg(not(target_os = "emscripten"))]
 pub use arrow_ipc::{ArrowIpcHandler, ArrowIpcPrepareError};
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
 pub use duckdb::{
     build_where_clause as build_duckdb_where_clause, normalize_source as duckdb_normalize_source,
     prepare_query as duckdb_prepare_query, DuckDBHandler, DuckDBPrepareError, FILE_READERS,
@@ -199,13 +198,13 @@ pub type RowStream = Box<dyn Iterator<Item = Result<Row, FDWError>> + Send>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FDWError {
-    #[cfg(not(target_os = "emscripten"))]
+    #[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
     #[error(transparent)]
     DuckDBPrepare(#[from] DuckDBPrepareError),
     #[cfg(not(target_os = "emscripten"))]
     #[error(transparent)]
     ArrowIpcPrepare(#[from] ArrowIpcPrepareError),
-    #[cfg(not(target_os = "emscripten"))]
+    #[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
     #[error(transparent)]
     DuckDB(#[from] ::duckdb::Error),
     #[cfg(not(target_os = "emscripten"))]

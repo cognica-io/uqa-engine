@@ -16,6 +16,7 @@ on:
       - ".cargo/**"
       - .github/workflows/ci.yml
       - .github/workflows/workspace-tests.yml
+      - .github/workflows/fdw-features.yml
       - ".github/actions/setup-nextest/**"
       - .config/nextest.toml
   workflow_dispatch:
@@ -77,26 +78,9 @@ jobs:
       os: ubuntu-24.04
 
   test-fdw-linux:
-    name: test FDW Linux
+    name: test FDW feature configurations
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
-    runs-on: ubuntu-24.04
-    env:
-      # Optimized test binaries that keep debug assertions, as in the workspace tests.
-      CARGO_PROFILE_DEV_OPT_LEVEL: "2"
-      CARGO_PROFILE_TEST_OPT_LEVEL: "2"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Free Linux runner disk
-        run: bash .github/scripts/free-linux-runner-disk.sh
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-          cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test -p uqa-fdw --locked
+    uses: ./.github/workflows/fdw-features.yml
 
   test-macos:
     name: test macOS

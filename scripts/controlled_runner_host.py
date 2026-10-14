@@ -24,6 +24,7 @@ from controlled_performance_resources import (
 )
 from performance_qualification import QualificationError, digest
 from performance_ec2_capacity import validate_guest, validate_instance
+from benchmark_features import feature_arguments
 
 
 WORK = Path("/var/lib/uqa-performance/work")
@@ -63,7 +64,7 @@ class ControlledHost:
                               ("cc", "/usr/bin/gcc", "--version"),
                               ("ld", "/usr/bin/ld", "--version"))}
         self.build_environment = digest({"toolchain": self.toolchain, "profile": "bench",
-                                         "incremental": False, "features": "default", "schema": 1})
+                                         "incremental": False, "features": "default + target-required", "schema": 2})
         self.make_writable(self.workspace)
 
     def make_writable(self, path: Path):
@@ -137,8 +138,13 @@ class ControlledHost:
                 (self.output / (role + "-build.json")).write_text(json.dumps(cached, indent=2) + "\n")
                 return cached
         source = self.source(revision, role)
+        metadata_output = self.unit("metadata-" + role,
+            [str(self.rust_bin / "cargo"), "metadata", "--no-deps", "--format-version", "1", "--locked", "--offline"],
+            source)
+        metadata = json.loads(metadata_output.read_text())
         args = [str(self.rust_bin / "cargo"), "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
-                "--bench", "analytical_comparison", "--message-format=json-render-diagnostics"]
+                "--bench", "analytical_comparison", "--message-format=json-render-diagnostics",
+                *feature_arguments(metadata, "uqa-engine", "analytical_comparison")]
         if claims:
             args += ["-p", "uqa-execution", "--example", "row_claim_contention"]
         output = self.unit("build-" + role, args, source, environment={

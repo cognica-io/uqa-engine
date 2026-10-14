@@ -6,17 +6,29 @@
 
 //! `CREATE SERVER` + `CREATE FOREIGN TABLE` DDL plumbing.
 
+#[cfg(feature = "fdw")]
 use std::collections::BTreeMap;
+#[cfg(all(feature = "fdw", not(target_os = "emscripten")))]
 use std::fs::File;
+#[cfg(all(feature = "fdw", not(target_os = "emscripten")))]
 use std::sync::Arc;
 
+#[cfg(all(feature = "fdw", not(target_os = "emscripten")))]
 use arrow_array::{Int64Array, RecordBatch, StringArray};
+#[cfg(all(feature = "fdw", not(target_os = "emscripten")))]
 use arrow_ipc::writer::FileWriter;
+#[cfg(all(feature = "fdw", not(target_os = "emscripten")))]
 use arrow_schema::{DataType, Field, Schema};
-use uqa_core::{ArrayValue, Value};
+#[cfg(feature = "fdw")]
+use uqa_core::ArrayValue;
+#[cfg(feature = "fdw")]
+use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ast::{ColumnDef, ColumnType};
 
+#[cfg(not(feature = "fdw"))]
+#[path = "sql_foreign_ddl/availability.rs"]
+mod availability;
 #[path = "sql_foreign_ddl/columns.rs"]
 mod columns;
 #[path = "sql_foreign_ddl/declarations.rs"]
@@ -30,6 +42,7 @@ mod temporary;
 #[path = "sql_foreign_ddl/wrappers.rs"]
 mod wrappers;
 
+#[cfg(feature = "fdw")]
 fn row(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
     pairs
         .iter()
@@ -86,13 +99,13 @@ fn create_server_then_create_foreign_table() {
     )
     .unwrap();
     let server = eng
-        .foreign_server("s1")
+        .foreign_server_definition("s1")
         .unwrap()
         .expect("server registered");
     assert_eq!(server.fdw_type, "duckdb_fdw");
     assert_eq!(server.options.get("database").unwrap(), "sample.db");
     let table = eng
-        .foreign_table("remote_books")
+        .foreign_table_definition("remote_books")
         .unwrap()
         .expect("foreign table");
     assert_eq!(table.server_name, "s1");
@@ -176,7 +189,7 @@ fn create_foreign_table_if_not_exists_checks_the_relation_before_its_definition(
         .unwrap()
         .is_none());
     assert!(engine
-        .foreign_table("absent_foreign_serial_server")
+        .foreign_table_definition("absent_foreign_serial_server")
         .unwrap()
         .is_none());
 
@@ -188,7 +201,7 @@ fn create_foreign_table_if_not_exists_checks_the_relation_before_its_definition(
         )
         .unwrap();
     assert!(engine
-        .foreign_table("new_foreign_definition_target")
+        .foreign_table_definition("new_foreign_definition_target")
         .unwrap()
         .is_some());
 }
@@ -254,6 +267,7 @@ fn unknown_foreign_table_metadata_is_an_error() {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn unloaded_memory_foreign_table_is_an_error() {
     let eng = Engine::new();
     eng.sql(
@@ -275,6 +289,7 @@ fn unloaded_memory_foreign_table_is_an_error() {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn select_from_memory_foreign_table() {
     let eng = Engine::new();
     eng.sql(
@@ -326,6 +341,7 @@ fn select_from_memory_foreign_table() {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn schema_qualified_foreign_table_uses_its_local_relation_qualifier() {
     let eng = Engine::new();
     eng.sql("CREATE SCHEMA app", &[]).unwrap();
@@ -359,6 +375,7 @@ fn schema_qualified_foreign_table_uses_its_local_relation_qualifier() {
     assert_eq!(result.value_at(0, 1), Some(&Value::Str("qualified".into())));
 }
 
+#[cfg(feature = "fdw")]
 fn typed_foreign_table() -> Engine {
     let eng = Engine::new();
     eng.sql(
@@ -408,6 +425,7 @@ fn typed_foreign_table() -> Engine {
     eng
 }
 
+#[cfg(feature = "fdw")]
 fn assert_declared_foreign_column_types(eng: &Engine) {
     let result = eng
         .sql("SELECT s, b, r, d, n, v, u, ts, a FROM remote_typed", &[])
@@ -461,6 +479,7 @@ fn assert_declared_foreign_column_types(eng: &Engine) {
     );
 }
 
+#[cfg(feature = "fdw")]
 fn assert_foreign_array_storage_semantics(eng: &Engine) {
     let bounded = ArrayValue::with_lower_bounds(vec![Value::Int(7), Value::Int(8)], vec![-2])
         .expect("bounded foreign array");
@@ -496,6 +515,7 @@ fn assert_foreign_array_storage_semantics(eng: &Engine) {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn foreign_tables_preserve_declared_postgresql_type_identity() {
     let eng = typed_foreign_table();
     assert_declared_foreign_column_types(&eng);
@@ -503,6 +523,7 @@ fn foreign_tables_preserve_declared_postgresql_type_identity() {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn memory_foreign_scan_is_pull_based_under_tiny_work_mem() {
     let eng = Engine::new();
     eng.set_query_memory_limit(Some(1));
@@ -537,6 +558,7 @@ fn memory_foreign_scan_is_pull_based_under_tiny_work_mem() {
 }
 
 #[test]
+#[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
 fn select_from_duckdb_foreign_table() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("remote.duckdb");
@@ -584,6 +606,51 @@ fn select_from_duckdb_foreign_table() {
 }
 
 #[test]
+#[cfg(all(feature = "fdw", not(feature = "duckdb")))]
+fn duckdb_foreign_scan_without_feature_preserves_catalog_and_reports_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("foreign-catalog.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine
+            .sql(
+                "CREATE SERVER duck FOREIGN DATA WRAPPER duckdb_fdw;
+                 CREATE FOREIGN TABLE remote_books(id integer, title text) SERVER duck OPTIONS (source 'books')",
+                &[],
+            )
+            .unwrap();
+    }
+    let engine = Engine::open(&path).unwrap();
+    assert_eq!(
+        engine
+            .foreign_server_definition("duck")
+            .unwrap()
+            .unwrap()
+            .fdw_type,
+        "duckdb_fdw"
+    );
+    assert_eq!(
+        engine
+            .foreign_table_definition("remote_books")
+            .unwrap()
+            .unwrap()
+            .columns
+            .len(),
+        2
+    );
+    let error = engine.sql("SELECT * FROM remote_books", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert_eq!(
+        error.to_string(),
+        "FDW type `duckdb_fdw` is not available in this build"
+    );
+    engine
+        .sql("DROP FOREIGN TABLE remote_books; DROP SERVER duck", &[])
+        .unwrap();
+}
+
+#[test]
+#[cfg(all(feature = "fdw", not(target_os = "emscripten")))]
 fn select_from_arrow_foreign_table() {
     let dir = tempfile::tempdir().unwrap();
     let arrow_path = dir.path().join("remote.arrow");

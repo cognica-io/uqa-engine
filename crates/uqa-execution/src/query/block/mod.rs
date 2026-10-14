@@ -26,7 +26,6 @@ use crate::query::{
     sources::SourceContext,
     CteScope,
 };
-use crate::{eval_scalar, ScalarEvalContext};
 use facets::{
     build_facet_output, facet_projection_fields, post_retrieval_score_top_k,
     score_limited_text_filter, score_order_top_k, FacetExecution,
@@ -35,7 +34,6 @@ use foreign::run_single_foreign_select_output;
 use table::run_single_table_select_output;
 use uqa_core::{ScoredEntry, Value};
 use uqa_sql::{
-    ast::BinaryOp,
     binding::{overlay_outer_schema, with_query_table_pseudo_columns},
     plan::{
         source_projection::SourceProjection, AccessPathPlan, ComputePlan, ProjectionPlan,

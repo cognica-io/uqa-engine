@@ -4,11 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Engine, RelationIdentity};
+use super::Engine;
+#[cfg(feature = "fdw")]
+use super::RelationIdentity;
+#[cfg(feature = "fdw")]
 use uqa_fdw::arrays::{column_type_is_array, normalize_array_columns};
 
 pub(crate) use uqa_execution::catalog::foreign::StoredForeignTable;
 
+#[cfg(feature = "fdw")]
 struct MemoryForeignRowStream<'a> {
     engine: &'a Engine,
     table_name: RelationIdentity,
@@ -19,6 +23,7 @@ struct MemoryForeignRowStream<'a> {
     emitted: u64,
 }
 
+#[cfg(feature = "fdw")]
 impl Iterator for MemoryForeignRowStream<'_> {
     type Item = std::result::Result<uqa_fdw::Row, String>;
 
@@ -111,6 +116,39 @@ impl Engine {
         .map_err(|error| error.to_string())
     }
 
+    /// Read the retained SQL server definition without requiring a source handler.
+    pub fn foreign_server_definition(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_sql::catalog::foreign_server::ForeignServerDefinition>, String> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| {
+                engine
+                    .foreign_lookup_context()
+                    .foreign_server_definition(name)
+            },
+            |error| error.to_string(),
+        )
+    }
+
+    /// Read the complete retained SQL table definition without requiring a source handler.
+    pub fn foreign_table_definition(
+        &self,
+        name: &str,
+    ) -> Result<Option<StoredForeignTable>, String> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| {
+                engine
+                    .foreign_lookup_context()
+                    .foreign_table_definition(name)
+            },
+            |error| error.to_string(),
+        )
+    }
+
+    #[cfg(feature = "fdw")]
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
         self.with_direct_query_snapshot(
             true,
@@ -119,6 +157,7 @@ impl Engine {
         )
     }
 
+    #[cfg(feature = "fdw")]
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
         self.with_direct_query_snapshot(
             true,
@@ -151,6 +190,7 @@ impl Engine {
         )
     }
 
+    #[cfg(feature = "fdw")]
     pub fn load_memory_foreign_table(
         &self,
         table_name: impl Into<String>,
@@ -189,6 +229,7 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(feature = "fdw")]
     pub(crate) fn scan_foreign_table_stream<'a>(
         &'a self,
         table_name: &str,
@@ -237,7 +278,7 @@ impl Engine {
                         emitted: 0,
                     })
                 }
-                #[cfg(not(target_os = "emscripten"))]
+                #[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
                 "duckdb_fdw" => {
                     let handler = uqa_fdw::DuckDBHandler::new(server);
                     Box::new(

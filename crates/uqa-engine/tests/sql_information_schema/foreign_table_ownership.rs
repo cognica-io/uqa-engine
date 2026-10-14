@@ -335,6 +335,7 @@ fn setup_foreign_table_acl(engine: &Engine) {
     ] {
         execute(engine, sql);
     }
+    #[cfg(feature = "fdw")]
     let rows = vec![
         std::collections::BTreeMap::from([
             ("id".into(), Value::Int(1)),
@@ -345,6 +346,7 @@ fn setup_foreign_table_acl(engine: &Engine) {
             ("value".into(), Value::Str("two".into())),
         ]),
     ];
+    #[cfg(feature = "fdw")]
     for table in ["items", "all_items", "cascade_items"] {
         engine
             .load_memory_foreign_table(format!("foreign_acl.{table}"), rows.clone())
@@ -387,6 +389,7 @@ fn grant_foreign_table_acl_fixture(engine: &Engine) {
     execute(engine, "RESET ROLE");
 }
 
+#[cfg(feature = "fdw")]
 fn assert_foreign_table_acl_defaults(engine: &Engine) {
     assert_eq!(
         scalar(
@@ -404,6 +407,7 @@ fn assert_foreign_table_acl_defaults(engine: &Engine) {
     );
 }
 
+#[cfg(feature = "fdw")]
 fn prepare_foreign_table_acl_catalog_fixture() -> Engine {
     let engine = Engine::new();
     setup_foreign_table_acl(&engine);
@@ -494,6 +498,7 @@ fn prepare_foreign_table_acl_catalog_fixture() -> Engine {
     engine
 }
 
+#[cfg(feature = "fdw")]
 fn assert_foreign_table_select_enforcement_and_visibility(engine: &Engine) {
     execute(engine, "SET ROLE foreign_acl_outsider");
     assert_eq!(
@@ -555,6 +560,7 @@ fn assert_foreign_table_select_enforcement_and_visibility(engine: &Engine) {
 }
 
 #[test]
+#[cfg(feature = "fdw")]
 fn foreign_table_acl_catalog_inquiry_visibility_and_select_enforcement() {
     let engine = prepare_foreign_table_acl_catalog_fixture();
     assert_foreign_table_select_enforcement_and_visibility(&engine);

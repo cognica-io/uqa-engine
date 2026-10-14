@@ -34,13 +34,16 @@ fn foreign_server_deletion_restores_metadata_and_dependencies_on_undo() {
         assert_eq!(engine.list_foreign_tables().unwrap().len(), 0);
         if let Some(peer) = &peer {
             assert_eq!(
-                peer.foreign_server("source").unwrap().unwrap().options,
+                peer.foreign_server_definition("source")
+                    .unwrap()
+                    .unwrap()
+                    .options,
                 original.options
             );
         }
         sql(&engine, "ROLLBACK TO before_drop; COMMIT");
         assert_eq!(engine.durable.foreign_servers.read()["source"], original);
-        assert!(engine.foreign_table("remote").unwrap().is_some());
+        assert!(engine.foreign_table_definition("remote").unwrap().is_some());
         assert_eq!(
             engine
                 .sql("DROP SERVER source", &[])
@@ -54,10 +57,13 @@ fn foreign_server_deletion_restores_metadata_and_dependencies_on_undo() {
         assert_ne!(committed.metadata.object_id, original.metadata.object_id);
         if let Some(peer) = &peer {
             assert_eq!(
-                peer.foreign_server("source").unwrap().unwrap().options,
+                peer.foreign_server_definition("source")
+                    .unwrap()
+                    .unwrap()
+                    .options,
                 committed.options
             );
-            assert!(peer.foreign_table("remote").unwrap().is_none());
+            assert!(peer.foreign_table_definition("remote").unwrap().is_none());
         }
         drop(retained);
         drop(peer);
@@ -65,7 +71,10 @@ fn foreign_server_deletion_restores_metadata_and_dependencies_on_undo() {
         if provider > 0 {
             let reopened = open(provider, &path);
             assert_eq!(reopened.durable.foreign_servers.read()["source"], committed);
-            assert!(reopened.foreign_table("remote").unwrap().is_none());
+            assert!(reopened
+                .foreign_table_definition("remote")
+                .unwrap()
+                .is_none());
             assert!(reopened.sql("SELECT * FROM dependent", &[]).is_err());
         }
     }
@@ -89,7 +98,7 @@ fn direct_foreign_server_deletion_obeys_authority_restrict_and_read_only_state()
             .drop_foreign_server("source")
             .unwrap_err()
             .contains("other objects depend on it"));
-        assert!(engine.foreign_table("remote").unwrap().is_some());
+        assert!(engine.foreign_table_definition("remote").unwrap().is_some());
         sql(&engine, "BEGIN READ ONLY");
         assert!(engine
             .drop_foreign_server("source")
@@ -315,6 +324,7 @@ fn foreign_table_server_reference_survives_concurrent_server_deletion() {
                         "{query}"
                     );
                 }
+                #[cfg(feature = "fdw")]
                 assert!(observer
                     .load_memory_foreign_table("ds414_orphan.remote", vec![])
                     .unwrap_err()

@@ -163,81 +163,6 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
     }
 }
 
-pub(super) fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
-    match ty {
-        uqa_fdw::ColumnType::SmallInteger => "smallint".into(),
-        uqa_fdw::ColumnType::Integer => "integer".into(),
-        uqa_fdw::ColumnType::BigInteger => "bigint".into(),
-        uqa_fdw::ColumnType::Oid => "oid".into(),
-        uqa_fdw::ColumnType::Xid => "xid".into(),
-        uqa_fdw::ColumnType::Void => "void".into(),
-        uqa_fdw::ColumnType::Real => "real".into(),
-        uqa_fdw::ColumnType::DoublePrecision => "double precision".into(),
-        uqa_fdw::ColumnType::Numeric { precision, scale } => match (precision, scale) {
-            (Some(p), Some(s)) => format!("numeric({p},{s})"),
-            (Some(p), None) => format!("numeric({p})"),
-            _ => "numeric".into(),
-        },
-        uqa_fdw::ColumnType::Text => "text".into(),
-        uqa_fdw::ColumnType::Name => "name".into(),
-        uqa_fdw::ColumnType::Uuid => "uuid".into(),
-        uqa_fdw::ColumnType::Varchar(Some(length)) => format!("character varying({length})"),
-        uqa_fdw::ColumnType::Varchar(None) => "character varying".into(),
-        uqa_fdw::ColumnType::Bpchar => "character".into(),
-        uqa_fdw::ColumnType::Character(length) => format!("character({length})"),
-        uqa_fdw::ColumnType::Bool => "boolean".into(),
-        uqa_fdw::ColumnType::Bytes => "bytea".into(),
-        uqa_fdw::ColumnType::InternalChar => r#""char""#.into(),
-        uqa_fdw::ColumnType::Regproc => "regproc".into(),
-        uqa_fdw::ColumnType::Regprocedure => "regprocedure".into(),
-        uqa_fdw::ColumnType::RefCursor => "refcursor".into(),
-        uqa_fdw::ColumnType::Regclass => "regclass".into(),
-        uqa_fdw::ColumnType::Regcollation => "regcollation".into(),
-        uqa_fdw::ColumnType::Regnamespace => "regnamespace".into(),
-        uqa_fdw::ColumnType::Regrole => "regrole".into(),
-        uqa_fdw::ColumnType::Regtype => "regtype".into(),
-        uqa_fdw::ColumnType::PgNodeTree => "pg_node_tree".into(),
-        uqa_fdw::ColumnType::AclItem => "aclitem".into(),
-        uqa_fdw::ColumnType::Int2Vector => "int2vector".into(),
-        uqa_fdw::ColumnType::OidVector => "oidvector".into(),
-        uqa_fdw::ColumnType::AnyArray => "anyarray".into(),
-        uqa_fdw::ColumnType::Json => "json".into(),
-        uqa_fdw::ColumnType::JsonB => "jsonb".into(),
-        uqa_fdw::ColumnType::Date => "date".into(),
-        uqa_fdw::ColumnType::Time => "time".into(),
-        uqa_fdw::ColumnType::TimeTz => "time with time zone".into(),
-        uqa_fdw::ColumnType::Timestamp => "timestamp".into(),
-        uqa_fdw::ColumnType::TimestampTz => "timestamp with time zone".into(),
-        uqa_fdw::ColumnType::Interval => "interval".into(),
-        uqa_fdw::ColumnType::Range(subtype) => fdw_range_name(subtype, false).into(),
-        uqa_fdw::ColumnType::Multirange(subtype) => fdw_range_name(subtype, true).into(),
-        uqa_fdw::ColumnType::Vector(dim) => format!("vector({dim})"),
-        uqa_fdw::ColumnType::Tensor(dim) => format!("tensor({dim})"),
-        uqa_fdw::ColumnType::Domain { schema, name, .. }
-        | uqa_fdw::ColumnType::Enum { schema, name, .. }
-        | uqa_fdw::ColumnType::Composite { schema, name, .. } => format!("{schema}.{name}"),
-        uqa_fdw::ColumnType::Array(element) => format!("{}[]", fdw_type_name(element)),
-        uqa_fdw::ColumnType::Record => "record".into(),
-    }
-}
-
-fn fdw_range_name(subtype: &uqa_fdw::RangeSubtype, multirange: bool) -> &'static str {
-    match (subtype, multirange) {
-        (uqa_fdw::RangeSubtype::Integer, false) => "int4range",
-        (uqa_fdw::RangeSubtype::BigInteger, false) => "int8range",
-        (uqa_fdw::RangeSubtype::Numeric, false) => "numrange",
-        (uqa_fdw::RangeSubtype::Date, false) => "daterange",
-        (uqa_fdw::RangeSubtype::Timestamp, false) => "tsrange",
-        (uqa_fdw::RangeSubtype::TimestampTz, false) => "tstzrange",
-        (uqa_fdw::RangeSubtype::Integer, true) => "int4multirange",
-        (uqa_fdw::RangeSubtype::BigInteger, true) => "int8multirange",
-        (uqa_fdw::RangeSubtype::Numeric, true) => "nummultirange",
-        (uqa_fdw::RangeSubtype::Date, true) => "datemultirange",
-        (uqa_fdw::RangeSubtype::Timestamp, true) => "tsmultirange",
-        (uqa_fdw::RangeSubtype::TimestampTz, true) => "tstzmultirange",
-    }
-}
-
 pub(super) fn column_constraints(col: &ColumnDef) -> String {
     let mut flags = Vec::new();
     if col.primary_key {
@@ -292,12 +217,11 @@ pub(super) fn foreign_table_options_display(options: &BTreeMap<String, String>) 
 
 #[cfg(test)]
 mod tests {
-    use super::{fdw_type_name, sql_type_name};
+    use super::sql_type_name;
     use uqa_sql::ColumnType;
 
     #[test]
     fn refcursor_type_names_match_postgresql() {
         assert_eq!(sql_type_name(&ColumnType::RefCursor), "refcursor");
-        assert_eq!(fdw_type_name(&uqa_fdw::ColumnType::RefCursor), "refcursor");
     }
 }

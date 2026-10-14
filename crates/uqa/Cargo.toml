@@ -16,6 +16,8 @@ categories = ["database-implementations"]
 
 [features]
 default = []
+fdw = ["uqa-engine/fdw"]
+duckdb = ["uqa-engine/duckdb"]
 nori = ["uqa-engine/nori"]
 kuromoji = ["uqa-engine/kuromoji"]
 

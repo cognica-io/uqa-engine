@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+#[cfg(feature = "fdw")]
 use uqa_core::Value;
 use uqa_engine::Engine;
 
@@ -23,6 +24,7 @@ fn open(provider: usize, path: &std::path::Path) -> Engine {
     }
 }
 
+#[cfg(feature = "fdw")]
 #[rstest::rstest]
 #[case::memory(0)]
 #[case::sqlite(1)]

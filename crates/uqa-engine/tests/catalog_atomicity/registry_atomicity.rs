@@ -70,7 +70,10 @@ fn registry_writes_fail_before_memory_is_published() {
     assert!(engine
         .register_foreign_server("broken_server".into(), "memory_fdw".into(), vec![], false,)
         .is_err());
-    assert!(engine.foreign_server("broken_server").unwrap().is_none());
+    assert!(engine
+        .foreign_server_definition("broken_server")
+        .unwrap()
+        .is_none());
     clear_failure(&connection);
 
     fail_event(&connection, "_sequences", "INSERT");
@@ -190,7 +193,10 @@ fn verify_fdw_and_sequence_delete_atomicity(connection: &ManagedConnection, engi
         .unwrap();
     fail_event(connection, "_foreign_servers", "DELETE");
     assert!(engine.drop_foreign_server("kept_server").is_err());
-    assert!(engine.foreign_server("kept_server").unwrap().is_some());
+    assert!(engine
+        .foreign_server_definition("kept_server")
+        .unwrap()
+        .is_some());
     clear_failure(connection);
 
     engine
@@ -204,7 +210,10 @@ fn verify_fdw_and_sequence_delete_atomicity(connection: &ManagedConnection, engi
         .unwrap();
     fail_event(connection, "_foreign_tables", "DELETE");
     assert!(engine.drop_foreign_table("kept_foreign").is_err());
-    assert!(engine.foreign_table("kept_foreign").unwrap().is_some());
+    assert!(engine
+        .foreign_table_definition("kept_foreign")
+        .unwrap()
+        .is_some());
     clear_failure(connection);
 
     engine.create_sequence("kept_seq", 1, 1, false).unwrap();

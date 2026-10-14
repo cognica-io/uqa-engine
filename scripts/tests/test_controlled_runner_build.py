@@ -114,6 +114,17 @@ class ControlledBuildTest(unittest.TestCase):
                 def compile_source(label, args, source, **kwargs):
                     self.assertEqual(self.git("rev-parse", "HEAD", cwd=source), revision)
                     self.assertIn("--locked", args)
+                    if label.startswith("metadata-"):
+                        metadata = self.root / "metadata.json"
+                        target = {"name": "analytical_comparison", "kind": ["bench"]}
+                        if role == "head":
+                            target["required-features"] = ["duckdb"]
+                        metadata.write_text(json.dumps({"packages": [{"name": "uqa-engine", "targets": [target]}]}))
+                        return metadata
+                    if role == "head":
+                        self.assertEqual(args[args.index("--features") + 1], "uqa-engine/duckdb")
+                    else:
+                        self.assertNotIn("--features", args)
                     self.assertEqual(kwargs["environment"]["CARGO_INCREMENTAL"], "0")
                     return compiler_output
 
@@ -124,7 +135,7 @@ class ControlledBuildTest(unittest.TestCase):
                     self.assertEqual(artifact["revision"], revision)
                     self.assertEqual(artifact["build_environment"], self.host.build_environment)
                     self.assertEqual(artifact["sha256"], runner.file_hash(Path(artifact["path"])))
-                self.host.unit.assert_called_once()
+                self.assertEqual(self.host.unit.call_count, 2)
 
     def test_fixture_ignores_the_callers_git_repository_environment(self):
         before = {name: (self.repository / ".git" / name).read_bytes() for name in ("HEAD", "index", "config")}
