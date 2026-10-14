@@ -87,13 +87,61 @@ fn retained_builtin_authority_uses_the_selected_declaration_and_kind() {
 #[test]
 fn builtin_permission_snapshots_and_bootstrap_authority_are_retained() {
     let revoked = permissions();
-    let mut next = revoked.catalog.snapshot().clone();
+    let catalog = &revoked.restricted.as_ref().unwrap().catalog;
+    let mut next = catalog.snapshot().clone();
     Arc::make_mut(&mut next.definitions.builtin_routine_security).clear();
     let allowed = BuiltinRoutinePermissions::new(CatalogReadView::new(next), "reader".into());
     let lower = binding("lower", &["text"]);
     allowed.require_execute(&lower).unwrap();
     assert!(revoked.require_execute(&lower).is_err());
-    BuiltinRoutinePermissions::new(revoked.catalog.clone(), "uqa".into())
+    BuiltinRoutinePermissions::new(catalog.clone(), "uqa".into())
         .require_execute(&lower)
+        .unwrap();
+}
+
+#[test]
+fn unrestricted_builtin_authority_retains_its_acl_and_role_decision() {
+    let revoked = permissions();
+    let definitions = &revoked
+        .restricted
+        .as_ref()
+        .unwrap()
+        .catalog
+        .snapshot()
+        .definitions;
+    let reader = RoleReference::from("reader");
+    let owner = RoleReference::from("uqa");
+    assert!(BuiltinRoutinePermissions::try_unrestricted(
+        &definitions.builtin_routine_security,
+        &definitions.roles,
+        &reader,
+    )
+    .is_none());
+    let superuser = BuiltinRoutinePermissions::try_unrestricted(
+        &definitions.builtin_routine_security,
+        &definitions.roles,
+        &owner,
+    )
+    .unwrap();
+    let mut changed_roles = (*definitions.roles).clone();
+    changed_roles
+        .get_mut("uqa")
+        .unwrap()
+        .attributes
+        .remove(&RoleAttribute::Superuser);
+    assert!(BuiltinRoutinePermissions::try_unrestricted(
+        &definitions.builtin_routine_security,
+        &changed_roles,
+        &owner,
+    )
+    .is_none());
+    superuser
+        .require_execute(&binding("lower", &["text"]))
+        .unwrap();
+    let public =
+        BuiltinRoutinePermissions::try_unrestricted(&BTreeMap::new(), &changed_roles, &reader)
+            .unwrap();
+    public
+        .require_execute(&binding("lower", &["text"]))
         .unwrap();
 }

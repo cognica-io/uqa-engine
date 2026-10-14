@@ -73,6 +73,16 @@ pub trait CatalogNamespace: Sync {
 
 pub trait CatalogSnapshotSource: Sync {
     fn catalog_snapshot(&self) -> super::CatalogReadView;
+    /// Capture builtin authority at the same boundary as ordinary catalog reads. Sources may use immutable authority inputs when they prove the existing unrestricted rule without table metadata.
+    fn builtin_routine_permissions(
+        &self,
+        current_role: RoleReference,
+    ) -> super::security::builtin_routines::execution::BuiltinRoutinePermissions {
+        super::security::builtin_routines::execution::BuiltinRoutinePermissions::new(
+            self.catalog_snapshot(),
+            current_role,
+        )
+    }
     fn refreshed_catalog_snapshot(&self) -> Result<super::CatalogReadView, SQLError>;
     /// Refresh definitions without capturing a query view that definition coordination will discard.
     fn refresh_catalog(&self) -> Result<(), SQLError> {

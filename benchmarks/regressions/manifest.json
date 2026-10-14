@@ -6793,6 +6793,140 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "unrestricted_builtin_authority_avoids_catalog_captures",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/builtin_authority.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Superuser and ordinary roles, zero/sixty unrelated tables, plain SELECT and a revoked builtin on all four providers.",
+      "invariant": "Unrestricted authority captures zero catalogs; plain SELECT captures at most its analysis/execution views; a revoked ordinary role still receives 42501.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "builtin_authority_preserves_retained_acl_role_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/builtin_authority.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Captured authority before and after lower(text) revocation, retained query input and a private grant followed by rollback.",
+      "invariant": "Selected declarations keep their exact EXECUTE decision, retained authority stays fixed, and public SQL observes rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unrestricted_builtin_authority_retains_its_acl_and_role_decision",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/execution/tests.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Empty builtin overrides and superuser authority followed by a role-attribute change.",
+      "invariant": "Narrow capture is unavailable for restricted authority and retains the original immutable role/ACL decision.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_builtin_authority_uses_the_selected_declaration_and_kind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/execution/tests.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Revoked scalar and aggregate signatures, another overload and a same-named user routine.",
+      "invariant": "Only the selected builtin declaration and routine kind determine EXECUTE denial.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "builtin_permission_snapshots_and_bootstrap_authority_are_retained",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/execution/tests.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Old revoked authority, a new cleared ACL and bootstrap authority over the revoked catalog.",
+      "invariant": "Retained ACL results stay fixed while new snapshots and actual superuser authority reflect their own inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "builtin_privileges_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Builtin EXECUTE grants, selected overloads, role membership and ordinary/superuser authority.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "builtin_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Constant planning, surviving calls and builtin permission checks before argument side effects.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "prepared_folded_and_surviving_calls_follow_peer_acl_changes",
+      "cases": 6,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Prepared folded and surviving builtin calls after another session commits ACL changes.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_sqlite::fixture_1_0",
+        "case_1_sqlite::fixture_2_1",
+        "case_2_sqlite_key_value::fixture_1_0",
+        "case_2_sqlite_key_value::fixture_2_1",
+        "case_3_redb::fixture_1_0",
+        "case_3_redb::fixture_2_1"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "mutation_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "INSERT, UPDATE, DELETE and MERGE initialization with revoked builtin permissions.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }
