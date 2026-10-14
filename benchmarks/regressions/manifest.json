@@ -6660,6 +6660,71 @@
       "capability": "Current constraint name coordination",
       "workload": "Three sessions interleave two owned-index renames with a rolled-back CHECK name reservation on native SQLite, SQLite K/V and redb.",
       "invariant": "A successful rename retains independently committed owned-index names after a destination-name wait and rollback; it never republishes stale names."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "exact_builtin_operator_selection_needs_no_candidate_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Every implemented exact builtin scalar operator signature.",
+      "invariant": "Exact builtin operands select their catalog signature with a zero-byte candidate allowance and no retained heap allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_operator_types_preserve_exact_unknown_and_cross_type_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Known, unknown, cross-width numeric, date and text operands under a zero-byte allowance.",
+      "invariant": "Exact matching keeps PostgreSQL operand precedence and result types without unrelated candidate ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "polymorphic_operator_outputs_keep_only_their_nested_type_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Array operands with declared element modifiers under the original bounded allowance.",
+      "invariant": "Polymorphic selection preserves normalized nested types and transfers only their owned leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "either_cancellation_stops_operator_type_production_without_retention",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Cancel either the retained or invoking owner before selecting a primitive operator.",
+      "invariant": "The exact builtin path reports 57014 and releases every temporary reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_result_errors_preserve_resource_identity_and_both_cancellation_sources",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/production_tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Array type results with an exhausted allowance and both cancellation owners.",
+      "invariant": "Allocating type results preserve 53200 and cancellation preserves 57014 after exact scalar selection stops allocating.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

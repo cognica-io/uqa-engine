@@ -60,7 +60,7 @@ fn json_operator_selection_retains_only_selected_input_types() {
 
 #[test]
 fn controlled_operator_types_preserve_exact_unknown_and_cross_type_selection() {
-    let budget = MemoryBudget::new(1 << 20);
+    let budget = MemoryBudget::new(0);
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
     let cases = [
@@ -188,4 +188,34 @@ fn either_cancellation_stops_operator_type_production_without_retention() {
         assert_eq!(error.sqlstate(), Some("57014"));
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn exact_builtin_operator_selection_needs_no_candidate_workspace() {
+    let budget = MemoryBudget::new(0);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+    let mut checked = 0;
+    for &(name, left, right, result, _, _) in SIGNATURES {
+        let scalar = |name| {
+            (name != "anyarray")
+                .then(|| crate::catalog::type_metadata::builtin_scalar_type_by_name(name))
+                .flatten()
+        };
+        let (Some(left), Some(right), Some(result)) = (scalar(left), scalar(right), scalar(result))
+        else {
+            continue;
+        };
+        let selected =
+            named_binary_operator_types_with_control(name, Some(left), Some(right), &control)
+                .unwrap_or_else(|error| panic!("{left:?} {name} {right:?}: {error}"));
+        assert_eq!(&*selected, &[left.clone(), right.clone(), result.clone()]);
+        assert_eq!(selected.reserved_bytes(), 0);
+        assert_eq!(budget.used(), 0);
+        checked += 1;
+    }
+    assert!(
+        checked > 100,
+        "the implemented builtin operator catalog must be covered"
+    );
 }

@@ -71,14 +71,9 @@ fn type_result_errors_preserve_resource_identity_and_both_cancellation_sources()
         Some("53200")
     );
     assert_eq!(
-        binary_result_type_with_control(
-            BinaryOp::Add,
-            Some(&ColumnType::Integer),
-            Some(&ColumnType::Integer),
-            &control
-        )
-        .unwrap_err()
-        .sqlstate(),
+        binary_result_type_with_control(BinaryOp::Equal, Some(&array), Some(&array), &control)
+            .unwrap_err()
+            .sqlstate(),
         Some("53200")
     );
     for cancel_original in [true, false] {
