@@ -6,11 +6,11 @@ Track the reported UPDATE, DDL and short-request regressions separately from the
 
 | Area | Required investigation | State |
 | --- | --- | --- |
-| Multirow UPDATE | Separate row count, payload width, generated columns, indexes, JSON joins and row locks. Count private-record work, retained reads, index edits and durable arbitration; preserve exact affected rows and rollback. | #859 merged as `3d741d1ca`, closing #858; row-identity captures reproduced as #862 and corrected locally; remaining index/private-record attribution stays open |
+| Multirow UPDATE | Separate row count, payload width, generated columns, indexes, JSON joins and row locks. Count private-record work, retained reads, index edits and durable arbitration; preserve exact affected rows and rollback. | #859 merged as `3d741d1ca`, closing #858; row-identity captures reproduced as #862 and corrected in #863; remaining index/private-record attribution stays open |
 | DDL | Separate one statement from a batch and compare fixed catalogs with zero and sixty unrelated tables. Attribute catalog loading, validation, publication and session creation independently. Include populated generated-column backfill. | Repeated catalog restoration corrected in #861 for #860; OID capture and populated backfill attribution stay open |
 | Short requests | Compare a reused Engine session, a fresh Engine session and the HTTP request boundary. Attribute admission, session construction, SQL execution, completion and response work independently. | #856 merged as `a70f100eb`, closing #857; HTTP attribution and remaining session costs stay open |
 | FK deletion | Retain the already corrected indexed cascade behavior as a regression control; do not reopen the whole child-table scan as an assumed cause. | Fixed before 0.5.3 by #537; current four-provider bounded-read control passes |
-| Verification | Add deterministic work/resource checks in the owning crate's existing test target, verify correctness and register relevant automatic performance regressions. Inspect actual Linux and macOS results for the delivered source before any merge. | #856 and #859 Linux/macOS complete; later corrections require their own results |
+| Verification | Add deterministic work/resource checks in the owning crate's existing test target, verify correctness and register relevant automatic performance regressions. Inspect actual Linux and macOS results for the delivered source before any merge. | #856 and #859 Linux/macOS complete; #863 and its DDL follow-up #861 require their own combined-source results |
 
 ## Report provenance and workload shape
 
