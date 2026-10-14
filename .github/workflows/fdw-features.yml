@@ -64,6 +64,7 @@ jobs:
         if: matrix.configuration == 'catalog'
         run: |
           cargo test -p uqa-engine --no-default-features --locked --lib catalog::foreign_tables
+          cargo test -p uqa-engine --no-default-features --locked --lib catalog::row_type_arrays
           cargo test -p uqa-engine --no-default-features --locked --test integration sql_foreign_ddl
           cargo test -p uqa-engine --no-default-features --locked --test integration manual_sql_examples_compile_or_execute
           cargo test -p uqa-cli --no-default-features --locked --test integration
@@ -72,6 +73,7 @@ jobs:
         run: |
           cargo test -p uqa-fdw --locked
           cargo test -p uqa-engine --no-default-features --features fdw --locked --lib catalog::foreign_tables
+          cargo test -p uqa-engine --no-default-features --features fdw --locked --lib catalog::row_type_arrays
           cargo test -p uqa-engine --no-default-features --features fdw --locked --test integration sql_foreign_ddl
           cargo test -p uqa-engine --no-default-features --features fdw --locked --test integration foreign_table_ownership
           cargo test -p uqa-engine --no-default-features --features fdw --locked --test integration catalog::sql_rules::relation_dependencies
