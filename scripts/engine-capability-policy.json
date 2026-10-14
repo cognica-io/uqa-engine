@@ -122,6 +122,7 @@
         "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",
         "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
         "crates/uqa-engine/src/capabilities/tests/relation_arrays.rs",
+        "crates/uqa-engine/src/capabilities/tests/relation_names.rs",
         "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",
         "crates/uqa-engine/src/capabilities/truncate.rs",

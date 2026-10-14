@@ -7,6 +7,7 @@
 //! Catalog snapshots resolve persistent and virtual names in one namespace.
 
 use super::*;
+use crate::catalog::RelationLookupMode;
 use crate::catalog::{security::BoundTableSecurity, test_support::empty_catalog};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::VirtualRelation;

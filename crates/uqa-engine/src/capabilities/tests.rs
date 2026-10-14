@@ -20,6 +20,7 @@ mod constraint_names;
 mod generated_rewrite;
 mod mutation_rows;
 mod relation_arrays;
+mod relation_names;
 mod scoped_catalog;
 
 pub(super) fn record_catalog_capture() {

@@ -270,6 +270,39 @@ impl Engine {
         }
     }
 
+    pub(crate) fn catalog_definition_snapshot(
+        durable: &DurableCatalogSnapshot,
+    ) -> CatalogDefinitionSnapshot {
+        CatalogDefinitionSnapshot {
+            sequence_persistence: durable.sequence_persistence.clone(),
+            foreign_tables: durable.foreign_tables.clone(),
+            foreign_wrappers: durable.foreign_wrappers.clone(),
+            foreign_servers: durable.foreign_servers.clone(),
+            sql_user_functions: durable.sql_user_functions.clone(),
+            role_memberships: durable.role_memberships.clone(),
+
+            domains: durable.domains.clone(),
+            enums: durable.enums.clone(),
+            composites: durable.composites.clone(),
+            graphs: durable.graphs.clone(),
+            views: durable.views.clone(),
+            catalog_indexes: durable.catalog_indexes.clone(),
+            database_security: durable.database_security.clone(),
+            schemas: durable.schemas.clone(),
+            sequences: durable.sequences.clone(),
+            sequence_object_ids: durable.sequence_object_ids.clone(),
+            sequence_catalog_oids: durable.sequence_catalog_oids.clone(),
+            graph_catalog_oids: durable.graph_catalog_oids.clone(),
+            sequence_security: durable.sequence_security.clone(),
+            foreign_table_security: durable.foreign_table_security.clone(),
+            builtin_routine_security: durable.builtin_routine_security.clone(),
+            system_relation_security: durable.system_relation_security.clone(),
+            roles: durable.roles.clone(),
+            triggers: durable.triggers.clone(),
+            rules: durable.rules.clone(),
+        }
+    }
+
     pub(crate) fn catalog_read_view_from(
         &self,
         durable: &DurableCatalogSnapshot,
@@ -299,34 +332,7 @@ impl Engine {
             .collect();
         let view = CatalogReadView::new(CatalogReadSnapshot {
             tables,
-            definitions: CatalogDefinitionSnapshot {
-                sequence_persistence: durable.sequence_persistence.clone(),
-                foreign_tables: durable.foreign_tables.clone(),
-                foreign_wrappers: durable.foreign_wrappers.clone(),
-                foreign_servers: durable.foreign_servers.clone(),
-                sql_user_functions: durable.sql_user_functions.clone(),
-                role_memberships: durable.role_memberships.clone(),
-
-                domains: durable.domains.clone(),
-                enums: durable.enums.clone(),
-                composites: durable.composites.clone(),
-                graphs: durable.graphs.clone(),
-                views: durable.views.clone(),
-                catalog_indexes: durable.catalog_indexes.clone(),
-                database_security: durable.database_security.clone(),
-                schemas: durable.schemas.clone(),
-                sequences: durable.sequences.clone(),
-                sequence_object_ids: durable.sequence_object_ids.clone(),
-                sequence_catalog_oids: durable.sequence_catalog_oids.clone(),
-                graph_catalog_oids: durable.graph_catalog_oids.clone(),
-                sequence_security: durable.sequence_security.clone(),
-                foreign_table_security: durable.foreign_table_security.clone(),
-                builtin_routine_security: durable.builtin_routine_security.clone(),
-                system_relation_security: durable.system_relation_security.clone(),
-                roles: durable.roles.clone(),
-                triggers: durable.triggers.clone(),
-                rules: durable.rules.clone(),
-            },
+            definitions: Self::catalog_definition_snapshot(durable),
             temporary_namespace: self.temporary_namespace_oids().map(|oids| {
                 uqa_sql::catalog::temporary_namespace::TemporaryNamespace {
                     schema: self.temporary_schema_name(),

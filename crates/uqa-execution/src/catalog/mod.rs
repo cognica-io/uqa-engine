@@ -35,6 +35,7 @@ mod graph_reads;
 pub mod namespaces;
 mod prepared_dependencies;
 mod read;
+pub mod relation_names;
 pub mod schema;
 mod snapshot_read;
 
