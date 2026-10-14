@@ -87,8 +87,15 @@ pub trait CatalogSnapshotSource: Sync {
     }
     /// Definition coordination uses the refreshed session catalog, independently from an ordinary query's retained snapshot.
     fn current_catalog_snapshot(&self) -> super::CatalogReadView;
+    /// A session-local revision covering all visible definition changes, including private DDL, rollback and refresh after a catalog lock wait. Sources without this guarantee must return `None`.
+    fn current_catalog_revision(&self) -> Option<u64> {
+        None
+    }
 }
 impl CatalogSnapshotSource for super::CatalogReadView {
+    fn current_catalog_revision(&self) -> Option<u64> {
+        Some(0)
+    }
     fn refresh_catalog(&self) -> Result<(), SQLError> {
         Ok(())
     }

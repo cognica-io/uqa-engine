@@ -14,6 +14,7 @@ thread_local! {
     static CATALOG_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+mod catalog_allocation;
 mod mutation_rows;
 mod scoped_catalog;
 

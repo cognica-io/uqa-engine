@@ -82,6 +82,10 @@ impl CatalogSnapshotSource for ScopedEngineHook<'_> {
     fn current_catalog_snapshot(&self) -> CatalogReadView {
         self.engine.restored_catalog_read_view()
     }
+
+    fn current_catalog_revision(&self) -> Option<u64> {
+        self.engine.current_catalog_revision()
+    }
 }
 
 impl uqa_sql::expr::CatalogInputFunctions for ScopedEngineHook<'_> {

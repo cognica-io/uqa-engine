@@ -116,6 +116,7 @@
         "crates/uqa-engine/src/capabilities/table_reads.rs",
         "crates/uqa-engine/src/capabilities/table_removal.rs",
         "crates/uqa-engine/src/capabilities/tests.rs",
+        "crates/uqa-engine/src/capabilities/tests/catalog_allocation.rs",
         "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
         "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",

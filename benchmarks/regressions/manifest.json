@@ -33,6 +33,61 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "catalog_allocations_capture_once_per_visible_revision",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/snapshots.rs",
+      "capability": "Catalog allocation work",
+      "workload": "OID allocation across stable, private, refreshed and unversioned catalog sources.",
+      "invariant": "Repeated allocations reuse one view; private definitions, post-wait collisions and rollback invalidate it, and losing locks are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_allocation_without_a_revision_keeps_both_collision_checks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/snapshots.rs",
+      "capability": "Catalog allocation work",
+      "workload": "OID allocation across stable, private, refreshed and unversioned catalog sources.",
+      "invariant": "Sources without a revision still capture before and after every lock wait, including filtered enum allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_allocation_rejects_a_view_invalidated_during_capture",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/snapshots.rs",
+      "capability": "Catalog allocation work",
+      "workload": "OID allocation across stable, private, refreshed and unversioned catalog sources.",
+      "invariant": "A definition change during capture cannot admit an occupied identifier or publish a stale view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_allocation_reuses_metadata_until_ddl_or_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_allocation.rs",
+      "capability": "Catalog allocation retention",
+      "workload": "Four providers; twenty OIDs each for ordinary and temporary tables, private constraints and savepoint rollback.",
+      "invariant": "Twenty allocations capture one catalog, private DDL rejects a conflicting owner, and rollback permits its released identity with one fresh capture.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "unrelated_updates_evaluate_no_stored_expressions_across_a_row_batch",
       "cases": 1,
       "source": "crates/uqa-execution/src/mutation/generated/tests.rs",

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse a current catalog view across object-ID reservations while preserving collision checks after private DDL, lock waits and rollback, including memory and temporary tables.
+
 - Retain session-maintained catalogs and unrelated table stores across successful DDL statements and commits, preserving refresh after peer changes and rollback.
 
 - Read bound table identities directly for mutation row images and RETURNING, avoiding whole-catalog captures per row while preserving retained, partition and foreign-table identities.
