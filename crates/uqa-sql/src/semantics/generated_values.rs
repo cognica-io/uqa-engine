@@ -12,6 +12,29 @@ use crate::{
     SQLError,
 };
 
+/// Stored expressions affected by an UPDATE's target columns. Explicitly assigning an unchanged input still selects its dependents; assigning a generated column to DEFAULT does not select it by itself. Callers with BEFORE ROW UPDATE triggers must recompute every stored expression instead.
+#[must_use]
+pub fn stored_columns_for_update(
+    columns: &[crate::ast::ColumnDef],
+    updated_columns: &[String],
+) -> Vec<String> {
+    columns
+        .iter()
+        .filter(|column| {
+            column.generated.as_ref().is_some_and(|generated| {
+                generated.kind == crate::ast::GeneratedColumnKind::Stored
+                    && updated_columns.iter().any(|updated| {
+                        crate::schema::dependencies::schema_expr_references_column(
+                            &generated.expression,
+                            updated,
+                        )
+                    })
+            })
+        })
+        .map(|column| column.name.clone())
+        .collect()
+}
+
 /// How a table generates a column's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Generation {
@@ -153,5 +176,26 @@ pub fn generated_column_update_error(column: &str) -> SQLError {
         message: format!("column \"{column}\" can only be updated to DEFAULT"),
         detail: Some(format!("Column \"{column}\" is a generated column.")),
         hint: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stored_update_selection_follows_expression_inputs() {
+        let crate::Statement::CreateTable(table) = crate::compile("CREATE TABLE t(a int,b int,unrelated int,ga int GENERATED ALWAYS AS(coalesce(a,1)) STORED,gb int GENERATED ALWAYS AS(b+2) STORED,c int GENERATED ALWAYS AS(42) STORED,v int GENERATED ALWAYS AS(b+3) VIRTUAL)").unwrap().remove(0) else { panic!("table") };
+        for (targets, expected) in [
+            (vec!["a"], vec!["ga"]),
+            (vec!["b"], vec!["gb"]),
+            (vec!["a", "b"], vec!["ga", "gb"]),
+            (vec!["unrelated"], vec![]),
+            (vec!["ga", "c", "v"], vec![]),
+        ] {
+            let targets = targets.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            assert_eq!(
+                super::stored_columns_for_update(&table.columns, &targets),
+                expected
+            );
+        }
     }
 }

@@ -50,7 +50,7 @@ pub use references::{
 };
 pub use rewrite::{
     prepare_document_rewrite, prepare_partition_update_route, prepare_referential_document_rewrite,
-    prepare_routed_document_rewrite, reject_partition_rewrite,
+    prepare_routed_document_rewrite, refresh_updated_generated_columns, reject_partition_rewrite,
 };
 pub enum PartitionUpdateRoute {
     Rewrite {

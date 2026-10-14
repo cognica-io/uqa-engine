@@ -2,6 +2,35 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unrelated_updates_evaluate_no_stored_expressions_across_a_row_batch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/generated/tests.rs",
+      "capability": "Generated UPDATE work",
+      "workload": "One hundred rows with twenty stored expressions; unrelated and explicit source assignments.",
+      "invariant": "Unrelated updates evaluate zero stored expressions and retain values; explicit input assignments evaluate all two thousand expressions with typed results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "generated_updates_follow_postgresql_target_dependencies",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_generated_columns/update_dependencies.rs",
+      "capability": "Generated UPDATE semantics",
+      "workload": "Four providers; ordinary and DEFAULT assignments, BEFORE triggers, MERGE, ON CONFLICT, FK cascade, partition moves, rollback and reopen.",
+      "invariant": "Stored values match independent PostgreSQL 18 results, including destination partition expressions and trigger ordering.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "shared_sessions_open_each_store_once_and_keep_current_counts",

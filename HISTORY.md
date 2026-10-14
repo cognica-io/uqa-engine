@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match PostgreSQL stored generated-column dependency selection during UPDATE, preserving unrelated values and using destination expressions when rows move between partitions.
+
 - Open each persistent table store once when creating an independent session, preserving validated row counts, analyzer bindings and the selected vector index.
 
 - Deduplicate equivalent retained NULL expressions in `GROUP BY DISTINCT` while preserving explicit collation clauses, selected types and conflicting collation metadata.
