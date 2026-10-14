@@ -23,6 +23,7 @@ from controlled_performance_resources import (
     MeasurementResources, restrict_workqueues, verify_workqueues, workqueue_mask,
 )
 from performance_qualification import QualificationError, digest
+from performance_ec2_capacity import validate_guest, validate_instance
 
 
 WORK = Path("/var/lib/uqa-performance/work")
@@ -172,6 +173,15 @@ class ControlledHost:
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")
+        response = json.loads(command("aws", "ec2", "describe-instances", "--region", self.config["region"],
+                                      "--instance-ids", self.config["instance_id"], "--output", "json"))
+        instance = response["Reservations"][0]["Instances"][0]
+        if instance["InstanceId"] != self.config["instance_id"]:
+            raise QualificationError("EC2 returned another controlled instance")
+        validate_instance(instance, state="running")
+        memory_kib = int(next(line.split()[1] for line in Path("/proc/meminfo").read_text().splitlines()
+                              if line.startswith("MemTotal:")))
+        validate_guest(instance["InstanceType"], os.cpu_count(), memory_kib)
         if subprocess.run(["pgrep", "-u", str(self.account.pw_uid)], stdout=subprocess.DEVNULL).returncode != 1:
             raise QualificationError("workload account still has running processes before calibration")
         timers = command("systemctl", "list-units", "--type=timer", "--state=active", "--no-legend", "--plain")
@@ -194,15 +204,8 @@ class ControlledHost:
             raise QualificationError("measurement CPU set differs")
         if len(Path("/proc/swaps").read_text().splitlines()) != 1:
             raise QualificationError("controlled host must not use swap")
-        response = json.loads(command("aws", "ec2", "describe-instances", "--region", self.config["region"],
-                                      "--instance-ids", self.config["instance_id"], "--output", "json"))
-        instance = response["Reservations"][0]["Instances"][0]
-        if (instance["Placement"]["Tenancy"] != "dedicated"
-                or instance["InstanceType"] != "c7g.4xlarge"
-                or instance["State"]["Name"] != "running"):
-            raise QualificationError("EC2 does not match the controlled-host contract")
         evidence = {"instance_id": instance["InstanceId"], "placement": instance["Placement"],
-                    "instance_type": instance["InstanceType"], "boot_id": self.boot,
+                    "instance_type": instance["InstanceType"], "memory_kib": memory_kib, "boot_id": self.boot,
                     "kernel": command("uname", "-a"), "cpu": command("lscpu", "--json"), "toolchain": self.toolchain,
                     "measurement_cpus": BENCH_CPUS, "administration_cpus": "0-7",
                     "partition": "root", "unbound_workqueue_mask": f"{workqueue_mask():x}",
