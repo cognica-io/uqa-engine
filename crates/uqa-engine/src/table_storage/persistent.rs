@@ -28,6 +28,22 @@ impl Engine {
         Self::value_indexes_clear(table);
         *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
 
+        let vector_fields = table
+            .vector_indexes
+            .read()
+            .iter()
+            .map(|(field, idx)| (field.clone(), idx.dimensions()))
+            .collect();
+        self.bind_persistent_table_indexes(table_name, table, vector_fields)
+    }
+
+    /// Attach catalog-owned field bindings and vector stores to already-open session handles. A new session's shared, validated row count remains current; replacing existing stores invalidates it in the caller.
+    pub(crate) fn bind_persistent_table_indexes(
+        &self,
+        table_name: &str,
+        table: &TableState,
+        vector_fields: Vec<(String, u32)>,
+    ) -> StorageBackendResult<()> {
         let analyzer_rows = self
             .durable
             .table_field_analyzers
@@ -40,12 +56,6 @@ impl Engine {
             binding.install(&field, table.inverted_index.write().as_mut())?;
         }
 
-        let vector_fields: Vec<(String, u32)> = table
-            .vector_indexes
-            .read()
-            .iter()
-            .map(|(field, idx)| (field.clone(), idx.dimensions()))
-            .collect();
         let mut rebound = BTreeMap::new();
         for (field, dimensions) in vector_fields {
             let spec = self
