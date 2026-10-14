@@ -272,3 +272,100 @@ fn grouping_identity_keeps_catalog_casts_for_the_catalog_resolver() {
         assert_eq!(*expr, input, "{ty}");
     }
 }
+
+#[test]
+fn grouping_distinct_keeps_selected_null_argument_identity() {
+    let schema = RowSchema::with_qualified_types(
+        "sales",
+        vec!["region".into()],
+        vec![Some(ColumnType::Text)],
+    );
+    let crate::Statement::CreateTable(table) = crate::compile("CREATE TABLE sales (region text)")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("table")
+    };
+    let context = crate::binding::BindingContext {
+        catalog: crate::binding::fixture::catalog(std::collections::BTreeMap::from([(
+            crate::RelationIdentity::new("public", "sales"),
+            crate::binding::fixture::table_definition(table.columns),
+        )])),
+        ..crate::binding::fixture::empty_binding_context()
+    };
+    for (sets, expected) in [
+        (
+            "((lower(NULL)),(lower(NULL::text)),(region || NULL),(region || NULL::text))",
+            2,
+        ),
+        (
+            r#"((lower(NULL)),(lower(NULL::varchar)),(lower(NULL::text COLLATE "C")),(lower(NULL::text COLLATE "default")))"#,
+            4,
+        ),
+        (
+            r#"((lower('A'::text COLLATE "C")),(lower('A'::text COLLATE "POSIX")))"#,
+            2,
+        ),
+    ] {
+        let sql = format!("SELECT count(*) FROM sales GROUP BY DISTINCT GROUPING SETS {sets}");
+        for retained in [false, true] {
+            let mut plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+            if retained {
+                crate::binding::read_prepared_inputs(&Catalog, &mut plan, &[], &context, None)
+                    .unwrap();
+            }
+            let UnifiedPlan::Query(query) = plan else {
+                panic!("query")
+            };
+            let RelationalPlan::QueryBlock(original) = query.root else {
+                panic!("block")
+            };
+            let prepared = prepare_grouping_sets(&Catalog, &original, &schema, &[])
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                prepared.grouping_sets.len(),
+                expected,
+                "retained={retained}: {sql}"
+            );
+        }
+    }
+}
+
+#[test]
+fn grouping_identity_preserves_collation_selection_state() {
+    use crate::catalog::collations::derivation::Derivation;
+
+    let schema = RowSchema::default();
+    let literal = ScalarExpr::TypedLiteral {
+        value: Value::Null,
+        ty: ColumnType::Text.catalog_name(),
+        bound_type: Some(ColumnType::Text),
+        parameter_index: None,
+        collation_oid: None,
+        composite_source: None,
+    };
+    let normalize = |expression| normalize_expression(&Catalog, expression, &schema, &[]).unwrap();
+    let selected = |derivation, initial_oid| ScalarExpr::Collated {
+        expr: Box::new(literal.clone()),
+        ty: ColumnType::Text,
+        collation: crate::ir::ResultCollation::new(derivation, initial_oid),
+    };
+    assert_eq!(
+        normalize(selected(Derivation::Implicit(100), 100)),
+        normalize(literal.clone())
+    );
+    let selections = [
+        selected(Derivation::Implicit(950), 950),
+        selected(Derivation::Implicit(951), 951),
+        selected(Derivation::Explicit(100), 100),
+        selected(Derivation::Conflict(950, 951), 0),
+        selected(Derivation::Implicit(100), 0),
+    ];
+    let identities: Vec<_> = selections.into_iter().map(normalize).collect();
+    for (index, identity) in identities.iter().enumerate() {
+        assert_ne!(*identity, normalize(literal.clone()));
+        assert_eq!(*identity, normalize(identity.clone()));
+        assert!(identities[..index].iter().all(|other| other != identity));
+    }
+}

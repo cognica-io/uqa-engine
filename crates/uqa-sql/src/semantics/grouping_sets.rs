@@ -296,11 +296,27 @@ fn normalize_expression(
             expr,
             ty,
             collation,
-        } => ScalarExpr::Collated {
-            expr: Box::new(normalize_expression(engine, *expr, schema, params)?),
-            ty,
-            collation,
-        },
+        } => {
+            let mut expression = normalize_expression(engine, *expr, schema, params)?;
+            match (&mut expression, collation.implicit_oid()) {
+                (
+                    ScalarExpr::TypedLiteral {
+                        bound_type,
+                        collation_oid,
+                        ..
+                    },
+                    Some(oid),
+                ) if bound_type.as_ref() == Some(&ty) => {
+                    *collation_oid = Some(oid);
+                    normalize_expression(engine, expression, schema, params)?
+                }
+                _ => ScalarExpr::Collated {
+                    expr: Box::new(expression),
+                    ty,
+                    collation,
+                },
+            }
+        }
         ScalarExpr::Cast { expr, ty, .. } => {
             let source_type = expression_type(engine, &expr, schema, params)?;
             let target_type = crate::type_resolution::resolve_declared_column_type(
@@ -390,6 +406,9 @@ fn normalize_expression(
                     &ColumnType::Named(ty),
                 )?,
             };
+            let collation_oid = collation_oid.filter(|oid| {
+                i64::from(*oid) != crate::catalog::type_metadata::pg_type_collation_oid(&declared)
+            });
             if parameter_index.is_none()
                 && composite_source.is_none()
                 && collation_oid.is_none()

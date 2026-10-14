@@ -6102,6 +6102,71 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "grouping_distinct_keeps_selected_null_argument_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests.rs",
+      "capability": "Retained grouping expression identity",
+      "workload": "Fixed raw and retained grouping sets with typed NULLs, explicit and implicit collations, casts and aliases.",
+      "invariant": "Equivalent selected constants share grouping identity; declared types, nondefault, explicit and conflicting collations and catalog-dependent input remain distinct without changing runtime expressions."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "grouping_identity_preserves_collation_selection_state",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests.rs",
+      "capability": "Retained grouping expression identity",
+      "workload": "Fixed raw and retained grouping sets with typed NULLs, explicit and implicit collations, casts and aliases.",
+      "invariant": "Equivalent selected constants share grouping identity; declared types, nondefault, explicit and conflicting collations and catalog-dependent input remain distinct without changing runtime expressions."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "grouping_identity_keeps_catalog_casts_for_the_catalog_resolver",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests.rs",
+      "capability": "Retained grouping expression identity",
+      "workload": "Fixed raw and retained grouping sets with typed NULLs, explicit and implicit collations, casts and aliases.",
+      "invariant": "Equivalent selected constants share grouping identity; declared types, nondefault, explicit and conflicting collations and catalog-dependent input remain distinct without changing runtime expressions."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "group_by_distinct_uses_analyzed_expression_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_grouping_sets.rs",
+      "capability": "Retained grouping expression identity",
+      "workload": "Fixed raw and retained grouping sets with typed NULLs, explicit and implicit collations, casts and aliases.",
+      "invariant": "Equivalent selected constants share grouping identity; declared types, nondefault, explicit and conflicting collations and catalog-dependent input remain distinct without changing runtime expressions."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "group_by_distinct_removes_only_duplicate_grouping_sets",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_grouping_sets.rs",
+      "capability": "Retained grouping expression identity",
+      "workload": "Fixed raw and retained grouping sets with typed NULLs, explicit and implicit collations, casts and aliases.",
+      "invariant": "Equivalent selected constants share grouping identity; declared types, nondefault, explicit and conflicting collations and catalog-dependent input remain distinct without changing runtime expressions."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "merge_action_scope_follows_returning_ancestry_and_analysis_order",
       "cases": 1,
       "case_names": [
