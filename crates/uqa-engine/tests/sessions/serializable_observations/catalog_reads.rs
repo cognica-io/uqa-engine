@@ -150,8 +150,8 @@ impl CatalogRead {
             Self::AnalyzerConfiguration => {
                 ignore_value(engine.get_table_analyzer("left_t", "v", "both"))
             }
-            Self::ForeignServer => ignore_value(engine.foreign_server("catalog_server")),
-            Self::ForeignTable => ignore_value(engine.foreign_table("catalog_foreign")),
+            Self::ForeignServer => ignore_value(engine.foreign_server_definition("catalog_server")),
+            Self::ForeignTable => ignore_value(engine.foreign_table_definition("catalog_foreign")),
             Self::ForeignServers => ignore_value(engine.list_foreign_servers()),
             Self::ForeignTables => ignore_value(engine.list_foreign_tables()),
             Self::ForeignColumns => ignore_value(engine.foreign_table_columns("catalog_foreign")),

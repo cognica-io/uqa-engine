@@ -107,7 +107,7 @@ fn sqlite_reopen_preserves_structural_ownership_for_every_relation_kind() {
         Value::Int(10)
     );
     assert!(reopened
-        .foreign_table("app.remote_items")
+        .foreign_table_definition("app.remote_items")
         .unwrap()
         .is_some());
     assert!(reopened.drop_schema("app").is_err());
@@ -185,7 +185,10 @@ fn assert_quoted_dot_relation_values(engine: &Engine) {
             .rows[0]["value"],
         Value::Int(7)
     );
-    assert!(engine.foreign_table("a.\"f.one\"").unwrap().is_some());
+    assert!(engine
+        .foreign_table_definition("a.\"f.one\"")
+        .unwrap()
+        .is_some());
 }
 
 fn assert_structural_table_identities(path: &Path) {

@@ -418,3 +418,30 @@ fn python_backslash_surface_is_available() {
     let redirected = std::fs::read_to_string(&output_file).expect("redirected output");
     assert!(redirected.contains("Alice"), "{redirected}");
 }
+
+#[test]
+fn foreign_catalog_commands_do_not_require_source_handlers() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = run_usql(
+        &[],
+        "CREATE SERVER remote_source FOREIGN DATA WRAPPER duckdb_fdw;\n\
+         CREATE FOREIGN TABLE remote_items(cursor refcursor, ids smallint[], amount numeric(9,2)) SERVER remote_source OPTIONS (source 'items');\n\
+         \\dt\n\\d remote_items\n\\dft\n\\dfs\n\\q\n",
+        dir.path(),
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    for expected in [
+        "remote_items",
+        "remote_source",
+        "duckdb_fdw",
+        "refcursor",
+        "smallint[]",
+        "numeric(9,2)",
+    ] {
+        assert!(out.contains(expected), "missing {expected}: {out}");
+    }
+    assert!(!out.contains("ERROR"), "{out}");
+    assert!(!out.contains("not available"), "{out}");
+    assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+}

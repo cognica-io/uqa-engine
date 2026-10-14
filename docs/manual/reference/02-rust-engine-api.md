@@ -363,6 +363,8 @@ Named graph methods cover graph creation, deletion, listing, vertex and edge mut
 
 ## Runtime extensions
 
+Foreign source handlers require the optional `fdw` feature; `duckdb` additionally enables native DuckDB. Default builds retain SQL foreign-table DDL, listing and the `foreign_server_definition` / `foreign_table_definition` metadata accessors. The handler projection APIs `foreign_server`, `foreign_table` and `load_memory_foreign_table` require `fdw`. See the [binding and feature contract](08-bindings-and-extensions.md#foreign-data-wrappers).
+
 Register scalar, table, and aggregate functions with:
 
 - `register_scalar_function` and `register_scalar_function_with_options`

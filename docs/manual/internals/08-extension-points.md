@@ -58,6 +58,8 @@ Routine depth is bounded in `QueryRuntime`. Dynamic SQL re-enters normal parse, 
 
 The SQL compiler owns generic `CREATE SERVER` and `CREATE FOREIGN TABLE` syntax but does not depend on DuckDB or Arrow. `uqa-engine` resolves a server type to a handler at the extension boundary.
 
+The entire `uqa-fdw` dependency is optional in Engine and Execution. Their default builds retain SQL catalog ownership and explicit unavailable-scan errors without compiling handler adapters. `fdw` enables memory/native Arrow execution; `duckdb` additionally selects DuckDB. CLI catalog display consumes retained SQL definitions and has no direct FDW dependency. See the [feature boundary and preservation proof](../../design/optional-foreign-data-wrappers.md).
+
 A handler must validate options, report unsupported pushdown, preserve row and type errors, and avoid claiming a predicate was pushed when it remains required as an engine residual.
 
 ## QueryBuilder

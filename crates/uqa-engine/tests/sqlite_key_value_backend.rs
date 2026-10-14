@@ -443,7 +443,7 @@ fn key_value_reopen_preserves_every_schema_owned_relation_kind() {
         Value::Int(10)
     );
     assert!(reopened
-        .foreign_table("app.remote_items")
+        .foreign_table_definition("app.remote_items")
         .unwrap()
         .is_some());
     assert!(reopened.drop_schema("app").is_err());

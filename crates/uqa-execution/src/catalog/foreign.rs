@@ -192,6 +192,7 @@ impl StoredForeignTable {
         .map_err(StorageBackendError::from)
     }
 
+    #[cfg(feature = "fdw")]
     pub fn fdw_definition(&self) -> uqa_fdw::ForeignTable {
         uqa_fdw::ForeignTable {
             name: self.name.clone(),
@@ -237,6 +238,7 @@ impl StoredForeignTable {
     }
 }
 
+#[cfg(feature = "fdw")]
 pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw::ColumnType {
     match column_type {
         uqa_sql::ast::ColumnType::Named(name) => {
@@ -329,6 +331,7 @@ pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw
     }
 }
 
+#[cfg(feature = "fdw")]
 fn sql_range_subtype_to_fdw(subtype: uqa_sql::ast::RangeSubtype) -> uqa_fdw::RangeSubtype {
     match subtype {
         uqa_sql::ast::RangeSubtype::Integer => uqa_fdw::RangeSubtype::Integer,

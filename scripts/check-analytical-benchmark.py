@@ -38,6 +38,7 @@ BENCHMARK_SOURCES = [
     ROOT / "scripts/performance_noise.py",
     ROOT / "scripts/run-analytical-comparison.sh",
     ROOT / "scripts/run-analytical-regression.py",
+    ROOT / "scripts/benchmark_features.py",
 ]
 WORKLOAD_IDENTITY_KEYS = (
     "workload",

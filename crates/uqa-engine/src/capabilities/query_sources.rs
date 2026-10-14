@@ -7,8 +7,10 @@
 //! Assemble independent capabilities for physical FROM execution.
 
 use crate::{session::StatementReadSnapshot, Engine};
+#[cfg(feature = "fdw")]
+use uqa_execution::query::sources::context::{ForeignSourceRows, ForeignTableScan};
 use uqa_execution::query::{
-    sources::context::{ForeignSourceRows, ForeignTableScan, SourceContext, SourcePlanning},
+    sources::context::{SourceContext, SourcePlanning},
     CteScope,
 };
 use uqa_sql::{
@@ -29,6 +31,7 @@ impl Engine {
             locking: self.row_lock_context(),
             catalog: self.catalog_execution(),
             planning: self,
+            #[cfg(feature = "fdw")]
             foreign_tables: self,
             volatility: self,
             types: self,
@@ -89,6 +92,7 @@ impl SourcePlanning<StatementReadSnapshot> for Engine {
     }
 }
 
+#[cfg(feature = "fdw")]
 impl ForeignTableScan for Engine {
     fn scan_foreign_source(
         &self,

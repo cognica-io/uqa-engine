@@ -250,7 +250,10 @@ fn search_path_resolves_views_sequences_and_foreign_tables() {
         &[],
     )
     .unwrap();
-    assert!(eng.foreign_table("remote_users").unwrap().is_some());
+    assert!(eng
+        .foreign_table_definition("remote_users")
+        .unwrap()
+        .is_some());
 }
 
 #[test]

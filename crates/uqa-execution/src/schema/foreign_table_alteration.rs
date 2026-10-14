@@ -38,7 +38,7 @@ pub type ForeignTableRegistryWrite<'a> =
 pub type ForeignSecurityRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
 pub type ForeignMemoryRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>> + 'a>;
+    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>> + 'a>;
 
 pub trait ForeignTableAlterCatalog {
     fn contains_table(&self, relation: &RelationIdentity) -> bool;

@@ -66,8 +66,12 @@ def build_target_path(
 
 
 def build_benchmark(worktree: pathlib.Path, target: pathlib.Path) -> pathlib.Path:
+    from benchmark_features import feature_arguments
+
     environment = os.environ.copy()
     environment["CARGO_TARGET_DIR"] = str(target)
+    metadata = json.loads(output("cargo", "metadata", "--no-deps", "--format-version", "1",
+                                 "--locked", "--offline", cwd=worktree))
     process = subprocess.Popen(
         [
             "cargo",
@@ -77,6 +81,7 @@ def build_benchmark(worktree: pathlib.Path, target: pathlib.Path) -> pathlib.Pat
             "uqa-engine",
             "--bench",
             BENCHMARK,
+            *feature_arguments(metadata, "uqa-engine", BENCHMARK),
             "--no-run",
             "--message-format=json-render-diagnostics",
         ],

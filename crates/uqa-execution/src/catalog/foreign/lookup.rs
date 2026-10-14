@@ -34,31 +34,29 @@ impl ForeignLookupContext<'_> {
             .find(|candidate| tables.contains_key(candidate))
             .map(|relation| relation.qualified_name()))
     }
-    pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
+    pub fn foreign_server_definition(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_sql::catalog::foreign_server::ForeignServerDefinition>, String> {
         if let Some(snapshot) = self.state.query_servers() {
-            return Ok(snapshot.get(name).map(super::servers::fdw_definition));
+            return Ok(snapshot.get(name).cloned());
         }
         self.state
             .synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        Ok(self
-            .registry
-            .servers()
-            .get(name)
-            .map(super::servers::fdw_definition))
+        Ok(self.registry.servers().get(name).cloned())
     }
-    pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
+    pub fn foreign_table_definition(
+        &self,
+        name: &str,
+    ) -> Result<Option<StoredForeignTable>, String> {
         if let Some(snapshot) = self.state.query_tables() {
             return Ok(self
                 .state
                 .relation_lookup_candidates(name)
                 .map_err(|err| format!("resolve foreign table: {err}"))?
                 .into_iter()
-                .find_map(|relation| {
-                    snapshot
-                        .get(&relation)
-                        .map(StoredForeignTable::fdw_definition)
-                }));
+                .find_map(|relation| snapshot.get(&relation).cloned()));
         }
         self.state
             .synchronize_catalog_registries()
@@ -70,13 +68,24 @@ impl ForeignLookupContext<'_> {
             return Ok(None);
         };
         let relation = RelationIdentity::from_legacy_name(&resolved)?;
+        Ok(self.registry.tables().get(&relation).cloned())
+    }
+    #[cfg(feature = "fdw")]
+    pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
         Ok(self
-            .registry
-            .tables()
-            .get(&relation)
+            .foreign_server_definition(name)?
+            .as_ref()
+            .map(super::servers::fdw_definition))
+    }
+    #[cfg(feature = "fdw")]
+    pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
+        Ok(self
+            .foreign_table_definition(name)?
+            .as_ref()
             .map(StoredForeignTable::fdw_definition))
     }
     /// Select the connection from the same retained catalog as its table and validate the captured server identity before invoking a handler.
+    #[cfg(feature = "fdw")]
     pub fn foreign_table_source(
         &self,
         name: &str,
@@ -99,6 +108,7 @@ impl ForeignLookupContext<'_> {
         )
     }
 
+    #[cfg(feature = "fdw")]
     fn table_source(
         &self,
         name: &str,
@@ -170,7 +180,7 @@ impl ForeignLookupContext<'_> {
     }
     pub fn foreign_table_columns(&self, table: &str) -> Result<Vec<String>, String> {
         let table = self
-            .foreign_table(table)?
+            .foreign_table_definition(table)?
             .ok_or_else(|| format!("Foreign table `{table}` does not exist"))?;
         Ok(table
             .columns

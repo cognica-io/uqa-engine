@@ -15,7 +15,8 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | Native Kuromoji, completion and Japanese diagnostics | Feature-enabled | Default | Default | Default |
 | Cypher | Yes | Yes | Yes | Yes |
 | Runtime scalar/table/aggregate callbacks | Yes | Yes | Yes | Yes |
-| Native DuckDB and Arrow FDWs | Yes | Build dependent | Build dependent | No |
+| Memory FDW | `fdw` feature | Custom `fdw` build | Custom `fdw` build | Custom `fdw` build |
+| Native Arrow / DuckDB FDWs | `fdw` / `duckdb` feature | Custom feature build | Custom feature build | No |
 | Independent persistent sessions | Yes | Engine dependent | Yes | Yes |
 | Local and Cloud HTTP SQL/batch/stream | Yes | Yes | Yes | Yes, subject to CORS |
 | Project lookup through installed `uqa` CLI | Yes | Yes | Yes | No |
@@ -284,7 +285,7 @@ See [Custom functions](../tutorials/07-custom-functions.md) and [Extension point
 
 ## Foreign data wrappers
 
-SQL can register foreign servers and foreign tables. Built-in native server types are:
+SQL can register, inspect, alter and remove foreign servers and tables independently of source-handler availability. Handlers are optional and disabled by default in current source builds, including the CLI and language bindings. Select `fdw` for memory and native Arrow sources, or `duckdb` to enable those handlers and DuckDB. The `uqa`, `uqa-engine`, `uqa-api`, `uqa-cli`, `uqa-python`, `uqa-node` and PostgreSQL server packages forward these features; `uqa-wasm` forwards `fdw` for memory sources only. The supported server types are:
 
 - `memory_fdw` for an in-process foreign relation
 - `duckdb_fdw` for DuckDB sources and file expressions
@@ -294,7 +295,9 @@ DuckDB server options include a database path, extensions, and S3 connection fie
 
 SQL deletion follows [DROP SERVER](../sql/02-ddl.md#foreign-servers-and-tables). Rust's `Engine::drop_foreign_server(name)` uses the same owner checks, server lifetime locks, RESTRICT dependency check and transaction boundary. It returns `Ok(false)` for a missing server, `Ok(true)` after deletion and the diagnostic text on failure. Use SQL `DROP SERVER name CASCADE` when dependent tables and their dependency closure should be removed too. Foreign table scans and memory loading use the table's captured server identity, so a same-name replacement cannot change the connection of an existing table.
 
-Availability depends on the target build. Validate server type and options at registration time, and never place long-lived secrets in SQL files or catalog options that are exported or logged.
+In this checkout, use `cargo build -p uqa-cli --features duckdb` or the corresponding package's feature option. Embedded Rust dependencies select `features = ["fdw"]` or `features = ["duckdb"]` on a revision containing this change. Published 0.5.3 predates these switches; consult its tagged manual for that artifact. Browser builds cannot include native Arrow or DuckDB handlers.
+
+Without `fdw`, scans fail with SQLSTATE `0A000` and `FDW support is not available in this build`. With `fdw` but without `duckdb`, a DuckDB scan retains the existing ``FDW type `duckdb_fdw` is not available in this build`` message. These builds retain definitions, privileges, transaction behavior and durable reopening. Rust's `foreign_server_definition` and `foreign_table_definition` expose the retained SQL metadata in every build; `foreign_server`, `foreign_table` and `load_memory_foreign_table` require `fdw`. Never place long-lived secrets in SQL files or exported catalog options.
 
 ## Extension lifecycle
 

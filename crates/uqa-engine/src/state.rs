@@ -428,7 +428,8 @@ impl Drop for SessionContext {
 }
 
 pub(super) struct RuntimeExtensions {
-    pub(super) foreign_memory_tables: Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>>>,
+    pub(super) foreign_memory_tables:
+        Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>>>,
     pub(super) scalar_functions:
         Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>>,
     pub(super) table_functions:
