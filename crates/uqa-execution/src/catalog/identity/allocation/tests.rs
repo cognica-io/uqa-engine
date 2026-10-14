@@ -10,6 +10,7 @@ use crate::row_locks::{
     shared_objects::SharedCatalogLock, RelationLockMode, RowLockManager, ScopedRelationLock,
 };
 use parking_lot::{Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use uqa_sql::{ast::ConstraintCatalogIdentity, SQLError};
 
 struct Session {
@@ -18,6 +19,10 @@ struct Session {
     failure: Option<&'static str>,
     locks: RowLockManager,
     cancellation: uqa_core::CancellationToken,
+    revision: AtomicU64,
+    captures: AtomicUsize,
+    versioned: bool,
+    capture_refresh: Mutex<Option<CatalogReadView>>,
 }
 
 impl Session {
@@ -28,6 +33,10 @@ impl Session {
             failure: None,
             locks: RowLockManager::new(),
             cancellation: uqa_core::CancellationToken::new(),
+            revision: AtomicU64::new(0),
+            captures: AtomicUsize::new(0),
+            versioned: true,
+            capture_refresh: Mutex::new(None),
         }
     }
 
@@ -164,7 +173,17 @@ impl CatalogSnapshotSource for Session {
         Ok(self.catalog_snapshot())
     }
     fn current_catalog_snapshot(&self) -> CatalogReadView {
-        self.current.read().clone()
+        self.captures.fetch_add(1, Ordering::Relaxed);
+        let current = self.current.read().clone();
+        if let Some(refreshed) = self.capture_refresh.lock().take() {
+            *self.current.write() = refreshed;
+            self.revision.fetch_add(1, Ordering::Release);
+        }
+        current
+    }
+    fn current_catalog_revision(&self) -> Option<u64> {
+        self.versioned
+            .then(|| self.revision.load(Ordering::Acquire))
     }
 }
 
@@ -221,6 +240,7 @@ impl SharedObjectLockSession for Session {
         }
         if let Some(refreshed) = self.refresh.lock().take() {
             *self.current.write() = refreshed;
+            self.revision.fetch_add(1, Ordering::Release);
         }
         Ok(())
     }
@@ -228,6 +248,8 @@ impl SharedObjectLockSession for Session {
         self.locks.catalog_oids().next_oid(None, || Ok(None))
     }
 }
+
+mod snapshots;
 
 fn occupied(oid: i64) -> CatalogReadView {
     let mut snapshot = crate::catalog::test_support::empty_catalog()

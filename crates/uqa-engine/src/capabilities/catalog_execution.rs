@@ -152,6 +152,10 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
     fn current_catalog_snapshot(&self) -> uqa_execution::catalog::CatalogReadView {
         self.restored_catalog_read_view()
     }
+
+    fn current_catalog_revision(&self) -> Option<u64> {
+        Some(self.runtime.regtype_output_cache.revision())
+    }
 }
 
 use uqa_core::Value;

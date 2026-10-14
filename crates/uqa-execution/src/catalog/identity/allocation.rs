@@ -29,6 +29,7 @@ impl<'a> CatalogIdentityReservationContext<'a> {
             context: self,
             allocate,
             assigned: BTreeSet::new(),
+            catalog: snapshot::AllocationCatalog::default(),
         }
     }
 }
@@ -37,6 +38,7 @@ pub struct ReservedCatalogIdentityAllocator<'a> {
     context: CatalogIdentityReservationContext<'a>,
     allocate: fn(&str) -> ConstraintMetadataResult<[u8; 16]>,
     assigned: BTreeSet<(CatalogOidClass, i64)>,
+    catalog: snapshot::AllocationCatalog,
 }
 
 impl ReservedCatalogIdentityAllocator<'_> {
@@ -103,7 +105,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
                     return Ok(true);
                 }
                 crate::catalog::projection::catalog_oid_in_use(
-                    &self.context.catalog.current_catalog_snapshot(),
+                    &self.catalog.current(self.context.catalog),
                     &resolution,
                     class,
                     oid,
@@ -153,9 +155,9 @@ impl CatalogObjectAllocator for ReservedCatalogIdentityAllocator<'_> {
         }
         let mut resolution = self.context.session.relation_name_resolution();
         resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-        let exists = || {
+        let mut exists = || {
             crate::catalog::projection::validate_catalog_identity_claim(
-                &self.context.catalog.current_catalog_snapshot(),
+                &self.catalog.current(self.context.catalog),
                 &resolution,
                 relation,
                 class,
@@ -198,7 +200,7 @@ impl CatalogObjectAllocator for ReservedCatalogIdentityAllocator<'_> {
                     return Ok(true);
                 }
                 crate::catalog::projection::catalog_oid_in_use(
-                    &self.context.catalog.current_catalog_snapshot(),
+                    &self.catalog.current(self.context.catalog),
                     &resolution,
                     class,
                     oid,
@@ -212,6 +214,7 @@ impl CatalogObjectAllocator for ReservedCatalogIdentityAllocator<'_> {
 }
 
 mod graphs;
+mod snapshot;
 pub use graphs::LabelShape;
 mod temporary_namespaces;
 
