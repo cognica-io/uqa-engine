@@ -10,15 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse a current catalog view across object-ID reservations while preserving collision checks after private DDL, lock waits and rollback, including memory and temporary tables.
 
-- Retain session-maintained catalogs and unrelated table stores across successful DDL statements and commits, preserving refresh after peer changes and rollback.
+- Retain session-maintained catalogs and unrelated table stores across successful DDL statements and commits, preserving refresh after peer changes and rollback. Avoid discarded physical-index build plans during post-lock rechecks and inspect partition membership once per table instead of once per index.
 
-- Read bound table identities directly for mutation row images and RETURNING, avoiding whole-catalog captures per row while preserving retained, partition and foreign-table identities. Check document existence through storage metadata before prepared writes, avoiding unnecessary payload copies.
+- Read bound table identities directly for mutation row images and RETURNING, avoiding whole-catalog captures per row while preserving retained, partition and foreign-table identities. Check document existence through storage metadata before prepared writes, avoiding unnecessary payload copies. Prepare joined UPDATE predicates once per unchanged statement schema while preserving per-row volatile evaluation, source selection and lock-wait rechecks.
 
 - Retain byte-identical native SQLite B-tree postings and their equality projections during publication, avoiding physical rewrites while preserving MVCC history, write conflicts, retry receipts and changes to SQL-equal stored representations.
 
 - Match PostgreSQL stored generated-column dependency selection during UPDATE, preserving unrelated values and using destination expressions when rows move between partitions. Reuse typed expression plans during generated-column rewrites, including PostgreSQL constant planning for empty relations.
 
-- Open each persistent table store once when creating an independent session, preserving validated row counts, analyzer bindings and the selected vector index. Resolve index names through existing registries without copying unrelated table metadata, preserving retained constraint-index lookup.
+- Open each persistent table store once and reuse immutable index preparation when creating independent sessions, preserving validated row counts, analyzer bindings, selected vector indexes and independent transaction state. Resolve relation, array, index and constraint names from selected metadata; avoid unrelated table copies during unrestricted builtin routine checks while preserving retained catalog authority.
+
+- Preserve another session's committed UNIQUE index rename when publishing a constraint-index rename after a name-lock wait.
+
+- Select exact builtin scalar operators directly from their catalog signatures, avoiding unrelated overload allocation and repeated type-declaration parsing while preserving unknown, domain and polymorphic resolution.
 
 - Deduplicate equivalent retained NULL expressions in `GROUP BY DISTINCT` while preserving explicit collation clauses, selected types and conflicting collation metadata.
 
