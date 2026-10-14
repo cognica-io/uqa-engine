@@ -18,7 +18,7 @@ import sys
 import time
 
 from performance_qualification import QualificationError, verified_document
-from performance_ec2_capacity import describe_instance, start_controller, validate_instance
+from performance_ec2_capacity import describe_instance, start_controller, validate_instance, verify_resize_permissions
 
 
 def aws(*args):
@@ -74,7 +74,7 @@ def main():
     failure = None
     lifecycle = {"head_revision": revision, "run_id": run_id, "timing_acceptance": False,
                  "capacity_attempts": [], "errors": []}
-    stage = "start-instance"
+    stage = "verify-capacity-permissions"
 
     def record_failure(error, failed_stage):
         lifecycle["errors"].append({"stage": failed_stage, **failure_detail(error)})
@@ -89,6 +89,8 @@ def main():
             record_failure(error, "retain-" + name)
 
     try:
+        verify_resize_permissions(aws, instance)
+        stage = "start-instance"
         selected_type = start_controller(aws, instance, lifecycle["capacity_attempts"])
         stage = "await-controller"
         await_online(instance)

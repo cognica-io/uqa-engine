@@ -101,6 +101,7 @@ class ControlledRunnerTest(unittest.TestCase):
                     patch.object(ci, "aws", side_effect=aws), patch.object(ci, "await_online"), \
                     patch.object(ci, "start_controller", return_value="c7g.4xlarge"), patch.object(ci, "validate_instance"), \
                     patch.object(ci, "describe_instance"), \
+                    patch.object(ci, "verify_resize_permissions"), \
                     patch.object(ci.subprocess, "run", side_effect=RuntimeError("S3 unavailable") if upload_failed else None), \
                     self.assertRaises(RuntimeError):
                 ci.main()
@@ -125,6 +126,7 @@ class ControlledRunnerTest(unittest.TestCase):
                 patch.object(sys, "argv", ["run-ec2-performance.py", "--output", temporary]), \
                 patch.object(ci, "aws", side_effect=aws), patch.object(ci, "verify_result") as verify, \
                 patch.object(ci, "start_controller", side_effect=capacity), \
+                patch.object(ci, "verify_resize_permissions"), \
                 patch.object(ci.subprocess, "run", side_effect=RuntimeError("S3 unavailable")), \
                 patch.object(sys, "stderr") as stderr:
             with self.assertRaises(ci.subprocess.CalledProcessError) as raised:
@@ -165,6 +167,7 @@ class ControlledRunnerTest(unittest.TestCase):
                     patch.object(ci, "aws", side_effect=aws), patch.object(ci, "await_online"), \
                     patch.object(ci, "start_controller", return_value="c7g.4xlarge"), patch.object(ci, "validate_instance"), \
                     patch.object(ci, "describe_instance"), \
+                    patch.object(ci, "verify_resize_permissions"), \
                     patch.object(ci.time, "sleep"), patch.object(sys, "stdout"), patch.object(sys, "stderr"), \
                     patch.object(ci, "verify_result", return_value={"accepted": True}) as verify, \
                     patch.object(ci.subprocess, "run", side_effect=error if stage == "collect-artifacts" else None):

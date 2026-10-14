@@ -11,7 +11,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from performance_ec2_capacity import describe_instance, start_controller, validate_guest, validate_instance
+from performance_ec2_capacity import describe_instance, start_controller, validate_guest, validate_instance, verify_resize_permissions
 from performance_qualification import QualificationError
 
 
@@ -126,6 +126,24 @@ class CapacityTest(unittest.TestCase):
                 with self.subTest(instance_type=instance_type, cpu_count=cpu_count, memory=memory), \
                         self.assertRaises(QualificationError):
                     validate_guest(instance_type, cpu_count, memory)
+
+    def test_ec2_checks_resize_authorization_without_changing_any_attribute(self):
+        calls = []
+
+        def aws(*args):
+            calls.append(args)
+            self.assertEqual(args[-1], "--dry-run")
+            raise subprocess.CalledProcessError(255, ["aws", *args], stderr=(
+                "An error occurred (DryRunOperation) when calling the ModifyInstanceAttribute operation: authorized"))
+
+        verify_resize_permissions(aws, "instance")
+        self.assertEqual([call[-2] for call in calls], ["Value=c7g.4xlarge", "Value=m7g.4xlarge"])
+        for response in (None, "UnauthorizedOperation", "InternalError"):
+            def rejected(*args):
+                if response:
+                    raise subprocess.CalledProcessError(255, ["aws", *args], stderr=response)
+            with self.subTest(response=response), self.assertRaises((QualificationError, subprocess.CalledProcessError)):
+                verify_resize_permissions(rejected, "instance")
 
 
 if __name__ == "__main__":

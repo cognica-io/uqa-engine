@@ -43,6 +43,19 @@ def describe_instance(aws, instance_id):
     return instances[0]
 
 
+def verify_resize_permissions(aws, instance_id):
+    """Ask EC2 to authorize each reviewed change without performing it."""
+    for instance_type in HOST_MEMORY_MIB:
+        try:
+            aws("ec2", "modify-instance-attribute", "--instance-id", instance_id,
+                "--instance-type", "Value=" + instance_type, "--dry-run")
+        except subprocess.CalledProcessError as error:
+            if "(DryRunOperation) when calling the ModifyInstanceAttribute operation" not in (error.stderr or ""):
+                raise
+        else:
+            raise QualificationError("EC2 did not confirm the capacity authorization check")
+
+
 def start_controller(aws, instance_id, attempts):
     instance = describe_instance(aws, instance_id)
     state = instance["State"]["Name"]
