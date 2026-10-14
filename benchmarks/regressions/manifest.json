@@ -6725,6 +6725,74 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_kind_lookups_avoid_unrelated_catalog_captures",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_names.rs",
+      "capability": "Relation-name binding",
+      "workload": "Table, index, view, materialized view, sequence, composite, foreign and virtual names with zero versus sixty unrelated tables on four providers.",
+      "invariant": "Dynamic, loaded and bound lookups capture zero complete catalogs and retain exact kinds and missing-name errors.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_kind_lookup_retains_statement_names_and_schema_privileges",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_names.rs",
+      "capability": "Relation-name binding",
+      "workload": "A retained statement view followed by table rename and schema USAGE revocation, then current rename and rollback.",
+      "invariant": "Retained names and privileges stay fixed without recaptures; current names follow rename and rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_relation_kinds_need_one_table_probe_regardless_of_catalog_size",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/relation_names/tests.rs",
+      "capability": "Relation-name binding",
+      "workload": "Exact table, absent, virtual and invalid bindings with zero versus sixty unrelated table names.",
+      "invariant": "Each ordinary bound name performs one membership probe; virtual and invalid names do not probe tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "virtual_and_physical_readers_stop_at_the_same_first_namespace_match",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/read/tests.rs",
+      "capability": "Relation-name binding",
+      "workload": "Temporary, public and system relation shadowing under three namespace orders.",
+      "invariant": "Kind, virtual and table readers choose the same first namespace match.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_system_relations_ignore_shadowing_and_reject_unqualified_bindings",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/read/tests.rs",
+      "capability": "Relation-name binding",
+      "workload": "Canonical system and physical names under temporary shadowing, plus an invalid unqualified stored binding.",
+      "invariant": "Bound identities bypass dynamic shadowing and reject malformed stored names.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -75,8 +75,7 @@ impl Engine {
     ) -> Result<RelationResolution, SQLError> {
         let mut resolution = self.session_execution_view().relation_name_resolution();
         resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
-        self.catalog_read_view()
-            .relation_kind_resolution(&resolution, name)
+        self.relation_kind_from_catalog(&resolution, name)
     }
 
     /// Resolve a dynamic name against registries that the caller has already synchronized. Catalog restoration uses this entry point while holding the synchronization boundary, so dependency binding cannot recursively reload the catalog.
@@ -85,8 +84,7 @@ impl Engine {
         name: &str,
     ) -> Result<RelationResolution, SQLError> {
         let resolution = self.session_execution_view().relation_name_resolution();
-        self.catalog_read_view()
-            .relation_kind_resolution(&resolution, name)
+        self.relation_kind_from_catalog(&resolution, name)
     }
 
     /// Resolve a SQL relation reference through the current user's effective namespace. This is the dynamic-name boundary; code operating on a returned canonical identity must use exact catalog access rather than repeating name resolution.
@@ -138,8 +136,25 @@ impl Engine {
         if relations_bound {
             resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
         }
-        self.catalog_read_view()
-            .relation_kind_resolution(&resolution, name)
+        self.relation_kind_from_catalog(&resolution, name)
+    }
+
+    fn relation_kind_from_catalog(
+        &self,
+        resolution: &crate::capabilities::RelationNameResolution,
+        name: &str,
+    ) -> Result<RelationResolution, SQLError> {
+        if let Some(snapshot) = &self.query_catalog_snapshot {
+            return snapshot
+                .read_view
+                .relation_kind_resolution(resolution, name);
+        }
+        let mut durable = self.durable.snapshot();
+        durable.graphs = self.visible_graph_handles();
+        let definitions = Self::catalog_definition_snapshot(&durable);
+        let tables = self.storage.tables.read();
+        uqa_execution::catalog::relation_names::RelationNameCatalog::new(&*tables, &definitions)
+            .relation_kind_resolution(resolution, name)
     }
 
     pub(crate) fn try_resolve_relation_kind_for_query(
