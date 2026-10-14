@@ -68,13 +68,23 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
         uqa_storage::read_control::StorageReadControl::new(&read_memory, context.cancellation);
     let mut original =
         super::rows::capture(context.keys.constraints.reads, table, &memory, &control)?;
-    let columns = if original.is_empty() {
-        Vec::new()
-    } else {
-        crate::mutation::assignment::describe_generated_columns(context.assignment, table)?
-    };
-    let mut expressions: Vec<crate::query::catalog_expression::PreparedCatalogExpression<'_>> =
-        Vec::new();
+    let columns =
+        crate::mutation::assignment::describe_generated_columns(context.assignment, table)?;
+    let schema = crate::mutation::generated::generated_row_schema(&columns);
+    // PostgreSQL plans every rewrite expression even for an empty relation; row evaluation still preserves conditional branches and error order.
+    let expressions =
+        crate::mutation::generated::stored_generation_expressions(&columns, Some(changed))
+            .map(|(_, generated)| {
+                context.cancellation.check()?;
+                crate::query::catalog_expression::PreparedCatalogExpression::lower(
+                    context.assignment.expressions.expressions,
+                    context.assignment.scopes.current_routine_scope(),
+                    &generated.expression,
+                    &schema,
+                    &[],
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
     let mut rows = RewriteRows::new(&memory);
     for position in 0..original.len() {
         context.cancellation.check()?;
@@ -83,25 +93,13 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
             mut document,
             ..
         } = original.get(position)?;
-        // This rewrite retains one column order and selection; bind each expression on its first evaluation and reuse it for subsequent rows.
         let mut expression_index = 0;
         crate::mutation::generated::refresh_stored_generated_columns(
             context.assignment.assignment,
             &columns,
             Some(changed),
             &mut document,
-            &mut |expression, row, schema| {
-                if expression_index == expressions.len() {
-                    expressions.push(
-                        crate::query::catalog_expression::PreparedCatalogExpression::lower(
-                            context.assignment.expressions.expressions,
-                            context.assignment.scopes.current_routine_scope(),
-                            expression,
-                            schema,
-                            &[],
-                        )?,
-                    );
-                }
+            &mut |_, row, _| {
                 let prepared = &expressions[expression_index];
                 expression_index += 1;
                 prepared.evaluate(row)
@@ -109,6 +107,7 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
         )?;
         rows.push(doc_id, document)?;
     }
+    drop(expressions);
     drop(original);
     rewrite_table_rows(context, table, rows, rewrite_physical_rows, changed)
 }

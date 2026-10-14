@@ -108,3 +108,29 @@ fn verify_rewrite_semantics(engine: &Engine) {
     assert_values(false);
     assert!(engine.sql("SELECT bad FROM typed", &[]).is_err());
 }
+
+#[test]
+fn empty_generated_rewrites_prepare_their_constant_expressions() {
+    let engine = Engine::new();
+    engine.sql("CREATE SEQUENCE empty_calls; CREATE FUNCTION empty_folded() RETURNS bigint IMMUTABLE LANGUAGE sql AS 'SELECT nextval(''empty_calls'')'; CREATE TABLE empty_rewrite(id int); ALTER TABLE empty_rewrite ADD COLUMN value bigint GENERATED ALWAYS AS(empty_folded()) STORED", &[]).unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT last_value FROM empty_calls", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&Value::Int(2))
+    );
+    engine
+        .sql(
+            "ALTER TABLE empty_rewrite ALTER COLUMN value SET EXPRESSION AS(empty_folded()+1)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT last_value FROM empty_calls", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&Value::Int(4))
+    );
+}

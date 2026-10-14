@@ -4,6 +4,19 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "empty_generated_rewrites_prepare_their_constant_expressions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",
+      "capability": "Empty generated-column rewrite planning",
+      "workload": "ADD COLUMN and SET EXPRESSION on an empty relation with an immutable function whose sequence exposes planning.",
+      "invariant": "Each DDL retains PostgreSQL 18 constant-planning behavior even when no rows are rewritten.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "generated_rewrite_catalog_captures_do_not_grow_with_rows",
       "cases": 4,
       "source": "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",

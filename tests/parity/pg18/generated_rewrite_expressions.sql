@@ -16,3 +16,15 @@ SELECT id,as_text FROM typed ORDER BY id;
 ROLLBACK TO before_rewrite;
 SELECT id,as_text FROM typed ORDER BY id;
 ROLLBACK;
+
+BEGIN;
+CREATE SCHEMA generated_empty_oracle;
+SET search_path = generated_empty_oracle, public;
+CREATE SEQUENCE calls;
+CREATE FUNCTION folded() RETURNS bigint IMMUTABLE LANGUAGE sql AS 'SELECT nextval(''generated_empty_oracle.calls'')';
+CREATE TABLE empty_rewrite(id int);
+ALTER TABLE empty_rewrite ADD COLUMN value bigint GENERATED ALWAYS AS(folded()) STORED;
+SELECT 'empty add' AS operation,last_value FROM calls;
+ALTER TABLE empty_rewrite ALTER COLUMN value SET EXPRESSION AS(folded()+1);
+SELECT 'empty alter' AS operation,last_value FROM calls;
+ROLLBACK;
