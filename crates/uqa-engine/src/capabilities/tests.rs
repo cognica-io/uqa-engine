@@ -15,6 +15,7 @@ thread_local! {
 }
 
 mod catalog_allocation;
+mod generated_rewrite;
 mod mutation_rows;
 mod scoped_catalog;
 

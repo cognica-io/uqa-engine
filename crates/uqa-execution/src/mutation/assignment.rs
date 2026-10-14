@@ -389,7 +389,7 @@ pub fn refresh_updated_stored_generated_columns<S: Clone + 'static>(
     refresh_generated_columns(services, &columns, document, selected.as_deref())
 }
 
-fn describe_generated_columns<S: Clone + 'static>(
+pub(crate) fn describe_generated_columns<S: Clone + 'static>(
     services: MutationAssignmentContext<'_, S>,
     table: &str,
 ) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {

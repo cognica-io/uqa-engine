@@ -4,6 +4,48 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "generated_rewrite_catalog_captures_do_not_grow_with_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",
+      "capability": "Generated-column rewrite work",
+      "workload": "One versus thirty-three 4KB rows under a 64KB work_mem limit, on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Catalog captures are independent of row count; typed results, constant planning, savepoint rollback and row errors remain correct.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_catalog_expression_binds_once_and_preserves_each_rows_source_type",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/catalog_expression.rs",
+      "capability": "Prepared catalog expression evaluation",
+      "workload": "Repeated evaluation of typed and conditional expressions through one prepared schema plan.",
+      "invariant": "One expression binding and optimization serve one hundred distinct rows without losing their analyzed source type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_catalog_expression_preserves_lazy_row_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/catalog_expression.rs",
+      "capability": "Prepared catalog expression evaluation",
+      "workload": "Repeated evaluation of typed and conditional expressions through one prepared schema plan.",
+      "invariant": "Reusing the typed plan does not memoize row values or evaluate an unselected error branch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "mutation_row_identity_catalog_captures_do_not_grow_with_rows",
       "cases": 4,
       "source": "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
