@@ -128,6 +128,9 @@ fn validate_parents(
     catalog: &CatalogReadView,
     objects: &ValidatedIndexes<'_>,
 ) -> StorageBackendResult<()> {
+    if objects.is_empty() {
+        return Ok(());
+    }
     let mut attached = BTreeSet::new();
     for (row, definition) in objects.values() {
         let Some(parent_id) = definition.relationships.parent_index else {

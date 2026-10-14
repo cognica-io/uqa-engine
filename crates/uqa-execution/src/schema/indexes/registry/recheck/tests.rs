@@ -231,6 +231,24 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
             catalog.snapshot().tables.len(),
             "partition validation rescanned every table for every unrelated index"
         );
+
+        let mut unindexed = catalog.snapshot().clone();
+        unindexed.definitions.catalog_indexes = Arc::default();
+        for table in unindexed.tables.values_mut() {
+            table.columns = Arc::new(plain.columns.clone());
+            table.keys = Arc::default();
+        }
+        let unindexed = CatalogReadView::new(unindexed);
+        super::super::validation::PARTITION_TABLE_VISITS.set(0);
+        validate_snapshots(
+            &unindexed,
+            &unindexed,
+            &unindexed.snapshot().definitions.catalog_indexes,
+            &root,
+            &unindexed,
+        )
+        .unwrap();
+        assert_eq!(super::super::validation::PARTITION_TABLE_VISITS.get(), 0);
     }
 }
 

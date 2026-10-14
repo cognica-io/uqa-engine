@@ -7004,8 +7004,8 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
       "capability": "Index registry recheck work",
-      "workload": "A valid catalog with zero or sixty unrelated nonpartitioned tables and indexes.",
-      "invariant": "Partition coverage traverses each table once, independent of the number of unrelated indexes.",
+      "workload": "Valid catalogs with zero or sixty unrelated nonpartitioned tables, with and without indexes.",
+      "invariant": "Partition coverage traverses each table once for a nonempty index graph and visits no tables for an empty graph.",
       "case_names": [
         ""
       ]
