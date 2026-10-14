@@ -145,9 +145,11 @@ fn rename_key_constraint(
                 .relation_name_available(&target.qualified_name())?)
         },
     )?;
-    let key = &mut constraints.key_constraints[position];
     let names = context.publication.constraint_names();
-    names.reserve(names.bind(table)?, to)?;
+    let object_id = names.bind(table)?;
+    names.reserve(object_id, to)?;
+    names.rebind_key_names(object_id, &mut constraints)?;
+    let key = &mut constraints.key_constraints[position];
     key.name = Some(to.into());
     let identity = key.catalog_identity;
     for inherited in &mut constraints.hierarchy.partition_inherited_key_constraints {
