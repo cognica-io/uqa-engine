@@ -158,33 +158,62 @@ def report_process_group(group: int) -> None:
 def capture(*command: str, timeout: float | None = None) -> str:
     if timeout is None:
         return subprocess.check_output(command, cwd=ROOT, text=True).strip()
-    # A file prevents a descendant retaining stdout from extending the deadline.
-    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
-        process = subprocess.Popen(command, cwd=ROOT, stdout=output, start_new_session=os.name == "posix")
-        try:
-            process.wait(timeout=timeout)
-        except BaseException as error:
-            if isinstance(error, subprocess.TimeoutExpired):
-                report_process_group(process.pid)
+    process = None
+    interruption = None
+    cleaning_up = False
+    previous_handlers = {}
+
+    def interrupt(signum, _frame):
+        nonlocal interruption
+        if interruption is None:
+            interruption = InterruptedError(f"discovery interrupted by {signal.Signals(signum).name}")
+        # Finish acquiring the child handle before raising, and let cleanup finish on repeated signals.
+        if process is not None and not cleaning_up:
+            raise interruption
+
+    try:
+        if os.name == "posix":
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                previous_handlers[signum] = signal.signal(signum, interrupt)
+        # A file prevents a descendant retaining stdout from extending the deadline.
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
             try:
-                if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGKILL)
-                else:
-                    process.kill()
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            if isinstance(error, subprocess.TimeoutExpired):
-                raise subprocess.TimeoutExpired(command[:3], timeout) from error
-            raise
-        output.seek(0)
-        text = output.read().strip()
-        if process.returncode:
-            raise subprocess.CalledProcessError(process.returncode, command, output=text)
-        return text
+                if interruption is not None:
+                    raise interruption
+                process = subprocess.Popen(command, cwd=ROOT, stdout=output, start_new_session=os.name == "posix")
+                if interruption is not None:
+                    raise interruption
+                process.wait(timeout=timeout)
+                output.seek(0)
+                text = output.read().strip()
+                if process.returncode:
+                    raise subprocess.CalledProcessError(process.returncode, command, output=text)
+            except BaseException as error:
+                cleaning_up = True
+                if process is not None:
+                    if isinstance(error, subprocess.TimeoutExpired):
+                        report_process_group(process.pid)
+                    try:
+                        if os.name == "posix":
+                            os.killpg(process.pid, signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                if isinstance(error, subprocess.TimeoutExpired):
+                    raise subprocess.TimeoutExpired(command[:3], timeout) from error
+                raise
+    finally:
+        cleaning_up = True
+        for signum, handler in reversed(previous_handlers.items()):
+            signal.signal(signum, handler)
+    if interruption is not None:
+        raise interruption
+    return text
 
 
 def report(output: pathlib.Path, result: dict) -> None:
@@ -261,9 +290,9 @@ def main() -> int:
         subprocess.run(["cargo", "nextest", "run", *selection], cwd=ROOT, check=True)
         result["status"] = "passed"
         result["stage"] = "completed"
-    except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-        result["error"] = str(error)
-        print(error, file=sys.stderr)
+    except (ValueError, KeyError, OSError, subprocess.SubprocessError, KeyboardInterrupt) as error:
+        result["error"] = f"{result['stage']} interrupted by SIGINT" if isinstance(error, KeyboardInterrupt) else str(error)
+        print(result["error"], file=sys.stderr)
     finally:
         report(args.output, result)
     return 0 if result["status"] == "passed" else 1

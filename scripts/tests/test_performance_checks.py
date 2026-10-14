@@ -270,6 +270,19 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertFalse((self.root / "run-output/test-inventory.json").exists())
         run.assert_not_called()
 
+    def test_discovery_interruption_retains_failed_report_and_does_not_run_tests(self):
+        for failure, name in [(KeyboardInterrupt(), "SIGINT"), (InterruptedError("discovery interrupted by SIGTERM"), "SIGTERM")]:
+            with self.subTest(signal=name):
+                status, result, _, run = self.run_main(
+                    archive=self.root / "tests.tar.zst", listing_failure=failure,
+                )
+                self.assertEqual(status, 1)
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(result["stage"], "discovery")
+                self.assertIn(name, result["error"])
+                self.assertFalse((self.root / "run-output/test-inventory.json").exists())
+                run.assert_not_called()
+
     def test_bounded_capture_preserves_output_and_nonzero_exit(self):
         self.assertEqual(runner.capture(sys.executable, "-c", "print('exact inventory')", timeout=5), "exact inventory")
         with self.assertRaises(subprocess.CalledProcessError) as failure:
@@ -287,6 +300,66 @@ class PerformanceChecksTest(unittest.TestCase):
         kill.assert_called_once_with(42, signal.SIGKILL)
 
     @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_signals_stop_listing_descendants_and_restore_prior_handlers(self):
+        child_script = (
+            "import os,pathlib,time\n"
+            "pathlib.Path('parent.pid').write_text(str(os.getpid()))\n"
+            "if os.fork() == 0:\n"
+            " pathlib.Path('child.pid').write_text(str(os.getpid()))\n"
+            "time.sleep(30)\n"
+        )
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=signum.name), tempfile.TemporaryFile(mode="w+") as output:
+                directory = self.root / signum.name
+                directory.mkdir()
+                script = (
+                    "import importlib.util,pathlib,signal,sys\n"
+                    f"spec=importlib.util.spec_from_file_location('runner', {str(ROOT / 'scripts/run-performance-checks.py')!r})\n"
+                    "runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)\n"
+                    f"runner.ROOT=pathlib.Path({str(directory)!r})\n"
+                    "previous={s:signal.getsignal(s) for s in (signal.SIGINT,signal.SIGTERM)}\n"
+                    "try:\n"
+                    f" runner.capture(sys.executable,'-c',{child_script!r},timeout=20)\n"
+                    "except InterruptedError as error:\n"
+                    " assert all(signal.getsignal(s)==handler for s,handler in previous.items())\n"
+                    " pathlib.Path('interruption.txt').write_text(str(error))\n"
+                    " raise SystemExit(23)\n"
+                )
+                process = subprocess.Popen([sys.executable, "-c", script], cwd=directory, stdout=output, stderr=subprocess.STDOUT)
+                try:
+                    deadline = time.monotonic() + 10
+                    while not (directory / "child.pid").exists() and time.monotonic() < deadline:
+                        self.assertIsNone(process.poll())
+                        time.sleep(0.01)
+                    self.assertTrue((directory / "child.pid").exists())
+                    process.send_signal(signum)
+                    process.wait(timeout=10)
+                    output.seek(0)
+                    self.assert_processes_stopped([int((directory / name).read_text()) for name in ("parent.pid", "child.pid")])
+                    self.assertEqual(process.returncode, 23, output.read())
+                    self.assertIn(signum.name, (directory / "interruption.txt").read_text())
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=5)
+                    parent = directory / "parent.pid"
+                    if parent.exists():
+                        try:
+                            os.killpg(int(parent.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
+    def assert_processes_stopped(self, pids):
+        for pid in pids:
+            deadline = time.monotonic() + 5
+            while True:
+                state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], text=True, capture_output=True, timeout=1).stdout.strip()
+                if not state or state.startswith("Z") or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.01)
+            self.assertTrue(not state or state.startswith("Z"), (pid, state))
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
     def test_bounded_capture_terminates_the_listing_and_its_descendant(self):
         script = (
             "import os,pathlib,time\n"
@@ -300,14 +373,7 @@ class PerformanceChecksTest(unittest.TestCase):
                 runner.capture(sys.executable, "-c", script, timeout=3)
             parent = int((self.root / "parent.pid").read_text())
             child = int((self.root / "child.pid").read_text())
-            for pid in [parent, child]:
-                deadline = time.monotonic() + 5
-                while True:
-                    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], text=True, capture_output=True, timeout=1).stdout.strip()
-                    if not state or state.startswith("Z") or time.monotonic() >= deadline:
-                        break
-                    time.sleep(0.01)
-                self.assertTrue(not state or state.startswith("Z"), (pid, state))
+            self.assert_processes_stopped([parent, child])
         finally:
             parent_path = self.root / "parent.pid"
             if parent_path.exists():
