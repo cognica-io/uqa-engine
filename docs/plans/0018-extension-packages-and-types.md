@@ -39,6 +39,8 @@ Composite, range and host base types add their own bound `ColumnType` variants. 
 
 ## Dependency order and progress ledger
 
+The [current task progress](0018-extension-progress.md) maps every originally unchecked PR #638 record to its implementation state, evidence and remaining completion condition. It distinguishes merged prerequisites, published changes awaiting CI, local verification and unstarted extension units; the chronological evidence below remains available for each delivered change.
+
 A unit is complete only when its exit evidence is recorded against the actual source revision. Units may contain several logical commits. Internal prerequisites may land before their SQL surface, but SQL continues to reject a form until its unit is complete.
 
 | Unit | Prerequisites | Primary owners | Status and evidence |
