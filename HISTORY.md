@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Read bound table identities directly for mutation row images and RETURNING, avoiding whole-catalog captures per row while preserving retained, partition and foreign-table identities. Check document existence through storage metadata before prepared writes, avoiding unnecessary payload copies.
 
+- Retain byte-identical native SQLite B-tree postings and their equality projections during publication, avoiding physical rewrites while preserving MVCC history, write conflicts, retry receipts and changes to SQL-equal stored representations.
+
 - Match PostgreSQL stored generated-column dependency selection during UPDATE, preserving unrelated values and using destination expressions when rows move between partitions. Reuse typed expression plans during generated-column rewrites, including PostgreSQL constant planning for empty relations.
 
 - Open each persistent table store once when creating an independent session, preserving validated row counts, analyzer bindings and the selected vector index.

@@ -6482,6 +6482,32 @@
       "capability": "MERGE action clause and row identity",
       "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
       "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "unchanged_btree_projection_keeps_its_equality_keys_without_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/physical/tests.rs",
+      "capability": "Native B-tree publication",
+      "workload": "Thirty-two existing postings, two identical rewrites each, and a signed-zero representation change under a 64KB allowance.",
+      "invariant": "Identical projection writes cause zero SQLite row changes; changed representations retain correct equality keys and rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "unchanged_native_btree_writes_keep_history_conflicts_and_reopen",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native B-tree publication",
+      "workload": "An unchanged posting commit and exact retry, a retained reader, competing writers, and persistent reopen.",
+      "invariant": "Unchanged physical projections still publish a newer MVCC version, preserve historical bytes and exact receipts, reject stale writes, and reopen the changed key.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
