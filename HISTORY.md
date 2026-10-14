@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Open each persistent table store once when creating an independent session, preserving validated row counts, analyzer bindings and the selected vector index.
+
 - Deduplicate equivalent retained NULL expressions in `GROUP BY DISTINCT` while preserving explicit collation clauses, selected types and conflicting collation metadata.
 
 - Retain resolved `JOIN USING` keys through nested and FULL joins, preserving hash execution, implicit key types and access to original input columns.
