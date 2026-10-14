@@ -34,16 +34,9 @@ impl CatalogReadView {
         name: &str,
     ) -> Result<Vec<uqa_core::RelationIdentity>, SQLError> {
         if resolution.lookup_mode() == RelationLookupMode::Bound {
-            let (schema, relation) =
-                uqa_core::RelationIdentity::parse_reference(name).map_err(|error| {
-                    SQLError::Internal(format!("decode bound relation `{name}`: {error}"))
-                })?;
-            let schema = schema.ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "bound query contains non-canonical relation reference `{name}`"
-                ))
-            })?;
-            return Ok(vec![uqa_core::RelationIdentity::new(schema, relation)]);
+            return Ok(vec![uqa_sql::catalog::resolution::bound_relation_identity(
+                name,
+            )?]);
         }
 
         let qualified = uqa_core::RelationIdentity::parse_reference(name)

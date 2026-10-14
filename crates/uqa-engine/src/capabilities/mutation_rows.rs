@@ -34,6 +34,31 @@ impl MutationRowCatalog for Engine {
     }
 }
 impl MutationTupleMetadata for Engine {
+    fn table_relation_oid(&self, table: &str) -> Result<i64, SQLError> {
+        if self.query_catalog_snapshot.is_some() {
+            return uqa_execution::catalog::projection::table_relation_oid(
+                &self.catalog_execution(),
+                table,
+            );
+        }
+        let relation = uqa_sql::catalog::resolution::bound_relation_identity(table)?;
+        let ordinary = self
+            .storage
+            .tables
+            .read()
+            .get(&relation)
+            .map(|state| state.relation_oids().relation);
+        ordinary
+            .or_else(|| {
+                self.durable
+                    .foreign_tables
+                    .read()
+                    .get(&relation)
+                    .map(|state| state.relation_oids().relation)
+            })
+            .map(i64::from)
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
+    }
     fn document_metadata(
         &self,
         table: &str,

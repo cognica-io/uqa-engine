@@ -88,10 +88,12 @@ pub fn returning_image_values<S: Clone + 'static>(
             }) {
                 super::rows::integer_key_value(&document, column, Some(image.doc_id))
             } else if column == TABLE_OID_COLUMN {
-                Ok(Value::Int(crate::catalog::projection::table_relation_oid(
-                    &services.rows.catalog,
-                    &image.storage_table,
-                )?))
+                Ok(Value::Int(
+                    services
+                        .rows
+                        .tuples
+                        .table_relation_oid(&image.storage_table)?,
+                ))
             } else {
                 Ok(crate::query::document_projection::project_document_column(
                     &document,

@@ -196,10 +196,9 @@ pub fn target_row_for_storage_optional_with_metadata(
                 integer_key_value(&materialized, column, doc_id)
             } else if column == TABLE_OID_COLUMN {
                 storage_table.map_or(Ok(Value::Null), |storage_table| {
-                    Ok(Value::Int(crate::catalog::projection::table_relation_oid(
-                        &context.catalog,
-                        storage_table,
-                    )?))
+                    Ok(Value::Int(
+                        context.tuples.table_relation_oid(storage_table)?,
+                    ))
                 })
             } else if column == XMIN_COLUMN {
                 Ok(crate::query::document_projection::project_document_column(
