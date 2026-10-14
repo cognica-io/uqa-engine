@@ -6508,6 +6508,35 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_index_lookup_avoids_table_metadata_captures",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_indexes.rs",
+      "capability": "Current and retained index registries",
+      "workload": "Thirty-two repeated index lookups with zero/thirty-two unrelated tables on four providers, shadowed and temporary schemas, quoted names, missing indexes and a retained constraint index.",
+      "invariant": "Index lookup makes zero full-table metadata captures once the current registry is refreshed, preserving exact index rows, namespace precedence, missing results, bound-name errors and retained query fallback."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_index_lookup_preserves_retained_constraint_fallback",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_indexes.rs",
+      "capability": "Current and retained index registries",
+      "workload": "Thirty-two repeated index lookups with zero/thirty-two unrelated tables on four providers, shadowed and temporary schemas, quoted names, missing indexes and a retained constraint index.",
+      "invariant": "Index lookup makes zero full-table metadata captures once the current registry is refreshed, preserving exact index rows, namespace precedence, missing results, bound-name errors and retained query fallback."
     }
   ]
 }
