@@ -85,14 +85,9 @@ impl Engine {
         field: &str,
         dimensions: u32,
         parameters: DiskANNIndexParams,
+        mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<()> {
-        let index = self.build_catalog_diskann_index(
-            row,
-            field,
-            dimensions,
-            parameters,
-            VectorIndexOpenMode::Create,
-        )?;
+        let index = self.build_catalog_diskann_index(row, field, dimensions, parameters, mode)?;
         let relation = uqa_core::RelationIdentity::from_legacy_name(&row.table_name)
             .map_err(StorageBackendError::Other)?;
         let table = self

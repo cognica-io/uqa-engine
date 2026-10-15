@@ -71,12 +71,12 @@ fn diskann_publication_cache_restore_failure_keeps_the_confirmed_commit() {
             assert!(first.pending_commit().is_none());
             let backend = first.storage.backend.as_ref().unwrap();
             let committed = backend.change_version().unwrap().unwrap();
-            let control = first.query_retention_control().unwrap();
+            let control = peer.query_retention_control().unwrap();
             let exhausted = control
                 .memory()
                 .reserve(control.memory().limit() - control.memory().used())
                 .unwrap();
-            let error = first.synchronize_table_catalog().unwrap_err();
+            let error = peer.synchronize_table_catalog().unwrap_err();
             assert_eq!(
                 uqa_execution::storage_errors::storage_error("restore committed catalog", &error)
                     .sqlstate(),
@@ -85,6 +85,8 @@ fn diskann_publication_cache_restore_failure_keeps_the_confirmed_commit() {
             );
             assert_eq!(first.transaction_depth(), 0);
             assert!(first.pending_commit().is_none());
+            assert_eq!(peer.transaction_depth(), 0);
+            assert!(peer.pending_commit().is_none());
             drop(exhausted);
             assert_eq!(backend.change_version().unwrap(), Some(committed));
             first.synchronize_table_catalog().unwrap();

@@ -56,7 +56,7 @@ fn assert_frozen(row: &TableSchema, oid: &Value) {
             collation_oid: None,
             composite_source: None,
             value: oid.clone(),
-            ty: "regclass".into()
+            ty: "pg_catalog.\"regclass\"".into()
         }
     );
     assert_eq!(binding.as_ref().unwrap().argument_types[0], "regclass");

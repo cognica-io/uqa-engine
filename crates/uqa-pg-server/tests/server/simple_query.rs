@@ -333,6 +333,7 @@ fn startup_reports_every_reported_parameter_and_reset_restores_client_settings()
         reported.keys().map(String::as_str).collect::<Vec<_>>(),
         [
             "DateStyle",
+            "IntervalStyle",
             "TimeZone",
             "application_name",
             "client_encoding",
@@ -347,6 +348,7 @@ fn startup_reports_every_reported_parameter_and_reset_restores_client_settings()
             "standard_conforming_strings",
         ]
     );
+    assert_eq!(reported["IntervalStyle"], "postgres");
     assert_eq!(reported["application_name"], "wire-test");
     assert_eq!(reported["is_superuser"], "on");
     assert_eq!(reported["search_path"], "\"$user\", public");

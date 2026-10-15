@@ -301,11 +301,12 @@ fn postgresql_merge_returning_and_join_shapes(eng: &Engine) {
              AND EXISTS (SELECT 1 FROM inventory WHERE id = 2 AND qty = 20)
              AND EXISTS (SELECT 1 FROM inventory WHERE id = 3 AND qty = 7) AS ok",
     );
-    let err = eng
-        .sql("SELECT merge_action()", &[])
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("MERGE RETURNING"), "{err}");
+    let err = eng.sql("SELECT merge_action()", &[]).unwrap_err();
+    assert_eq!(err.sqlstate(), Some("42601"));
+    assert_eq!(
+        err.to_string(),
+        "MERGE_ACTION() can only be used in the RETURNING list of a MERGE command"
+    );
 
     exec(eng, "CREATE TABLE removals (id INTEGER PRIMARY KEY)");
     exec(eng, "INSERT INTO removals (id) VALUES (2)");

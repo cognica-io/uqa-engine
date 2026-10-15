@@ -31,12 +31,16 @@ mod security;
 fn regclass_reference(engine: &Engine, expression: &Expr) -> Option<String> {
     match expression {
         Expr::Literal(Value::Str(reference)) => Some(reference.clone()),
-        Expr::Cast { expr, ty, .. } if ty.ends_with("regclass") => regclass_reference(engine, expr),
+        Expr::Cast { expr, ty, .. }
+            if matches!(ty.as_str(), "regclass" | "pg_catalog.\"regclass\"") =>
+        {
+            regclass_reference(engine, expr)
+        }
         Expr::TypedLiteral {
             value: Value::Int(oid),
             ty,
             ..
-        } if ty == "regclass" => {
+        } if matches!(ty.as_str(), "regclass" | "pg_catalog.\"regclass\"") => {
             let result = engine.sql(&format!("SELECT n.nspname || '.' || c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid={oid}"), &[]).unwrap();
             let Value::Str(name) = &result.rows.first()?["name"] else {
                 return None;

@@ -46,8 +46,8 @@ pub fn require_attribute_format(
     }
 }
 
-/// Validate a load-only catalog without allocating identities or publishing repairs.
-pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+/// Validate the fixed conversion markers before reusing already validated definitions.
+pub fn validate_constraint_catalog_format(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
     match catalog.get_metadata(IDENTITY_METADATA_KEY)?.as_deref() {
         Some("1") => {}
         None => {
@@ -64,6 +64,12 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
     require_foreign_key_identity_format(catalog, false)?;
     addresses::require_format(catalog, false)?;
     require_attribute_format(catalog, false)?;
+    Ok(())
+}
+
+/// Validate a load-only catalog without allocating identities or publishing repairs.
+pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+    validate_constraint_catalog_format(catalog)?;
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut validate = |columns: &[uqa_sql::ast::ColumnDef],

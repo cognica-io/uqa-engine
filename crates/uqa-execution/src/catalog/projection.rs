@@ -402,8 +402,9 @@ pub fn resolve_catalog_column_type_name(
     type_name: &str,
 ) -> Result<uqa_sql::ast::ColumnType, SQLError> {
     if let Some(identity) = uqa_sql::ast::UserTypeIdentity::parse(type_name) {
-        return resolve_catalog_column_type(context, type_name).ok_or_else(|| {
-            SQLError::Internal(format!("cache lookup failed for type {}", identity.oid))
+        return resolve_catalog_column_type(context, type_name).ok_or_else(|| SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("type with OID {} does not exist", identity.oid),
         });
     }
     let parsed = uqa_sql::parse_regtype_name(type_name)?;

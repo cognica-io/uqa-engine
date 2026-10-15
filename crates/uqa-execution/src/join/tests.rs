@@ -167,7 +167,12 @@ fn hash_join_prepares_constant_like_residual_once() {
     let predicate = ScalarExpr::Not(Box::new(ScalarExpr::Func {
         order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
         name: "like".into(),
-        binding: None,
+        binding: Some(uqa_sql::ast::FunctionBinding::dispatched(
+            uqa_sql::ast::FunctionDispatch::Pattern {
+                operator: uqa_sql::ast::PatternOperator::Like,
+                oid: None,
+            },
+        )),
         args: vec![
             ScalarExpr::qualified_column("o", "comment"),
             ScalarExpr::Literal(Value::Str("%special%requests%".into())),

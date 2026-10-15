@@ -312,8 +312,11 @@ impl Deparser<'_> {
                 _ => Some("?column?"),
             };
             if own_name != Some(name.as_str()) {
-                write!(expression, " AS {}", quote_ident(&name))
-                    .expect("writing to a String cannot fail");
+                let quoted_name = quote_ident(&name);
+                if expression != quoted_name {
+                    write!(expression, " AS {quoted_name}")
+                        .expect("writing to a String cannot fail");
+                }
             }
             self.projection(rendered, &expression, index, scope.indent);
         }

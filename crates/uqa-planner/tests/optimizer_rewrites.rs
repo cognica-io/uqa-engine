@@ -262,7 +262,7 @@ fn window_definitions_follow_subquery_remapping_and_source_constants() {
             collation_oid: None,
             composite_source: None,
             value: Value::Int(3),
-            ty: "integer".into(),
+            ty: "pg_catalog.\"int4\"".into(),
             bound_type: Some(uqa_sql::ColumnType::Integer),
             parameter_index: None,
         }

@@ -6,7 +6,7 @@
 
 //! CASE type refinement shares controlled constant production and preserves semantic fallback and branch selection.
 
-use super::{merge_value_types, ColumnType, SQLError, ScalarExpr, Value};
+use super::{ColumnType, SQLError, ScalarExpr, Value};
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub(in crate::type_resolution) fn case_output_type_with_control(
@@ -76,7 +76,11 @@ fn include(
     } else {
         common.without_type_modifiers_with_control(control)?
     };
-    *output = merge_value_types(output.take(), Some(ty), control)?;
+    *output = Some(match output.take() {
+        None => ty,
+        Some(previous) if *previous == *ty => previous,
+        Some(_) => common.without_type_modifiers_with_control(control)?,
+    });
     Ok(())
 }
 

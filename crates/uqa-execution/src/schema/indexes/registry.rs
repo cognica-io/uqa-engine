@@ -49,6 +49,13 @@ pub trait IndexRegistryPublication {
     fn publish_index(&self, row: CatalogIndexRow);
     fn forget_index(&self, relation: &RelationIdentity);
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()>;
+    fn rebind_diskann_index(
+        &self,
+        row: &CatalogIndexRow,
+        field: &str,
+        dimensions: u32,
+        parameters: uqa_storage::vector_index::DiskANNIndexParams,
+    ) -> StorageBackendResult<()>;
 }
 
 #[derive(Clone, Copy)]
@@ -100,7 +107,18 @@ impl IndexRegistryChange {
         previous: &CatalogIndexRow,
         renamed: CatalogIndexRow,
     ) -> StorageBackendResult<()> {
-        Self::rename_with_publication(context.publication, previous, renamed)
+        let binding = if renamed.index_type.eq_ignore_ascii_case("diskann") {
+            Some(super::diskann::target(context.vectors, &renamed)?)
+        } else {
+            None
+        };
+        Self::rename_with_publication(context.publication, previous, renamed.clone())?;
+        if let Some((field, dimensions, parameters)) = binding {
+            context
+                .publication
+                .rebind_diskann_index(&renamed, &field, dimensions, parameters)?;
+        }
+        Ok(())
     }
 
     pub(super) fn rename_with_publication(

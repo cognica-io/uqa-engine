@@ -81,6 +81,38 @@ fn constant_case_refinement_preserves_lazy_branch_modifiers() {
 }
 
 #[test]
+fn nonconstant_case_keeps_an_unconstrained_reachable_branch_unconstrained() {
+    let budget = MemoryBudget::new(64 * 1024);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+    for literal_first in [false, true] {
+        let literal = ScalarExpr::Literal(Value::Str("longtext".into()));
+        let constrained = ScalarExpr::Column("chosen".into());
+        let (chosen, otherwise) = if literal_first {
+            (literal, constrained)
+        } else {
+            (constrained, literal)
+        };
+        let expression = ScalarExpr::Case {
+            base: None,
+            when: vec![(ScalarExpr::Column("condition".into()), chosen)],
+            else_branch: Some(Box::new(otherwise)),
+        };
+        let output = case_output_type_with_control(
+            &expression,
+            &ColumnType::Varchar(None),
+            &mut |expression| inferred(expression, &control),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(*output, ColumnType::Varchar(None));
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn simple_case_uses_shared_constant_cast_and_binary_comparison_producers() {
     let budget = MemoryBudget::new(64 * 1024);
     let cancellation = CancellationToken::new();

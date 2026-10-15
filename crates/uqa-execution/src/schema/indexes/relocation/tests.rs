@@ -46,6 +46,16 @@ impl IndexRegistryPublication for Publication {
     fn refresh_index_table(&self, _: &str) -> StorageBackendResult<()> {
         panic!("a retained namespace move must not reload the partly moved catalog")
     }
+
+    fn rebind_diskann_index(
+        &self,
+        _: &CatalogIndexRow,
+        _: &str,
+        _: u32,
+        _: uqa_storage::vector_index::DiskANNIndexParams,
+    ) -> StorageBackendResult<()> {
+        panic!("a retained namespace move must not rebind the partly moved catalog")
+    }
 }
 
 #[test]

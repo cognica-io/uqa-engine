@@ -130,6 +130,22 @@ impl IndexRegistryPublication for Engine {
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()> {
         self.refresh_value_indexes_for_table(table)
     }
+
+    fn rebind_diskann_index(
+        &self,
+        row: &CatalogIndexRow,
+        field: &str,
+        dimensions: u32,
+        parameters: uqa_storage::vector_index::DiskANNIndexParams,
+    ) -> StorageBackendResult<()> {
+        self.install_catalog_diskann_index(
+            row,
+            field,
+            dimensions,
+            parameters,
+            uqa_storage::VectorIndexOpenMode::Restore,
+        )
+    }
 }
 
 impl IndexRenameTransactions for Engine {
@@ -181,8 +197,14 @@ impl IndexCreationPublication for Engine {
         parameters: uqa_storage::vector_index::DiskANNIndexParams,
     ) -> Result<(), SQLError> {
         self.prepare_explicit_transaction_writer()?;
-        self.install_catalog_diskann_index(row, field, dimensions, parameters)
-            .map_err(|error| storage_error("CREATE INDEX diskann", &error))
+        self.install_catalog_diskann_index(
+            row,
+            field,
+            dimensions,
+            parameters,
+            uqa_storage::VectorIndexOpenMode::Create,
+        )
+        .map_err(|error| storage_error("CREATE INDEX diskann", &error))
     }
     fn add_text_field(
         &self,

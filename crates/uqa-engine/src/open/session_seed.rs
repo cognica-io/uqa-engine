@@ -36,6 +36,9 @@ impl Engine {
         }) {
             return Ok(None);
         }
+        uqa_execution::schema::constraints::restoration::validate_constraint_catalog_format(
+            storage.catalog.as_ref(),
+        )?;
         let epochs = self.epochs.published_epochs();
         let cache_revisions = self.epochs.storage_cache_revisions.lock().clone();
         let read_view = self.epochs.seen_storage_read_view.lock().clone();

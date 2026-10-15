@@ -380,7 +380,11 @@ mod unified_plan_tests {
             .sql("CREATE TABLE ledger (account text, amount integer)", &[])
             .expect("plan source table");
 
-        let arithmetic = one(&engine, "SELECT amount * 2 + 1 AS adjusted FROM ledger");
+        let arithmetic_sql = "SELECT amount * 2 + 1 AS adjusted FROM ledger";
+        engine
+            .sql(arithmetic_sql, &[])
+            .expect("cache executed query");
+        let arithmetic = one(&engine, arithmetic_sql);
         let UnifiedPlan::Query(query) = arithmetic else {
             panic!("arithmetic SELECT must be a QueryPlan");
         };
@@ -425,7 +429,7 @@ mod unified_plan_tests {
         // The cache retains the structural IR alongside the parsed statement;
         // execution still enters exclusively through UnifiedPlanExecutor.
         assert!(engine
-            .cached_sql_plans("SELECT amount * 2 + 1 AS adjusted FROM ledger")
+            .cached_sql_plans(arithmetic_sql)
             .is_some_and(|plans| matches!(plans.as_slice(), [UnifiedPlan::Query(_)])));
     }
 

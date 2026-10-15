@@ -46,7 +46,7 @@ fn assert_stored_identity(engine: &Engine, columns: &[&str]) {
                 collation_oid: None,
                 composite_source: None,
                 value: oid.clone(),
-                ty: "regclass".into()
+                ty: "pg_catalog.\"regclass\"".into()
             }
         );
         assert!(matches!(oid, Value::Int(_)));
