@@ -73,6 +73,8 @@ pub struct ConstraintCatalogColumn {
 
 #[derive(Debug, Clone)]
 pub struct ForeignKeyCatalogData {
+    /// Enforcement lifetime, distinct from the physical catalog row of a partition copy.
+    pub enforcement_identity: Option<[u8; 16]>,
     pub referenced_index: Option<[u8; 16]>,
     pub schema: String,
     pub table: String,
@@ -413,6 +415,7 @@ fn foreign_key_catalog_row(
         ),
         period: foreign_key.period,
         foreign_key: Some(ForeignKeyCatalogData {
+            enforcement_identity: foreign_key.object_id,
             referenced_index: foreign_key.referenced_index,
             schema: referenced_schema,
             table: referenced_table,
@@ -583,6 +586,7 @@ fn derived_constraint_catalog_rows(
             ),
             period: foreign_key.period,
             foreign_key: Some(ForeignKeyCatalogData {
+                enforcement_identity: Some(derived.catalog_identity.object_id),
                 referenced_index,
                 schema: partition.schema.clone(),
                 table: partition.name.clone(),

@@ -219,3 +219,64 @@ fn exact_builtin_operator_selection_needs_no_candidate_workspace() {
         "the implemented builtin operator catalog must be covered"
     );
 }
+
+#[test]
+fn containment_operator_identities_and_bounded_types_match_postgresql() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("containment.json")).unwrap();
+    let concrete = |name: &str| {
+        ColumnType::from_sql_name(match name {
+            "anyarray" => "integer[]",
+            "anyelement" => "integer",
+            "anyrange" => "int4range",
+            "anymultirange" => "int4multirange",
+            other => other,
+        })
+        .unwrap()
+    };
+    for row in reference["operators"].as_array().unwrap() {
+        let operator = row[0].as_str().unwrap();
+        let left = concrete(row[1].as_str().unwrap());
+        let right = concrete(row[2].as_str().unwrap());
+        let selected =
+            crate::type_resolution::named_binary_operator_catalog_entry(operator, [&left, &right])
+                .unwrap();
+        assert_eq!(selected.oid, row[3].as_i64().unwrap(), "{row}");
+        assert_eq!(selected.function_oid, row[4].as_i64().unwrap(), "{row}");
+        let mut succeeded = false;
+        for limit in [0, 32, 4096, 65536] {
+            let budget = MemoryBudget::new(limit);
+            let cancellation = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+            match named_binary_operator_types_with_control(
+                operator,
+                Some(&left),
+                Some(&right),
+                &control,
+            ) {
+                Ok(types) => {
+                    assert_eq!(
+                        *types,
+                        [left.clone(), right.clone(), ColumnType::Boolean],
+                        "{row}"
+                    );
+                    assert_eq!(budget.used(), types.reserved_bytes());
+                    succeeded = true;
+                }
+                Err(error) => assert_eq!(error.sqlstate(), Some("53200"), "{row}: {error}"),
+            }
+            assert_eq!(budget.used(), 0);
+        }
+        assert!(succeeded, "{row}");
+    }
+    for (left, right) in [
+        ("int4range", "bigint"),
+        ("int4range", "int8range"),
+        ("int4range", "int8multirange"),
+    ] {
+        assert!(
+            named_binary_operator_types("@>", Some(&concrete(left)), Some(&concrete(right)))
+                .is_err()
+        );
+    }
+}

@@ -47,6 +47,17 @@ impl ExpressionContext<'_> {
                     )
                     .map(Some);
             }
+            Some(FunctionDispatch::Range { operation, .. }) => {
+                use crate::ast::RangeFunctionOperation as Range;
+                let symbol = match operation {
+                    Range::Contains | Range::ContainsElement => "@>",
+                    Range::ContainedBy | Range::ElementContainedBy => "<@",
+                    Range::Overlap => "&&",
+                    Range::Adjacent => "-|-",
+                    _ => return Ok(None),
+                };
+                return self.named_binary_operator(symbol, args).map(Some);
+            }
             Some(FunctionDispatch::FieldSelect) => {
                 return self
                     .field_select(binding.expect("field selection dispatch"), args)
@@ -86,6 +97,16 @@ impl ExpressionContext<'_> {
         }
         if binding.is_some_and(|binding| binding.object_id.is_some()) {
             return Ok(None);
+        }
+        let symbol = match name {
+            "contains_op" => Some("@>"),
+            "contained_by_op" => Some("<@"),
+            "array_overlap" => Some("&&"),
+            "range_adjacent" => Some("-|-"),
+            _ => None,
+        };
+        if let Some(symbol) = symbol {
+            return self.named_binary_operator(symbol, args).map(Some);
         }
         if name == "nullif" && binding.is_some_and(|binding| binding.builtin) {
             return self.null_if(args).map(Some);

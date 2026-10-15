@@ -6,11 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-15
+
 ### Changed
+
+- Upgrade persistent databases to SQLite record format 62 and redb record format 58 for physical constraint catalog histories; native SQLite mapping 17 and coordination format 2 stay unchanged. Close all owners, retain a pre-upgrade backup and update every owner together. Custom versioned providers must forward committed-read boundaries and private changes; see the [0.5.4 upgrade guide](docs/manual/reference/10-upgrading.md#054).
 
 - Make native foreign handlers independently opt-in through `arrow` and `duckdb`, both disabled by default. Keep the memory handler and its Rust APIs available in every build. Preserve foreign-table SQL declarations, catalog inspection, rollback and persistent reopening for omitted handlers; unavailable scans fail explicitly. Rust metadata inspection uses `foreign_server_definition` and `foreign_table_definition` independently of handler projections.
 
 ### Fixed
+
+- Preserve deferred foreign-key modes and pending events across physical constraint catalog publication, partition changes, renames, nested execution and savepoint rollback by retaining the independent enforcement identity.
+
+- Publish inherited constraint counts and routine-dependent foreign-table changes atomically, repair physical constraint rows during legacy conversion and reject missing or unknown constraint formats when creating independent sessions.
+
+- Reconstruct catalog expressions with the current IntervalStyle, PostgreSQL real-number precision and the selected array, JSONB, range and multirange containment operators. Preserve typed range-element CHECK constraints through persistent reopening.
+
+- Rebind live DiskANN handles after index renames while preserving stored generations, subsequent writes and savepoint undo.
+
+- Allocate retained catalog transaction identities only when a reader captures a boundary, avoiding a heap allocation in ordinary MVCC indexing transactions while preserving transaction-lifetime checks and existing Nori resource limits.
+
+- Update the locked TLS dependency to rustls 0.23.46, incorporating the fixes for RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349 in native HTTP clients and published binaries.
 
 - Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views. Accept foreign-table CHECK and NOT NULL constraint deletion through the existing transactional dependency path.
 

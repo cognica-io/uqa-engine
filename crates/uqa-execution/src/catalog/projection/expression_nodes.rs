@@ -207,6 +207,10 @@ pub(super) fn render_with_relation(
     value: &Field,
     pretty: bool,
 ) -> Result<String, SQLError> {
+    let (_, setting) = context.session.show_parameter("IntervalStyle")?;
+    let style = uqa_sql::semantics::parameters::intervalstyle::style(&setting)
+        .ok_or_else(|| SQLError::Internal("invalid session IntervalStyle".into()))?;
+    let _interval_style = uqa_sql::expr::IntervalStyleScope::enter(style);
     let output = CatalogOutput(*context);
     let values = EngineValueCatalog(&output);
     deparse::expression(

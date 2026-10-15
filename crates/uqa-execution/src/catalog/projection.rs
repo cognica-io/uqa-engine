@@ -246,7 +246,14 @@ pub fn runtime_constraints(
                 identity: ConstraintIdentity {
                     relation: RelationIdentity::new(&constraint.schema, &constraint.table),
                     name: constraint.name.clone(),
-                    object_id: constraint.object_id,
+                    object_id: match &constraint.foreign_key {
+                        Some(foreign_key) => {
+                            Some(foreign_key.enforcement_identity.ok_or_else(|| {
+                                SQLError::Internal("FOREIGN KEY has no enforcement identity".into())
+                            })?)
+                        }
+                        None => constraint.object_id,
+                    },
                 },
                 deferrable: constraint.state.deferrable(),
                 catalog_oid: constraint.catalog_oid,

@@ -49,6 +49,8 @@ pub trait IndexRegistryPublication {
     fn publish_index(&self, row: CatalogIndexRow);
     fn forget_index(&self, relation: &RelationIdentity);
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()>;
+    /// Replace a name-bound live handle while retaining its stored generation and canonical data.
+    fn rebind_diskann_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()>;
 }
 
 #[derive(Clone, Copy)]
@@ -111,7 +113,10 @@ impl IndexRegistryChange {
         publication.erase_index(previous, IndexPublicationKind::Names)?;
         publication.persist_index(&renamed, IndexPublicationKind::Names)?;
         publication.forget_index(&previous.relation);
-        publication.publish_index(renamed);
+        publication.publish_index(renamed.clone());
+        if renamed.index_type.eq_ignore_ascii_case("diskann") {
+            publication.rebind_diskann_index(&renamed)?;
+        }
         Ok(())
     }
 

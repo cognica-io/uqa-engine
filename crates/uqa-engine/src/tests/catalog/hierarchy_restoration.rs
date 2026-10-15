@@ -151,6 +151,7 @@ fn legacy_partition_foreign_key_addresses_convert_with_and_without_the_original_
 
 // These fixtures predate persisted constraint and partition indexes; current index graphs reject a missing parent.
 pub(super) fn legacy_index_registry(catalog: &dyn uqa_storage::CatalogFacade) {
+    legacy_constraint_rows(catalog);
     let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)
         .unwrap();
     for row in catalog.load_catalog_indexes().unwrap() {
@@ -183,4 +184,25 @@ pub(super) fn legacy_index_registry(catalog: &dyn uqa_storage::CatalogFacade) {
     catalog
         .delete_metadata("sql_index_registry_version")
         .unwrap();
+}
+
+// Old catalog fixtures have no physical constraint tuples, memberships or current-row heads.
+pub(super) fn legacy_constraint_rows(catalog: &dyn uqa_storage::CatalogFacade) {
+    let class = uqa_sql::catalog::dependencies::CONSTRAINT_CLASS;
+    for prefix in [
+        format!("uqa.sql.catalog.tuple.v1:{class:08x}:"),
+        format!("uqa.sql.catalog.current.v1:{class:08x}:"),
+        "uqa.sql.catalog.constraint.".into(),
+    ] {
+        let mut keys = Vec::new();
+        catalog
+            .visit_metadata_with_prefix(&prefix, &mut |key, _| {
+                keys.push(key.to_owned());
+                Ok(())
+            })
+            .unwrap();
+        for key in keys {
+            catalog.delete_metadata(&key).unwrap();
+        }
+    }
 }

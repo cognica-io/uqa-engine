@@ -43,6 +43,10 @@ impl IndexRegistryPublication for Publication {
         self.forgotten.borrow_mut().push(relation.clone());
     }
 
+    fn rebind_diskann_index(&self, _: &CatalogIndexRow) -> StorageBackendResult<()> {
+        panic!("ordinary index names have no DiskANN handle")
+    }
+
     fn refresh_index_table(&self, _: &str) -> StorageBackendResult<()> {
         panic!("a retained namespace move must not reload the partly moved catalog")
     }

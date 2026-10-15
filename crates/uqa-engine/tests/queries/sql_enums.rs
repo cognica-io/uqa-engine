@@ -97,7 +97,7 @@ fn enum_partition_key_catalog_output_matches_postgresql(#[case] open: Option<fn(
 }
 
 fn assert_partition_expression_label(engine: &Engine, label: &str) {
-    let rows = text_rows(engine, "SELECT partexprs::text FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass");
+    let rows = text_rows(engine, "SELECT pg_get_expr(partexprs, partrelid) FROM pg_partitioned_table WHERE partrelid = 'enum_partition_rows'::regclass");
     let expression = rows[0][0].as_ref().unwrap();
     assert!(
         expression.contains(&format!("'{label}'::current_partition_mood")),

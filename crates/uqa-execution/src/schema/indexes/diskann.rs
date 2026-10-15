@@ -74,7 +74,7 @@ pub(super) fn build(
         .map_err(storage_error)
 }
 
-pub(crate) fn target(
+pub fn target(
     vectors: &dyn VectorIndexCatalog,
     row: &CatalogIndexRow,
 ) -> StorageBackendResult<(String, u32, DiskANNIndexParams)> {

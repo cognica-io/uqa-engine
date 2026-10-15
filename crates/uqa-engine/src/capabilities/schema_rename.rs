@@ -77,7 +77,9 @@ impl Engine {
 
 impl SchemaRenameTransactions for Engine {
     fn with_rename_write(&self, operation: SchemaRenameWrite<'_>) -> Result<SQLResult, SQLError> {
-        self.with_implicit_transaction(|engine| operation(&engine.schema_rename_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            operation(&engine.schema_rename_context())
+        })
     }
 }
 

@@ -134,29 +134,34 @@ pub(crate) fn named_binary_operator_catalog_entry(
 ) -> Result<BinaryOperatorCatalogEntry, SQLError> {
     for polymorphic in [false, true] {
         for &(candidate, left, right, result_type, oid, function_oid) in catalog::SIGNATURES {
+            if candidate != name {
+                continue;
+            }
+            let range_match = resolution::range_operands(left, right, operands.map(Some)).is_some();
             if candidate == name
-                && [left, right]
-                    .into_iter()
-                    .zip(operands)
-                    .all(|(declared, actual)| {
-                        let actual = base_type(actual);
-                        resolution::catalog_type(declared).is_some_and(|ty| {
-                            crate::catalog::type_metadata::pg_type_oid(&ty)
-                                == crate::catalog::type_metadata::pg_type_oid(actual)
-                        }) || polymorphic
-                            && match declared {
-                                "anyarray" => matches!(
-                                    actual,
-                                    ColumnType::Array(_)
-                                        | ColumnType::Int2Vector
-                                        | ColumnType::OidVector
-                                ),
-                                "anyrange" => matches!(actual, ColumnType::Range(_)),
-                                "anymultirange" => matches!(actual, ColumnType::Multirange(_)),
-                                "anyenum" => matches!(actual, ColumnType::Enum(_)),
-                                _ => false,
-                            }
-                    })
+                && (range_match
+                    || [left, right]
+                        .into_iter()
+                        .zip(operands)
+                        .all(|(declared, actual)| {
+                            let actual = base_type(actual);
+                            resolution::catalog_type(declared).is_some_and(|ty| {
+                                crate::catalog::type_metadata::pg_type_oid(&ty)
+                                    == crate::catalog::type_metadata::pg_type_oid(actual)
+                            }) || polymorphic
+                                && match declared {
+                                    "anyarray" => matches!(
+                                        actual,
+                                        ColumnType::Array(_)
+                                            | ColumnType::Int2Vector
+                                            | ColumnType::OidVector
+                                    ),
+                                    "anyrange" => matches!(actual, ColumnType::Range(_)),
+                                    "anymultirange" => matches!(actual, ColumnType::Multirange(_)),
+                                    "anyenum" => matches!(actual, ColumnType::Enum(_)),
+                                    _ => false,
+                                }
+                        }))
             {
                 return Ok(BinaryOperatorCatalogEntry {
                     name: candidate,

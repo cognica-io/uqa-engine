@@ -31,13 +31,13 @@ impl DropStatementBindings for Engine {
         &self,
         write: SchemaRemovalWrite<'_>,
     ) -> Result<SQLResult, SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.schema_removal_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.schema_removal_context()))
     }
     fn with_domain_removal_write(
         &self,
         write: DomainRemovalWrite<'_>,
     ) -> Result<SQLResult, SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.domain_removal_context()))
+        self.with_implicit_definition_transaction(|engine| write(&engine.domain_removal_context()))
     }
     fn with_relation_removal_inputs(
         &self,

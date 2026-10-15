@@ -47,7 +47,7 @@ pub fn require_attribute_format(
 }
 
 /// Validate a load-only catalog without allocating identities or publishing repairs.
-pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+pub fn validate_constraint_formats(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
     match catalog.get_metadata(IDENTITY_METADATA_KEY)?.as_deref() {
         Some("1") => {}
         None => {
@@ -64,6 +64,12 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
     require_foreign_key_identity_format(catalog, false)?;
     addresses::require_format(catalog, false)?;
     require_attribute_format(catalog, false)?;
+    Ok(())
+}
+
+/// Validate a load-only catalog without allocating identities or publishing repairs.
+pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+    validate_constraint_formats(catalog)?;
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut validate = |columns: &[uqa_sql::ast::ColumnDef],
@@ -169,6 +175,12 @@ pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackend
         if migration.changed {
             migration.row.columns_json = migration.table.schema_json()?;
             catalog.save_foreign_table(&migration.row)?;
+            crate::catalog::tuples::publication::queue_relation(
+                catalog,
+                &migration.row.relation,
+                migration.table.object_id,
+                true,
+            )?;
         }
     }
     if legacy {
@@ -499,6 +511,12 @@ fn save_constraint_metadata_migrations(
         migration.schema.columns_json = serde_json::to_string(&migration.columns)?;
         migration.schema.constraints_json = names.encode(&migration.constraints)?;
         catalog.save_table(&migration.schema)?;
+        crate::catalog::tuples::publication::queue_relation(
+            catalog,
+            &migration.schema.relation,
+            migration.schema.object_id,
+            true,
+        )?;
     }
     Ok(())
 }
