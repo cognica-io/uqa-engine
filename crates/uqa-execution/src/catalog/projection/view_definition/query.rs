@@ -295,7 +295,11 @@ impl Deparser<'_> {
                 .cloned()
                 .or_else(|| projection.alias.clone())
                 .unwrap_or_else(|| expression_name(&projection.expr));
-            let own_name = match &projection.expr {
+            let mut target = &projection.expr;
+            while let ScalarExpr::Collated { expr, .. } = target {
+                target = expr;
+            }
+            let own_name = match target {
                 ScalarExpr::Column(column)
                     if self.parameter_reference(None, column, scope).is_none() =>
                 {

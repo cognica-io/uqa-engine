@@ -6257,6 +6257,35 @@
       "capability": "Retained type identity after removal",
       "workload": "Missing scalar/array type identities and the 153-observation PostgreSQL composite-removal reference across four providers and durable reopen.",
       "invariant": "A deleted selected type reports 42704 with its original OID; live lookup, attribute changes, lazy reads, rollback and retained tuple bounds keep their existing contracts."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_collation_metadata_preserves_projection_column_names",
+      "source": "crates/uqa-execution/src/catalog/projection/view_definition/expressions/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Catalog projection column identity",
+      "workload": "Plain and qualified columns, renamed outputs, explicit COLLATE and function calls with zero/one/two retained metadata wrappers in both formatting modes; existing 85-case PostgreSQL catalog-cast reference across four providers.",
+      "invariant": "Internal collation metadata never adds a redundant column alias; explicit clauses, renamed outputs, routine binding and catalog-dependent text retain their existing representation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "catalog_cast_qualification_matches_postgresql",
+      "source": "crates/uqa-engine/tests/queries/catalog_cast_qualification.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Catalog projection column identity",
+      "workload": "Plain and qualified columns, renamed outputs, explicit COLLATE and function calls with zero/one/two retained metadata wrappers in both formatting modes; existing 85-case PostgreSQL catalog-cast reference across four providers.",
+      "invariant": "Internal collation metadata never adds a redundant column alias; explicit clauses, renamed outputs, routine binding and catalog-dependent text retain their existing representation."
     }
   ]
 }

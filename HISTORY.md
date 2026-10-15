@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve plain projected column names in view definitions when analyzed expressions retain collation metadata, while keeping explicit COLLATE and renamed outputs.
+
 - Report PostgreSQL `42704` when a retained expression names a deleted type, preserving the original type OID in the diagnostic.
 
 - Deduplicate equivalent retained NULL expressions in `GROUP BY DISTINCT` while preserving explicit collation clauses, selected types and conflicting collation metadata.
