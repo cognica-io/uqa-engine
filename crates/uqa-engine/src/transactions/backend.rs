@@ -111,8 +111,7 @@ impl Engine {
             backend
                 .refresh_transaction_snapshot(&self.runtime.cancellation)
                 .map_err(|error| Self::storage_tx_error("refresh command snapshot", &error))?;
-            self.refresh_pinned_transaction_snapshot()
-                .map_err(|error| Self::storage_tx_error("refresh command caches", &error))?;
+            self.refresh_command_catalog(backend.as_ref(), advance_statement_baseline)?;
         } else {
             self.replace_unwritten_backend_transaction(
                 &mut stack,
@@ -136,6 +135,30 @@ impl Engine {
         if !fixed_snapshot_already_set && (advance_statement_baseline || !versioned) {
             stack[0].snapshot_change_baseline = baseline.clone();
             self.update_statement_row_lock_baseline(baseline);
+        }
+        Ok(())
+    }
+
+    fn refresh_command_catalog(
+        &self,
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+        advance_statement_baseline: bool,
+    ) -> Result<(), SQLError> {
+        // A lock recheck inside a command must preserve the command's own catalog publications, including a declaration that is not complete yet. Restore caches when a committed change became visible, or at the next command boundary; private writes alone do not require rebuilding every table.
+        let keep_command_catalog = !advance_statement_baseline
+            && backend
+                .read_view_revision()
+                .map_err(|error| Self::storage_tx_error("inspect command catalog view", &error))?
+                .is_some_and(|current| {
+                    self.epochs
+                        .seen_storage_read_view
+                        .lock()
+                        .as_ref()
+                        .is_some_and(|seen| current.same_committed_state(seen))
+                });
+        if !keep_command_catalog {
+            self.refresh_pinned_transaction_snapshot()
+                .map_err(|error| Self::storage_tx_error("refresh command caches", &error))?;
         }
         Ok(())
     }

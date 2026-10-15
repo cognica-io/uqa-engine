@@ -209,10 +209,13 @@ impl Engine {
     ) -> StorageBackendResult<Option<RelationIdentity>> {
         self.synchronize_catalog_registries()?;
         let candidates = self.relation_lookup_candidates(name)?;
-        let catalog = self.catalog_read_view();
         let indexes = self.durable.catalog_indexes.read();
         Ok(candidates.into_iter().find(|candidate| {
-            indexes.contains_key(candidate) || catalog.has_constraint_index(candidate)
+            indexes.contains_key(candidate)
+                || self
+                    .query_catalog_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.read_view.has_constraint_index(candidate))
         }))
     }
 
@@ -232,9 +235,15 @@ impl Engine {
         if let Some(index) = self.durable.catalog_indexes.read().get(&relation).cloned() {
             return Ok(Some(index));
         }
-        self.catalog_read_view()
-            .constraint_index(&relation)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))
+        // Current constraint indexes already belong to the registry above; only a retained query can have an earlier row absent from it.
+        self.query_catalog_snapshot
+            .as_ref()
+            .map_or(Ok(None), |snapshot| {
+                snapshot
+                    .read_view
+                    .constraint_index(&relation)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))
+            })
     }
 
     /// An index has no independent owner: `PostgreSQL` derives its owner from the indexed table and additionally permits the containing schema's owner to drop it.

@@ -11,6 +11,9 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ColumnType;
 
+#[path = "sql_update_from_delete_using/predicate_preparation.rs"]
+mod predicate_preparation;
+
 fn setup() -> Engine {
     let eng = Engine::new();
     eng.sql(

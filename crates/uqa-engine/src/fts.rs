@@ -344,9 +344,8 @@ impl Engine {
         } else {
             t.document_store
                 .read()
-                .get(doc_id)
+                .contains_doc_id(doc_id)
                 .map_err(|error| SQLError::Internal(format!("read existing document: {error}")))?
-                .is_some()
         };
         // Value-index maintenance: unindex the previous field values
         // (put may replace an existing document), index the new ones.

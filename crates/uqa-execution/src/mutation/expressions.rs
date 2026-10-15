@@ -15,6 +15,9 @@ use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{SQLError, SQLParam};
 
+mod predicate;
+pub(crate) use predicate::MutationPredicate;
+
 pub fn eval_mutation_expr<S: Clone + 'static>(
     services: MutationExpressionContext<'_, S>,
     ctes: &CteScope<S>,
@@ -43,21 +46,39 @@ pub(crate) fn eval_mutation_expr_with_retrieval<S: Clone + 'static>(
         params,
         services.types,
     );
+    eval_bound_mutation_expr(
+        &expression,
+        &ctes.scalar_subqueries,
+        hook.as_ref(),
+        row,
+        params,
+        retrieval,
+    )
+}
+
+fn eval_bound_mutation_expr(
+    expression: &ScalarExpr,
+    subqueries: &[uqa_sql::plan::QueryPlan],
+    hook: &dyn crate::query::set_projection::SetFunctionRuntime,
+    row: Option<&OwnedPhysicalRow>,
+    params: &[SQLParam],
+    retrieval: Option<&crate::scalar::RetrievalPredicate<'_>>,
+) -> Result<Value, SQLError> {
     if let Some(row) = row {
         let view = row.view();
         let mut context = PhysicalEvalContext::from_row_lookup(&view, params)
-            .with_function_hook(hook.as_ref())
-            .with_subquery_runner(hook.as_ref())
+            .with_function_hook(hook)
+            .with_subquery_runner(hook)
             .with_physical_outer_row(&row.schema, &row.row);
         if let Some(retrieval) = retrieval {
             context = context.with_retrieval_predicate(retrieval);
         }
-        eval_physical_scalar(&expression, &ctes.scalar_subqueries, &context)
+        eval_physical_scalar(expression, subqueries, &context)
     } else {
         let context = PhysicalEvalContext::new(None, params)
-            .with_function_hook(hook.as_ref())
-            .with_subquery_runner(hook.as_ref());
-        eval_physical_scalar(&expression, &ctes.scalar_subqueries, &context)
+            .with_function_hook(hook)
+            .with_subquery_runner(hook);
+        eval_physical_scalar(expression, subqueries, &context)
     }
 }
 

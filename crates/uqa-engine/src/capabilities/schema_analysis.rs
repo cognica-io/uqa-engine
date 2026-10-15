@@ -7,10 +7,72 @@
 //! Catalog metadata adapters for SQL declaration analysis and physical index validation.
 
 use crate::Engine;
+use std::{collections::BTreeMap, sync::Arc};
+use uqa_core::RelationIdentity;
+use uqa_execution::schema::constraints::names::catalog::{
+    ConstraintNameCatalog, ConstraintTableMetadata,
+};
 use uqa_sql::{
     ast::{ColumnDef, Expr, FunctionVolatility},
     SQLError,
 };
+
+fn constraint_table_metadata(table: &crate::TableState) -> ConstraintTableMetadata {
+    ConstraintTableMetadata {
+        object_id: table.object_id(),
+        columns: table.columns.snapshot(),
+        checks: table.table_checks.snapshot(),
+        foreign_keys: table.foreign_keys.snapshot(),
+        keys: table.key_constraints.snapshot(),
+        hierarchy: table.hierarchy.snapshot(),
+    }
+}
+
+impl ConstraintNameCatalog for Engine {
+    fn constraint_table(&self, relation: &RelationIdentity) -> Option<ConstraintTableMetadata> {
+        let table = self.storage.tables.read().get(relation).cloned()?;
+        Some(constraint_table_metadata(&table))
+    }
+    fn constraint_owner(
+        &self,
+        object_id: [u8; 16],
+    ) -> Option<(RelationIdentity, ConstraintTableMetadata)> {
+        let (relation, table) = self
+            .storage
+            .tables
+            .read()
+            .iter()
+            .find(|(_, table)| table.object_id() == object_id)
+            .map(|(relation, table)| (relation.clone(), Arc::clone(table)))?;
+        Some((relation, constraint_table_metadata(&table)))
+    }
+    fn constraint_schema_tables(&self, schema: &str) -> Vec<ConstraintTableMetadata> {
+        // Release the registry before reading per-table declarations, as catalog capture does.
+        let tables = self
+            .storage
+            .tables
+            .read()
+            .iter()
+            .filter(|(relation, _)| relation.schema == schema)
+            .map(|(_, table)| Arc::clone(table))
+            .collect::<Vec<_>>();
+        tables
+            .iter()
+            .map(|table| constraint_table_metadata(table))
+            .collect()
+    }
+    fn constraint_foreign_tables(
+        &self,
+    ) -> Arc<BTreeMap<RelationIdentity, uqa_execution::catalog::foreign::StoredForeignTable>> {
+        self.durable.foreign_tables.snapshot()
+    }
+    fn constraint_domains(&self) -> Arc<uqa_execution::catalog::domain::DomainRegistry> {
+        self.durable.domains.snapshot()
+    }
+    fn constraint_triggers(&self) -> Arc<uqa_sql::catalog::events::TriggerCatalog> {
+        self.durable.triggers.snapshot()
+    }
+}
 
 impl uqa_sql::assignment::AssignmentContext for Engine {
     fn evaluate_domain_check(

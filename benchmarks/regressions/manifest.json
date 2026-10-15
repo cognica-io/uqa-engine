@@ -3,6 +3,260 @@
   "checks": [
     {
       "package": "uqa-engine",
+      "kind": "lib",
+      "test": "prepared_document_writes_check_presence_without_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/storage_consistency.rs",
+      "capability": "Prepared document publication",
+      "workload": "Four prepared writes with unknown identities, covering insertion and replacement over a 256KB starting document.",
+      "invariant": "Presence checks copy zero payloads; documents and row counts remain correct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "prepared_document_presence_failure_does_not_publish_a_write",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/storage_consistency.rs",
+      "capability": "Prepared document publication",
+      "workload": "A provider rejects the metadata-only presence lookup before a replacement.",
+      "invariant": "The provider error reaches the caller, no full row read occurs, and the prior document survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "empty_generated_rewrites_prepare_their_constant_expressions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",
+      "capability": "Empty generated-column rewrite planning",
+      "workload": "ADD COLUMN and SET EXPRESSION on an empty relation with an immutable function whose sequence exposes planning.",
+      "invariant": "Each DDL retains PostgreSQL 18 constant-planning behavior even when no rows are rewritten.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "generated_rewrite_catalog_captures_do_not_grow_with_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/generated_rewrite.rs",
+      "capability": "Generated-column rewrite work",
+      "workload": "One versus thirty-three 4KB rows under a 64KB work_mem limit, on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Catalog captures are independent of row count; typed results, constant planning, savepoint rollback and row errors remain correct.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_catalog_expression_binds_once_and_preserves_each_rows_source_type",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/catalog_expression.rs",
+      "capability": "Prepared catalog expression evaluation",
+      "workload": "Repeated evaluation of typed and conditional expressions through one prepared schema plan.",
+      "invariant": "One expression binding and optimization serve one hundred distinct rows without losing their analyzed source type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_catalog_expression_preserves_lazy_row_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/catalog_expression.rs",
+      "capability": "Prepared catalog expression evaluation",
+      "workload": "Repeated evaluation of typed and conditional expressions through one prepared schema plan.",
+      "invariant": "Reusing the typed plan does not memoize row values or evaluate an unselected error branch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "mutation_row_identity_catalog_captures_do_not_grow_with_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
+      "capability": "Mutation relation identity reads",
+      "workload": "One versus nine updated rows, with and without RETURNING, on memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Catalog captures do not grow with affected row count; every RETURNING tableoid and the final row values remain correct.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "mutation_identity_uses_bound_ordinary_foreign_and_quoted_names",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/mutation_rows.rs",
+      "capability": "Retained mutation relation identities",
+      "workload": "Ordinary, foreign and quoted relations under a shadowing search path, then replacement of a relation held by a retained snapshot.",
+      "invariant": "Exact bound identities and retained incarnations are read with zero full-catalog captures; invalid or missing bound names remain errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_allocations_capture_once_per_visible_revision",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/snapshots.rs",
+      "capability": "Catalog allocation work",
+      "workload": "OID allocation across stable, private, refreshed and unversioned catalog sources.",
+      "invariant": "Repeated allocations reuse one view; private definitions, post-wait collisions and rollback invalidate it, and losing locks are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_allocation_without_a_revision_keeps_both_collision_checks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/snapshots.rs",
+      "capability": "Catalog allocation work",
+      "workload": "OID allocation across stable, private, refreshed and unversioned catalog sources.",
+      "invariant": "Sources without a revision still capture before and after every lock wait, including filtered enum allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_allocation_rejects_a_view_invalidated_during_capture",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/snapshots.rs",
+      "capability": "Catalog allocation work",
+      "workload": "OID allocation across stable, private, refreshed and unversioned catalog sources.",
+      "invariant": "A definition change during capture cannot admit an occupied identifier or publish a stale view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_allocation_reuses_metadata_until_ddl_or_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_allocation.rs",
+      "capability": "Catalog allocation retention",
+      "workload": "Four providers; twenty OIDs each for ordinary and temporary tables, private constraints and savepoint rollback.",
+      "invariant": "Twenty allocations capture one catalog, private DDL rejects a conflicting owner, and rollback permits its released identity with one fresh capture.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unrelated_updates_evaluate_no_stored_expressions_across_a_row_batch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/generated/tests.rs",
+      "capability": "Generated UPDATE work",
+      "workload": "One hundred rows with twenty stored expressions; unrelated and explicit source assignments.",
+      "invariant": "Unrelated updates evaluate zero stored expressions and retain values; explicit input assignments evaluate all two thousand expressions with typed results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "generated_updates_follow_postgresql_target_dependencies",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_generated_columns/update_dependencies.rs",
+      "capability": "Generated UPDATE semantics",
+      "workload": "Four providers; ordinary and DEFAULT assignments, BEFORE triggers, MERGE, ON CONFLICT, FK cascade, partition moves, rollback and reopen.",
+      "invariant": "Stored values match independent PostgreSQL 18 results, including destination partition expressions and trigger ordering.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "completed_ddl_batch_keeps_unrelated_stores_and_rolls_back_atomically",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Persistent DDL catalog retention",
+      "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
+      "invariant": "Seven DDL statements retain unrelated store identity through both SQL string and array batch boundaries; failed batches roll back atomically and persistent reopen preserves results.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "own_ddl_commits_keep_stores_but_intervening_commits_refresh_them",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Persistent DDL catalog retention",
+      "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
+      "invariant": "Successful own table, index, column, view and function commits retain unrelated store identity; intervening peer commits use ordinary refresh.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_lock_refresh_retains_own_definitions_and_observes_other_commits",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Persistent DDL catalog retention",
+      "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
+      "invariant": "Lock rechecks retain each unrelated table handle until committed visibility changes; private declarations, peer commits, savepoint rollback and reopen remain correct.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "shared_sessions_open_each_store_once_and_keep_current_counts",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/session_stores.rs",
+      "capability": "Independent session construction",
+      "workload": "Native SQLite, SQLite K/V and redb; two tables, a keyword analyzer and an HNSW field, followed by another writer and rollback.",
+      "invariant": "Exactly one document and inverted store per table and one vector store per field; valid row counts, independent handles, catalog-selected retrieval and later commit visibility remain correct.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
       "kind": "test",
       "test": "absent_temporal_unique_updates_keep_postgresql_equality",
       "cases": 42,
@@ -6228,6 +6482,707 @@
       "capability": "MERGE action clause and row identity",
       "workload": "Ordered SQL input errors, failed statement rollback, nested scalar/EXISTS outputs and repeated prepared MERGE actions.",
       "invariant": "Only MERGE RETURNING ancestry admits native action syntax; each nested result retains its owned outer-row input, while ordinary routines, earlier diagnostics and output-only metadata retain their existing contracts."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "unchanged_btree_projection_keeps_its_equality_keys_without_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/physical/tests.rs",
+      "capability": "Native B-tree publication",
+      "workload": "Thirty-two existing postings, two identical rewrites each, and a signed-zero representation change under a 64KB allowance.",
+      "invariant": "Identical projection writes cause zero SQLite row changes; changed representations retain correct equality keys and rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "unchanged_native_btree_writes_keep_history_conflicts_and_reopen",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests.rs",
+      "capability": "Native B-tree publication",
+      "workload": "An unchanged posting commit and exact retry, a retained reader, competing writers, and persistent reopen.",
+      "invariant": "Unchanged physical projections still publish a newer MVCC version, preserve historical bytes and exact receipts, reject stale writes, and reopen the changed key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_index_lookup_avoids_table_metadata_captures",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_indexes.rs",
+      "capability": "Current and retained index registries",
+      "workload": "Thirty-two repeated index lookups with zero/thirty-two unrelated tables on four providers, shadowed and temporary schemas, quoted names, missing indexes and a retained constraint index.",
+      "invariant": "Index lookup makes zero full-table metadata captures once the current registry is refreshed, preserving exact index rows, namespace precedence, missing results, bound-name errors and retained query fallback."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_index_lookup_preserves_retained_constraint_fallback",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_indexes.rs",
+      "capability": "Current and retained index registries",
+      "workload": "Thirty-two repeated index lookups with zero/thirty-two unrelated tables on four providers, shadowed and temporary schemas, quoted names, missing indexes and a retained constraint index.",
+      "invariant": "Index lookup makes zero full-table metadata captures once the current registry is refreshed, preserving exact index rows, namespace precedence, missing results, bound-name errors and retained query fallback."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_array_lookups_avoid_unrelated_catalog_captures",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_arrays.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_array_names_use_current_definitions_with_a_retained_query_view",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_arrays.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "array_name_projection_preserves_missing_oid_schema_and_generated_fallback",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/types/relation_arrays/tests.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "current_array_projection_keeps_order_exact_identity_and_absent_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/types/relation_arrays/tests.rs",
+      "capability": "Current relation-array name metadata",
+      "workload": "Repeated table/view/foreign array-name inquiries with zero/sixty unrelated tables on four providers, retained query metadata and displaced names; exact OID, namespace and missing-name projection.",
+      "invariant": "Creation name inquiries perform zero complete catalog captures and preserve current definitions, exact OID selection, recorded names, generated-name fallback and candidate precedence."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "constraint_names_avoid_unrelated_catalog_captures",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/constraint_names.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "constraint_names_keep_current_identity_across_rename_rollback_and_replacement",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/capabilities/tests/constraint_names.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "reservations_recheck_current_owners_and_release_failed_locks",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/constraints/names/tests.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "reservation_refresh_preserves_the_current_owned_index_name",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/schema/constraints/names/tests.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Constraint names across tables, constraint triggers, foreign tables and domains with zero/sixty unrelated tables on four providers; retained metadata, rollback, owner replacement and a changed catalog after lock acquisition.",
+      "invariant": "Constraint inquiries perform zero complete catalog captures, preserve PostgreSQL names and object identities, recheck current metadata after lock refresh, release failed reservations and retain successful reservations and current owned index names."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "owned_index_name_wait_preserves_other_constraint_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/constraint_names.rs",
+      "capability": "Current constraint name coordination",
+      "workload": "Three sessions interleave two owned-index renames with a rolled-back CHECK name reservation on native SQLite, SQLite K/V and redb.",
+      "invariant": "A successful rename retains independently committed owned-index names after a destination-name wait and rollback; it never republishes stale names."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "exact_builtin_operator_selection_needs_no_candidate_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Every implemented exact builtin scalar operator signature.",
+      "invariant": "Exact builtin operands select their catalog signature with a zero-byte candidate allowance and no retained heap allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_operator_types_preserve_exact_unknown_and_cross_type_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Known, unknown, cross-width numeric, date and text operands under a zero-byte allowance.",
+      "invariant": "Exact matching keeps PostgreSQL operand precedence and result types without unrelated candidate ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "polymorphic_operator_outputs_keep_only_their_nested_type_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Array operands with declared element modifiers under the original bounded allowance.",
+      "invariant": "Polymorphic selection preserves normalized nested types and transfers only their owned leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "either_cancellation_stops_operator_type_production_without_retention",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Cancel either the retained or invoking owner before selecting a primitive operator.",
+      "invariant": "The exact builtin path reports 57014 and releases every temporary reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_result_errors_preserve_resource_identity_and_both_cancellation_sources",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/production_tests.rs",
+      "capability": "Builtin operator selection",
+      "workload": "Array type results with an exhausted allowance and both cancellation owners.",
+      "invariant": "Allocating type results preserve 53200 and cancellation preserves 57014 after exact scalar selection stops allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_kind_lookups_avoid_unrelated_catalog_captures",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_names.rs",
+      "capability": "Relation-name binding",
+      "workload": "Table, index, view, materialized view, sequence, composite, foreign and virtual names with zero versus sixty unrelated tables on four providers.",
+      "invariant": "Dynamic, loaded and bound lookups capture zero complete catalogs and retain exact kinds and missing-name errors.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_kind_lookup_retains_statement_names_and_schema_privileges",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/relation_names.rs",
+      "capability": "Relation-name binding",
+      "workload": "A retained statement view followed by table rename and schema USAGE revocation, then current rename and rollback.",
+      "invariant": "Retained names and privileges stay fixed without recaptures; current names follow rename and rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_relation_kinds_need_one_table_probe_regardless_of_catalog_size",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/relation_names/tests.rs",
+      "capability": "Relation-name binding",
+      "workload": "Exact table, absent, virtual and invalid bindings with zero versus sixty unrelated table names.",
+      "invariant": "Each ordinary bound name performs one membership probe; virtual and invalid names do not probe tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "virtual_and_physical_readers_stop_at_the_same_first_namespace_match",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/read/tests.rs",
+      "capability": "Relation-name binding",
+      "workload": "Temporary, public and system relation shadowing under three namespace orders.",
+      "invariant": "Kind, virtual and table readers choose the same first namespace match.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_system_relations_ignore_shadowing_and_reject_unqualified_bindings",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/read/tests.rs",
+      "capability": "Relation-name binding",
+      "workload": "Canonical system and physical names under temporary shadowing, plus an invalid unqualified stored binding.",
+      "invariant": "Bound identities bypass dynamic shadowing and reject malformed stored names.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "unrestricted_builtin_authority_avoids_catalog_captures",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/builtin_authority.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Superuser and ordinary roles, zero/sixty unrelated tables, plain SELECT and a revoked builtin on all four providers.",
+      "invariant": "Unrestricted authority captures zero catalogs; plain SELECT captures at most its analysis/execution views; a revoked ordinary role still receives 42501.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "builtin_authority_preserves_retained_acl_role_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/builtin_authority.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Captured authority before and after lower(text) revocation, retained query input and a private grant followed by rollback.",
+      "invariant": "Selected declarations keep their exact EXECUTE decision, retained authority stays fixed, and public SQL observes rollback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unrestricted_builtin_authority_retains_its_acl_and_role_decision",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/execution/tests.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Empty builtin overrides and superuser authority followed by a role-attribute change.",
+      "invariant": "Narrow capture is unavailable for restricted authority and retains the original immutable role/ACL decision.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_builtin_authority_uses_the_selected_declaration_and_kind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/execution/tests.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Revoked scalar and aggregate signatures, another overload and a same-named user routine.",
+      "invariant": "Only the selected builtin declaration and routine kind determine EXECUTE denial.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "builtin_permission_snapshots_and_bootstrap_authority_are_retained",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/execution/tests.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Old revoked authority, a new cleared ACL and bootstrap authority over the revoked catalog.",
+      "invariant": "Retained ACL results stay fixed while new snapshots and actual superuser authority reflect their own inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "builtin_privileges_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Builtin EXECUTE grants, selected overloads, role membership and ordinary/superuser authority.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "builtin_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Constant planning, surviving calls and builtin permission checks before argument side effects.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "prepared_folded_and_surviving_calls_follow_peer_acl_changes",
+      "cases": 6,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "Prepared folded and surviving builtin calls after another session commits ACL changes.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_sqlite::fixture_1_0",
+        "case_1_sqlite::fixture_2_1",
+        "case_2_sqlite_key_value::fixture_1_0",
+        "case_2_sqlite_key_value::fixture_2_1",
+        "case_3_redb::fixture_1_0",
+        "case_3_redb::fixture_2_1"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "mutation_initialization_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/security_roles/builtin_grants.rs",
+      "capability": "Builtin routine authority",
+      "workload": "INSERT, UPDATE, DELETE and MERGE initialization with revoked builtin permissions.",
+      "invariant": "Exact outputs, SQLSTATEs, declaration identities, side-effect ordering and retained/prepared authority match the committed PostgreSQL 18 oracle.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "independent_sessions_reuse_physical_index_preparation",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/session_indexes.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "Fresh independent SQLite, SQLite K/V and redb sessions with zero or sixty unrelated indexed tables.",
+      "invariant": "The exact immutable registry yields one shared preparation while each session retains independent stores and correct PK output.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "shared_index_preparation_preserves_private_and_committed_definitions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/session_indexes.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "Private index creation, rollback, peer commit and retained definition consumers on all three persistent providers.",
+      "invariant": "Private and committed registries select their own definitions; retained consumers remain unchanged and cancellation stays session-local.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_physical_index_preparation_is_single_and_preserves_retained_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/tests.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "Eight simultaneous first readers share one immutable registry, then sibling consumers replace and restore it.",
+      "invariant": "One successful preparation serves all simultaneous readers and prior physical keys and predicates remain correct after replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_physical_index_preparation_does_not_publish_invalid_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/physical/tests.rs",
+      "capability": "Shared immutable index preparation",
+      "workload": "A sibling cache rejects malformed stored index JSON after a valid registry has been prepared.",
+      "invariant": "Failed preparation leaves the existing immutable definition entry available to every reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_recheck_validates_metadata_without_planning_physical_builds",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
+      "capability": "Index registry recheck work",
+      "workload": "An unchanged index registry followed by malformed current index metadata.",
+      "invariant": "Catalog rechecks select zero physical build plans and still reject malformed metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_recheck_partition_validation_visits_unrelated_tables_once",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
+      "capability": "Index registry recheck work",
+      "workload": "Valid catalogs with zero or sixty unrelated nonpartitioned tables, with and without indexes.",
+      "invariant": "Partition coverage traverses each table once for a nonempty index graph and visits no tables for an empty graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "catalog_recheck_keeps_missing_partition_index_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/registry/recheck/tests.rs",
+      "capability": "Index registry recheck work",
+      "workload": "A partitioned parent index whose child table lacks an attached child index.",
+      "invariant": "Rechecks reject the missing child index with the existing diagnostic before publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "update_source_qualification_prepares_once_for_fixed_statement_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/update/from/tests.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "One hundred target rows and one hundred source rows, with memory and disk-backed source materialization.",
+      "invariant": "Exactly one predicate preparation serves 10,000 candidate pairs under one schema; all selected sources and qualification counts remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_update_qualification_keeps_lazy_errors_nulls_and_schema_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/update/from/tests.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "A lazy arithmetic predicate over NULL and error-producing rows, then equal-column schemas with different declared types.",
+      "invariant": "Row errors remain lazy, NULL does not qualify, and the single retained preparation is replaced whenever the complete schema changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_update_qualification_keeps_source_counts_order_and_rechecks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/update/from/tests.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "Empty and spilled duplicate source rows, source-only qualification counts, and changed row values at recheck.",
+      "invariant": "Empty inputs prepare nothing; duplicate counts and first-source order remain exact, and rechecks evaluate current values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "update_predicate_preparation_preserves_postgresql_evaluation",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_update_from_delete_using/predicate_preparation.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "Four providers; prepared JSON source rows, volatile sequence calls, empty sources, lazy arithmetic, rollback, independent sessions and persistent reopen.",
+      "invariant": "Exact rows, aggregates and sequence effects match PostgreSQL 18 while the original payloads and transaction boundaries survive.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "update_from_recheck_keeps_the_source_row_selected_by_the_command_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_row_locks_recheck/writer_order/update_from_source.rs",
+      "capability": "Mutation predicate preparation",
+      "workload": "Joined UPDATE waits for a competing writer after selecting a source row from its command snapshot.",
+      "invariant": "The lock recheck uses the updated target with the originally selected source row and preserves writer order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_views_keep_renamed_owners_after_peer_catalog_publication",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/catalog/roles/creation.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Twelve provider/isolation/view schedules that deliver the role rename's catalog epoch after the creator observes its physical commit, without another durable commit to repair a lost view.",
+      "invariant": "A nested catalog lookup preserves the private view and original owner incarnation through commit/reopen; the uncorrected merge deterministically loses the ownership JOIN row after COMMIT.",
+      "case_names": [
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_1_4",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_1_4",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_1_4",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_1_4",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_1_4",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_1_4",
+        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_2_5"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_view_definitions_survive_refresh_commit_and_undo",
+      "cases": 18,
+      "source": "crates/uqa-engine/src/tests/catalog/roles/view_publication.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Eighteen provider/isolation/finish schedules with private view replacement, rename, deletion, creation and materialized refresh beside a committed peer replacement.",
+      "invariant": "Private definitions and peer changes survive catalog synchronization; commit, rollback, savepoint and reopen results match PostgreSQL 18.",
+      "case_names": [
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_viewsCOMMIT__"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_view_records_preserve_complete_definitions_and_peer_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Private creation, same-identity replacement, rename, deletion and reincarnation beside a peer-only definition.",
+      "invariant": "One exact provenance inquiry per distinct key retains complete definitions and owner identities without changing the captured committed map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unchanged_views_share_the_committed_map_and_provenance_errors_do_not_publish",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
+      "capability": "Private view catalog publication",
+      "workload": "An unchanged view and a rejected private-provenance inquiry.",
+      "invariant": "Unchanged definitions reuse the committed allocation; provenance errors propagate without publishing a partial result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "view_private_provenance_tracks_exact_names_rename_deletion_and_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/view_provenance.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Serialized and native views with adjacent, Unicode, NUL and wildcard names through replacement, rename, deletion, savepoint undo and commit.",
+      "invariant": "Private provenance identifies exact view keys, including tombstones, without matching another name or schema.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-execution",

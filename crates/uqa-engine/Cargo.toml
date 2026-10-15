@@ -18,6 +18,8 @@ categories = ["database-implementations"]
 
 [features]
 default = []
+arrow = ["uqa-fdw/arrow", "dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema"]
+duckdb = ["dep:duckdb", "uqa-fdw/duckdb"]
 nori = ["uqa-analysis/nori"]
 kuromoji = ["uqa-analysis/kuromoji"]
 
@@ -53,6 +55,11 @@ thiserror = { workspace = true }
 # emscripten builds bundle plain SQLite instead.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
 rusqlite = { workspace = true }
+# Integration fixtures and the analytical comparison use DuckDB directly.
+duckdb = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+arrow-ipc = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
 
 [target.'cfg(any(windows, all(unix, not(target_os = "emscripten"))))'.dependencies]
 fs2 = { workspace = true }
@@ -70,10 +77,6 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
-duckdb = { workspace = true }
-arrow-array = { workspace = true }
-arrow-ipc = { workspace = true }
-arrow-schema = { workspace = true }
 
 [target.'cfg(not(target_os = "emscripten"))'.dev-dependencies]
 rusqlite = { workspace = true, features = ["functions"] }
@@ -150,6 +153,7 @@ harness = false
 [[bench]]
 name = "analytical_comparison"
 harness = false
+required-features = ["duckdb"]
 
 [lints]
 workspace = true

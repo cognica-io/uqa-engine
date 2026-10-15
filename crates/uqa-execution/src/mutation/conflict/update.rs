@@ -16,7 +16,10 @@ use crate::mutation::{
     expressions::eval_mutation_expr,
     locking::{lock_mutation_target, MutationLockCleanup},
     prepared::PreparedInsertConflict,
-    referential::{prepare_document_rewrite, reject_partition_rewrite, ReferentialContext},
+    referential::{
+        prepare_document_rewrite, refresh_updated_generated_columns, reject_partition_rewrite,
+        ReferentialContext,
+    },
     rows::{
         append_hidden_qualified_row as dml_append_hidden_qualified_row,
         target_row as dml_target_row,
@@ -365,6 +368,12 @@ impl InsertConflictLocks {
                     return Ok(PreparedInsertConflict::Skip);
                 };
                 new_document = triggered_document;
+                refresh_updated_generated_columns(
+                    context,
+                    &existing.table,
+                    &mut new_document,
+                    &updated_columns,
+                )?;
                 let prepared = prepare_document_rewrite(
                     context,
                     &existing.table,

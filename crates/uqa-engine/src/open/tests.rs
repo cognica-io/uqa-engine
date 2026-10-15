@@ -16,12 +16,15 @@ use super::Engine;
 use crate::tests::native_storage;
 
 mod cache_refresh;
+mod command_catalog;
 mod external_refresh;
 mod internal_reads;
 mod key_identities;
 mod own_commits;
 mod read_view;
 mod resource_lifetime;
+mod session_indexes;
+mod session_stores;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine

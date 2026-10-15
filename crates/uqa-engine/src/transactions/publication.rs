@@ -38,9 +38,14 @@ impl Engine {
                 && self.epochs.table_data.dirty.load(Ordering::Acquire)
                 && !self.epochs.table_catalog.dirty.load(Ordering::Acquire)
                 && !self.epochs.catalog_registry.dirty.load(Ordering::Acquire);
+            let own_definitions = wrote_records
+                && (self.epochs.table_catalog.dirty.load(Ordering::Acquire)
+                    || self.epochs.catalog_registry.dirty.load(Ordering::Acquire));
             self.publish_committed_transaction_epochs();
             if data_only {
                 self.adopt_own_commit_revisions();
+            } else if own_definitions {
+                self.adopt_own_catalog_commit_revisions();
             }
             let recorded = committed.statistics_settlement.recorded();
             self.settle_statistics_changes(committed.statistics_settlement.clone());

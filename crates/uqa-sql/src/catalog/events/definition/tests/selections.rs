@@ -567,7 +567,7 @@ fn trigger_definitions_hold_every_enable_mode_and_do_not_read_the_replication_ro
                 TriggerTiming::Before,
                 TriggerEvent::Insert,
                 true,
-                &[],
+                Some(&[]),
             )
             .unwrap();
         assert_eq!(
@@ -591,7 +591,13 @@ fn trigger_definitions_hold_every_enable_mode_and_do_not_read_the_replication_ro
         // Another timing or level has none of them.
         for (timing, row) in [(TriggerTiming::After, true), (TriggerTiming::Before, false)] {
             assert!(lookup
-                .trigger_definitions_for("public.child", timing, TriggerEvent::Insert, row, &[])
+                .trigger_definitions_for(
+                    "public.child",
+                    timing,
+                    TriggerEvent::Insert,
+                    row,
+                    Some(&[])
+                )
                 .unwrap()
                 .is_empty());
         }

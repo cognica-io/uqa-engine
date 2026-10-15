@@ -29,6 +29,7 @@ mod settings;
 mod snapshots;
 mod system_security;
 mod tuple_changes;
+mod view_publication;
 
 #[test]
 fn role_registry_and_memberships_restore_together_after_reopen() {

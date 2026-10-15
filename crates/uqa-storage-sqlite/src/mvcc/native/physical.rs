@@ -185,7 +185,13 @@ fn sql(layout: &'static NativeRecordLayout, statement: Statement) -> Arc<str> {
             let action = if assignments.is_empty() {
                 "NOTHING".to_owned()
             } else {
-                format!("UPDATE SET {}", assignments.join(", "))
+                // An identical posting already has its derived equality key. MVCC still publishes its evaluated history and conflict precondition; avoid rerunning only the physical posting's update triggers.
+                let condition = if layout.family == super::NativeRecordFamily::BtreeIndexEntries {
+                    " WHERE value_json IS NOT excluded.value_json"
+                } else {
+                    ""
+                };
+                format!("UPDATE SET {}{condition}", assignments.join(", "))
             };
             format!(
                 "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO {action}",

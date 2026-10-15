@@ -550,6 +550,16 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool>;
     fn load_views(&self) -> StorageBackendResult<Vec<ViewRow>>;
 
+    /// Whether this exact view record has a private creation, replacement or deletion in the current session, including either end of a rename.
+    fn view_has_private_changes(&self, _relation: &RelationIdentity) -> StorageBackendResult<bool> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "private view provenance is not supported by this catalog".into(),
+            ));
+        }
+        Ok(false)
+    }
+
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     /// Bind graph mutations to their definition and allocation generation while allowing independent data writers to share the definition. Concurrent backends and catalog wrappers must implement this capability.
     fn guard_graph_definition(&self, _graph: Option<&str>) -> StorageBackendResult<()> {

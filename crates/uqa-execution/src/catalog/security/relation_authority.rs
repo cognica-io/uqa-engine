@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fresh authority overlays only ACL tuples actually replaced by the retained transaction.
+//! Fresh authority retains private view records and relation ACL tuples from the active transaction.
 
 use crate::catalog::foreign::StoredForeignTable;
 use std::{collections::BTreeMap, sync::Arc};
@@ -46,6 +46,11 @@ pub fn merge_private_views(
     current: &BTreeMap<RelationIdentity, StoredView>,
     mut latest: Arc<BTreeMap<RelationIdentity, StoredView>>,
 ) -> StorageBackendResult<Arc<BTreeMap<RelationIdentity, StoredView>>> {
+    latest = merge_private_view_definitions(current, latest, |relation| {
+        catalog.map_or(Ok(false), |catalog| {
+            catalog.view_has_private_changes(relation)
+        })
+    })?;
     for (relation, view) in Arc::make_mut(&mut latest) {
         if let Some(previous) = current
             .get(relation)
@@ -53,6 +58,28 @@ pub fn merge_private_views(
         {
             view.security =
                 merge_private(catalog, relation, &previous.security, view.security.clone())?;
+        }
+    }
+    Ok(latest)
+}
+
+fn merge_private_view_definitions(
+    current: &BTreeMap<RelationIdentity, StoredView>,
+    mut latest: Arc<BTreeMap<RelationIdentity, StoredView>>,
+    mut is_private: impl FnMut(&RelationIdentity) -> StorageBackendResult<bool>,
+) -> StorageBackendResult<Arc<BTreeMap<RelationIdentity, StoredView>>> {
+    let relations = current
+        .keys()
+        .chain(latest.keys())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for relation in relations {
+        if is_private(&relation)? {
+            if let Some(view) = current.get(&relation) {
+                Arc::make_mut(&mut latest).insert(relation, view.clone());
+            } else {
+                Arc::make_mut(&mut latest).remove(&relation);
+            }
         }
     }
     Ok(latest)
@@ -92,3 +119,6 @@ pub fn merge_private_foreign(
         security: latest,
     })
 }
+
+#[cfg(test)]
+mod tests;

@@ -6,13 +6,14 @@
 
 //! Retain a constraint destination within its immutable owning relation.
 
-use crate::catalog::{
-    services::CatalogSnapshotSource, CatalogReadSnapshot, CatalogReadView, CatalogTableSnapshot,
-};
+pub mod catalog;
+#[cfg(test)]
+mod tests;
 use crate::row_locks::{
     shared_objects::{SharedCatalogLock, SharedObjectLockSession},
     RelationLockMode,
 };
+use catalog::{ConstraintNameCatalog, ConstraintTableMetadata};
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -26,26 +27,15 @@ use uqa_sql::{
 
 #[derive(Clone, Copy)]
 pub struct ConstraintNameContext<'a> {
-    pub catalog: &'a dyn CatalogSnapshotSource,
+    pub catalog: &'a dyn ConstraintNameCatalog,
     pub locks: &'a dyn SharedObjectLockSession,
 }
 
-fn table_names(table: &CatalogTableSnapshot) -> ConstraintNames<'_> {
-    ConstraintNames {
-        columns: &table.columns,
-        checks: &table.checks,
-        foreign_keys: &table.foreign_keys,
-        keys: &table.keys,
-    }
-}
-
 fn trigger_names<'a>(
-    catalog: &'a CatalogReadSnapshot,
+    triggers: &'a uqa_sql::catalog::events::TriggerCatalog,
     relation: &RelationIdentity,
 ) -> impl Iterator<Item = &'a str> {
-    catalog
-        .definitions
-        .triggers
+    triggers
         .get(relation)
         .into_iter()
         .flat_map(|triggers| triggers.values())
@@ -59,41 +49,35 @@ fn trigger_names<'a>(
 }
 
 pub(crate) fn existing_names(
-    catalog: &CatalogReadSnapshot,
+    catalog: &dyn ConstraintNameCatalog,
     relation: &RelationIdentity,
 ) -> BTreeSet<String> {
-    catalog
-        .tables
-        .get(relation)
+    let table = catalog.constraint_table(relation);
+    let triggers = catalog.constraint_triggers();
+    table
+        .as_ref()
         .into_iter()
-        .flat_map(|table| table_names(table).entries().map(|entry| entry.name))
-        .chain(trigger_names(catalog, relation))
+        .flat_map(|table| table.names().entries().map(|entry| entry.name))
+        .chain(trigger_names(&triggers, relation))
         .map(str::to_owned)
         .collect()
 }
 
 pub(crate) fn event_names(
-    catalog: &CatalogReadSnapshot,
+    catalog: &dyn ConstraintNameCatalog,
     relation: &RelationIdentity,
 ) -> BTreeSet<String> {
-    trigger_names(catalog, relation)
+    trigger_names(&catalog.constraint_triggers(), relation)
         .map(str::to_owned)
         .collect()
 }
 
-pub(crate) fn schema_names(catalog: &CatalogReadSnapshot, schema: &str) -> BTreeSet<String> {
-    let snapshot = catalog;
+pub(crate) fn schema_names(catalog: &dyn ConstraintNameCatalog, schema: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    for (relation, table) in &snapshot.tables {
-        if relation.schema == schema {
-            names.extend(
-                table_names(table)
-                    .entries()
-                    .map(|entry| entry.name.to_owned()),
-            );
-        }
+    for table in catalog.constraint_schema_tables(schema) {
+        names.extend(table.names().entries().map(|entry| entry.name.to_owned()));
     }
-    for (relation, table) in snapshot.definitions.foreign_tables.iter() {
+    for (relation, table) in catalog.constraint_foreign_tables().iter() {
         if relation.schema == schema {
             names.extend(
                 ConstraintNames {
@@ -107,17 +91,12 @@ pub(crate) fn schema_names(catalog: &CatalogReadSnapshot, schema: &str) -> BTree
             );
         }
     }
-    for relation in snapshot
-        .definitions
-        .triggers
-        .keys()
-        .filter(|relation| relation.schema == schema)
-    {
-        names.extend(trigger_names(catalog, relation).map(str::to_owned));
+    let triggers = catalog.constraint_triggers();
+    for relation in triggers.keys().filter(|relation| relation.schema == schema) {
+        names.extend(trigger_names(&triggers, relation).map(str::to_owned));
     }
-    for domain in snapshot
-        .definitions
-        .domains
+    for domain in catalog
+        .constraint_domains()
         .values()
         .filter(|domain| domain.identity.schema == schema)
     {
@@ -140,7 +119,7 @@ pub(crate) fn schema_names(catalog: &CatalogReadSnapshot, schema: &str) -> BTree
 }
 
 pub(crate) fn name_scope(
-    catalog: &CatalogReadSnapshot,
+    catalog: &dyn ConstraintNameCatalog,
     relation: &RelationIdentity,
 ) -> ConstraintNameScope {
     ConstraintNameScope {
@@ -150,55 +129,44 @@ pub(crate) fn name_scope(
 }
 
 fn owner(
-    catalog: &CatalogReadView,
+    catalog: &dyn ConstraintNameCatalog,
     object_id: [u8; 16],
-) -> Result<(&RelationIdentity, &CatalogTableSnapshot), SQLError> {
+) -> Result<(RelationIdentity, ConstraintTableMetadata), SQLError> {
     catalog
-        .snapshot()
-        .tables
-        .iter()
-        .find(|(_, table)| table.object_id == object_id)
+        .constraint_owner(object_id)
         .ok_or_else(|| SQLError::Internal("constraint owning relation disappeared".into()))
 }
 
 impl ConstraintNameContext<'_> {
     pub fn existing_names(&self, table: &str) -> Result<BTreeSet<String>, SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-        Ok(existing_names(
-            self.catalog.current_catalog_snapshot().snapshot(),
-            &relation,
-        ))
+        Ok(existing_names(self.catalog, &relation))
     }
 
     pub fn name_scope(&self, relation: &RelationIdentity) -> ConstraintNameScope {
-        name_scope(self.catalog.current_catalog_snapshot().snapshot(), relation)
+        name_scope(self.catalog, relation)
     }
 
     pub fn automatic_names(&self, table: &str) -> Result<BTreeSet<String>, SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-        Ok(schema_names(
-            self.catalog.current_catalog_snapshot().snapshot(),
-            &relation.schema,
-        ))
+        Ok(schema_names(self.catalog, &relation.schema))
     }
     pub fn bind(&self, table: &str) -> Result<[u8; 16], SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         self.catalog
-            .current_catalog_snapshot()
-            .snapshot()
-            .tables
-            .get(&relation)
+            .constraint_table(&relation)
             .map(|table| table.object_id)
             .ok_or_else(|| SQLError::UnknownTable(table.into()))
     }
 
     pub fn in_use(&self, object_id: [u8; 16], name: &str) -> Result<bool, SQLError> {
-        let catalog = self.catalog.current_catalog_snapshot();
-        let (relation, table) = owner(&catalog, object_id)?;
-        Ok(table_names(table)
+        let (relation, table) = owner(self.catalog, object_id)?;
+        Ok(table
+            .names()
             .entries()
             .any(|constraint| constraint.name == name)
-            || trigger_names(catalog.snapshot(), relation).any(|candidate| candidate == name))
+            || trigger_names(&self.catalog.constraint_triggers(), &relation)
+                .any(|candidate| candidate == name))
     }
 
     pub fn ensure_available(&self, table: &str, name: Option<&str>) -> Result<(), SQLError> {
@@ -245,18 +213,18 @@ impl ConstraintNameContext<'_> {
         columns: &[ColumnDef],
         constraints: &mut TableConstraintSet,
     ) -> Result<(), SQLError> {
-        let catalog = self.catalog.current_catalog_snapshot();
-        let (_, table) = owner(&catalog, object_id)?;
-        crate::schema::indexes::constraint_names::rebind_current_key_names(
+        let (_, table) = owner(self.catalog, object_id)?;
+        crate::schema::indexes::constraint_names::rebind_key_names(
             constraints.key_constraints.iter_mut().chain(
                 constraints
                     .hierarchy
                     .partition_inherited_key_constraints
                     .iter_mut(),
             ),
-            table,
+            table.key_names(),
         );
-        let before = table_names(table)
+        let before = table
+            .names()
             .entries()
             .map(|entry| (entry.name, entry.object_id))
             .collect::<std::collections::BTreeMap<_, _>>();
@@ -265,16 +233,24 @@ impl ConstraintNameContext<'_> {
                 self.reserve(object_id, entry.name)?;
             }
         }
-        let refreshed = self.catalog.current_catalog_snapshot();
-        let (_, table) = owner(&refreshed, object_id)?;
-        crate::schema::indexes::constraint_names::rebind_current_key_names(
+        self.rebind_key_names(object_id, constraints)
+    }
+
+    /// Retain independent index renames that became visible during a name reservation.
+    pub(crate) fn rebind_key_names(
+        &self,
+        object_id: [u8; 16],
+        constraints: &mut TableConstraintSet,
+    ) -> Result<(), SQLError> {
+        let (_, table) = owner(self.catalog, object_id)?;
+        crate::schema::indexes::constraint_names::rebind_key_names(
             constraints.key_constraints.iter_mut().chain(
                 constraints
                     .hierarchy
                     .partition_inherited_key_constraints
                     .iter_mut(),
             ),
-            table,
+            table.key_names(),
         );
         Ok(())
     }

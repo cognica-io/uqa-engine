@@ -22,58 +22,25 @@ use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::SQLError;
 
 use super::{
-    CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationLookupMode,
-    RelationNameResolution, RelationResolution,
+    CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationNameResolution,
+    RelationResolution,
 };
 
 impl CatalogReadView {
-    /// Produce the only relation candidate set exposed to SQL binding and execution. Dynamic names are filtered by namespace `USAGE`; stored bindings must already be canonical and therefore bypass name lookup entirely.
+    fn relation_names(&self) -> super::relation_names::RelationNameCatalog<'_> {
+        super::relation_names::RelationNameCatalog::new(
+            &self.snapshot.tables,
+            &self.snapshot.definitions,
+        )
+    }
+
     fn relation_lookup_candidates(
         &self,
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Vec<uqa_core::RelationIdentity>, SQLError> {
-        if resolution.lookup_mode() == RelationLookupMode::Bound {
-            let (schema, relation) =
-                uqa_core::RelationIdentity::parse_reference(name).map_err(|error| {
-                    SQLError::Internal(format!("decode bound relation `{name}`: {error}"))
-                })?;
-            let schema = schema.ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "bound query contains non-canonical relation reference `{name}`"
-                ))
-            })?;
-            return Ok(vec![uqa_core::RelationIdentity::new(schema, relation)]);
-        }
-
-        let qualified = uqa_core::RelationIdentity::parse_reference(name)
-            .map_err(SQLError::Internal)?
-            .0
-            .is_some();
-        let mut visible = Vec::new();
-        for relation in resolution.raw_relation_lookup_candidates(name)? {
-            if self
-                .snapshot
-                .definitions
-                .schemas
-                .contains_key(&relation.schema)
-                && !self.schema_has_privilege_to(
-                    &relation.schema,
-                    &resolution.current_user,
-                    crate::catalog::security::schema::SchemaAclPrivilege::Usage,
-                )
-            {
-                if qualified {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42501".into(),
-                        message: format!("permission denied for schema {}", relation.schema),
-                    });
-                }
-                continue;
-            }
-            visible.push(relation);
-        }
-        Ok(visible)
+        self.relation_names()
+            .relation_lookup_candidates(resolution, name)
     }
 
     fn relation_exists(&self, relation: &uqa_core::RelationIdentity) -> bool {
@@ -94,71 +61,13 @@ impl CatalogReadView {
             || self.has_constraint_index(relation)
     }
 
-    fn namespace_exists(&self, resolution: &RelationNameResolution, schema: &str) -> bool {
-        if schema == resolution.temporary_schema {
-            return resolution.temporary_namespace_allocated;
-        }
-        uqa_sql::catalog::is_virtual_system_schema(schema)
-            || self.snapshot.definitions.schemas.contains_key(schema)
-            || self.snapshot.definitions.graphs.contains_key(schema)
-    }
-
     pub fn relation_kind_resolution(
         &self,
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<RelationResolution, SQLError> {
-        if resolution.lookup_mode() == RelationLookupMode::Dynamic {
-            if let Some((requested, resolved)) = resolution.qualified_schema(name)? {
-                if !self.namespace_exists(resolution, &resolved) {
-                    return Ok(RelationResolution::MissingSchema(requested));
-                }
-            }
-        }
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            let kind = if let Some(virtual_relation) =
-                uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name)
-            {
-                Some(virtual_relation.kind())
-            } else if self.snapshot.tables.contains_key(&relation) {
-                Some("table")
-            } else if let Some(view) = self.snapshot.definitions.views.get(&relation) {
-                Some(match view.kind {
-                    crate::catalog::view::StoredViewKind::View => "view",
-                    crate::catalog::view::StoredViewKind::Materialized => "materialized view",
-                })
-            } else if self.snapshot.definitions.sequences.contains_key(&relation) {
-                Some("sequence")
-            } else if self
-                .snapshot
-                .definitions
-                .foreign_tables
-                .contains_key(&relation)
-            {
-                Some("foreign table")
-            } else if self
-                .snapshot
-                .definitions
-                .catalog_indexes
-                .contains_key(&relation)
-                || self.has_constraint_index(&relation)
-            {
-                Some("index")
-            } else if self
-                .snapshot
-                .definitions
-                .composites
-                .contains_key(&relation.qualified_name())
-            {
-                Some("composite type")
-            } else {
-                None
-            };
-            if let Some(kind) = kind {
-                return Ok(RelationResolution::Found(relation.qualified_name(), kind));
-            }
-        }
-        Ok(RelationResolution::MissingRelation)
+        self.relation_names()
+            .relation_kind_resolution(resolution, name)
     }
 
     pub fn virtual_relation_resolved(

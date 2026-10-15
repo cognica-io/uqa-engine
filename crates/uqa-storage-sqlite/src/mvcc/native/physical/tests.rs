@@ -14,6 +14,74 @@ use std::sync::{
 };
 
 #[test]
+fn unchanged_btree_projection_keeps_its_equality_keys_without_writes() {
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch("CREATE TABLE _btree_index_entries (table_name TEXT NOT NULL, field TEXT NOT NULL, doc_id INTEGER NOT NULL, value_json TEXT NOT NULL, PRIMARY KEY(table_name,field,doc_id)) WITHOUT ROWID").unwrap();
+    crate::btree_index::equality::install(&connection).unwrap();
+    let layout = super::super::NativeRecordFamily::BtreeIndexEntries.layout();
+    let control = StorageReadControl::with_limit(65536);
+    let original = br#"{"type":"Float","value":0}"#;
+    let values = |id, encoded| {
+        [
+            ValueRef::Text(b"items"),
+            ValueRef::Text(b"key"),
+            ValueRef::Integer(id),
+            ValueRef::Text(encoded),
+        ]
+    };
+    for id in 1..=32 {
+        upsert(&connection, layout, &values(id, original), &control).unwrap();
+    }
+    let before = connection.total_changes();
+    for _ in 0..2 {
+        for id in 1..=32 {
+            upsert(&connection, layout, &values(id, original), &control).unwrap();
+        }
+    }
+    assert_eq!(
+        connection.total_changes() - before,
+        0,
+        "unchanged index entries must not rewrite rows or rebuild equality keys"
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM _btree_equality_keys WHERE equality_key IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        32
+    );
+    let key: Vec<u8> = connection
+        .query_row(
+            "SELECT equality_key FROM _btree_equality_keys WHERE doc_id=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    // SQL-equal values can have different stored representations: the negative zero must replace positive zero even though its lookup key is the same.
+    let negative_zero = br#"{"type":"Float","value":9223372036854775808}"#;
+    let before = transaction.total_changes();
+    upsert(&transaction, layout, &values(1, negative_zero), &control).unwrap();
+    assert!(transaction.total_changes() > before);
+    let (encoded, new_key): (String, Vec<u8>) = transaction.query_row("SELECT value_json,equality_key FROM _btree_index_entries JOIN _btree_equality_keys USING(table_name,field,doc_id) WHERE doc_id=1",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(encoded.as_bytes(), negative_zero);
+    assert_eq!(new_key, key);
+    transaction.rollback().unwrap();
+    let encoded: String = connection
+        .query_row(
+            "SELECT value_json FROM _btree_index_entries WHERE doc_id=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(encoded.as_bytes(), original);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn physical_row_operations_reuse_preparation_with_fresh_bindings() {
     let connection = Connection::open_in_memory().unwrap();
     connection

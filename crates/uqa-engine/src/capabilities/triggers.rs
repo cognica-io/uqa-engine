@@ -79,7 +79,7 @@ impl TriggerCatalog for Engine {
         table: &str,
         timing: TriggerTiming,
         event: TriggerEvent,
-        updated_columns: &[String],
+        updated_columns: Option<&[String]>,
     ) -> Result<Vec<StoredTrigger>, SQLError> {
         self.event_lookup_context().trigger_definitions_for(
             table,

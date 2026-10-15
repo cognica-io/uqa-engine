@@ -163,3 +163,42 @@ pub fn described_relation_name(
         format!("{}.{local}", crate::expr::quote_ident(&relation.schema))
     })
 }
+
+/// Decode a relation identity already selected by binding. A stored identity must name its schema and must never resolve through the current search path or temporary-schema alias.
+pub fn bound_relation_identity(name: &str) -> Result<uqa_core::RelationIdentity, SQLError> {
+    let (schema, relation) = uqa_core::RelationIdentity::parse_reference(name)
+        .map_err(|error| SQLError::Internal(format!("decode bound relation `{name}`: {error}")))?;
+    let schema = schema.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "bound query contains non-canonical relation reference `{name}`"
+        ))
+    })?;
+    Ok(uqa_core::RelationIdentity::new(schema, relation))
+}
+
+#[cfg(test)]
+mod bound_identity_tests {
+    #[test]
+    fn bound_identity_requires_a_schema_and_keeps_quoted_names_and_schema_aliases() {
+        for (input, schema, name) in [
+            ("public.items", "public", "items"),
+            ("pg_temp.items", "pg_temp", "items"),
+            (
+                "\"other.schema\".\"odd.table\"",
+                "other.schema",
+                "odd.table",
+            ),
+        ] {
+            assert_eq!(
+                super::bound_relation_identity(input).unwrap(),
+                uqa_core::RelationIdentity::new(schema, name)
+            );
+        }
+        let error = super::bound_relation_identity("items").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "internal error: bound query contains non-canonical relation reference `items`"
+        );
+        assert!(super::bound_relation_identity("a.b.c").is_err());
+    }
+}

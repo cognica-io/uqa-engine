@@ -38,10 +38,7 @@ fn foreign_server_roundtrip_preserves_identity_and_does_not_use_connection_optio
     persist(&catalog, &expected).unwrap();
     let actual = restore(&catalog, &roles(), false).unwrap();
     assert_eq!(actual.definitions["source"], expected);
-    assert_eq!(
-        fdw_definition(&actual.definitions["source"]).options,
-        expected.options
-    );
+    assert_eq!(actual.definitions["source"].options, expected.options);
     // A legacy provider caller updates connection settings without discarding ownership.
     catalog
         .save_foreign_server("source", "memory_fdw", "{}")

@@ -61,11 +61,24 @@ pub(crate) fn named_binary_operator_types_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<[ColumnType; 3]>, SQLError> {
     control.check()?;
-    let candidates = candidates(name, left, right, control)?;
     let arguments = normalized_arguments(left, right, control)?;
     // One unknown operand first tries the exact known base type, before preferred-type candidate selection.
     let exact_left = arguments[0].as_ref().or(arguments[1].as_ref());
     let exact_right = arguments[1].as_ref().or(arguments[0].as_ref());
+    if let (Some(lhs), Some(rhs)) = (exact_left, exact_right) {
+        for &(operator, left, right, output, _, _) in SIGNATURES {
+            control.check()?;
+            if operator == name
+                && scalar_catalog_type(left) == Some(lhs)
+                && scalar_catalog_type(right) == Some(rhs)
+            {
+                if let Some(output) = scalar_catalog_type(output) {
+                    return result(lhs, rhs, output, control);
+                }
+            }
+        }
+    }
+    let candidates = candidates(name, left, right, control)?;
     if let (Some(lhs), Some(rhs)) = (exact_left, exact_right) {
         if let Some(candidate) = candidates.iter().find(|candidate| {
             matches!(candidate.argument_types.as_slice(), [left, right] if left == lhs && right == rhs)
@@ -211,11 +224,10 @@ pub(super) fn catalog_type_with_control(
     name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    if let Some(ty) = scalar_catalog_type(name) {
+        return ty.clone_with_control(control).map(Some).map_err(Into::into);
+    }
     match name {
-        "char" => control
-            .finish(ColumnType::InternalChar, control.empty_reservation())
-            .map(Some)
-            .map_err(Into::into),
         "_text" | "_aclitem" => {
             let element = if name == "_text" {
                 ColumnType::Text
@@ -236,6 +248,14 @@ pub(super) fn catalog_type_with_control(
             Err(_) => Ok(None),
         },
     }
+}
+
+fn scalar_catalog_type(name: &str) -> Option<&'static ColumnType> {
+    // Polymorphic declarations are instantiated from their operands, not the catalog's pseudo type.
+    if matches!(name, "anyarray" | "anyrange" | "anymultirange" | "anyenum") {
+        return None;
+    }
+    crate::catalog::type_metadata::builtin_scalar_type_by_name(name)
 }
 
 fn overload(

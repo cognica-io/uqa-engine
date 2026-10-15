@@ -560,7 +560,7 @@ impl Default for SessionRandomState {
 struct EngineDataSnapshot {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
     durable: DurableCatalogSnapshot,
-    foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>,
+    foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>,
 }
 
 #[derive(Clone)]

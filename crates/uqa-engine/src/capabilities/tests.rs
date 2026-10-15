@@ -14,6 +14,14 @@ thread_local! {
     static CATALOG_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+mod builtin_authority;
+mod catalog_allocation;
+mod catalog_indexes;
+mod constraint_names;
+mod generated_rewrite;
+mod mutation_rows;
+mod relation_arrays;
+mod relation_names;
 mod scoped_catalog;
 
 pub(super) fn record_catalog_capture() {

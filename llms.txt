@@ -14,6 +14,8 @@ Do not infer behavior beyond the verified surface from familiar labels such as P
 
 Korean (`nori`) and Japanese (`kuromoji`) analysis are optional Cargo features of the `uqa` and `uqa-engine` crates, off by default: `cargo add uqa@0.5.3` alone does not include them, and an embedded Rust application that uses either enables it separately, as in `cargo add uqa@0.5.3 --features nori,kuromoji`. A build without the feature rejects requests for that analyzer. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
+Current source builds include memory foreign sources by default, with independent opt-in `arrow` and `duckdb` features for native handlers. Foreign SQL definitions and durable catalog operations remain available for every source type; scans of an omitted native handler report an unavailable-build error. See the [foreign-handler feature contract](docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
+
 When generating SQL:
 
 - Keep relation and column identifiers in SQL syntax. Positional parameters bind values only.

@@ -18,6 +18,8 @@ pub use uqa_sql::semantics::mutation_rows::MutationRowCatalog;
 
 /// Tuple provenance from the statement's read generation and write transaction.
 pub trait MutationTupleMetadata: Sync {
+    /// Read the canonically bound storage relation identity without constructing a database-wide catalog for each row image.
+    fn table_relation_oid(&self, table: &str) -> Result<i64, SQLError>;
     fn document_metadata(
         &self,
         table: &str,

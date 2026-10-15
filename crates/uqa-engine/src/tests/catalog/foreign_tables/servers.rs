@@ -54,7 +54,11 @@ fn foreign_server_owner_and_identity_survive_rename_undo_refresh_and_reopen() {
         );
         assert_eq!(expected.options["metadata_json"], "connection option");
         assert_eq!(
-            engine.foreign_server("source").unwrap().unwrap().options,
+            engine
+                .foreign_server_definition("source")
+                .unwrap()
+                .unwrap()
+                .options,
             expected.options
         );
         let retained = engine.durable.foreign_servers.snapshot();
@@ -66,7 +70,10 @@ fn foreign_server_owner_and_identity_survive_rename_undo_refresh_and_reopen() {
         assert_ne!(transient.metadata.oid, expected.metadata.oid);
         assert_ne!(transient.metadata.object_id, expected.metadata.object_id);
         sql(&engine, "ROLLBACK TO before_server; COMMIT");
-        assert!(engine.foreign_server("transient").unwrap().is_none());
+        assert!(engine
+            .foreign_server_definition("transient")
+            .unwrap()
+            .is_none());
         assert_eq!(server(&engine, "source"), expected);
         sql(
             &engine,
@@ -93,7 +100,10 @@ fn foreign_server_owner_and_identity_survive_rename_undo_refresh_and_reopen() {
                 &peer,
                 "CREATE SERVER peer_server FOREIGN DATA WRAPPER memory_fdw",
             );
-            assert!(engine.foreign_server("peer_server").unwrap().is_some());
+            assert!(engine
+                .foreign_server_definition("peer_server")
+                .unwrap()
+                .is_some());
             assert_eq!(server(&engine, "source"), expected);
             drop(peer);
             drop(pinned);
@@ -197,7 +207,11 @@ fn foreign_server_direct_options_remain_maps_and_empty_names_never_publish() {
         )
         .unwrap();
     assert_eq!(
-        engine.foreign_server("source").unwrap().unwrap().options["a=b"],
+        engine
+            .foreign_server_definition("source")
+            .unwrap()
+            .unwrap()
+            .options["a=b"],
         "last"
     );
     assert!(engine
@@ -281,7 +295,11 @@ fn foreign_server_name_reservations_follow_competing_commit_or_rollback() {
             }
             assert_eq!(second.take_sql_notices().len(), 0);
             assert_eq!(
-                second.foreign_server("competing").unwrap().unwrap().options["source"],
+                second
+                    .foreign_server_definition("competing")
+                    .unwrap()
+                    .unwrap()
+                    .options["source"],
                 schedule["final_source"]
             );
         }

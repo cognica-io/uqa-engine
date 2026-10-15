@@ -13,27 +13,26 @@
 //! stores pre-loaded rows and applies projection, pushdown predicate
 //! filtering, and a row limit before returning.
 
-// The DuckDB and Arrow handlers wrap native C/C++ engines that do not
-// exist on the browser (emscripten) target; the registry types and the
-// in-memory handler below stay available everywhere.
-#[cfg(not(target_os = "emscripten"))]
+// Native handlers are opt-in and unavailable on emscripten.
+// Registry types and the in-memory handler stay available everywhere.
+#[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
 pub mod arrow_flight;
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
 pub mod arrow_ipc;
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
 pub mod duckdb;
 
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
 pub use arrow_flight::{
     build_where_clause as build_arrow_flight_where_clause,
     prepare_query as arrow_flight_prepare_query, quote_literal as arrow_flight_quote_literal,
     ArrowFlightPrepareError,
 };
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
 pub use arrow_ipc::ArrowIpcHandler as ArrowHandler;
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
 pub use arrow_ipc::{ArrowIpcHandler, ArrowIpcPrepareError};
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
 pub use duckdb::{
     build_where_clause as build_duckdb_where_clause, normalize_source as duckdb_normalize_source,
     prepare_query as duckdb_prepare_query, DuckDBHandler, DuckDBPrepareError, FILE_READERS,
@@ -199,16 +198,16 @@ pub type RowStream = Box<dyn Iterator<Item = Result<Row, FDWError>> + Send>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FDWError {
-    #[cfg(not(target_os = "emscripten"))]
+    #[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
     #[error(transparent)]
     DuckDBPrepare(#[from] DuckDBPrepareError),
-    #[cfg(not(target_os = "emscripten"))]
+    #[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
     #[error(transparent)]
     ArrowIpcPrepare(#[from] ArrowIpcPrepareError),
-    #[cfg(not(target_os = "emscripten"))]
+    #[cfg(all(not(target_os = "emscripten"), feature = "duckdb"))]
     #[error(transparent)]
     DuckDB(#[from] ::duckdb::Error),
-    #[cfg(not(target_os = "emscripten"))]
+    #[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
     #[error(transparent)]
     Arrow(#[from] arrow_schema::ArrowError),
     #[error(transparent)]

@@ -14,6 +14,11 @@ exclude.workspace = true
 keywords = ["database", "sql", "query-builder"]
 categories = ["database"]
 
+[features]
+default = []
+arrow = ["uqa-engine/arrow"]
+duckdb = ["uqa-engine/duckdb"]
+
 [dependencies]
 uqa-engine = { workspace = true }
 uqa-core = { workspace = true }

@@ -18,6 +18,8 @@ categories = ["command-line-utilities", "database"]
 
 [features]
 default = ["nori", "kuromoji"]
+arrow = ["uqa-engine/arrow"]
+duckdb = ["uqa-engine/duckdb"]
 nori = ["uqa-engine/nori"]
 kuromoji = ["uqa-engine/kuromoji"]
 
@@ -29,7 +31,6 @@ test = false
 [dependencies]
 uqa-engine = { workspace = true, default-features = false }
 uqa-core = { workspace = true }
-uqa-fdw = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-pg-query = { workspace = true }
 uqa-sql = { workspace = true }

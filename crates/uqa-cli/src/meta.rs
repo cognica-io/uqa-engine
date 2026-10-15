@@ -203,7 +203,7 @@ impl Session {
             .list_foreign_tables()
             .map_err(|err| format!("Failed to read foreign tables: {err}"))?;
         for name in foreign_tables {
-            match self.engine.foreign_table(&name) {
+            match self.engine.foreign_table_definition(&name) {
                 Ok(Some(table)) => {
                     rows.push(result_row(vec![
                         ("table_name", Value::Str(name)),
@@ -256,7 +256,7 @@ impl Session {
             Ok(None) => {}
             Err(err) => return Err(format!("Failed to describe table '{name}': {err}")),
         }
-        match self.engine.foreign_table(name) {
+        match self.engine.foreign_table_definition(name) {
             Ok(Some(table)) => {
                 let _ = writeln!(
                     out,
@@ -269,7 +269,7 @@ impl Session {
                     .map(|col| {
                         result_row(vec![
                             ("column", Value::Str(col.name.clone())),
-                            ("type", Value::Str(fdw_type_name(&col.ty))),
+                            ("type", Value::Str(sql_type_name(&col.ty))),
                             ("constraints", Value::Str(String::new())),
                         ])
                     })
@@ -437,7 +437,7 @@ impl Session {
         }
         let mut rows = Vec::new();
         for name in names {
-            match self.engine.foreign_table(&name) {
+            match self.engine.foreign_table_definition(&name) {
                 Ok(Some(table)) => {
                     let options = foreign_table_options_display(&table.options);
                     let source = table.options.get("source").cloned().unwrap_or_default();
@@ -484,7 +484,7 @@ impl Session {
         }
         let mut rows = Vec::new();
         for name in names {
-            match self.engine.foreign_server(&name) {
+            match self.engine.foreign_server_definition(&name) {
                 Ok(Some(server)) => rows.push(result_row(vec![
                     ("server_name", Value::Str(server.name)),
                     ("fdw_type", Value::Str(server.fdw_type)),

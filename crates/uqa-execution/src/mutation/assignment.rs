@@ -69,6 +69,10 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
     if matches!(expression, ScalarExpr::Default) {
         uqa_sql::assignment::targets::validate_assignment_default(assignment_target)?;
         if generated.is_some() {
+            // UPDATE DEFAULT does not force a stored expression to run. Keep its old value until dependency selection or a BEFORE trigger requires recomputation.
+            if !new_row && generated == Some(uqa_sql::ast::GeneratedColumnKind::Stored) {
+                return Ok(target.current.cloned());
+            }
             return Ok(None);
         }
         if let Some(sequence) =
@@ -367,14 +371,44 @@ pub fn refresh_selected_stored_generated_columns<S: Clone + 'static>(
     document: &mut Document,
     selected: Option<&[String]>,
 ) -> Result<(), SQLError> {
-    let columns = services
+    let columns = describe_generated_columns(services, table)?;
+    refresh_generated_columns(services, &columns, document, selected)
+}
+
+/// Retain stored values whose inputs the UPDATE does not assign. A BEFORE ROW trigger removes this restriction because it may assign any input.
+pub fn refresh_updated_stored_generated_columns<S: Clone + 'static>(
+    services: MutationAssignmentContext<'_, S>,
+    table: &str,
+    document: &mut Document,
+    updated_columns: Option<&[String]>,
+) -> Result<(), SQLError> {
+    let columns = describe_generated_columns(services, table)?;
+    let selected = updated_columns.map(|updated| {
+        uqa_sql::semantics::generated_values::stored_columns_for_update(&columns, updated)
+    });
+    refresh_generated_columns(services, &columns, document, selected.as_deref())
+}
+
+pub(crate) fn describe_generated_columns<S: Clone + 'static>(
+    services: MutationAssignmentContext<'_, S>,
+    table: &str,
+) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
+    services
         .columns
         .try_describe_table(table)
         .map_err(|error| SQLError::Internal(format!("read generated columns: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
+}
+
+fn refresh_generated_columns<S: Clone + 'static>(
+    services: MutationAssignmentContext<'_, S>,
+    columns: &[uqa_sql::ast::ColumnDef],
+    document: &mut Document,
+    selected: Option<&[String]>,
+) -> Result<(), SQLError> {
     super::generated::refresh_stored_generated_columns(
         services.assignment,
-        &columns,
+        columns,
         selected,
         document,
         &mut |expression, row, schema| {

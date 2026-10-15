@@ -269,11 +269,17 @@ fn assert_attached_catalog_visibility(engine: &Engine, visible: bool) {
         visible
     );
     assert_eq!(
-        engine.foreign_server("later_server").unwrap().is_some(),
+        engine
+            .foreign_server_definition("later_server")
+            .unwrap()
+            .is_some(),
         visible
     );
     assert_eq!(
-        engine.foreign_table("later_foreign").unwrap().is_some(),
+        engine
+            .foreign_table_definition("later_foreign")
+            .unwrap()
+            .is_some(),
         visible
     );
     assert_eq!(

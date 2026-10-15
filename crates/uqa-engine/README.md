@@ -233,7 +233,9 @@ Read the [compressed VFS security contract](https://github.com/cognica-io/uqa-en
 
 Released Node.js applications install `@cognica-io/uqa` from npm; npm selects an exact-version native optional package under `@cognica-io` for the current supported platform. Browser applications install the independent `@cognica-io/uqa-wasm` package.
 
-Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled DuckDB runtime requires the modern C++11 ABI.
+Prebuilt Linux Python wheels target glibc 2.28 or newer.
+
+Source builds include the memory foreign-data wrapper by default. Enable `arrow` for native Arrow IPC sources or `duckdb` for native DuckDB sources; the features are independent and disabled by default. Foreign-table definitions and catalog inspection remain available for every handler; see the [feature contract](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
 
 ## Build and test
 

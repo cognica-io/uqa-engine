@@ -128,7 +128,11 @@ fn server_registration_releases_the_actual_guard_before_epoch_publication() {
     assert_eq!(publication.changes.get(), 1);
     assert!(!publication.held.get());
     assert_eq!(
-        engine.foreign_server("source").unwrap().unwrap().options["source"],
+        engine
+            .foreign_server_definition("source")
+            .unwrap()
+            .unwrap()
+            .options["source"],
         "last"
     );
     context
@@ -137,7 +141,11 @@ fn server_registration_releases_the_actual_guard_before_epoch_publication() {
     assert_eq!(publication.changes.get(), 1);
     assert!(!publication.held.get());
     assert_eq!(
-        engine.foreign_server("source").unwrap().unwrap().fdw_type,
+        engine
+            .foreign_server_definition("source")
+            .unwrap()
+            .unwrap()
+            .fdw_type,
         "memory_fdw"
     );
     engine.sql("COMMIT", &[]).unwrap();

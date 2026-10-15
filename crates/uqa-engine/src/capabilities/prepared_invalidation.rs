@@ -11,6 +11,7 @@ use uqa_execution::statement::prepared::invalidation::PreparedCatalogChange;
 
 impl MutationCoordinator<'_> {
     pub(crate) fn note_prepared_catalog_change(&self, change: PreparedCatalogChange) {
+        self.runtime.regtype_output_cache.clear();
         if let Some(frame) = self.session.transactions.lock().last_mut() {
             frame.prepared_changes.record(change);
         }

@@ -95,8 +95,8 @@ mod statements;
 
 use completion::{UsqlEditor, UsqlHelper};
 use display::{
-    fdw_type_name, foreign_table_options_display, optional_value_to_display_value, options_display,
-    print_backslash_help, print_columns, result_row, sequence_row, u64_count_value,
+    foreign_table_options_display, optional_value_to_display_value, options_display,
+    print_backslash_help, print_columns, result_row, sequence_row, sql_type_name, u64_count_value,
     usize_count_value,
 };
 use migration_io::{

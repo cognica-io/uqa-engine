@@ -472,6 +472,10 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_views_impl()
     }
 
+    fn view_has_private_changes(&self, relation: &RelationIdentity) -> StorageBackendResult<bool> {
+        self.view_has_private_changes_impl(relation)
+    }
+
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()> {
         self.save_named_graph_impl(name)
     }

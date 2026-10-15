@@ -46,6 +46,8 @@ mod reverse_overloads;
 mod string_binary_lengths;
 #[path = "sql_generated_columns/typing.rs"]
 mod typing;
+#[path = "sql_generated_columns/update_dependencies.rs"]
+mod update_dependencies;
 #[path = "sql_generated_columns/validation.rs"]
 mod validation;
 

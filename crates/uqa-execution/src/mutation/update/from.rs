@@ -10,6 +10,7 @@ use crate::mutation::{
     assignment::MutationAssignmentTarget,
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
+    expressions::MutationPredicate,
     prepared::PreparedMutationAction,
     returning::DmlReturningShape,
     rows::join_rows as dml_join_rows,
@@ -126,21 +127,21 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             "UPDATE",
             stmt.predicate.as_ref(),
         )?;
+    let mut qualification = MutationPredicate::new(
+        read_context
+            .mutation
+            .preparation
+            .referential
+            .assignment
+            .expressions,
+        &snapshot_ctes,
+        stmt.predicate.as_ref(),
+        params,
+    );
     let mut update_qualification_count = if qualification_references_target {
         0
     } else {
-        count_source_qualifications(
-            read_context
-                .mutation
-                .preparation
-                .referential
-                .assignment
-                .expressions,
-            stmt,
-            &snapshot_ctes,
-            &from_rows,
-            params,
-        )?
+        count_source_qualifications(&mut qualification, &from_rows)?
     };
     let overlay = MutationOverlayScope::new(context.mutation.state);
     let mut pending_updates = Vec::new();
@@ -171,19 +172,8 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             doc_id,
             &candidate,
         )?;
-        let candidate_sources = matching_update_sources(
-            read_context
-                .mutation
-                .preparation
-                .referential
-                .assignment
-                .expressions,
-            stmt,
-            &snapshot_ctes,
-            &from_rows,
-            &candidate_row,
-            params,
-        )?;
+        let candidate_sources =
+            matching_update_sources(&mut qualification, &from_rows, &candidate_row)?;
         if qualification_references_target {
             update_qualification_count += candidate_sources.qualification_count;
         }
@@ -249,20 +239,8 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             &original_doc,
         )?;
         let source_context = if recheck {
-            update_join_qualifies(
-                read_context
-                    .mutation
-                    .preparation
-                    .referential
-                    .assignment
-                    .expressions,
-                stmt,
-                &snapshot_ctes,
-                &target_row,
-                &candidate_source,
-                params,
-            )?
-            .then_some(candidate_source)
+            update_join_qualifies(&mut qualification, &target_row, &candidate_source)?
+                .then_some(candidate_source)
         } else {
             Some(candidate_source)
         };
@@ -555,12 +533,9 @@ struct MatchingUpdateSources {
 }
 
 fn matching_update_sources<S: Clone + Send + Sync + 'static>(
-    expressions: crate::mutation::rows::context::MutationExpressionContext<'_, S>,
-    stmt: &UpdatePlan,
-    ctes: &CteScope<S>,
+    qualification: &mut MutationPredicate<'_, S>,
     from_rows: &crate::SharedSpill,
     target_row: &crate::OwnedPhysicalRow,
-    params: &[SQLParam],
 ) -> Result<MatchingUpdateSources, SQLError> {
     let from_reader = from_rows
         .read_rows()
@@ -569,7 +544,7 @@ fn matching_update_sources<S: Clone + Send + Sync + 'static>(
     let mut qualification_count = 0;
     for from_row in from_reader {
         let source_context = from_row.map_err(crate::query::projection::physical_exec_error)?;
-        if update_join_qualifies(expressions, stmt, ctes, target_row, &source_context, params)? {
+        if update_join_qualifies(qualification, target_row, &source_context)? {
             qualification_count += 1;
             if first.is_none() {
                 first = Some(source_context);
@@ -583,11 +558,8 @@ fn matching_update_sources<S: Clone + Send + Sync + 'static>(
 }
 
 fn count_source_qualifications<S: Clone + Send + Sync + 'static>(
-    expressions: crate::mutation::rows::context::MutationExpressionContext<'_, S>,
-    stmt: &UpdatePlan,
-    ctes: &CteScope<S>,
+    qualification: &mut MutationPredicate<'_, S>,
     from_rows: &crate::SharedSpill,
-    params: &[SQLParam],
 ) -> Result<usize, SQLError> {
     let mut count = 0;
     for source in from_rows
@@ -595,38 +567,19 @@ fn count_source_qualifications<S: Clone + Send + Sync + 'static>(
         .map_err(crate::query::projection::physical_exec_error)?
     {
         let source = source.map_err(crate::query::projection::physical_exec_error)?;
-        let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |predicate| {
-            crate::mutation::expressions::eval_mutation_expr(
-                expressions,
-                ctes,
-                predicate,
-                Some(&source),
-                params,
-            )
-            .map(|value| uqa_sql::expr::truthy(&value))
-        })?;
-        count += usize::from(qualifies);
+        count += usize::from(qualification.qualifies(&source)?);
     }
     Ok(count)
 }
 
 fn update_join_qualifies<S: Clone + Send + Sync + 'static>(
-    expressions: crate::mutation::rows::context::MutationExpressionContext<'_, S>,
-    stmt: &UpdatePlan,
-    ctes: &CteScope<S>,
+    qualification: &mut MutationPredicate<'_, S>,
     target_row: &crate::OwnedPhysicalRow,
     source_context: &crate::OwnedPhysicalRow,
-    params: &[SQLParam],
 ) -> Result<bool, SQLError> {
     let joined = dml_join_rows(target_row, source_context);
-    stmt.predicate.as_ref().map_or(Ok(true), |filter| {
-        crate::mutation::expressions::eval_mutation_expr(
-            expressions,
-            ctes,
-            filter,
-            Some(&joined),
-            params,
-        )
-        .map(|value| uqa_sql::expr::truthy(&value))
-    })
+    qualification.qualifies(&joined)
 }
+
+#[cfg(test)]
+mod tests;

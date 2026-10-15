@@ -105,6 +105,7 @@ type SnapshotErrorFactory = fn() -> StorageBackendError;
 struct PortalSnapshotProbeStore {
     docs: Arc<BTreeMap<DocId, StoredDocument>>,
     snapshot_error: Option<SnapshotErrorFactory>,
+    presence_error: Option<SnapshotErrorFactory>,
     snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
     row_reads: Arc<std::sync::atomic::AtomicUsize>,
     field_reads: Arc<std::sync::atomic::AtomicUsize>,
@@ -122,6 +123,7 @@ impl PortalSnapshotProbeStore {
         Self {
             docs: Arc::new(docs),
             snapshot_error: None,
+            presence_error: None,
             snapshot_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             row_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             field_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -166,6 +168,9 @@ impl DocumentStore for PortalSnapshotProbeStore {
     }
 
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        if let Some(error) = self.presence_error {
+            return Err(error());
+        }
         Ok(self.docs.contains_key(&doc_id))
     }
 
@@ -666,4 +671,93 @@ fn persistent_engine_restores_through_facade_traits() {
         .search("docs", "title", "facade", &ScoringMode::default(), 10)
         .unwrap();
     assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
+}
+
+#[test]
+fn prepared_document_writes_check_presence_without_copying_payloads() {
+    let engine = Engine::new();
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    engine
+        .sql("CREATE TABLE presence_writes(body text)", &[])
+        .unwrap();
+    engine
+        .add_document(
+            "presence_writes",
+            1,
+            BTreeMap::from([("body".into(), Value::Str("x".repeat(256 << 10)))]),
+        )
+        .unwrap();
+    let probe = PortalSnapshotProbeStore::from_table(&engine, "presence_writes");
+    let row_reads = probe.row_reads.clone();
+    let table = engine.table("presence_writes").unwrap().unwrap();
+    *table.document_store.write() = Box::new(probe);
+    for id in [1, 2, 1, 2] {
+        engine
+            .add_prepared_document_without_fts_impl(
+                "presence_writes",
+                id,
+                BTreeMap::from([("body".into(), Value::Str(format!("replacement {id}")))]),
+                uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        row_reads.load(Ordering::Relaxed),
+        0,
+        "presence checking must not copy a document payload"
+    );
+    assert_eq!(table.document_store.read().len().unwrap(), 2);
+    assert_eq!(
+        engine
+            .sql("SELECT count(*) FROM presence_writes", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&Value::Int(2))
+    );
+    for id in [1, 2] {
+        assert_eq!(
+            table.document_store.read().get(id).unwrap().unwrap()["body"],
+            Value::Str(format!("replacement {id}"))
+        );
+    }
+}
+
+#[test]
+fn prepared_document_presence_failure_does_not_publish_a_write() {
+    let engine = Engine::new();
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    engine
+        .sql(
+            "CREATE TABLE presence_failure(body text); INSERT INTO presence_failure VALUES('old')",
+            &[],
+        )
+        .unwrap();
+    let mut probe = PortalSnapshotProbeStore::from_table(&engine, "presence_failure");
+    let id = *probe.docs.keys().next().unwrap();
+    probe.presence_error = Some(|| StorageBackendError::Other("injected presence failure".into()));
+    let row_reads = probe.row_reads.clone();
+    let table = engine.table("presence_failure").unwrap().unwrap();
+    *table.document_store.write() = Box::new(probe);
+    let error = engine
+        .add_prepared_document_without_fts_impl(
+            "presence_failure",
+            id,
+            BTreeMap::from([("body".into(), Value::Str("new".into()))]),
+            uqa_execution::mutation::publication::InsertedIdentity::Unknown,
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("injected presence failure"));
+    assert_eq!(row_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        table.document_store.read().get(id).unwrap().unwrap()["body"],
+        Value::Str("old".into())
+    );
 }

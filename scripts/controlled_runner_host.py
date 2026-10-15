@@ -23,6 +23,8 @@ from controlled_performance_resources import (
     MeasurementResources, restrict_workqueues, verify_workqueues, workqueue_mask,
 )
 from performance_qualification import QualificationError, digest
+from performance_ec2_capacity import validate_guest, validate_instance
+from benchmark_features import feature_arguments
 
 
 WORK = Path("/var/lib/uqa-performance/work")
@@ -62,7 +64,7 @@ class ControlledHost:
                               ("cc", "/usr/bin/gcc", "--version"),
                               ("ld", "/usr/bin/ld", "--version"))}
         self.build_environment = digest({"toolchain": self.toolchain, "profile": "bench",
-                                         "incremental": False, "features": "default", "schema": 1})
+                                         "incremental": False, "features": "default + target-required", "schema": 2})
         self.make_writable(self.workspace)
 
     def make_writable(self, path: Path):
@@ -136,8 +138,13 @@ class ControlledHost:
                 (self.output / (role + "-build.json")).write_text(json.dumps(cached, indent=2) + "\n")
                 return cached
         source = self.source(revision, role)
+        metadata_output = self.unit("metadata-" + role,
+            [str(self.rust_bin / "cargo"), "metadata", "--no-deps", "--format-version", "1", "--locked", "--offline"],
+            source)
+        metadata = json.loads(metadata_output.read_text())
         args = [str(self.rust_bin / "cargo"), "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
-                "--bench", "analytical_comparison", "--message-format=json-render-diagnostics"]
+                "--bench", "analytical_comparison", "--message-format=json-render-diagnostics",
+                *feature_arguments(metadata, "uqa-engine", "analytical_comparison")]
         if claims:
             args += ["-p", "uqa-execution", "--example", "row_claim_contention"]
         output = self.unit("build-" + role, args, source, environment={
@@ -172,6 +179,15 @@ class ControlledHost:
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")
+        response = json.loads(command("aws", "ec2", "describe-instances", "--region", self.config["region"],
+                                      "--instance-ids", self.config["instance_id"], "--output", "json"))
+        instance = response["Reservations"][0]["Instances"][0]
+        if instance["InstanceId"] != self.config["instance_id"]:
+            raise QualificationError("EC2 returned another controlled instance")
+        validate_instance(instance, state="running")
+        memory_kib = int(next(line.split()[1] for line in Path("/proc/meminfo").read_text().splitlines()
+                              if line.startswith("MemTotal:")))
+        validate_guest(instance["InstanceType"], os.cpu_count(), memory_kib)
         if subprocess.run(["pgrep", "-u", str(self.account.pw_uid)], stdout=subprocess.DEVNULL).returncode != 1:
             raise QualificationError("workload account still has running processes before calibration")
         timers = command("systemctl", "list-units", "--type=timer", "--state=active", "--no-legend", "--plain")
@@ -194,15 +210,8 @@ class ControlledHost:
             raise QualificationError("measurement CPU set differs")
         if len(Path("/proc/swaps").read_text().splitlines()) != 1:
             raise QualificationError("controlled host must not use swap")
-        response = json.loads(command("aws", "ec2", "describe-instances", "--region", self.config["region"],
-                                      "--instance-ids", self.config["instance_id"], "--output", "json"))
-        instance = response["Reservations"][0]["Instances"][0]
-        if (instance["Placement"]["Tenancy"] != "dedicated"
-                or instance["InstanceType"] != "c7g.4xlarge"
-                or instance["State"]["Name"] != "running"):
-            raise QualificationError("EC2 does not match the controlled-host contract")
         evidence = {"instance_id": instance["InstanceId"], "placement": instance["Placement"],
-                    "instance_type": instance["InstanceType"], "boot_id": self.boot,
+                    "instance_type": instance["InstanceType"], "memory_kib": memory_kib, "boot_id": self.boot,
                     "kernel": command("uname", "-a"), "cpu": command("lscpu", "--json"), "toolchain": self.toolchain,
                     "measurement_cpus": BENCH_CPUS, "administration_cpus": "0-7",
                     "partition": "root", "unbound_workqueue_mask": f"{workqueue_mask():x}",

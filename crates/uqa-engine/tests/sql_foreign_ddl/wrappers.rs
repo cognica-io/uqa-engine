@@ -75,7 +75,10 @@ fn native_handler_aliases_select_the_original_adapter_and_keep_their_owner(
         Some("42501")
     );
     engine.sql("CREATE SERVER public_native_source FOREIGN DATA WRAPPER memory_fdw; RESET ROLE; DROP FOREIGN DATA WRAPPER custom_memory CASCADE", &[]).unwrap();
-    assert!(engine.foreign_table("custom_rows").unwrap().is_none());
+    assert!(engine
+        .foreign_table_definition("custom_rows")
+        .unwrap()
+        .is_none());
 }
 
 #[rstest::rstest]
@@ -113,7 +116,7 @@ fn wrapper_declaration_validation_and_dependencies_match_postgresql(#[case] prov
         .sql("DROP FUNCTION wrapper_validator(text[],oid) CASCADE", &[])
         .unwrap();
     assert!(engine
-        .foreign_table("wrapper_valid_rows")
+        .foreign_table_definition("wrapper_valid_rows")
         .unwrap()
         .is_none());
     let error = engine
@@ -130,7 +133,7 @@ fn wrapper_declaration_validation_and_dependencies_match_postgresql(#[case] prov
         open(provider, &path)
     };
     assert!(engine
-        .foreign_table("wrapper_valid_rows")
+        .foreign_table_definition("wrapper_valid_rows")
         .unwrap()
         .is_none());
     let error = engine
@@ -164,7 +167,10 @@ fn direct_foreign_table_options_keep_map_semantics() {
             false,
         )
         .unwrap();
-    let table = engine.foreign_table("direct_rows").unwrap().unwrap();
+    let table = engine
+        .foreign_table_definition("direct_rows")
+        .unwrap()
+        .unwrap();
     assert_eq!(table.options["same"], "last");
     assert_eq!(table.options["has=equals"], "allowed");
 }

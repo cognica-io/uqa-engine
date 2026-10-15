@@ -11,6 +11,11 @@ rust-version.workspace = true
 publish = false
 autotests = false
 
+[features]
+default = []
+arrow = ["uqa-engine/arrow"]
+duckdb = ["uqa-engine/duckdb"]
+
 [dependencies]
 uqa-core = { workspace = true }
 uqa-engine = { workspace = true }

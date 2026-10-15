@@ -1,0 +1,110 @@
+{
+  "postgresql_version_num": "180004",
+  "capture_script_sha256": "4caed9ff75a6d1a47177b1727eff60fdd580bf124df7161b4492393afe0147f7",
+  "session_script_sha256": "c12bbb226a4a3ae944740e95844c0b874dd4a9c2e80b144497600205f9ef4366",
+  "scope": "Private view replacement, rename, deletion, materialized refresh and creation beside a peer definition commit, with commit, rollback and savepoint undo.",
+  "cases": [
+    {
+      "isolation": "REPEATABLE READ",
+      "finish": "COMMIT",
+      "during": [
+        "11|2|44|55|6"
+      ],
+      "values": [
+        "11|2|44|55"
+      ],
+      "names": [
+        "created",
+        "renamed_to"
+      ],
+      "peer_values": [
+        "11|2|44|55"
+      ]
+    },
+    {
+      "isolation": "REPEATABLE READ",
+      "finish": "ROLLBACK",
+      "during": [
+        "11|2|44|55|6"
+      ],
+      "values": [
+        "1|2|1|55"
+      ],
+      "names": [
+        "dropped",
+        "renamed_from"
+      ],
+      "peer_values": [
+        "1|2|1|55"
+      ]
+    },
+    {
+      "isolation": "REPEATABLE READ",
+      "finish": "ROLLBACK TO before_views; COMMIT",
+      "during": [
+        "11|2|44|55|6"
+      ],
+      "values": [
+        "1|2|1|55"
+      ],
+      "names": [
+        "dropped",
+        "renamed_from"
+      ],
+      "peer_values": [
+        "1|2|1|55"
+      ]
+    },
+    {
+      "isolation": "SERIALIZABLE",
+      "finish": "COMMIT",
+      "during": [
+        "11|2|44|55|6"
+      ],
+      "values": [
+        "11|2|44|55"
+      ],
+      "names": [
+        "created",
+        "renamed_to"
+      ],
+      "peer_values": [
+        "11|2|44|55"
+      ]
+    },
+    {
+      "isolation": "SERIALIZABLE",
+      "finish": "ROLLBACK",
+      "during": [
+        "11|2|44|55|6"
+      ],
+      "values": [
+        "1|2|1|55"
+      ],
+      "names": [
+        "dropped",
+        "renamed_from"
+      ],
+      "peer_values": [
+        "1|2|1|55"
+      ]
+    },
+    {
+      "isolation": "SERIALIZABLE",
+      "finish": "ROLLBACK TO before_views; COMMIT",
+      "during": [
+        "11|2|44|55|6"
+      ],
+      "values": [
+        "1|2|1|55"
+      ],
+      "names": [
+        "dropped",
+        "renamed_from"
+      ],
+      "peer_values": [
+        "1|2|1|55"
+      ]
+    }
+  ]
+}

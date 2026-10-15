@@ -189,5 +189,8 @@ fn schema_owner_can_drop_table_and_foreign_table_without_gaining_data_or_owner_p
         )
         .unwrap();
     assert!(!engine.try_has_table("tenant.items").unwrap());
-    assert!(engine.foreign_table("tenant.remote").unwrap().is_none());
+    assert!(engine
+        .foreign_table_definition("tenant.remote")
+        .unwrap()
+        .is_none());
 }

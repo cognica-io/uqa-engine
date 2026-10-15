@@ -407,8 +407,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .bound_wrapper(&definitions.foreign_wrappers)?
                     .require_handler()?;
                 let rows = context
-                    .foreign_tables
-                    .scan_foreign_source(&foreign_name, &[])
+                    .scan_foreign_source(&foreign_name, None, &[])
                     .map_err(SQLError::Unsupported)?;
                 let schema =
                     crate::RowSchema::with_column_definitions(None, &foreign_table.columns);

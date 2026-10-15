@@ -91,6 +91,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let statement_relation =
         crate::mutation::constraints::statement_relation(constraints, &target_table)?;
     let statement = ConstraintStatement::new(&statement_relation, &supplied_columns);
+    let update_targets = uqa_sql::semantics::merge::merge_update_columns(stmt);
     referential.locking.session.lock_relation(
         &target_table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -526,6 +527,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             &target_table,
                             params,
                             true,
+                            &update_targets,
                         )?
                         else {
                             continue;

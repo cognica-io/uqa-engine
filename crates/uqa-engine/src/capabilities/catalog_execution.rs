@@ -177,8 +177,30 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
         self.catalog_read_view()
     }
 
+    fn builtin_routine_permissions(
+        &self,
+        current_role: RoleReference,
+    ) -> uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions
+    {
+        use uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions;
+
+        if let Some(snapshot) = &self.query_catalog_snapshot {
+            return BuiltinRoutinePermissions::new(snapshot.read_view.clone(), current_role);
+        }
+        BuiltinRoutinePermissions::try_unrestricted(
+            &self.durable.builtin_routine_security.snapshot(),
+            &self.durable.roles.snapshot(),
+            &current_role,
+        )
+        .unwrap_or_else(|| BuiltinRoutinePermissions::new(self.catalog_read_view(), current_role))
+    }
+
     fn current_catalog_snapshot(&self) -> uqa_execution::catalog::CatalogReadView {
         self.restored_catalog_read_view()
+    }
+
+    fn current_catalog_revision(&self) -> Option<u64> {
+        Some(self.runtime.regtype_output_cache.revision())
     }
 }
 

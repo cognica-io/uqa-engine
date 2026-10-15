@@ -16,6 +16,126 @@ use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 use uqa_storage::mvcc::{PrivateRecordChanges, RecordWrite, VersionedPersistence};
 
 #[test]
+fn unchanged_native_btree_writes_keep_history_conflicts_and_reopen() {
+    use crate::mvcc::native::tests::materialization::{initialize, records, replace, with};
+    use uqa_storage::{
+        mvcc::{VersionedKeyValueStore, VersionedSessionOptions},
+        KeyValueStore,
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("unchanged-index.db");
+    let control = StorageReadControl::with_limit(1 << 20);
+    let (transaction, receipt) = {
+        let connection = ManagedConnection::open(&path).unwrap();
+        initialize(&connection);
+        with(&connection, |sqlite| {
+            sqlite.execute_batch("INSERT INTO _btree_indexes VALUES('public.docs','n'); INSERT INTO _btree_index_entries VALUES('public.docs','n',1,'{\"type\":\"Int\",\"value\":1}');")?;
+            Ok(())
+        });
+        let store = Arc::new(SQLiteRecordStore::for_native(&connection, &control).unwrap());
+        let original = records(&connection, &store, Family::BtreeIndexEntries, &control);
+        assert_eq!(original.len(), 1);
+        let original = &original[0];
+        let retained = store.snapshot(&control).unwrap();
+        let old = retained.get(original.key(), &control).unwrap().unwrap();
+        let writes = [original.write(Some(old.sequence()))];
+        let prepared = PreparedRecordCommit::new(&writes, &control).unwrap();
+        let transaction = store.allocate_transaction(&control).unwrap();
+        let receipt = store.commit(transaction, &prepared, &control).unwrap();
+        assert_eq!(
+            store.commit(transaction, &prepared, &control).unwrap(),
+            receipt
+        );
+        let latest = store.snapshot(&control).unwrap();
+        let current = latest.get(original.key(), &control).unwrap().unwrap();
+        assert_eq!(current.sequence(), receipt.sequence);
+        assert!(current.sequence() > old.sequence());
+        assert_eq!(&***current.value().unwrap(), original.row());
+        assert_eq!(
+            &***retained
+                .get(original.key(), &control)
+                .unwrap()
+                .unwrap()
+                .value()
+                .unwrap(),
+            original.row()
+        );
+
+        let first =
+            VersionedKeyValueStore::new(store.clone(), None, VersionedSessionOptions::default());
+        let second =
+            VersionedKeyValueStore::new(store.clone(), None, VersionedSessionOptions::default());
+        first.begin_transaction().unwrap();
+        second.begin_transaction().unwrap();
+        first.put(original.key(), original.row()).unwrap();
+        let changed = replace(
+            original,
+            3,
+            ValueRef::Text(br#"{"type":"Int","value":2}"#),
+            &control,
+        );
+        second.put(changed.key(), changed.row()).unwrap();
+        second.commit_transaction().unwrap();
+        let error = first.commit_transaction().unwrap_err();
+        assert_write_conflict(&error);
+        if first.in_transaction() {
+            first.rollback_transaction().unwrap();
+        }
+        with(&connection, |sqlite| {
+            assert_eq!(
+                sqlite.query_row(
+                    "SELECT value_json FROM _btree_index_entries WHERE doc_id=1",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )?,
+                r#"{"type":"Int","value":2}"#
+            );
+            assert_eq!(sqlite.query_row("SELECT count(*) FROM _btree_equality_keys WHERE doc_id=1 AND equality_key=__uqa_btree_equal_v1('{\"type\":\"Int\",\"value\":2}')",[],|row|row.get::<_,i64>(0))?,1);
+            Ok(())
+        });
+        (transaction, receipt)
+    };
+    let connection = ManagedConnection::open(&path).unwrap();
+    let store = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    assert_eq!(
+        store.commit_status(transaction, &control).unwrap(),
+        uqa_storage::mvcc::CommitStatus::Committed(receipt)
+    );
+    with(&connection, |sqlite| {
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT value_json FROM _btree_index_entries WHERE doc_id=1",
+                [],
+                |row| row.get::<_, String>(0)
+            )?,
+            r#"{"type":"Int","value":2}"#
+        );
+        Ok(())
+    });
+}
+
+fn assert_write_conflict(error: &uqa_storage::StorageBackendError) {
+    use uqa_storage::mvcc::CommitFailure;
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    let mut conflict = false;
+    while let Some(error) = cause {
+        conflict |= matches!(
+            error.downcast_ref::<VersionError>(),
+            Some(VersionError::WriteConflict { .. })
+        ) || matches!(
+            error.downcast_ref::<CommitFailure>(),
+            Some(CommitFailure::Rejected(VersionError::WriteConflict { .. }))
+        );
+        cause = error.source();
+    }
+    assert!(
+        conflict,
+        "unchanged record must retain its write conflict: {error:?}"
+    );
+}
+
+#[test]
 fn data_commit_evidence_matches_the_exact_receipt_and_rejects_definition_changes() {
     use crate::mvcc::native::tests::materialization::{initialize, records, replace};
     use uqa_storage::{

@@ -9,7 +9,7 @@
 use uqa_core::Value;
 use uqa_sql::assignment::{conversion::coerce_assignment_value, AssignmentContext};
 use uqa_sql::{
-    ast::{ColumnDef, Expr, GeneratedColumnKind},
+    ast::{ColumnDef, Expr, GeneratedColumn, GeneratedColumnKind},
     ResultRow, RowSchema, SQLError,
 };
 
@@ -33,22 +33,11 @@ pub fn refresh_stored_generated_columns(
             document.remove(&column.name);
         }
     }
-    let schema = RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
-    for column in columns {
-        let Some(generated) = column.generated.as_ref() else {
-            continue;
-        };
-        if generated.kind != GeneratedColumnKind::Stored
-            || selected.is_some_and(|selected| !selected.contains(&column.name))
-        {
-            continue;
-        }
+    if selected.is_some_and(<[String]>::is_empty) {
+        return Ok(());
+    }
+    let schema = generated_row_schema(columns);
+    for (column, generated) in stored_generation_expressions(columns, selected) {
         let (value, source) = evaluate(&generated.expression, document, &schema)?;
         document.insert(
             column.name.clone(),
@@ -56,6 +45,28 @@ pub fn refresh_stored_generated_columns(
         );
     }
     Ok(())
+}
+
+pub(crate) fn generated_row_schema(columns: &[ColumnDef]) -> RowSchema {
+    RowSchema::with_types(
+        columns.iter().map(|column| column.name.clone()).collect(),
+        columns
+            .iter()
+            .map(|column| Some(column.ty.clone()))
+            .collect(),
+    )
+}
+
+pub(crate) fn stored_generation_expressions<'a>(
+    columns: &'a [ColumnDef],
+    selected: Option<&'a [String]>,
+) -> impl Iterator<Item = (&'a ColumnDef, &'a GeneratedColumn)> {
+    columns.iter().filter_map(move |column| {
+        let generated = column.generated.as_ref()?;
+        (generated.kind == GeneratedColumnKind::Stored
+            && selected.is_none_or(|selected| selected.contains(&column.name)))
+        .then_some((column, generated))
+    })
 }
 
 #[cfg(test)]

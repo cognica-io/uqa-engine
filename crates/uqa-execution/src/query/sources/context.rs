@@ -20,7 +20,7 @@ use uqa_sql::{
         QueryBlockPlan, SourcePlan,
     },
     semantics::volatility::VolatilityCatalog,
-    ResultRow, SQLError, ScalarExpr,
+    ResultRow, SQLError, SQLParam, ScalarExpr,
 };
 
 /// Planner decisions needed when a parameterized source is assembled for execution.
@@ -67,7 +67,8 @@ pub trait ForeignTableScan: Sync {
     fn scan_foreign_source(
         &self,
         name: &str,
-        predicates: &[uqa_fdw::FDWPredicate],
+        filter: Option<&ScalarExpr>,
+        params: &[SQLParam],
     ) -> Result<ForeignSourceRows<'_>, String>;
 }
 
@@ -80,7 +81,7 @@ pub struct SourceContext<'a, S: Clone + 'static> {
     pub locking: RowLockContext<'a, S>,
     pub catalog: CatalogContext<'a>,
     pub planning: &'a dyn SourcePlanning<S>,
-    pub foreign_tables: &'a dyn ForeignTableScan,
+    pub foreign_tables: Option<&'a dyn ForeignTableScan>,
     pub volatility: &'a (dyn VolatilityCatalog + Sync),
     pub types: &'a dyn FunctionTypeResolver,
     pub documents: &'a dyn crate::query::block::context::QueryDocumentRead,
@@ -88,3 +89,16 @@ pub struct SourceContext<'a, S: Clone + 'static> {
     pub text_indexes: &'a (dyn uqa_sql::semantics::text_indexes::TextMatchCatalog + Sync),
 }
 impl<S: Clone + 'static> Copy for SourceContext<'_, S> {}
+
+impl<'a, S: Clone + 'static> SourceContext<'a, S> {
+    pub fn scan_foreign_source(
+        &self,
+        name: &str,
+        filter: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<ForeignSourceRows<'a>, String> {
+        self.foreign_tables
+            .ok_or_else(|| "FDW support is not available in this build".to_owned())?
+            .scan_foreign_source(name, filter, params)
+    }
+}

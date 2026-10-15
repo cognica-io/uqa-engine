@@ -13,7 +13,7 @@ use parking_lot::{Mutex, RwLock};
 use uqa_storage::{PersistentStorageProvider, PersistentStorageSession, StorageBackendResult};
 
 use crate::state::CatalogCell;
-use crate::{Engine, TableState, VectorIndexOpenMode, VectorIndexSpec};
+use crate::{Engine, TableState};
 
 impl Engine {
     pub(super) fn session_from_shared_catalog(
@@ -39,7 +39,7 @@ impl Engine {
         let epochs = self.epochs.published_epochs();
         let cache_revisions = self.epochs.storage_cache_revisions.lock().clone();
         let read_view = self.epochs.seen_storage_read_view.lock().clone();
-        let session = Self::empty_persistent_session(
+        let mut session = Self::empty_persistent_session(
             PersistentStorageSession::new(
                 Arc::clone(&storage.catalog),
                 Arc::clone(&storage.backend),
@@ -47,6 +47,7 @@ impl Engine {
             Some(Arc::clone(provider)),
         );
         session.durable.restore(&self.durable.snapshot());
+        session.runtime.physical_index_cache = self.runtime.physical_index_cache.clone();
         uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session);
         session.rebind_graph_stores()?;
         for (relation, source) in self.storage.tables.read().iter() {
@@ -54,13 +55,19 @@ impl Engine {
                 continue;
             }
             let name = relation.qualified_name();
-            let table = Self::bind_shared_session_table(storage, &name, source)?;
+            let table = Self::bind_shared_session_table(storage, &name, source);
             session
                 .storage
                 .tables
                 .write()
                 .insert(relation.clone(), Arc::clone(&table));
-            session.rebind_persistent_table_stores(&name, &table)?;
+            let vector_fields = source
+                .vector_indexes
+                .read()
+                .iter()
+                .map(|(field, index)| (field.clone(), index.dimensions()))
+                .collect();
+            session.bind_persistent_table_indexes(&name, &table, vector_fields)?;
         }
         // Compare the source monitor with itself: providers need not use
         // comparable generation numbers across independent monitor handles.
@@ -89,29 +96,17 @@ impl Engine {
         storage: &PersistentStorageSession,
         name: &str,
         source: &TableState,
-    ) -> StorageBackendResult<Arc<TableState>> {
+    ) -> Arc<TableState> {
         let analyzer = source.analyzer.read().clone();
-        let mut vectors = std::collections::BTreeMap::new();
-        for (field, index) in source.vector_indexes.read().iter() {
-            vectors.insert(
-                field.clone(),
-                storage.backend.vector_index(
-                    name,
-                    field,
-                    index.dimensions(),
-                    VectorIndexSpec::BruteForce,
-                    VectorIndexOpenMode::Restore,
-                )?,
-            );
-        }
-        Ok(Arc::new(TableState {
+        Arc::new(TableState {
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
             security: CatalogCell::from_snapshot(source.security.snapshot()),
             storage_generation: RwLock::new(source.storage_generation()),
             document_store: RwLock::new(storage.backend.document_store(name)),
             inverted_index: RwLock::new(storage.backend.inverted_index(name, analyzer)),
-            vector_indexes: RwLock::new(vectors.into()),
+            // Bind catalog-selected vector stores after installing the table, which DiskANN restoration needs for its owner and resource handles.
+            vector_indexes: RwLock::new(std::collections::BTreeMap::new().into()),
             fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
@@ -136,6 +131,6 @@ impl Engine {
             catalog_oids: source.recorded_catalog_oids(),
             row_type_array_name: CatalogCell::from_snapshot(source.row_type_array_name.snapshot()),
             dropped_attributes: CatalogCell::from_snapshot(source.dropped_attributes.snapshot()),
-        }))
+        })
     }
 }

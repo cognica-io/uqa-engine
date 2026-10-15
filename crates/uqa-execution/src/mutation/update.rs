@@ -67,6 +67,7 @@ pub fn prepare_update_row<S: Clone + 'static>(
         &stmt.table,
         params,
         stmt.include_descendants,
+        statement.columns,
     )?
     else {
         return Ok(None);
