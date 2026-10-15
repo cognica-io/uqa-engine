@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Update the locked TLS dependency to rustls 0.23.46, incorporating the fixes for RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349 in native HTTP clients and published binaries.
+
 - Preserve private regular and materialized views when another session publishes catalog changes during a fixed-isolation transaction. Retain view creation, replacement, rename, deletion, materialized rows and original owner identities through catalog refresh, commit, rollback and reopening.
 
 - Reuse a current catalog view across object-ID reservations while preserving collision checks after private DDL, lock waits and rollback, including memory and temporary tables.
