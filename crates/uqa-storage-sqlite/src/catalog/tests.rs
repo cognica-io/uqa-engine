@@ -12,6 +12,7 @@ mod metadata;
 mod metadata_prefix;
 mod migration;
 mod version_migrations;
+mod view_provenance;
 
 fn fresh() -> Catalog {
     let mc = ManagedConnection::open_in_memory().unwrap();

@@ -460,6 +460,10 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_views(self))
     }
 
+    fn view_has_private_changes(&self, relation: &RelationIdentity) -> StorageBackendResult<bool> {
+        into_storage_result(self.native_view_has_private_changes(relation))
+    }
+
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_named_graph(self, name))
     }

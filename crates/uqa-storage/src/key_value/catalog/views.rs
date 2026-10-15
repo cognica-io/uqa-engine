@@ -13,6 +13,19 @@ use super::{
 };
 
 impl KeyValueCatalog {
+    pub(super) fn view_has_private_changes_impl(
+        &self,
+        relation: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(false);
+        }
+        let key = relation_key(TAG_VIEW, relation)?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            Ok(read.revision(&[&key])?.has_private_changes())
+        })
+    }
+
     pub(super) fn save_view_impl(&self, view: &ViewRow) -> StorageBackendResult<()> {
         self.store.with_mutation(&mut |read, batch| {
             super::relations::claim_relation(read, batch, &view.relation, RelationKind::View)?;
