@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views. Accept foreign-table CHECK and NOT NULL constraint deletion through the existing transactional dependency path.
 
-- Retain physical constraint catalog rows across concurrent DDL, REPEATABLE READ, SERIALIZABLE, savepoint rollback and held cursors. Publish ordinary, foreign, domain and trigger constraints atomically, preserving independent partition catalog identities. Complete SQL creation and direct schema API publication inside their owning transactions so unrelated writers do not replay unfinished catalog work. The all-owner storage upgrade initializes existing definitions without rewriting user rows.
+- Retain physical constraint catalog rows across concurrent DDL, REPEATABLE READ, SERIALIZABLE, savepoint rollback and held cursors. Publish ordinary, foreign, domain and trigger constraints atomically, preserving independent partition catalog identities. Complete SQL table/index changes and direct schema/constraint API publication inside their owning transactions so unrelated writers and no-op declarations do not replay unfinished catalog work. The all-owner storage upgrade initializes existing definitions without rewriting user rows.
 
 - Restore role definitions and validate OID claims without first copying all selected metadata payloads, preserving snapshot boundaries and callback errors.
 
