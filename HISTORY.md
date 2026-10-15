@@ -16,6 +16,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve deferred foreign-key modes and pending events across physical constraint catalog publication, partition changes, renames, nested execution and savepoint rollback by retaining the independent enforcement identity.
+
+- Publish inherited constraint counts and routine-dependent foreign-table changes atomically, repair physical constraint rows during legacy conversion and reject missing or unknown constraint formats when creating independent sessions.
+
+- Reconstruct catalog expressions with the current IntervalStyle, PostgreSQL real-number precision and the selected array, JSONB, range and multirange containment operators. Preserve typed range-element CHECK constraints through persistent reopening.
+
+- Rebind live DiskANN handles after index renames while preserving stored generations, subsequent writes and savepoint undo.
+
 - Allocate retained catalog transaction identities only when a reader captures a boundary, avoiding a heap allocation in ordinary MVCC indexing transactions while preserving transaction-lifetime checks and existing Nori resource limits.
 
 - Update the locked TLS dependency to rustls 0.23.46, incorporating the fixes for RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349 in native HTTP clients and published binaries.

@@ -8658,6 +8658,548 @@
       "capability": "Independent PostgreSQL catalog oracle",
       "workload": "Reference CONST bytes with platform-dependent C char signedness beside deliberately preserved node fields and whitespace.",
       "invariant": "Only numeric byte spelling changes; the production node parser and writer cannot erase reference differences."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_constraints_uses_batch_callback_and_temporary_namespace_transaction_contexts",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "deferred_checks_run_before_on_commit_drop_actions",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_constraints_resolves_names_like_postgresql_and_all_ignores_immediate_constraints",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_constraints_changes_foreign_key_modes_retroactively_and_transactionally",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_foreign_key_drop_follows_pg18_inheritance_and_pending_events",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/catalog_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "deferred_events_follow_row_rewrites_and_survive_constraint_changes",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_modes_follow_cross_session_table_renames_by_object_identity",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_constraints_honors_explicit_pg_temp_search_path_position",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "dependency_cascades_discard_child_events_like_pg18",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/catalog_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "pending_events_block_relation_rewrites_but_allow_renames",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "detach_preserves_both_constraint_modes_and_savepoint_undo",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/catalog_addresses.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "drop_restrict_dependency_precedes_a_pending_parent_event",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_deferred_events_keep_their_physical_identity_during_unrelated_ddl",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-cli",
+      "kind": "lib",
+      "test": "command_text_uses_one_implicit_transaction_for_multiple_statements",
+      "cases": 1,
+      "source": "crates/uqa-cli/src/main_tests.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "renamed_foreign_key_keeps_deferred_mode_and_pending_events",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/foreign_key_rename.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "parent_events_are_queued_without_referencing_rows",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_constraints_immediate_checks_only_the_selected_foreign_keys",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/persistence.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "set_constraints_all_object_lifecycle_and_nested_execution_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_key_modes_use_enforcement_identity_without_changing_catalog_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests.rs",
+      "capability": "Foreign-key runtime identity",
+      "workload": "Deferred modes, pending events, partition copies, renames, temporary namespaces and transactional batch boundaries.",
+      "invariant": "Logical enforcement identity survives physical catalog publication, DDL, savepoint undo and commit; violations and SET CONSTRAINTS retain PostgreSQL behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "interval_style_matches_postgresql_execution_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/interval_style.rs",
+      "capability": "Typed catalog expression output",
+      "workload": "Session IntervalStyle, partition expressions and bounds, enum labels and range-element CHECK expressions across memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Reconstructed SQL uses PostgreSQL values, types and operator identities through persistent reopening; controlled operator resolution releases its memory on success and failure.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "enum_partition_key_catalog_output_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_enums.rs",
+      "capability": "Typed catalog expression output",
+      "workload": "Session IntervalStyle, partition expressions and bounds, enum labels and range-element CHECK expressions across memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Reconstructed SQL uses PostgreSQL values, types and operator identities through persistent reopening; controlled operator resolution releases its memory on success and failure.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "range_elements_match_postgresql_execution_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_elements.rs",
+      "capability": "Typed catalog expression output",
+      "workload": "Session IntervalStyle, partition expressions and bounds, enum labels and range-element CHECK expressions across memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Reconstructed SQL uses PostgreSQL values, types and operator identities through persistent reopening; controlled operator resolution releases its memory on success and failure.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_bounds_match_postgresql_memory",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_partition_bounds.rs",
+      "capability": "Typed catalog expression output",
+      "workload": "Session IntervalStyle, partition expressions and bounds, enum labels and range-element CHECK expressions across memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Reconstructed SQL uses PostgreSQL values, types and operator identities through persistent reopening; controlled operator resolution releases its memory on success and failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_bounds_match_postgresql_sqlite",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_partition_bounds.rs",
+      "capability": "Typed catalog expression output",
+      "workload": "Session IntervalStyle, partition expressions and bounds, enum labels and range-element CHECK expressions across memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Reconstructed SQL uses PostgreSQL values, types and operator identities through persistent reopening; controlled operator resolution releases its memory on success and failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "containment_operator_identities_and_bounded_types_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Typed catalog expression output",
+      "workload": "Session IntervalStyle, partition expressions and bounds, enum labels and range-element CHECK expressions across memory, SQLite, SQLite K/V and redb.",
+      "invariant": "Reconstructed SQL uses PostgreSQL values, types and operator identities through persistent reopening; controlled operator resolution releases its memory on success and failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_key_and_check_conversion_rolls_back_with_a_later_restore_failure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/catalog_addresses.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "foreign_key_restoration_requires_a_known_completed_conversion_marker",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/foreign_key_rename/restoration.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_foreign_key_conversion_is_initial_only_and_rolls_back_with_later_restore_failure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/foreign_key_rename/restoration.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "not_null_removal_matches_different_names_after_another_parent_is_removed",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/removal.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "constraint_removal_stops_at_local_or_other_parent_origins",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/removal.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "inherited_merge_preserves_an_existing_unvalidated_not_null_constraint",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_relation_hierarchy/not_null.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_partition_foreign_key_addresses_convert_with_and_without_the_original_parent",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/hierarchy_restoration.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "load_only_not_null_restore_requires_a_known_completed_conversion_marker",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/constraint_rename.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_not_null_conversion_is_initial_only_and_rolls_back_on_later_restore_failure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_alteration_locks/constraint_rename.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "adding_partition_key_materializes_descendants_and_renamed_foreign_key_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "foreign_table_routine_dependencies_survive_reopen_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_routine_identity/foreign_table_dependencies.rs",
+      "capability": "Physical constraint catalog publication",
+      "workload": "Inheritance removal/merge, legacy catalog conversion and format validation, dependent routine removal and partition foreign-key index selection.",
+      "invariant": "Physical catalog rows agree with logical enforcement after commit, rollback and reopen, and load-only sessions reject incomplete or unknown formats.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_sql_index_rename_keeps_writes_and_undo_bound_to_the_original_identity",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/renaming.rs",
+      "capability": "DiskANN retained catalog binding",
+      "workload": "Index, column and table renames with writes and savepoint undo, plus peer-triggered cache restoration after a confirmed commit.",
+      "invariant": "Live handles follow the stored index identity without rebuilding canonical vectors; bounded cache restoration failure preserves the confirmed durable commit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_publication_cache_restore_failure_keeps_the_confirmed_commit",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
+      "capability": "DiskANN retained catalog binding",
+      "workload": "Index, column and table renames with writes and savepoint undo, plus peer-triggered cache restoration after a confirmed commit.",
+      "invariant": "Live handles follow the stored index identity without rebuilding canonical vectors; bounded cache restoration failure preserves the confirmed durable commit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_sql_column_rename_preserves_index_kind_and_canonical_vectors",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/renaming.rs",
+      "capability": "DiskANN retained catalog binding",
+      "workload": "Index, column and table renames with writes and savepoint undo, plus peer-triggered cache restoration after a confirmed commit.",
+      "invariant": "Live handles follow the stored index identity without rebuilding canonical vectors; bounded cache restoration failure preserves the confirmed durable commit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "diskann_sql_table_rename_preserves_index_kind_and_catalog_undo",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/renaming.rs",
+      "capability": "DiskANN retained catalog binding",
+      "workload": "Index, column and table renames with writes and savepoint undo, plus peer-triggered cache restoration after a confirmed commit.",
+      "invariant": "Live handles follow the stored index identity without rebuilding canonical vectors; bounded cache restoration failure preserves the confirmed durable commit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "postgresql_sql_compatibility_matrix",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/postgres_age_compat.rs",
+      "capability": "PostgreSQL MERGE action diagnostics",
+      "workload": "The existing SQL compatibility matrix, including MERGE_ACTION outside a MERGE RETURNING clause.",
+      "invariant": "SQLSTATE 42601 and the PostgreSQL diagnostic are exact while supported query output remains unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
