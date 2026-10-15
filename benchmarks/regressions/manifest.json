@@ -8591,6 +8591,19 @@
       "capability": "Requested constraint expression work",
       "workload": "Temporary ordinary and foreign constraint rows beside a retained physical catalog; name-only, excluded-name and selected-conbin requests.",
       "invariant": "Unrequested or excluded CHECK nodes perform zero encodings; selecting conbin encodes exactly the matching node and retains its value."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "reference_datum_normalization_preserves_node_fields_and_layout",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Independent PostgreSQL catalog oracle",
+      "workload": "Reference CONST bytes with platform-dependent C char signedness beside deliberately preserved node fields and whitespace.",
+      "invariant": "Only numeric byte spelling changes; the production node parser and writer cannot erase reference differences."
     }
   ]
 }

@@ -258,16 +258,47 @@ fn verify_reference(engine: &Engine, transcript: &str) {
             for row in result["rows"].as_array_mut().unwrap() {
                 for &column in &columns {
                     if let Some(value) = row[column].as_str() {
-                        row[column] = uqa_sql::catalog::node_tree::parse(value)
-                            .unwrap()
-                            .to_string()
-                            .into();
+                        row[column] = normalize_reference_datum_chars(value).into();
                     }
                 }
             }
         }
     }
     crate::pg18_oracle::verify(engine, &serde_json::to_string(&oracle).unwrap());
+}
+
+/// Normalize only `PostgreSQL`'s platform-dependent C char spelling; leave the reference node syntax untouched by the production parser or writer.
+fn normalize_reference_datum_chars(value: &str) -> String {
+    static DATUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(:constvalue [0-9]+ \[)([-0-9\s]*)(\])").unwrap()
+    });
+    static BYTE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"-?[0-9]+").unwrap());
+    DATUM
+        .replace_all(value, |datum: &regex::Captures<'_>| {
+            let bytes = BYTE.replace_all(&datum[2], |number: &regex::Captures<'_>| {
+                let value = number[0].parse::<i16>().unwrap();
+                assert!((-128..=255).contains(&value));
+                let byte = u8::try_from(value.rem_euclid(256)).unwrap();
+                std::ffi::c_char::from_ne_bytes([byte]).to_string()
+            });
+            format!("{}{}{}", &datum[1], bytes, &datum[3])
+        })
+        .into_owned()
+}
+
+#[test]
+fn reference_datum_normalization_preserves_node_fields_and_layout() {
+    let reference = "{CONST  :location 17 :constvalue 2 [  255\t128  ] :unknown keep\\ text}";
+    let normalized = normalize_reference_datum_chars(reference);
+    let first = std::ffi::c_char::from_ne_bytes([255]);
+    let second = std::ffi::c_char::from_ne_bytes([128]);
+    assert_eq!(
+        normalized,
+        format!(
+            "{{CONST  :location 17 :constvalue 2 [  {first}\t{second}  ] :unknown keep\\ text}}"
+        )
+    );
 }
 
 #[path = "constraint_expressions/catalog_upgrade.rs"]
