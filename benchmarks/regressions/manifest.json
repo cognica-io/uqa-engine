@@ -6286,6 +6286,178 @@
       "capability": "Catalog projection column identity",
       "workload": "Plain and qualified columns, renamed outputs, explicit COLLATE and function calls with zero/one/two retained metadata wrappers in both formatting modes; existing 85-case PostgreSQL catalog-cast reference across four providers.",
       "invariant": "Internal collation metadata never adds a redundant column alias; explicit clauses, renamed outputs, routine binding and catalog-dependent text retain their existing representation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "sequence_default_inputs_match_postgresql",
+      "source": "crates/uqa-engine/tests/sql_sequences/default_inputs.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Retained sequence default identity",
+      "workload": "All four providers for the unchanged PostgreSQL default-input reference, plus frozen-OID lifecycle and atomic initial-open migration on persistent providers.",
+      "invariant": "Selected relation OIDs, exact regclass type identity, missing collation/composite metadata, native overload binding and initial-open-only restoration survive canonical SQL type spelling without changing SQL behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "canonical_default_dependency_survives_reopen_and_blocks_only_its_sequence_drop",
+      "source": "crates/uqa-engine/tests/sql_sequences/lifecycle.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained sequence default identity",
+      "workload": "All four providers for the unchanged PostgreSQL default-input reference, plus frozen-OID lifecycle and atomic initial-open migration on persistent providers.",
+      "invariant": "Selected relation OIDs, exact regclass type identity, missing collation/composite metadata, native overload binding and initial-open-only restoration survive canonical SQL type spelling without changing SQL behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "legacy_default_sequence_identity_is_frozen_on_initial_open",
+      "source": "crates/uqa-engine/tests/sql_sequences/lifecycle.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained sequence default identity",
+      "workload": "All four providers for the unchanged PostgreSQL default-input reference, plus frozen-OID lifecycle and atomic initial-open migration on persistent providers.",
+      "invariant": "Selected relation OIDs, exact regclass type identity, missing collation/composite metadata, native overload binding and initial-open-only restoration survive canonical SQL type spelling without changing SQL behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "every_sequence_function_default_and_alter_path_stores_a_canonical_target",
+      "source": "crates/uqa-engine/tests/sql_sequences/lifecycle.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained sequence default identity",
+      "workload": "All four providers for the unchanged PostgreSQL default-input reference, plus frozen-OID lifecycle and atomic initial-open migration on persistent providers.",
+      "invariant": "Selected relation OIDs, exact regclass type identity, missing collation/composite metadata, native overload binding and initial-open-only restoration survive canonical SQL type spelling without changing SQL behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_initial_restore_does_not_publish_legacy_sequence_default_conversion",
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/restoration/defaults.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained sequence default identity",
+      "workload": "All four providers for the unchanged PostgreSQL default-input reference, plus frozen-OID lifecycle and atomic initial-open migration on persistent providers.",
+      "invariant": "Selected relation OIDs, exact regclass type identity, missing collation/composite metadata, native overload binding and initial-open-only restoration survive canonical SQL type spelling without changing SQL behavior."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_sequence_defaults_migrate_only_on_initial_open_and_keep_oid_after_rename",
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/restoration/defaults.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained sequence default identity",
+      "workload": "All four providers for the unchanged PostgreSQL default-input reference, plus frozen-OID lifecycle and atomic initial-open migration on persistent providers.",
+      "invariant": "Selected relation OIDs, exact regclass type identity, missing collation/composite metadata, native overload binding and initial-open-only restoration survive canonical SQL type spelling without changing SQL behavior."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "hash_join_prepares_constant_like_residual_once",
+      "source": "crates/uqa-execution/src/join/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native retained-plan regression contracts",
+      "workload": "Compiled native NOT LIKE join residuals, constant-folded named windows and public SQL cache entry with transaction/invalidation controls.",
+      "invariant": "Prepared native predicates never fall back to scalar evaluation; exact folded value/type/metadata and window idempotence survive canonical names; cached structural plans respect their catalog and transaction boundaries."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "test",
+      "test": "window_definitions_follow_subquery_remapping_and_source_constants",
+      "source": "crates/uqa-planner/tests/optimizer_rewrites.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native retained-plan regression contracts",
+      "workload": "Compiled native NOT LIKE join residuals, constant-folded named windows and public SQL cache entry with transaction/invalidation controls.",
+      "invariant": "Prepared native predicates never fall back to scalar evaluation; exact folded value/type/metadata and window idempotence survive canonical names; cached structural plans respect their catalog and transaction boundaries."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "sql_boundaries_are_cached_as_structural_unified_plans",
+      "source": "crates/uqa-engine/src/tests/queries.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native retained-plan regression contracts",
+      "workload": "Compiled native NOT LIKE join residuals, constant-folded named windows and public SQL cache entry with transaction/invalidation controls.",
+      "invariant": "Prepared native predicates never fall back to scalar evaluation; exact folded value/type/metadata and window idempotence survive canonical names; cached structural plans respect their catalog and transaction boundaries."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_read_only_statements_reuse_optimized_plan_until_invalidation",
+      "source": "crates/uqa-engine/src/tests/queries.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native retained-plan regression contracts",
+      "workload": "Compiled native NOT LIKE join residuals, constant-folded named windows and public SQL cache entry with transaction/invalidation controls.",
+      "invariant": "Prepared native predicates never fall back to scalar evaluation; exact folded value/type/metadata and window idempotence survive canonical names; cached structural plans respect their catalog and transaction boundaries."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cached_memory_read_plan_is_not_reused_inside_explicit_transaction",
+      "source": "crates/uqa-engine/src/tests/queries.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native retained-plan regression contracts",
+      "workload": "Compiled native NOT LIKE join residuals, constant-folded named windows and public SQL cache entry with transaction/invalidation controls.",
+      "invariant": "Prepared native predicates never fall back to scalar evaluation; exact folded value/type/metadata and window idempotence survive canonical names; cached structural plans respect their catalog and transaction boundaries."
+    },
+    {
+      "package": "uqa-pg-server",
+      "kind": "test",
+      "test": "startup_reports_every_reported_parameter_and_reset_restores_client_settings",
+      "source": "crates/uqa-pg-server/tests/server/simple_query.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Reported session parameters and typed TCP output",
+      "workload": "Simple Query startup, IntervalStyle SET/SET LOCAL/rollback/RESET notifications and output, client setting reset, and the independent enum wire reference.",
+      "invariant": "Session status follows the SQL parameter catalog and transaction boundaries; interval and enum text and metadata retain PostgreSQL behavior."
+    },
+    {
+      "package": "uqa-pg-server",
+      "kind": "test",
+      "test": "enum_oracle_matches_postgresql_over_tcp",
+      "source": "crates/uqa-pg-server/tests/server/enums.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Reported session parameters and typed TCP output",
+      "workload": "Simple Query startup, IntervalStyle SET/SET LOCAL/rollback/RESET notifications and output, client setting reset, and the independent enum wire reference.",
+      "invariant": "Session status follows the SQL parameter catalog and transaction boundaries; interval and enum text and metadata retain PostgreSQL behavior."
     }
   ]
 }

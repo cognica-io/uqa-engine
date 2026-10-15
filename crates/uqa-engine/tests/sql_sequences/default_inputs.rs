@@ -40,15 +40,22 @@ fn assert_stored_identity(engine: &Engine, columns: &[&str]) {
         let Expr::Func { args, .. } = expression else {
             panic!("stored sequence call");
         };
+        let Expr::TypedLiteral {
+            value,
+            ty,
+            collation_oid,
+            composite_source,
+        } = &args[0]
+        else {
+            panic!("stored sequence OID constant");
+        };
+        assert_eq!(value, &oid);
         assert_eq!(
-            args[0],
-            Expr::TypedLiteral {
-                collation_oid: None,
-                composite_source: None,
-                value: oid.clone(),
-                ty: "regclass".into()
-            }
+            uqa_sql::ColumnType::from_sql_name(ty).unwrap(),
+            uqa_sql::ColumnType::Regclass
         );
+        assert_eq!(*collation_oid, None);
+        assert_eq!(*composite_source, None);
         assert!(matches!(oid, Value::Int(_)));
     }
 }
