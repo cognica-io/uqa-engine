@@ -1,0 +1,251 @@
+{
+  "provenance": {
+    "server": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1)",
+    "timezone": "UTC",
+    "datestyle": "ISO, YMD",
+    "intervalstyle": "postgres",
+    "source": "Independent psql capture; carrier units are Unix days/microseconds and TemporalInfinity endpoints."
+  },
+  "cases": [
+    {
+      "sql": "SELECT '-infinity'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-2147483648}",
+      "expected": "-infinity",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT 'infinity'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":2147483647}",
+      "expected": "infinity",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '0001-01-01 BC'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-719528}",
+      "expected": "0001-01-01 BC",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '0002-12-31 BC'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-719529}",
+      "expected": "0002-12-31 BC",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '0001-01-01'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-719162}",
+      "expected": "0001-01-01",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1582-10-04'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-141438}",
+      "expected": "1582-10-04",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1582-10-15'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-141427}",
+      "expected": "1582-10-15",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1900-02-28'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":-25509}",
+      "expected": "1900-02-28",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '2000-02-29'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":11016}",
+      "expected": "2000-02-29",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '10000-01-01'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":2932897}",
+      "expected": "10000-01-01",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '262142-12-31'::date",
+      "wire": "{\"$uqa_type\":\"date\",\"days\":95026236}",
+      "expected": "262142-12-31",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '-infinity'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":-9223372036854775808}",
+      "expected": "-infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT 'infinity'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":-9223372036854775807}",
+      "expected": "infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0001-01-01 00:00:00 BC'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":-62167219200000000}",
+      "expected": "0001-01-01 00:00:00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0002-12-31 23:59:59.999999 BC'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":-62167219200000001}",
+      "expected": "0002-12-31 23:59:59.999999 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '1969-12-31 23:59:59.999999'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":-1}",
+      "expected": "1969-12-31 23:59:59.999999",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1970-01-01 00:00:00.000001'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":1}",
+      "expected": "1970-01-01 00:00:00.000001",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '10000-01-01 00:00:00'::timestamp",
+      "wire": "{\"$uqa_type\":\"timestamp\",\"micros\":253402300800000000}",
+      "expected": "10000-01-01 00:00:00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '-infinity'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":-9223372036854775808}",
+      "expected": "-infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT 'infinity'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":-9223372036854775807}",
+      "expected": "infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0001-01-01 00:00:00 BC'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":-62167219200000000}",
+      "expected": "0001-01-01 00:00:00+00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0002-12-31 23:59:59.999999 BC'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":-62167219200000001}",
+      "expected": "0002-12-31 23:59:59.999999+00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '1969-12-31 23:59:59.999999'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":-1}",
+      "expected": "1969-12-31 23:59:59.999999+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1970-01-01 00:00:00.000001'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":1}",
+      "expected": "1970-01-01 00:00:00.000001+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '10000-01-01 00:00:00'::timestamptz",
+      "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":253402300800000000}",
+      "expected": "10000-01-01 00:00:00+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '24:00'::time",
+      "wire": "{\"$uqa_type\":\"time\",\"micros\":86400000000}",
+      "expected": "24:00:00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '23:59:59.999999'::time",
+      "wire": "{\"$uqa_type\":\"time\",\"micros\":86399999999}",
+      "expected": "23:59:59.999999",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '00:00:00.000001'::time",
+      "wire": "{\"$uqa_type\":\"time\",\"micros\":1}",
+      "expected": "00:00:00.000001",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '24:00+09'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz\",\"micros\":86400000000,\"offset_minutes\":540}",
+      "expected": "24:00:00+09",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '12:34:56.123456-03:30'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz\",\"micros\":45296123456,\"offset_minutes\":-210}",
+      "expected": "12:34:56.123456-03:30",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '00:00+00'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz\",\"micros\":0,\"offset_minutes\":0}",
+      "expected": "00:00:00+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '00:00-09'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz\",\"micros\":0,\"offset_minutes\":-540}",
+      "expected": "00:00:00-09",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '-infinity'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":-2147483648,\"days\":-2147483648,\"micros\":-9223372036854775808}",
+      "expected": "-infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT 'infinity'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":2147483647,\"days\":2147483647,\"micros\":9223372036854775807}",
+      "expected": "infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '-1 year -1 mon 2 days 1 hour'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":-13,\"days\":2,\"micros\":3600000000}",
+      "expected": "-1 years -1 mons +2 days 01:00:00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '-1 mon 1 day 1 hour'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":-1,\"days\":1,\"micros\":3600000000}",
+      "expected": "-1 mons +1 day 01:00:00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1 year -2 days 1 hour'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":12,\"days\":-2,\"micros\":3600000000}",
+      "expected": "1 year -2 days +01:00:00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '-1 day 1 hour'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":0,\"days\":-1,\"micros\":3600000000}",
+      "expected": "-1 days +01:00:00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '0 seconds'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":0,\"days\":0,\"micros\":0}",
+      "expected": "00:00:00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '-1 year -1 mon 2 days 9223372036854775807 microseconds'::interval",
+      "wire": "{\"$uqa_type\":\"interval\",\"months\":-13,\"days\":2,\"micros\":9223372036854775807}",
+      "expected": "-1 years -1 mons +2 days 2562047788:00:54.775807",
+      "browser_safe": false
+    }
+  ]
+}

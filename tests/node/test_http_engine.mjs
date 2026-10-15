@@ -19,6 +19,7 @@ import { registerNotificationPortabilityTests } from "./notifications/portabilit
 import { registerNotificationHTTPTests } from "./notifications/http.mjs";
 import { registerCLILifecycleTests, runCLIFixture } from "./http_cli.mjs";
 import { registerHTTPLimitTests } from "../parity/http_limits.mjs";
+import { registerHTTPTemporalTests } from "../parity/http_temporal.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../../crates/uqa-node/", import.meta.url));
@@ -37,6 +38,7 @@ registerNotificationPortabilityTests(packagePath);
 registerNotificationHTTPTests(packagePath);
 registerCLILifecycleTests(packagePath);
 registerHTTPLimitTests("Node.js", uqa.HttpEngine, uqa.HttpEngineError);
+registerHTTPTemporalTests("Node.js", uqa.HttpEngine);
 after(() => rmSync(directory, { recursive: true, force: true }));
 
 async function server(handler, run) {
@@ -189,7 +191,7 @@ test("HTTP results preserve tagged values, nested integers, and prototype-shaped
     assert.deepEqual(row.__proto__, { safe: true });
     assert.equal(row.record.__proto__, 7);
     assert.equal(row.timestamp, "2255-06-05 23:47:34.740993+00");
-    assert.equal(row.interval, "-1 years -1 mons +2 days +2562047788:00:54.775807");
+    assert.equal(row.interval, "-1 years -1 mons +2 days 2562047788:00:54.775807");
     assert.deepEqual(row.bytesMap, { $uqa_type: "bytes", hex: "ff", extra: true });
     assert.equal(row.void, "");
   });

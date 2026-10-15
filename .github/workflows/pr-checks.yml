@@ -18,6 +18,17 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  http:
+    name: JavaScript HTTP values and package contents
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test HTTP clients without native artifacts
+        run: node --test tests/node/test_http_engine.mjs
+
   fmt:
     name: cargo fmt
     runs-on: ubuntu-24.04

@@ -228,6 +228,8 @@ function requireSafeHTTPInteger(value) {
 
 function formatHTTPDate(days) {
   requireSafeHTTPInteger(days);
+  if (days === -2_147_483_648) return "-infinity";
+  if (days === 2_147_483_647) return "infinity";
   const date = new Date(days * 86_400_000);
   if (Number.isNaN(date.valueOf())) {
     return String(days);
@@ -238,16 +240,16 @@ function formatHTTPDate(days) {
   }
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
-  return `${formatHTTPYear(year)}-${month}-${day}`;
+  return `${formatHTTPYear(year)}-${month}-${day}${year <= 0 ? " BC" : ""}`;
 }
 
 function formatHTTPYear(year) {
-  const magnitude = String(Math.abs(year)).padStart(4, "0");
-  return year < 0 ? `-${magnitude}` : year > 9_999 ? `+${magnitude}` : magnitude;
+  return String(year > 0 ? year : 1 - year).padStart(4, "0");
 }
 
 function formatHTTPTime(source) {
   const day = 86_400_000_000n;
+  if (BigInt(source) === day) return "24:00:00";
   const micros = ((BigInt(source) % day) + day) % day;
   return formatClock(micros);
 }
@@ -266,27 +268,35 @@ function formatHTTPOffset(source) {
   const minutes = requireSafeHTTPInteger(source);
   const sign = minutes < 0 ? "-" : "+";
   const absolute = Math.abs(minutes);
-  return `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
+  const hours = `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}`;
+  return absolute % 60 === 0 ? hours : `${hours}:${String(absolute % 60).padStart(2, "0")}`;
 }
 
 function formatHTTPTimestamp(source, utc) {
   const micros = BigInt(source);
+  // Timestamp endpoints occupy the unrepresentable lower Unix-microsecond range; i64::MAX is finite.
+  if (micros === MIN_INT64) return "-infinity";
+  if (micros === MIN_INT64 + 1n) return "infinity";
   const day = 86_400_000_000n;
   const remainder = ((micros % day) + day) % day;
   const days = Number((micros - remainder) / day);
   const date = formatHTTPDate(days);
-  if (!/^[+-]?\d{4,}-\d{2}-\d{2}$/.test(date)) return String(micros);
-  return date + " " + formatClock(remainder) + (utc ? "+00" : "");
+  const era = date.endsWith(" BC") ? " BC" : "";
+  const calendar = era ? date.slice(0, -3) : date;
+  if (!/^\d{4,}-\d{2}-\d{2}$/.test(calendar)) return String(micros);
+  return calendar + " " + formatClock(remainder) + (utc ? "+00" : "") + era;
 }
 
 function formatHTTPInterval(months, days, source) {
   const micros = BigInt(source);
+  if (months === -2_147_483_648 && days === months && micros === MIN_INT64) return "-infinity";
+  if (months === 2_147_483_647 && days === months && micros === MAX_INT64) return "infinity";
   const fields = [];
   let negative = false;
   for (const [value, unit] of [[Math.trunc(months / 12), "year"], [months % 12, "mon"], [days, "day"]]) {
     if (value !== 0) {
       fields.push((negative && value > 0 ? "+" : "") + value + " " + unit + (value === 1 ? "" : "s"));
-      negative ||= value < 0;
+      negative = value < 0;
     }
   }
   if (micros !== 0n || fields.length === 0) {

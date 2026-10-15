@@ -1,0 +1,50 @@
+name: HTTP carrier parity
+
+on:
+  pull_request:
+    paths:
+      - "crates/uqa-core/src/types/temporal.rs"
+      - "crates/uqa-core/src/types/temporal/**"
+      - "crates/uqa-client/**"
+      - "crates/uqa-node/**"
+      - "tests/node/**"
+      - "tests/parity/http_temporal.*"
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/http-carrier-parity.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  native:
+    name: Native and JavaScript HTTP value parity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Install Node build dependencies
+        working-directory: crates/uqa-node
+        run: npm ci --ignore-scripts
+      - name: Build the native value adapter
+        working-directory: crates/uqa-node
+        run: npx napi build --platform --no-js --profile release-stripped --no-default-features
+      - name: Compare typed HTTP carriers with the native client and PostgreSQL oracle
+        run: node --test --test-name-pattern='JavaScript HTTP values agree' tests/node/test_uqa_node.mjs
