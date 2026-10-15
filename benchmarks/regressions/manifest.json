@@ -8256,6 +8256,19 @@
     },
     {
       "package": "uqa-storage",
+      "kind": "lib",
+      "source": "crates/uqa-storage/src/mvcc/session/transaction/tests.rs",
+      "test": "empty_transactions_allocate_only_the_private_record_owner",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "MVCC transaction allocation",
+      "workload": "Open and drop empty read-only and writable transactions over an existing committed snapshot.",
+      "invariant": "At most one private-record owner allocation is needed; unused retained catalog boundary identities allocate nothing, and completion retains no allocations."
+    },
+    {
+      "package": "uqa-storage",
       "kind": "test",
       "source": "crates/uqa-storage/tests/cases/mvcc_sessions/retained.rs",
       "test": "fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes",

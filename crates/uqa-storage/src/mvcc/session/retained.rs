@@ -30,8 +30,8 @@ impl VersionedKeyValueStore {
     ) -> StorageBackendResult<Arc<CommittedReadBoundary>> {
         self.require_mutable_session()?;
         self.control.check()?;
-        let active = self.active.lock();
-        let transaction = active.as_ref().ok_or_else(super::no_transaction)?;
+        let mut active = self.active.lock();
+        let transaction = active.as_mut().ok_or_else(super::no_transaction)?;
         transaction
             .unsealed()
             .map_err(VersionError::into_storage_error)?;
@@ -42,7 +42,11 @@ impl VersionedKeyValueStore {
         Ok(Arc::new(CommittedReadBoundary {
             database: self.persistence.database_id(),
             session: self.affinity.clone(),
-            transaction: Arc::clone(&transaction.retention_identity),
+            transaction: Arc::clone(
+                transaction
+                    .retention_identity
+                    .get_or_insert_with(|| Arc::new(())),
+            ),
             committed: transaction.committed_snapshot(),
             serializable: transaction.serializable_context().cloned(),
             _memory: memory,
@@ -68,7 +72,11 @@ impl VersionedKeyValueStore {
         transaction
             .unsealed()
             .map_err(VersionError::into_storage_error)?;
-        if !Arc::ptr_eq(&boundary.transaction, &transaction.retention_identity) {
+        if !transaction
+            .retention_identity
+            .as_ref()
+            .is_some_and(|identity| Arc::ptr_eq(&boundary.transaction, identity))
+        {
             return Err(invalid_boundary(
                 "committed read boundary belongs to a completed transaction",
             ));

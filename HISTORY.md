@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Allocate retained catalog transaction identities only when a reader captures a boundary, avoiding a heap allocation in ordinary MVCC indexing transactions while preserving transaction-lifetime checks and existing Nori resource limits.
+
 - Update the locked TLS dependency to rustls 0.23.46, incorporating the fixes for RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349 in native HTTP clients and published binaries.
 
 - Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views. Accept foreign-table CHECK and NOT NULL constraint deletion through the existing transactional dependency path.

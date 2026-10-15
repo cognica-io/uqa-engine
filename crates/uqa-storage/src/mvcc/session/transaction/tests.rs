@@ -19,6 +19,22 @@ fn transaction(control: &StorageReadControl) -> Transaction {
     Transaction::at_snapshot(Arc::new(store.snapshot().unwrap()), false, control)
 }
 
+#[test]
+fn empty_transactions_allocate_only_the_private_record_owner() {
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let store = MemoryVersionStore::new(control.memory());
+    let committed: Arc<dyn CommittedRecordSnapshot> = Arc::new(store.snapshot().unwrap());
+    for read_only in [false, true] {
+        let allocation = allocation_counter::measure(|| {
+            let transaction = Transaction::at_snapshot(Arc::clone(&committed), read_only, &control);
+            assert!(!transaction.has_record_publication());
+            std::hint::black_box(transaction);
+        });
+        assert!(allocation.count_total <= 1, "{allocation:?}");
+        assert_eq!(allocation.count_current, 0, "{allocation:?}");
+    }
+}
+
 fn stage(transaction: &mut Transaction, control: &StorageReadControl) -> VersionResult<()> {
     let graph = OwnedGraphMutation::retain(GraphMutation::InvalidateGraph("graph"), control)?;
     transaction.graph_mutation(&graph)?;
