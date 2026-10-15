@@ -529,10 +529,9 @@ pub(super) fn assign_check_name(
     target: &mut Option<String>,
     used: &mut BTreeSet<String>,
 ) -> ConstraintMetadataResult<bool> {
-    let mut referenced_columns = Vec::new();
-    collect_constraint_columns(expression, &mut referenced_columns);
-    let component = match referenced_columns.as_slice() {
-        [column] => column.as_str(),
+    let references = crate::schema::constraints::check_references(expression);
+    let component = match references.as_slice() {
+        [crate::schema::constraints::CheckReference::Column(name)] => *name,
         _ => "",
     };
     assign_constraint_name(target, (relation, component, "check"), used)
@@ -575,113 +574,4 @@ fn constraint_column_component(
         )));
     }
     Ok(columns.join("_"))
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "one traversal covers every constraint expression child"
-)]
-fn collect_constraint_columns(expression: &crate::ast::Expr, output: &mut Vec<String>) {
-    use crate::ast::{Expr, FrameBound};
-    match expression {
-        Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
-            if !output.contains(name) {
-                output.push(name.clone());
-            }
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for argument in args {
-                collect_constraint_columns(argument, output);
-            }
-            for order in order_by {
-                collect_constraint_columns(&order.expr, output);
-            }
-            if let Some(filter) = filter {
-                collect_constraint_columns(filter, output);
-            }
-        }
-        Expr::Array(items)
-        | Expr::Row(items)
-        | Expr::CompositeRow { items, .. }
-        | Expr::And(items)
-        | Expr::Or(items) => {
-            for item in items {
-                collect_constraint_columns(item, output);
-            }
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            collect_constraint_columns(lhs, output);
-            collect_constraint_columns(rhs, output);
-        }
-        Expr::Not(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::IsNull { expr: inner, .. }
-        | Expr::Cast { expr: inner, .. } => {
-            collect_constraint_columns(inner, output);
-        }
-        Expr::Between { expr, low, high } => {
-            collect_constraint_columns(expr, output);
-            collect_constraint_columns(low, output);
-            collect_constraint_columns(high, output);
-        }
-        Expr::InList { expr, list, .. } => {
-            collect_constraint_columns(expr, output);
-            for item in list {
-                collect_constraint_columns(item, output);
-            }
-        }
-        Expr::WindowCall {
-            args, spec, filter, ..
-        } => {
-            for expression in args
-                .iter()
-                .chain(filter.as_deref())
-                .chain(&spec.partition_by)
-                .chain(spec.order_by.iter().map(|order| &order.expr))
-            {
-                collect_constraint_columns(expression, output);
-            }
-            for bound in spec
-                .frame
-                .iter()
-                .flat_map(|frame| [&frame.start, &frame.end])
-            {
-                if let FrameBound::Preceding(expression) | FrameBound::Following(expression) = bound
-                {
-                    collect_constraint_columns(expression, output);
-                }
-            }
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base {
-                collect_constraint_columns(base, output);
-            }
-            for (condition, result) in when {
-                collect_constraint_columns(condition, output);
-                collect_constraint_columns(result, output);
-            }
-            if let Some(else_branch) = else_branch {
-                collect_constraint_columns(else_branch, output);
-            }
-        }
-        Expr::InSubquery { expr, .. } => collect_constraint_columns(expr, output),
-        Expr::Default
-        | Expr::Star
-        | Expr::QualifiedStar(_)
-        | Expr::InternalColumn(_)
-        | Expr::Literal(_)
-        | Expr::TypedLiteral { .. }
-        | Expr::Param(_)
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. } => {}
-    }
 }

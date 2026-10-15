@@ -14,6 +14,7 @@ use crate::plan::AggregateClassifier;
 pub(super) enum SchemaExpressionKind {
     TypeTransform,
     DomainCheck,
+    TableCheck,
     Default,
 }
 
@@ -21,7 +22,7 @@ impl SchemaExpressionKind {
     fn singular(self) -> &'static str {
         match self {
             Self::TypeTransform => "transform expression",
-            Self::DomainCheck => "check constraint",
+            Self::DomainCheck | Self::TableCheck => "check constraint",
             Self::Default => "DEFAULT expression",
         }
     }
@@ -29,7 +30,7 @@ impl SchemaExpressionKind {
     fn plural(self) -> &'static str {
         match self {
             Self::TypeTransform => "transform expressions",
-            Self::DomainCheck => "check constraints",
+            Self::DomainCheck | Self::TableCheck => "check constraints",
             Self::Default => "DEFAULT expressions",
         }
     }
@@ -42,6 +43,28 @@ pub(super) struct SchemaExpressionContext<'a> {
 }
 
 impl Preparation<'_> {
+    pub(super) fn check_schema_column(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
+        if !self
+            .schema_expression
+            .is_some_and(|context| matches!(context.kind, SchemaExpressionKind::TableCheck))
+        {
+            return Ok(());
+        }
+        let (ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. }) = expression
+        else {
+            return Ok(());
+        };
+        if column != "tableoid"
+            && crate::schema::columns::POSTGRES_SYSTEM_COLUMNS.contains(&column.as_str())
+        {
+            return Err(error(
+                "42P10",
+                format!("system column \"{column}\" reference in check constraint is invalid"),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn check_schema_subquery(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
         let Some(context) = self.schema_expression else {
             return Ok(());

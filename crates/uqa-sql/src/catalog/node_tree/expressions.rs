@@ -80,6 +80,16 @@ impl ExpressionContext<'_> {
         Ok(value.node)
     }
 
+    /// Defaults use assignment coercion, whose cast set is broader than implicit expression coercion.
+    pub fn assignment(&self, expression: &Expr, target: &ColumnType) -> Result<Node, SQLError> {
+        let unknown = self.expression_type(expression)?.is_none();
+        let input_type = target.without_type_modifiers();
+        let value = self.encode(expression, unknown.then_some(&input_type))?;
+        let mut value = Self::coerce_assignment(value, target)?;
+        collations::assign(&mut value.node)?;
+        Ok(value.node)
+    }
+
     fn expression_type(&self, expression: &Expr) -> Result<Option<ColumnType>, SQLError> {
         let plan = crate::plan::ExpressionPlan::lower(expression.clone());
         common_context_expression_type(&plan.scalar, self.schema, &[], self.types)

@@ -151,9 +151,12 @@ impl ExpressionContext<'_> {
                 return Err(coercion_error(value.type_ref()?, target));
             }
             entry.method
-        } else if coercion.explicit
+        } else if (coercion.explicit
             && explicit_type_compatible(source, target)
-            && (is_string(source) || is_string(target))
+            && (is_string(source) || is_string(target)))
+            || (coercion.assignment
+                && is_string(target)
+                && crate::type_resolution::assignment_type_compatible(source, target))
         {
             CastMethod::InputOutput
         } else {

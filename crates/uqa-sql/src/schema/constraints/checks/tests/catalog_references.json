@@ -1,0 +1,121 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "raw_sha256": "78b8a86613058439102e932e907c24aa35f9b4faaf9deda9d390e42db6ca6e9e",
+  "cases": [
+    {
+      "sql": "CREATE TABLE ref_scope(a integer,b integer,CONSTRAINT whole CHECK(ref_scope IS NOT NULL),CONSTRAINT system_oid CHECK(tableoid>0),CONSTRAINT combined CHECK(ref_scope IS NOT NULL AND tableoid>0 AND b>a),CONSTRAINT reversed CHECK(b>a AND a>0),CONSTRAINT constant_check CHECK(true))",
+      "keys": [
+        [
+          "combined",
+          "{0,-6,2,1}"
+        ],
+        [
+          "constant_check",
+          null
+        ],
+        [
+          "reversed",
+          "{2,1}"
+        ],
+        [
+          "system_oid",
+          "{-6}"
+        ],
+        [
+          "whole",
+          "{0}"
+        ]
+      ],
+      "dependencies": [
+        [
+          "combined",
+          "-6",
+          "a"
+        ],
+        [
+          "combined",
+          "-6",
+          "n"
+        ],
+        [
+          "combined",
+          "1",
+          "a"
+        ],
+        [
+          "combined",
+          "1",
+          "n"
+        ],
+        [
+          "combined",
+          "2",
+          "a"
+        ],
+        [
+          "combined",
+          "2",
+          "n"
+        ],
+        [
+          "constant_check",
+          "0",
+          "a"
+        ],
+        [
+          "reversed",
+          "1",
+          "a"
+        ],
+        [
+          "reversed",
+          "1",
+          "n"
+        ],
+        [
+          "reversed",
+          "2",
+          "a"
+        ],
+        [
+          "reversed",
+          "2",
+          "n"
+        ],
+        [
+          "system_oid",
+          "-6",
+          "a"
+        ],
+        [
+          "system_oid",
+          "-6",
+          "n"
+        ],
+        [
+          "whole",
+          "0",
+          "a"
+        ]
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mixed(n integer,CHECK(mixed IS NOT NULL AND n>0))",
+      "keys": [
+        [
+          "mixed_check",
+          "{0,1}"
+        ]
+      ]
+    },
+    {
+      "sql": "CREATE TABLE first_oid(n integer,CHECK(tableoid>0 AND first_oid IS NOT NULL))",
+      "keys": [
+        [
+          "first_oid_check",
+          "{-6,0}"
+        ]
+      ]
+    }
+  ]
+}

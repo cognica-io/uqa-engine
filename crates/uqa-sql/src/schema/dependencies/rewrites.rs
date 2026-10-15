@@ -105,7 +105,7 @@ pub fn rename_schema_expr_column(
 ) -> Result<(), String> {
     walk_schema_expr_mut(expression, &mut |node| {
         match node {
-            crate::ast::Expr::Star | crate::ast::Expr::QualifiedStar(_) => {
+            crate::ast::Expr::Star => {
                 return Err("schema expression contains `*` and cannot be rewritten safely".into());
             }
             crate::ast::Expr::Column(name) if name == from => *name = to.to_string(),
@@ -125,9 +125,15 @@ pub fn schema_expr_references_relation(
     let mut expression = expression.clone();
     let mut referenced = false;
     let result = walk_schema_expr_mut(&mut expression, &mut |node| {
-        if let crate::ast::Expr::QualifiedColumn { qualifier, .. } = node {
-            referenced |= stored_relation_reference_matches(qualifier, target);
-        }
+        referenced |= match node {
+            crate::ast::Expr::QualifiedColumn { qualifier, .. } => {
+                stored_relation_reference_matches(qualifier, target)
+            }
+            crate::ast::Expr::QualifiedStar(qualifier) => {
+                qualifier == &target.name || stored_relation_reference_matches(qualifier, target)
+            }
+            _ => false,
+        };
         Ok(())
     });
     result.is_err() || referenced
@@ -139,10 +145,20 @@ pub fn rename_schema_expr_relation(
     to: &str,
 ) -> Result<(), String> {
     walk_schema_expr_mut(expression, &mut |node| {
-        if let crate::ast::Expr::QualifiedColumn { qualifier, .. } = node {
-            if stored_relation_reference_matches(qualifier, from) {
+        match node {
+            crate::ast::Expr::QualifiedColumn { qualifier, .. }
+                if stored_relation_reference_matches(qualifier, from) =>
+            {
                 *qualifier = to.to_string();
             }
+            crate::ast::Expr::QualifiedStar(qualifier)
+                if qualifier == &from.name
+                    || stored_relation_reference_matches(qualifier, from) =>
+            {
+                // Analyzed whole rows use the decoded local range name; DDL supplies a SQL-qualified destination.
+                *qualifier = RelationIdentity::parse_reference(to)?.1;
+            }
+            _ => {}
         }
         Ok(())
     })

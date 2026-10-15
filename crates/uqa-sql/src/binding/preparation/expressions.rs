@@ -173,6 +173,7 @@ impl Preparation<'_> {
                 }
             }
         }
+        self.check_schema_column(expression)?;
         let ty = match expression {
             ScalarExpr::ScalarSubquery(index) => {
                 let query = subqueries.get(*index).ok_or_else(|| {

@@ -1,0 +1,64 @@
+{
+  "create": "CREATE TABLE defaults (id integer, n integer DEFAULT 1.5, txt text DEFAULT 12, amount numeric(5,2) DEFAULT 1.5, fp double precision DEFAULT 1.5, serial_value bigint DEFAULT nextval('seq'), code varchar(3) DEFAULT 'ab', \"Odd Column\" text DEFAULT 'hello', generated integer GENERATED ALWAYS AS (id + 1) STORED)",
+  "defaults": [
+    {
+      "column": "n",
+      "node": "{FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1}",
+      "sql": "1.5",
+      "pretty": "1.5"
+    },
+    {
+      "column": "txt",
+      "node": "{COERCEVIAIO :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} :resulttype 25 :resultcollid 100 :coerceformat 2 :location -1}",
+      "sql": "12",
+      "pretty": "12"
+    },
+    {
+      "column": "amount",
+      "node": "{FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1}",
+      "sql": "1.5",
+      "pretty": "1.5"
+    },
+    {
+      "column": "fp",
+      "node": "{FUNCEXPR :funcid 1746 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1}",
+      "sql": "1.5",
+      "pretty": "1.5"
+    },
+    {
+      "column": "code",
+      "node": "{FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "'ab'::character varying",
+      "pretty": "'ab'::character varying"
+    },
+    {
+      "column": "Odd Column",
+      "node": "{CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 104 101 108 108 111 ]}",
+      "sql": "'hello'::text",
+      "pretty": "'hello'::text"
+    },
+    {
+      "column": "generated",
+      "node": "{OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}",
+      "sql": "(id + 1)",
+      "pretty": "id + 1"
+    }
+  ],
+  "other": [
+    {
+      "node": "({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 870 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 100 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1})",
+      "sql": "(id + 1), lower(txt)",
+      "pretty": "id + 1, lower(txt)"
+    },
+    {
+      "node": "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+      "sql": "(VALUE > 'a'::text)",
+      "pretty": "VALUE > 'a'::text"
+    },
+    {
+      "node": "({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1} {COERCEVIAIO :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} :resulttype 25 :resultcollid 100 :coerceformat 2 :location -1})",
+      "sql": "1.5, 12",
+      "pretty": "1.5, 12"
+    }
+  ]
+}
