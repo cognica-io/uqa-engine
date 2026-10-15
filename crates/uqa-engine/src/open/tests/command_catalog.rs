@@ -28,6 +28,7 @@ fn catalog_lock_refresh_retains_own_definitions_and_observes_other_commits(
                     &[],
                 )
                 .unwrap();
+            assert_catalog_published(&engine);
         }
         engine.sql("SELECT 1", &[]).unwrap();
         let peer = engine.new_session().unwrap();
@@ -36,6 +37,7 @@ fn catalog_lock_refresh_retains_own_definitions_and_observes_other_commits(
         engine
             .sql("BEGIN; CREATE TABLE pending(id int PRIMARY KEY CHECK(id>0),v text DEFAULT 'private')", &[])
             .unwrap();
+        assert_catalog_published(&engine);
         for _ in 0..3 {
             engine.refresh_explicit_statement_snapshot().unwrap();
             let current = engine.storage.tables.read();
@@ -49,6 +51,7 @@ fn catalog_lock_refresh_retains_own_definitions_and_observes_other_commits(
 
         peer.sql("CREATE TABLE published(id int PRIMARY KEY)", &[])
             .unwrap();
+        assert_catalog_published(&peer);
         engine.refresh_explicit_statement_snapshot().unwrap();
         engine.sql("INSERT INTO pending(id) VALUES(1); INSERT INTO published VALUES(2); SAVEPOINT before_column; ALTER TABLE pending ADD COLUMN discarded int; ROLLBACK TO before_column", &[]).unwrap();
         let result = engine.sql("SELECT * FROM pending", &[]).unwrap();
@@ -88,6 +91,72 @@ fn catalog_lock_refresh_retains_own_definitions_and_observes_other_commits(
             Some(&Value::Null)
         );
     }
+}
+
+fn assert_catalog_published(engine: &Engine) {
+    assert!(
+        !uqa_execution::catalog::tuples::publication::has_pending(
+            engine.storage.catalog.as_ref().unwrap().as_ref()
+        )
+        .unwrap(),
+        "completed definitions must not leave publication work for another transaction"
+    );
+}
+
+#[rstest::rstest]
+#[case::sqlite(0)]
+#[case::sqlite_kv(1)]
+#[case::redb(2)]
+fn direct_schema_apis_finish_constraint_publication(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("direct-catalog.db");
+    let engine = open_provider(provider, &path);
+    engine
+        .sql(
+            "CREATE TABLE source(id int PRIMARY KEY CHECK(id>0), body text)",
+            &[],
+        )
+        .unwrap();
+    assert_catalog_published(&engine);
+    engine
+        .create_vector_field("source", "embedding", 2)
+        .unwrap();
+    assert_catalog_published(&engine);
+    engine.add_fts_field("source", "body".into()).unwrap();
+    assert_catalog_published(&engine);
+    let uqa_sql::ast::Statement::CreateTable(mut declaration) =
+        uqa_sql::compile("CREATE TABLE columns_to_register(extra int NOT NULL)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("column declaration");
+    };
+    engine
+        .register_column("source", declaration.columns.remove(0))
+        .unwrap();
+    assert_catalog_published(&engine);
+    assert!(engine.rename_column("source", "id", "key").unwrap());
+    assert_catalog_published(&engine);
+    assert!(engine.rename_table("source", "destination").unwrap());
+    assert_catalog_published(&engine);
+    engine.truncate_table("destination").unwrap();
+    assert_catalog_published(&engine);
+    let definitions = "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='destination'::regclass ORDER BY conname";
+    let expected = engine.sql(definitions, &[]).unwrap();
+    assert_eq!(expected.rows.len(), 4);
+    engine.sql("BEGIN; SAVEPOINT before_rename", &[]).unwrap();
+    assert!(engine
+        .rename_column("destination", "key", "discarded")
+        .unwrap());
+    assert_catalog_published(&engine);
+    engine
+        .sql("ROLLBACK TO before_rename; COMMIT", &[])
+        .unwrap();
+    assert_eq!(engine.sql(definitions, &[]).unwrap().rows, expected.rows);
+    drop(engine);
+    let reopened = open_provider(provider, &path);
+    assert_catalog_published(&reopened);
+    assert_eq!(reopened.sql(definitions, &[]).unwrap().rows, expected.rows);
 }
 
 fn pause_statistics(engine: &Engine) {

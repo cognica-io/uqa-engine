@@ -71,7 +71,7 @@ impl Engine {
         for table_name in ordered {
             self.truncate_locked_table(&table_name, restart_identity)?;
         }
-        Ok(())
+        self.publish_catalog_constraint_tuples()
     }
 
     pub(crate) fn truncate_locked_table(

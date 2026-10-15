@@ -392,7 +392,7 @@ impl Engine {
         dimensions: u32,
     ) -> StorageBackendResult<bool> {
         let field = field.into();
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.install_vector_field(
                 table,
                 field,

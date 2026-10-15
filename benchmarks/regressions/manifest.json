@@ -259,7 +259,22 @@
       "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
       "capability": "Persistent DDL catalog retention",
       "workload": "Native SQLite, SQLite K/V and redb; own and peer DDL, independent statements and atomic batches.",
-      "invariant": "Lock rechecks retain each unrelated table handle until committed visibility changes; private declarations, peer commits, savepoint rollback and reopen remain correct.",
+      "invariant": "Completed table declarations leave no pending physical constraint publication. Lock rechecks retain each unrelated table handle until committed visibility changes; private declarations, peer commits, savepoint rollback and reopen remain correct.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "direct_schema_apis_finish_constraint_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/tests/command_catalog.rs",
+      "capability": "Direct schema transaction publication",
+      "workload": "Native SQLite, SQLite K/V and redb; vector and full-text field registration, NOT NULL columns, column/table renames, TRUNCATE, savepoint rollback and reopen.",
+      "invariant": "Every completed direct definition publishes its constraint rows in the same transaction, leaves no pending work for unrelated writers, and preserves catalog output through rollback and reopen.",
       "case_names": [
         "case_1_sqlite",
         "case_2_sqlite_kv",

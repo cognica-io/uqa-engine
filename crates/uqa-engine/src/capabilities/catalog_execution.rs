@@ -316,7 +316,9 @@ impl Engine {
     ) -> uqa_storage::StorageBackendResult<()> {
         if !uqa_execution::catalog::tuples::publication::requires_initialization(catalog.as_ref())?
         {
-            return Ok(());
+            return self.publish_catalog_constraint_tuples().map_err(|error| {
+                uqa_storage::StorageBackendError::backend("finish restored physical catalog", error)
+            });
         }
         uqa_execution::catalog::tuples::publication::initialize(
             &self.catalog_execution(),
