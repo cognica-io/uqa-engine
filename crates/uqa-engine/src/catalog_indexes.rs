@@ -74,7 +74,7 @@ impl Engine {
         options: &[(String, String)],
         definition: &IndexDefinition,
     ) -> StorageBackendResult<()> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.try_register_catalog_index_inner(
                 name, index_type, table, columns, options, definition,
             )
@@ -149,7 +149,7 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             let Some(relation) = engine.try_resolve_catalog_index_relation(name)? else {
                 return Ok(None);
             };
@@ -165,7 +165,7 @@ impl Engine {
         &self,
         relation: &RelationIdentity,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.try_drop_catalog_index_inner(relation, true)
         })
     }

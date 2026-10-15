@@ -80,6 +80,10 @@ impl IndexRemovalPublication for Engine {
 }
 impl IndexRemovalTransactions for Engine {
     fn with_index_write(&self, write: IndexRemovalWrite<'_>) -> Result<SQLResult, SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.index_removal_context()))
+        self.with_implicit_transaction(|engine| {
+            let result = write(&engine.index_removal_context())?;
+            engine.publish_catalog_constraint_tuples()?;
+            Ok(result)
+        })
     }
 }

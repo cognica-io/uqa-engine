@@ -19,7 +19,7 @@ impl Engine {
         column: &str,
         default: Option<uqa_sql::ast::Expr>,
     ) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.set_column_default_inner(table, column, default)
         })
     }
@@ -44,7 +44,7 @@ impl Engine {
         column: &str,
         not_null: bool,
     ) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.set_column_not_null_inner(table, column, not_null)
         })
     }
@@ -69,7 +69,7 @@ impl Engine {
         column: &str,
         ty: &uqa_sql::ast::ColumnType,
     ) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.set_column_type_inner(table, column, ty)
         })
     }
@@ -97,7 +97,7 @@ impl Engine {
         foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
         key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
     ) -> StorageBackendResult<()> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.register_table_constraints_inner(table, checks, foreign_keys, key_constraints)
         })
     }

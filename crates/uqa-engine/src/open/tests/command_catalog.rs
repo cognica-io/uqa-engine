@@ -93,6 +93,7 @@ fn catalog_lock_refresh_retains_own_definitions_and_observes_other_commits(
     }
 }
 
+#[track_caller]
 fn assert_catalog_published(engine: &Engine) {
     assert!(
         !uqa_execution::catalog::tuples::publication::has_pending(
@@ -141,9 +142,67 @@ fn direct_schema_apis_finish_constraint_publication(#[case] provider: usize) {
     assert_catalog_published(&engine);
     engine.truncate_table("destination").unwrap();
     assert_catalog_published(&engine);
+    engine
+        .sql(
+            "CREATE TABLE indexed(id int PRIMARY KEY, body text, embedding vector(2))",
+            &[],
+        )
+        .unwrap();
+    for statement in [
+        "CREATE INDEX indexed_body ON indexed USING gin(body)",
+        "CREATE INDEX indexed_embedding ON indexed USING hnsw(embedding)",
+        "DROP INDEX indexed_body",
+        "DROP INDEX indexed_embedding",
+    ] {
+        engine.sql(statement, &[]).unwrap();
+        assert_catalog_published(&engine);
+    }
+    engine
+        .register_catalog_index("direct_body", "btree", "indexed", &["body".into()], &[])
+        .unwrap();
+    assert_catalog_published(&engine);
+    assert!(engine.drop_catalog_index("direct_body").unwrap().is_some());
+    assert_catalog_published(&engine);
+    assert!(engine
+        .set_column_default(
+            "indexed",
+            "body",
+            Some(uqa_sql::ast::Expr::Literal(Value::Str("default".into())))
+        )
+        .unwrap());
+    assert_catalog_published(&engine);
+    assert!(engine.set_column_not_null("indexed", "body", true).unwrap());
+    assert_catalog_published(&engine);
+    assert!(engine
+        .set_column_type(
+            "indexed",
+            "body",
+            &uqa_sql::ast::ColumnType::Varchar(Some(32))
+        )
+        .unwrap());
+    assert_catalog_published(&engine);
+    let uqa_sql::ast::Statement::CreateTable(declaration) =
+        uqa_sql::compile("CREATE TABLE constraints_to_register(id int, CHECK(id>0))")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("constraint declaration");
+    };
+    engine
+        .register_table_constraints(
+            "indexed",
+            declaration.checks,
+            declaration.foreign_keys,
+            declaration.key_constraints,
+        )
+        .unwrap();
+    assert_catalog_published(&engine);
     let definitions = "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='destination'::regclass ORDER BY conname";
     let expected = engine.sql(definitions, &[]).unwrap();
     assert_eq!(expected.rows.len(), 4);
+    let indexed_definitions = "SELECT conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='indexed'::regclass ORDER BY conname";
+    let indexed_expected = engine.sql(indexed_definitions, &[]).unwrap();
+    assert_eq!(indexed_expected.rows.len(), 4);
     engine.sql("BEGIN; SAVEPOINT before_rename", &[]).unwrap();
     assert!(engine
         .rename_column("destination", "key", "discarded")
@@ -157,6 +216,10 @@ fn direct_schema_apis_finish_constraint_publication(#[case] provider: usize) {
     let reopened = open_provider(provider, &path);
     assert_catalog_published(&reopened);
     assert_eq!(reopened.sql(definitions, &[]).unwrap().rows, expected.rows);
+    assert_eq!(
+        reopened.sql(indexed_definitions, &[]).unwrap().rows,
+        indexed_expected.rows
+    );
 }
 
 fn pause_statistics(engine: &Engine) {
