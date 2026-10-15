@@ -7098,8 +7098,8 @@
       "cases": 12,
       "source": "crates/uqa-engine/src/tests/catalog/roles/creation.rs",
       "capability": "Private view catalog publication",
-      "workload": "Twelve persistent-provider, fixed-isolation and regular/materialized view schedules after a role rename wait.",
-      "invariant": "A nested catalog lookup preserves the private view and original owner incarnation through commit and reopen.",
+      "workload": "Twelve provider/isolation/view schedules that deliver the role rename's catalog epoch after the creator observes its physical commit, without another durable commit to repair a lost view.",
+      "invariant": "A nested catalog lookup preserves the private view and original owner incarnation through commit/reopen; the uncorrected merge deterministically loses the ownership JOIN row after COMMIT.",
       "case_names": [
         "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_1_4",
         "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_2_5",

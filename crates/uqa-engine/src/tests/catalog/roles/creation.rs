@@ -183,19 +183,9 @@ fn private_views_keep_renamed_owners_after_peer_catalog_publication(
     );
     result.unwrap();
     target.assert_created_as(&second, true, "renamed");
-    sql(&first, "CREATE ROLE peer_catalog_change");
-    // A peer can publish after this command pins its view, before a nested catalog lookup.
+    // COMMIT releases the owner's logical locks before publishing its catalog epoch. Replay that late notification after the creator has already observed the physical commit and installed its private view; no further durable commit may repair the lost cache incidentally.
+    first.publish_catalog_registry_changes();
     second.synchronize_catalog_registries().unwrap();
-    assert!(
-        second
-            .durable
-            .views
-            .read()
-            .contains_key(&uqa_core::RelationIdentity::new("public", "created")),
-        "private view disappeared during a catalog lookup: {}",
-        target.create
-    );
-    target.assert_created_as(&second, true, "renamed");
     sql(&second, "COMMIT; RESET ROLE");
     target.assert_created_as(&second, true, "renamed");
     drop(second);
