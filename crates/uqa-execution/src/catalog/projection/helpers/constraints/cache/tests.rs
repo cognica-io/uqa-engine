@@ -16,6 +16,7 @@ use uqa_core::{
 use uqa_sql::{ast::TableConstraintSet, catalog::domain::StoredDomain, Statement};
 
 mod domains;
+mod references;
 
 fn table_name(position: usize) -> RelationIdentity {
     RelationIdentity::new("public", format!("items_{position:03}"))

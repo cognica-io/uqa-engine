@@ -327,6 +327,7 @@ impl Engine {
             characteristics,
             first_snapshot_set: false,
             fixed_snapshot: None,
+            fixed_catalog_records: None,
             fixed_catalog_baseline: None,
             xid_levels: vec![None],
             savepoints: Vec::new(),

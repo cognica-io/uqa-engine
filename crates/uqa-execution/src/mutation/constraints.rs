@@ -149,16 +149,6 @@ fn validate_row_checks(
         .catalog
         .try_check_constraint_definitions(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?;
-    let schema = crate::RowSchema::with_types(
-        definitions
-            .iter()
-            .map(|column| column.name.clone())
-            .collect(),
-        definitions
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
     let virtual_columns = definitions
         .iter()
         .filter(|column| {
@@ -196,6 +186,22 @@ fn validate_row_checks(
 
     validate_not_null_columns(context, statement, &definitions, table, document)?;
 
+    let scope = check_constraints
+        .iter()
+        .any(|constraint| {
+            constraint.enforced
+                && (statement.is_some() || constraint.validated)
+                && constraint.partition_constraint.is_none()
+        })
+        .then(|| {
+            crate::schema::check_rows::CheckRowScope::new(
+                context.partitions.types,
+                table,
+                &definitions,
+            )
+        })
+        .transpose()?;
+
     // `PostgreSQL` evaluates a relation's CHECK constraints in the order of their names (`CheckConstraintFetch`), so a row that fails several reports the first.
     let mut check_constraints = check_constraints;
     check_constraints.sort_by(|left, right| left.name.cmp(&right.name));
@@ -213,12 +219,15 @@ fn validate_row_checks(
                 document,
             )?
         } else {
-            let result = context.partitions.expressions.evaluate_row(
-                &constraint.expr,
-                document,
-                &schema,
-                params,
-            )?;
+            let result = scope
+                .as_ref()
+                .expect("an applicable ordinary CHECK has a row scope")
+                .evaluate(
+                    context.partitions.expressions,
+                    &constraint.expr,
+                    document,
+                    params,
+                )?;
             matches!(result, Value::Null) || uqa_sql::expr::truthy(&result)
         };
         if !accepted {

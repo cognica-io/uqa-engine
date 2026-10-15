@@ -1,0 +1,348 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE FOREIGN DATA WRAPPER memory",
+      "command_tags": [
+        "CREATE FOREIGN DATA WRAPPER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "CREATE SERVER drop_server FOREIGN DATA WRAPPER memory",
+      "command_tags": [
+        "CREATE SERVER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "CREATE FOREIGN TABLE foreign_drop(n integer CONSTRAINT foreign_nn NOT NULL, CONSTRAINT foreign_a CHECK(n>0), CONSTRAINT foreign_b CHECK(n<10)) SERVER drop_server",
+      "command_tags": [
+        "CREATE FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "SELECT conname,contype,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conrelid='foreign_drop'::regclass ORDER BY conname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "conkey",
+            "has_node"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "foreign_a",
+              "c",
+              "{1}",
+              "t"
+            ],
+            [
+              "foreign_b",
+              "c",
+              "{1}",
+              "t"
+            ],
+            [
+              "foreign_nn",
+              "n",
+              "{1}",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "ALTER FOREIGN TABLE foreign_drop DROP CONSTRAINT missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "constraint \"missing\" of relation \"foreign_drop\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "ALTER FOREIGN TABLE foreign_drop DROP CONSTRAINT IF EXISTS missing",
+      "command_tags": [
+        "ALTER FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "constraint \"missing\" of relation \"foreign_drop\" does not exist, skipping",
+          "detail": null,
+          "hint": null
+        }
+      ],
+      "session": 0
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "SAVEPOINT removals",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "ALTER FOREIGN TABLE foreign_drop DROP CONSTRAINT foreign_a, DROP CONSTRAINT foreign_nn",
+      "command_tags": [
+        "ALTER FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "SELECT conname,contype,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conrelid='foreign_drop'::regclass ORDER BY conname",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "conkey",
+            "has_node"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "foreign_b",
+              "c",
+              "{1}",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "ROLLBACK TO removals",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "SELECT conname,contype,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conrelid='foreign_drop'::regclass ORDER BY conname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "conkey",
+            "has_node"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "foreign_a",
+              "c",
+              "{1}",
+              "t"
+            ],
+            [
+              "foreign_b",
+              "c",
+              "{1}",
+              "t"
+            ],
+            [
+              "foreign_nn",
+              "n",
+              "{1}",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "ALTER FOREIGN TABLE foreign_drop DROP CONSTRAINT foreign_b CASCADE",
+      "command_tags": [
+        "ALTER FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "session": 0
+    },
+    {
+      "sql": "SELECT conname,contype,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conrelid='foreign_drop'::regclass ORDER BY conname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "conkey",
+            "has_node"
+          ],
+          "type_oids": [
+            19,
+            18,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "foreign_a",
+              "c",
+              "{1}",
+              "t"
+            ],
+            [
+              "foreign_nn",
+              "n",
+              "{1}",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "session": 0
+    }
+  ]
+}

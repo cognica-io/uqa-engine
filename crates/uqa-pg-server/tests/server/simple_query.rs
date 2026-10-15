@@ -43,6 +43,11 @@ fn result_fields_and_text_match_postgresql_over_tcp() {
 }
 
 #[test]
+fn case_result_modifiers_match_postgresql_over_tcp() {
+    compare_oracle(include_str!("case_modifiers.json"));
+}
+
+#[test]
 fn constant_and_rule_planning_match_postgresql_over_tcp() {
     for fixture in [
         include_str!("../../../../tests/parity/pg18/constant_planning_oracle.expected.json"),
@@ -333,6 +338,7 @@ fn startup_reports_every_reported_parameter_and_reset_restores_client_settings()
         reported.keys().map(String::as_str).collect::<Vec<_>>(),
         [
             "DateStyle",
+            "IntervalStyle",
             "TimeZone",
             "application_name",
             "client_encoding",
@@ -347,10 +353,36 @@ fn startup_reports_every_reported_parameter_and_reset_restores_client_settings()
             "standard_conforming_strings",
         ]
     );
+    assert_eq!(reported["IntervalStyle"], "postgres");
     assert_eq!(reported["application_name"], "wire-test");
     assert_eq!(reported["is_superuser"], "on");
     assert_eq!(reported["search_path"], "\"$user\", public");
     assert_eq!(reported["session_authorization"], "uqa");
+    let changed = parameter_statuses(&client.query("SET IntervalStyle = iso_8601"));
+    assert_eq!(changed["IntervalStyle"], "iso_8601");
+    assert_eq!(
+        evidence(&client.query("SELECT interval '1 day'"))["results"][0]["rows"],
+        json!([["P1D"]])
+    );
+    client.query("BEGIN");
+    let local = parameter_statuses(&client.query("SET LOCAL IntervalStyle = postgres_verbose"));
+    assert_eq!(local["IntervalStyle"], "postgres_verbose");
+    assert_eq!(
+        evidence(&client.query("SELECT interval '1 day'"))["results"][0]["rows"],
+        json!([["@ 1 day"]])
+    );
+    let rollback = parameter_statuses(&client.query("ROLLBACK"));
+    assert_eq!(rollback["IntervalStyle"], "iso_8601");
+    assert_eq!(
+        evidence(&client.query("SELECT interval '1 day'"))["results"][0]["rows"],
+        json!([["P1D"]])
+    );
+    let reset = parameter_statuses(&client.query("RESET IntervalStyle"));
+    assert_eq!(reset["IntervalStyle"], "postgres");
+    assert_eq!(
+        evidence(&client.query("SELECT interval '1 day'"))["results"][0]["rows"],
+        json!([["1 day"]])
+    );
     let changed =
         parameter_statuses(&client.query("SET search_path = app; SET application_name = 'other'"));
     assert_eq!(changed["search_path"], "app");

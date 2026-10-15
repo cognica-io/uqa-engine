@@ -520,7 +520,7 @@ fn legacy_default_sequence_identity_is_frozen_on_initial_open() {
         panic!("stored sequence default");
     };
     assert!(
-        matches!(&args[0], Expr::TypedLiteral { value: Value::Int(_), ty, .. } if ty == "regclass")
+        matches!(&args[0], Expr::TypedLiteral { value: Value::Int(_), ty, .. } if matches!(uqa_sql::ColumnType::from_sql_name(ty), Ok(uqa_sql::ColumnType::Regclass)))
     );
     args[0] = Expr::Literal(Value::Str("missing".into()));
     schema.columns_json = serde_json::to_string(&columns).unwrap();

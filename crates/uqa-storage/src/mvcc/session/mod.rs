@@ -12,6 +12,8 @@ mod notifications;
 mod observed;
 mod read;
 pub use read::RecordRead;
+mod retained;
+pub use retained::CommittedReadBoundary;
 mod sequence_values;
 pub use sequence_values::SequencePublicationLease;
 mod serializable;
@@ -289,28 +291,6 @@ impl VersionedKeyValueStore {
         let mut session = self.new_session_with_cancellation(control.cancellation());
         session.control = StorageReadControl::new(control.memory(), session.control.cancellation());
         session
-    }
-
-    /// Open an independently owned read-only session at this exact committed/private view. Its original participant, snapshot leases and retention allowance remain shared, while read cancellation stays independent. Completing this reader never completes the originating transaction.
-    pub fn new_retained_read_session(
-        &self,
-        cancellation: &uqa_core::CancellationToken,
-    ) -> StorageBackendResult<Self> {
-        cancellation.check()?;
-        let active = self.active.lock();
-        let retained = self
-            .view_locked(active.as_ref())
-            .map_err(VersionError::into_storage_error)?;
-        let mut session = self.new_session_with_cancellation(cancellation);
-        session.control =
-            StorageReadControl::new(self.control.memory(), session.control.cancellation());
-        session.retained = Some(retained);
-        session.sequence_durability = Arc::clone(&self.sequence_durability);
-        session.sequence_generation = Some(
-            self.sequence_generation
-                .unwrap_or_else(|| self.sequence_durability.generation()),
-        );
-        Ok(session)
     }
 
     fn require_mutable_session(&self) -> StorageBackendResult<()> {
@@ -611,6 +591,21 @@ impl KeyValueStore for VersionedKeyValueStore {
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
         Ok(Arc::new(self.new_retained_read_session(cancellation)?))
+    }
+
+    fn capture_committed_read_boundary(&self) -> StorageBackendResult<Arc<CommittedReadBoundary>> {
+        Self::capture_committed_read_boundary(self)
+    }
+
+    fn open_read_session_with_private_changes(
+        &self,
+        boundary: &CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        Ok(Arc::new(self.new_read_session_with_private_changes(
+            boundary,
+            cancellation,
+        )?))
     }
 
     fn transaction_model(&self) -> crate::StorageTransactionModel {

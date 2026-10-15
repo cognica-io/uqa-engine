@@ -442,6 +442,28 @@ pub trait KeyValueStore: Send + Sync {
         ))
     }
 
+    /// Retain the committed boundary of this active transaction without copying records. Wrappers must preserve the original session and transaction identity.
+    fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<crate::mvcc::CommittedReadBoundary>> {
+        Err(StorageBackendError::Other(
+            "fixed committed read boundaries are not supported by this KeyValue store".into(),
+        ))
+    }
+
+    /// Combine a boundary captured by this same active transaction with its current private changes, returning an immutable read-only owner. Opening a latest session is not an equivalent implementation.
+    fn open_read_session_with_private_changes(
+        &self,
+        _boundary: &crate::mvcc::CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "fixed committed/private read composition is not supported by this KeyValue store"
+                .into(),
+        ))
+    }
+
     /// Whether writes remain private while independent sessions read and write. Versioned stores must provide command refresh, retained reads, savepoint undo and conditional publication under one reported affinity.
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         crate::StorageTransactionModel::ProviderSerialized

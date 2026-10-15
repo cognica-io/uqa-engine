@@ -302,6 +302,16 @@ fn indexed_data_commits_and_existing_definitions_retain_reader_registries() {
         .unwrap();
     let table = reader.require_table("records").unwrap();
     let registries = reader.durable.schemas.snapshot();
+    let pending = || {
+        uqa_execution::catalog::tuples::publication::has_pending(
+            writer.storage.catalog.as_ref().unwrap().as_ref(),
+        )
+        .unwrap()
+    };
+    assert!(
+        !pending(),
+        "index creation left unfinished constraint publication"
+    );
     for statement in [
         "INSERT INTO records VALUES (2, 'second', ARRAY[0.0, 1.0, 0.0])",
         "UPDATE records SET body = 'updated' WHERE id = 1",
@@ -311,6 +321,7 @@ fn indexed_data_commits_and_existing_definitions_retain_reader_registries() {
         "UPDATE records SET embedding = ARRAY[0.0, 0.0, 1.0] WHERE id = 2",
     ] {
         writer.sql(statement, &[]).unwrap();
+        assert!(!pending(), "unfinished constraint publication after {statement}");
         assert_eq!(reader.sql("SELECT id FROM records ORDER BY id LIMIT 1", &[]).unwrap().rows[0]["id"], uqa_core::Value::Int(1));
         assert!(Arc::ptr_eq(&table, &reader.require_table("records").unwrap()), "table rebuilt after {statement}");
         assert!(Arc::ptr_eq(&registries, &reader.durable.schemas.snapshot()), "registries rebuilt after {statement}");

@@ -1,0 +1,566 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT CASE WHEN flag THEN 'longtext' ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "longtext"
+            ],
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN NULL ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              null
+            ],
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 'abc'::varchar(3) ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ],
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 'abc'::varchar(3) ELSE 'x'::varchar(9) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ],
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 'abc'::char(3) ELSE 'x'::char(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1042
+          ],
+          "rows": [
+            [
+              "abc"
+            ],
+            [
+              "x  "
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1042,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 'abc'::char(3) ELSE 'longtext' END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1042
+          ],
+          "rows": [
+            [
+              "abc"
+            ],
+            [
+              "longtext"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1042,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 'longtext' COLLATE \"C\" ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "longtext"
+            ],
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN '04:05:06.12345' ELSE '00:00'::time(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [
+            [
+              "04:05:06.12345"
+            ],
+            [
+              "00:00:00"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 1.25::numeric(4,2) ELSE 2::numeric(4,2) END AS result FROM (VALUES (true), (false)) t(flag)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "1.25"
+            ],
+            [
+              "2.00"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1700,
+              "type_size": -1,
+              "type_modifier": 262150,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 'abc'::varchar(3) ELSE 'x'::varchar(9) END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 'longtext' ELSE 'x'::varchar(3) END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "longtext"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN 'abc'::varchar(3) ELSE 'x'::varchar(9) END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 13,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN 'longtext' ELSE 'x'::varchar(3) END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "x"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN v::varchar(3) ELSE v::varchar(9) END AS result FROM (VALUES ('abcdef'), ('uvwxyz')) t(v)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ],
+            [
+              "uvw"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN v::varchar(3) ELSE v::varchar(9) END AS result FROM (VALUES ('abcdef'), ('uvwxyz')) t(v)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abcdef"
+            ],
+            [
+              "uvwxyz"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 13,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (CASE WHEN true THEN 'abc'::varchar(3) ELSE 'x'::varchar(9) END) COLLATE \"C\" AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "result",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

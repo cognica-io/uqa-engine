@@ -61,7 +61,11 @@ impl TableCreationTransactions for Engine {
         &self,
         write: TableCreationWrite<'_>,
     ) -> Result<SQLResult, SQLError> {
-        self.transaction(|engine| write(&engine.create_table_context()))
+        self.transaction(|engine| {
+            let result = write(&engine.create_table_context())?;
+            engine.publish_catalog_constraint_tuples()?;
+            Ok(result)
+        })
     }
 }
 impl TableAsQuerySource for Engine {

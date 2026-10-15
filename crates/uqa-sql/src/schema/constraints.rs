@@ -6,147 +6,16 @@
 
 //! Shared CREATE/ALTER validation for table constraints.
 
-use super::SchemaBindingContext;
-use crate::ast::{ColumnDef, Expr, ForeignKey, TableKeyConstraint};
-use crate::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
+use crate::ast::{ColumnDef, ForeignKey, TableKeyConstraint};
 use crate::{ColumnType, SQLError};
-use uqa_core::Value;
 
-struct CheckConditionTypeResolver<'a> {
-    table: &'a str,
-    qualifier: &'a str,
-    columns: &'a [ColumnDef],
-}
-
-impl CheckConditionTypeResolver<'_> {
-    fn column(&self, name: &str) -> Result<ResolvedVariable, SQLError> {
-        let definition = self
-            .columns
-            .iter()
-            .find(|column| column.name == name)
-            .ok_or_else(|| SQLError::UnknownColumn(name.to_string()))?;
-        Ok(ResolvedVariable {
-            collation_oid: None,
-            value: Value::Null,
-            declared_type: Some(definition.ty.catalog_name()),
-        })
-    }
-
-    fn qualifier_matches(&self, qualifier: &str) -> bool {
-        qualifier == self.qualifier
-            || qualifier == self.table
-            || self
-                .table
-                .rsplit_once('.')
-                .is_some_and(|(_, local)| qualifier == local)
-    }
-}
-
-impl VariableResolver for CheckConditionTypeResolver<'_> {
-    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        self.column(name).map(Some)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if !self.qualifier_matches(qualifier) {
-            return Err(SQLError::UnknownTable(qualifier.to_string()));
-        }
-        self.column(column).map(Some)
-    }
-
-    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-}
-
-fn is_boolean_type(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Boolean => true,
-        ColumnType::Domain { base, .. } => is_boolean_type(base),
-        _ => false,
-    }
-}
-
-pub fn validate_check_expression(
-    context: &SchemaBindingContext<'_, '_>,
-    table: &str,
-    qualifier: &str,
-    columns: &[ColumnDef],
-    expression: &mut Expr,
-) -> Result<(), SQLError> {
-    // `cookConstraint` reads the objects a CHECK names as `reg*` constants when the constraint is defined.
-    super::dependencies::oid_alias::read_oid_alias_constants(context.catalog, expression)?;
-    let bound = bind_expr(
-        expression,
-        &mut CheckConditionTypeResolver {
-            table,
-            qualifier,
-            columns,
-        },
-    )?;
-    let lowered = crate::plan::ExpressionPlan::lower(bound);
-    if !lowered.subqueries.is_empty() {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "cannot use subquery in check constraint".into(),
-        });
-    }
-    match crate::type_resolution::common_context_expression_type(
-        &lowered.scalar,
-        &crate::RowSchema::default(),
-        &[],
-        Some(context.catalog),
-    )? {
-        Some(ty) if !is_boolean_type(&ty) => Err(SQLError::Routine {
-            sqlstate: "42804".into(),
-            message: format!(
-                "argument of CHECK must be type boolean, not type {}",
-                ty.sql_name()
-            ),
-        }),
-        None => {
-            if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = expression {
-                *value = crate::expr::cast_value(value, "boolean")?;
-            } else {
-                *expression = Expr::Cast {
-                    implicit: true,
-                    expr: Box::new(expression.clone()),
-                    ty: "boolean".into(),
-                };
-            }
-            Ok(())
-        }
-        Some(_) => Ok(()),
-    }?;
-    bind_stored_check_expression(context, table, qualifier, columns, expression)?;
-    super::generated::bind_schema_column_references(expression, qualifier);
-    super::generated::bind_schema_column_references(expression, table);
-    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    super::generated::bind_schema_column_references(expression, &relation.name);
-    super::check_inheritance::remove_identity_casts(expression, columns)
-}
-
-pub fn bind_stored_check_expression(
-    context: &SchemaBindingContext<'_, '_>,
-    table: &str,
-    qualifier: &str,
-    columns: &[ColumnDef],
-    expression: &mut Expr,
-) -> Result<bool, SQLError> {
-    let typed_expression = bind_expr(
-        expression,
-        &mut CheckConditionTypeResolver {
-            table,
-            qualifier,
-            columns,
-        },
-    )?;
-    super::defaults::bind_stored_schema_expression(context, expression, typed_expression)
-}
+mod checks;
+mod references;
+pub use checks::{
+    bind_stored_check_expression, check_row_schema, validate_check_expression,
+    validate_check_expression_with_type,
+};
+pub use references::{check_references, CheckReference};
 
 pub fn validate_foreign_key_definition(
     local_table: &str,

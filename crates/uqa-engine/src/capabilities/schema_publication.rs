@@ -197,6 +197,20 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             uqa_execution::catalog::definition_revision::TablePublicationKind::ExpressionNames,
         )
     }
+    fn persist_declaration(
+        &self,
+        columns: &[ColumnDef],
+        constraints: &TableConstraintSet,
+    ) -> StorageBackendResult<()> {
+        self.engine.try_save_table_schema_candidate(
+            &self.name,
+            &self.state,
+            columns,
+            constraints,
+            &self.state.security(),
+            uqa_execution::catalog::definition_revision::TablePublicationKind::Declaration,
+        )
+    }
     fn publish_columns(
         &self,
         columns_declared: bool,
@@ -224,7 +238,12 @@ impl uqa_execution::schema::publication::SchemaWriteTransaction for Engine {
         &self,
         write: uqa_execution::schema::publication::SchemaWrite<'_>,
     ) -> StorageBackendResult<()> {
-        self.with_implicit_storage_transaction(|engine| write(&engine.schema_publication_context()))
+        self.with_implicit_storage_transaction(|engine| {
+            write(&engine.schema_publication_context())?;
+            engine.publish_catalog_constraint_tuples().map_err(|error| {
+                uqa_storage::StorageBackendError::backend("constraint publication", error)
+            })
+        })
     }
 }
 

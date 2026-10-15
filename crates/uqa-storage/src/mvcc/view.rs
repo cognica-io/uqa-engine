@@ -500,6 +500,17 @@ impl MergedRecordSnapshot {
         })
     }
 
+    /// The session owner verifies the database and transaction before composing a fixed committed boundary with this exact private root.
+    pub(super) fn with_committed_snapshot(
+        mut self,
+        committed: Arc<dyn CommittedRecordSnapshot>,
+        serializable: Option<super::SerializableReadContext>,
+    ) -> Self {
+        self.committed = committed;
+        self.serializable = serializable;
+        self
+    }
+
     pub fn new(
         committed: Arc<dyn CommittedRecordSnapshot>,
         private: PrivateRecordSnapshot,

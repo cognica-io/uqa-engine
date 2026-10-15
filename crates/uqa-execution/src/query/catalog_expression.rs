@@ -71,7 +71,7 @@ pub fn eval_lowered_expression_with_schema<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
     expression: &uqa_sql::ast::Expr,
-    row: &ResultRow,
+    row: &dyn RowLookup,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
@@ -84,7 +84,7 @@ pub fn eval_lowered_expression_with_schema_and_type<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
     expression: &uqa_sql::ast::Expr,
-    row: &ResultRow,
+    row: &dyn RowLookup,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
@@ -172,7 +172,7 @@ impl<'a> PreparedCatalogExpression<'a> {
 
     pub(crate) fn evaluate(
         &self,
-        row: &ResultRow,
+        row: &dyn RowLookup,
     ) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
         let row = CatalogRowView {
             schema: &self.schema,
@@ -190,7 +190,7 @@ fn eval_catalog_expression_with_schema<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
     expression: ExpressionPlan,
-    row: &ResultRow,
+    row: &dyn RowLookup,
     schema: &RowSchema,
     params: &[SQLParam],
     optimize: bool,
@@ -202,7 +202,7 @@ fn eval_catalog_expression_with_schema<S: Clone + 'static>(
 /// Borrow named document fields through the analyzed schema's identities, without copying a row or inventing qualified map keys.
 struct CatalogRowView<'a> {
     schema: &'a RowSchema,
-    row: &'a ResultRow,
+    row: &'a dyn RowLookup,
 }
 
 impl CatalogRowView<'_> {
@@ -224,12 +224,24 @@ impl RowLookup for CatalogRowView<'_> {
         self.schema
             .column_slot(name)
             .and_then(|slot| self.physical_column(slot))
+            .or_else(|| {
+                self.schema
+                    .has_unqualified_column(name)
+                    .then(|| self.row.column(name))
+                    .flatten()
+            })
     }
 
     fn qualified_column(&self, qualifier: &str, column: &str) -> Option<&Value> {
         self.schema
             .qualified_slot(qualifier, column)
             .and_then(|slot| self.physical_column(slot))
+            .or_else(|| {
+                self.schema
+                    .has_qualified_column(qualifier, column)
+                    .then(|| self.row.qualified_column(qualifier, column))
+                    .flatten()
+            })
     }
 
     fn column_is_ambiguous(&self, name: &str) -> bool {
@@ -244,7 +256,7 @@ impl RowLookup for CatalogRowView<'_> {
         self.schema
             .columns()
             .get(index)
-            .and_then(|name| self.row.get(name))
+            .and_then(|name| self.row.column(name))
     }
 
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
@@ -380,6 +392,54 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed),
             1
         );
+    }
+
+    #[test]
+    fn virtual_attributes_use_the_borrowed_row_only_inside_the_declared_namespace() {
+        struct Row(Value);
+        impl RowLookup for Row {
+            fn column(&self, name: &str) -> Option<&Value> {
+                (name == "tableoid").then_some(&self.0)
+            }
+            fn qualified_column(&self, qualifier: &str, name: &str) -> Option<&Value> {
+                (qualifier == "scoped").then(|| self.column(name)).flatten()
+            }
+        }
+        let schema = RowSchema::with_typed_virtual_identities(
+            &RowSchema::default(),
+            &[
+                (
+                    uqa_sql::ColumnIdentity::unqualified("tableoid"),
+                    Some(uqa_sql::ColumnType::Oid),
+                ),
+                (
+                    uqa_sql::ColumnIdentity::qualified("scoped", "tableoid"),
+                    Some(uqa_sql::ColumnType::Oid),
+                ),
+            ],
+        );
+        let row = Row(Value::Int(80001));
+        let view = CatalogRowView {
+            schema: &schema,
+            row: &row,
+        };
+        assert!(std::ptr::eq(
+            view.column("tableoid").unwrap(),
+            std::ptr::from_ref(&row.0)
+        ));
+        assert!(std::ptr::eq(
+            view.qualified_column("scoped", "tableoid").unwrap(),
+            std::ptr::from_ref(&row.0)
+        ));
+        assert!(view.qualified_column("other", "tableoid").is_none());
+        let mut visited = 0;
+        view.visit_columns(&mut |_, _| visited += 1);
+        assert_eq!(visited, 0);
+        let hidden = CatalogRowView {
+            schema: &RowSchema::default(),
+            row: &row,
+        };
+        assert!(hidden.column("tableoid").is_none());
     }
 
     #[test]

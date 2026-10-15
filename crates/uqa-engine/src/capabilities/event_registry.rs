@@ -93,6 +93,9 @@ impl uqa_execution::schema::events::EventCatalogGuards for Engine {
     }
 }
 impl uqa_execution::schema::events::EventCatalogPublication for Engine {
+    fn finish_publication(&self) -> Result<(), uqa_sql::SQLError> {
+        self.publish_catalog_constraint_tuples()
+    }
     fn persist_triggers(
         &self,
         triggers: &uqa_sql::catalog::events::TriggerCatalog,

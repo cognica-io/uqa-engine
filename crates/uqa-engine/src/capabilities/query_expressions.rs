@@ -421,7 +421,7 @@ pub(crate) fn eval_lowered_expression_with_type(
 pub(crate) fn eval_lowered_expression_with_schema(
     engine: &Engine,
     expression: &uqa_sql::ast::Expr,
-    row: &ResultRow,
+    row: &dyn uqa_sql::expr::RowLookup,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {

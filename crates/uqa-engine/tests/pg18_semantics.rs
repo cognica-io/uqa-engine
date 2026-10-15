@@ -198,3 +198,6 @@ mod zoned_interval;
 
 #[path = "pg18_semantics/generated_concatenation.rs"]
 mod generated_concatenation;
+
+#[path = "pg18_semantics/constraint_expressions.rs"]
+mod constraint_expressions;

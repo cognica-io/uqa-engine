@@ -91,19 +91,26 @@ fn generated_column_catalog_metadata_matches_pg18() {
 
     let definitions = engine
         .sql(
-            "SELECT adnum, adbin FROM pg_catalog.pg_attrdef ORDER BY adnum",
+            "SELECT adnum, adbin, pg_get_expr(adbin, adrelid) AS expression FROM pg_catalog.pg_attrdef WHERE adrelid='generated_catalog'::regclass ORDER BY adnum",
             &[],
         )
         .unwrap();
-    assert_eq!(definitions.rows.len(), 2);
-    assert_eq!(
-        definitions.rows[0]["adbin"],
-        Value::Str("(source + 1)".into())
-    );
-    assert_eq!(
-        definitions.rows[1]["adbin"],
-        Value::Str("(source * 2)".into())
-    );
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("generated_catalog.json")).unwrap();
+    let expected = reference["rows"].as_array().unwrap();
+    assert_eq!(definitions.rows.len(), expected.len());
+    for (actual, expected) in definitions.rows.iter().zip(expected) {
+        assert_eq!(
+            actual["adnum"],
+            Value::Int(expected["adnum"].as_i64().unwrap())
+        );
+        for column in ["adbin", "expression"] {
+            assert_eq!(
+                actual[column],
+                Value::Str(expected[column].as_str().unwrap().into())
+            );
+        }
+    }
 }
 
 #[test]

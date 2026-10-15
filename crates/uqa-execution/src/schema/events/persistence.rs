@@ -315,7 +315,26 @@ pub fn persist_trigger_catalog_snapshot(
     let Some(catalog) = catalog else {
         return Ok(());
     };
+    let before: StoredTriggerCatalog = catalog
+        .get_metadata(TRIGGERS_METADATA_KEY)
+        .map_err(|error| {
+            uqa_sql::catalog::errors::storage_error("read trigger predecessors", &error)
+        })?
+        .map(|json| serde_json::from_str(&json))
+        .transpose()
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .unwrap_or_default();
     let snapshot = model::stored_triggers_snapshot(triggers, relations);
+    for trigger in before
+        .triggers
+        .iter()
+        .chain(&snapshot.triggers)
+        .filter(|trigger| trigger.definition.constraint)
+    {
+        crate::catalog::tuples::publication::queue_trigger(catalog, trigger).map_err(|error| {
+            uqa_sql::catalog::errors::storage_error("publish constraint trigger", &error)
+        })?;
+    }
     let json = serde_json::to_string(&snapshot)
         .map_err(|error| SQLError::Internal(format!("serialize trigger catalog: {error}")))?;
     catalog

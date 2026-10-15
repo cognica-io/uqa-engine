@@ -14,7 +14,7 @@ use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::information_schema_types::array_dimension_count;
-use super::super::helpers::oids::{split_schema_name, stable_oid};
+use super::super::helpers::oids::stable_oid;
 use super::super::helpers::rows::{
     bool_value, catalog_ordinal, catalog_usize, column_ordinal, int_value, row, str_value,
 };
@@ -343,38 +343,37 @@ fn dropped_attribute_row(
 }
 
 pub fn build_pg_attrdef(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
+    request: &super::super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for table_name in catalog.table_names() {
-        let (_, table) = split_schema_name(&table_name)?;
         let relid = table_relation_oid_from(catalog, resolution, &table_name)?;
         let columns = &catalog
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
             .columns;
         append_pg_attrdef_rows(
-            output,
-            (catalog, resolution),
+            context,
+            catalog,
             &mut out,
             &table_name,
-            &table,
             relid,
             columns,
+            request,
         )?;
     }
     for (table_name, table) in catalog.foreign_tables() {
-        let (_, local_name) = split_schema_name(&table_name)?;
         append_pg_attrdef_rows(
-            output,
-            (catalog, resolution),
+            context,
+            catalog,
             &mut out,
             &table_name,
-            &local_name,
             crate::catalog::projection::foreign_table_relation_oid(&table),
             &table.columns,
+            request,
         )?;
     }
     Ok(out)
@@ -418,43 +417,40 @@ pub fn attrdef_catalog_oid(table_name: &str, column: &SQLColumnDef) -> i64 {
         .unwrap_or_else(|| stable_oid("attrdef", &format!("{table_name}.{}", column.name)))
 }
 
-/// `adbin` holds the expression as `pg_get_expr` prints it for the relation.
+/// Typed retained defaults and generation expressions; identity-only scans do not encode them.
 fn append_pg_attrdef_rows(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
-    (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
+    context: &CatalogContext<'_>,
+    catalog: &CatalogReadView,
     out: &mut Vec<ResultRow>,
     table_name: &str,
-    local_table_name: &str,
     relid: i64,
     columns: &[SQLColumnDef],
+    request: &super::super::CatalogRequest,
 ) -> Result<(), SQLError> {
     for (idx, col) in columns.iter().enumerate() {
-        let legacy_auto_increment = col
-            .auto_increment
-            .as_ref()
-            .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
-        if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
-            continue;
-        }
-        let default = if legacy_auto_increment {
-            format!("nextval('{}_{}_seq')", local_table_name, col.name)
-        } else if let Some(expression) = col
+        let Some(expression) = col
             .generated
             .as_ref()
             .map(|generated| generated.expression.as_ref())
             .or(col.default.as_ref())
-        {
-            super::super::view_definition::stored_expression_text(
-                output, catalog, resolution, expression,
-            )?
-        } else {
+        else {
             continue;
+        };
+        let default = if request.includes("adbin") {
+            str_value(
+                super::super::expression_nodes::default_node(
+                    context, catalog, columns, expression, &col.ty,
+                )?
+                .to_string(),
+            )
+        } else {
+            Value::Null
         };
         out.push(row([
             ("oid", int_value(attrdef_catalog_oid(table_name, col))),
             ("adrelid", int_value(relid)),
             ("adnum", int_value(column_ordinal(idx, col)?)),
-            ("adbin", str_value(default)),
+            ("adbin", default),
         ]));
     }
     Ok(())

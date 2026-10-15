@@ -33,7 +33,7 @@ impl PartitionExpressions for Literals {
     fn evaluate_row(
         &self,
         _expression: &Expr,
-        _row: &ResultRow,
+        _row: &dyn crate::expr::RowLookup,
         _schema: &RowSchema,
         _params: &[SQLParam],
     ) -> Result<Value, SQLError> {

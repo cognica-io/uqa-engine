@@ -26,7 +26,8 @@ pub type DomainRegistryRead<'a> = Box<dyn Deref<Target = DomainRegistry> + 'a>;
 pub trait DomainRegistryPublication: RoleCatalogGuards {
     fn domain_registry(&self) -> DomainRegistryRead<'_>;
     fn domain_catalog(&self) -> Option<&dyn CatalogFacade>;
-    fn publish_domain_definitions(&self, registry: DomainRegistry);
+    fn publish_domain_definitions(&self, registry: DomainRegistry)
+        -> Result<(), uqa_sql::SQLError>;
 }
 
 /// Overlay private domain replacements and deletions without losing independently committed definitions.
@@ -86,8 +87,7 @@ pub fn publish(
         }
         registry
     };
-    publication.publish_domain_definitions(registry);
-    Ok(())
+    publication.publish_domain_definitions(registry)
 }
 
 #[cfg(test)]

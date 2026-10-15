@@ -84,6 +84,10 @@ impl EventCatalogGuards for Publication<'_> {
     }
 }
 impl EventCatalogPublication for Publication<'_> {
+    fn finish_publication(&self) -> Result<(), SQLError> {
+        self.guards_released();
+        Ok(())
+    }
     fn persist_triggers(&self, _: &TriggerCatalog) -> Result<(), SQLError> {
         self.guards_held();
         self.events.lock().push("persist-triggers");

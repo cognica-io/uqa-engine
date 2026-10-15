@@ -23,7 +23,7 @@ pub(crate) use private_rows::PrivateRows;
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
 use uqa_storage::read_control::StorageReadControl;
-use uqa_storage::{KeyValueBatch, KeyValueStore, StorageTransactionModel};
+use uqa_storage::{KeyValueBatch, KeyValueStore, StorageBackendResult, StorageTransactionModel};
 
 use super::{
     decode_record, invalid, owners, NativeRecord, NativeRecordFamily as Family,
@@ -286,7 +286,7 @@ impl NativeSnapshot {
         family: Family,
         owner: Option<NativeRecordOwner>,
         components: &[ValueRef<'_>],
-        visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
     ) -> Result<()> {
         let prefix = match owner {
             Some(owner) => NativeRecordIdentity::new(family, owner)?
@@ -296,17 +296,19 @@ impl NativeSnapshot {
             }
             None => return Err(invalid("native components require an owner").into()),
         };
-        self.visit_row_prefix(&prefix, visit)
+        self.visit_row_prefix(&prefix, |row| visit(row).map_err(Into::into))
+            .map_err(Into::into)
     }
 
     pub(crate) fn visit_object_rows(
         &self,
         family: Family,
         identity: [u8; 16],
-        visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
     ) -> Result<()> {
         let prefix = NativeRecordIdentity::object_prefix(family, identity, &self.control)?;
-        self.visit_row_prefix(&prefix, visit)
+        self.visit_row_prefix(&prefix, |row| visit(row).map_err(Into::into))
+            .map_err(Into::into)
     }
 
     /// Select a literal prefix within a single TEXT identity on this fixed view.
@@ -315,31 +317,34 @@ impl NativeSnapshot {
         family: Family,
         owner: NativeRecordOwner,
         prefix: &str,
-        visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
-    ) -> Result<()> {
-        let prefix = NativeRecordIdentity::new(family, owner)?
-            .encode_text_prefix(prefix.as_bytes(), &self.control)?;
+        visit: impl FnMut(&[ValueRef<'_>]) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        let prefix = NativeRecordIdentity::new(family, owner)
+            .and_then(|identity| identity.encode_text_prefix(prefix.as_bytes(), &self.control))
+            .map_err(VersionError::into_storage_error)?;
         self.visit_row_prefix(&prefix, visit)
     }
 
     fn visit_row_prefix(
         &self,
         prefix: &[u8],
-        mut visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
-    ) -> Result<()> {
-        self.view.visit_prefix(
-            prefix,
-            None,
-            usize::MAX,
-            &self.control,
-            &mut |key, record| {
-                if let Some(bytes) = record.value {
-                    let (_, row) = decode_record(key, bytes, &self.control)?;
-                    visit(&row).map_err(|error| VersionError::Storage(error.into()))?;
-                }
-                Ok(true)
-            },
-        )?;
+        mut visit: impl FnMut(&[ValueRef<'_>]) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        self.view
+            .visit_prefix(
+                prefix,
+                None,
+                usize::MAX,
+                &self.control,
+                &mut |key, record| {
+                    if let Some(bytes) = record.value {
+                        let (_, row) = decode_record(key, bytes, &self.control)?;
+                        visit(&row).map_err(VersionError::Storage)?;
+                    }
+                    Ok(true)
+                },
+            )
+            .map_err(VersionError::into_storage_error)?;
         Ok(())
     }
 

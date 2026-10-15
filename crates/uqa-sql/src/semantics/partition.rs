@@ -34,7 +34,7 @@ pub trait PartitionExpressions {
     fn evaluate_row(
         &self,
         expression: &Expr,
-        row: &ResultRow,
+        row: &dyn crate::expr::RowLookup,
         schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Value, SQLError>;

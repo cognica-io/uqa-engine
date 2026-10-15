@@ -222,7 +222,9 @@ impl SystemRelation {
     }
     const fn constraint_view_sources(self) -> Option<&'static [Self]> {
         use SystemRelation::Projected as P;
-        use VirtualRelation::{PgAttribute, PgClass, PgConstraint, PgIndex, PgNamespace, PgType};
+        use VirtualRelation::{
+            PgAttribute, PgClass, PgConstraint, PgDepend, PgIndex, PgNamespace, PgType,
+        };
         match self {
             P(VirtualRelation::InformationTableConstraints) => Some(&[
                 P(PgNamespace),
@@ -252,6 +254,27 @@ impl SystemRelation {
                 P(PgNamespace),
                 P(PgConstraint),
             ]),
+            P(VirtualRelation::InformationConstraintColumnUsage) => Some(&[
+                P(PgNamespace),
+                P(PgClass),
+                P(PgAttribute),
+                P(PgDepend),
+                P(PgNamespace),
+                P(PgConstraint),
+                P(PgNamespace),
+                P(PgClass),
+                P(PgAttribute),
+                P(PgNamespace),
+                P(PgConstraint),
+                P(PgNamespace),
+                P(PgClass),
+                P(PgAttribute),
+                P(PgNamespace),
+                P(PgConstraint),
+            ]),
+            P(VirtualRelation::InformationConstraintTableUsage) => {
+                Some(&[P(PgConstraint), P(PgNamespace), P(PgClass), P(PgNamespace)])
+            }
             _ => None,
         }
     }

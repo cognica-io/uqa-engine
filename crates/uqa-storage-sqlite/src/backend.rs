@@ -176,6 +176,25 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(PersistentStorageSession::new(catalog, backend))
     }
 
+    fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<uqa_storage::mvcc::CommittedReadBoundary>> {
+        self.conn.capture_committed_read_boundary()
+    }
+
+    fn open_read_session_with_private_changes(
+        &self,
+        boundary: &uqa_storage::mvcc::CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let connection = self
+            .conn
+            .new_read_session_with_private_changes(boundary, cancellation)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(connection));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         Some(self.conn.write_cancellation())
     }

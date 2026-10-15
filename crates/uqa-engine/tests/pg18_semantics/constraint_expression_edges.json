@@ -1,0 +1,445 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE SCHEMA node_edges",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SET search_path=node_edges,public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE SEQUENCE seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE defaults (id integer, n integer DEFAULT 1.5, txt text DEFAULT 12, amount numeric(5,2) DEFAULT 1.5, fp double precision DEFAULT 1.5, serial_value bigint DEFAULT nextval('seq'), code varchar(3) DEFAULT 'ab', \"Odd Column\" text DEFAULT 'hello', generated integer GENERATED ALWAYS AS (id + 1) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE INDEX expressions ON defaults ((id+1),lower(txt)) WHERE id>0",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN c_text AS text COLLATE \"C\" CONSTRAINT c_compare CHECK (VALUE>'a')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION with_defaults(n integer DEFAULT 1.5, t text DEFAULT 12) RETURNS integer LANGUAGE SQL RETURN n",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SELECT a.attname,d.adbin::text,pg_get_expr(d.adbin,d.adrelid,false),pg_get_expr(d.adbin,d.adrelid,true) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='defaults'::regclass AND a.attname<>'serial_value' ORDER BY a.attnum",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "adbin",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "n",
+              "{FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1}",
+              "1.5",
+              "1.5"
+            ],
+            [
+              "txt",
+              "{COERCEVIAIO :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} :resulttype 25 :resultcollid 100 :coerceformat 2 :location -1}",
+              "12",
+              "12"
+            ],
+            [
+              "amount",
+              "{FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1}",
+              "1.5",
+              "1.5"
+            ],
+            [
+              "fp",
+              "{FUNCEXPR :funcid 1746 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1}",
+              "1.5",
+              "1.5"
+            ],
+            [
+              "code",
+              "{FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 2 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 1043 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 97 98 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 7 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+              "'ab'::character varying",
+              "'ab'::character varying"
+            ],
+            [
+              "Odd Column",
+              "{CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 104 101 108 108 111 ]}",
+              "'hello'::text",
+              "'hello'::text"
+            ],
+            [
+              "generated",
+              "{OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}",
+              "(id + 1)",
+              "id + 1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(adbin,adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='defaults'::regclass AND a.attname='serial_value'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "nextval('seq'::regclass)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT i.indexprs::text,i.indpred::text,pg_get_expr(i.indexprs,i.indrelid,false),pg_get_expr(i.indexprs,i.indrelid,true),pg_get_expr(i.indpred,i.indrelid) FROM pg_index i WHERE i.indexrelid='expressions'::regclass",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "indexprs",
+            "indpred",
+            "pg_get_expr",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 870 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({VAR :varno 1 :varattno 3 :vartype 25 :vartypmod -1 :varcollid 100 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1}) :location -1})",
+              "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+              "(id + 1), lower(txt)",
+              "id + 1, lower(txt)",
+              "(id > 0)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conbin::text,pg_get_expr(conbin,0),pg_get_expr(conbin,0,true) FROM pg_constraint WHERE conname='c_compare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conbin",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{OPEXPR :opno 666 :opfuncid 742 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1}",
+              "(VALUE > 'a'::text)",
+              "VALUE > 'a'::text"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT proargdefaults::text,pg_get_expr(proargdefaults,0),pg_get_expr(proargdefaults,0,true) FROM pg_proc WHERE proname='with_defaults' AND pronamespace='node_edges'::regnamespace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "proargdefaults",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "({FUNCEXPR :funcid 1744 :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 128 128 1 0 136 19 ]}) :location -1} {COERCEVIAIO :arg {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 12 0 0 0 0 0 0 0 ]} :resulttype 25 :resultcollid 100 :coerceformat 2 :location -1})",
+              "1.5, 12",
+              "1.5, 12"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM seq",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE defaults RENAME COLUMN id TO renamed",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(indexprs,indrelid),pg_get_expr(indpred,indrelid) FROM pg_index WHERE indexrelid='expressions'::regclass",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "(renamed + 1), lower(txt)",
+              "(renamed > 0)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE defaults RENAME COLUMN txt TO changed",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(indexprs,indrelid),pg_get_expr(indpred,indrelid) FROM pg_index WHERE indexrelid='expressions'::regclass",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "(renamed + 1), lower(changed)",
+              "(renamed > 0)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(indexprs,indrelid),pg_get_expr(indpred,indrelid) FROM pg_index WHERE indexrelid='expressions'::regclass",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "(renamed + 1), lower(txt)",
+              "(renamed > 0)"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

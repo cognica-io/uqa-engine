@@ -240,3 +240,41 @@ fn builtin_output_distinguishes_keyword_aliases_from_catalog_identifiers() {
         );
     }
 }
+
+#[test]
+fn missing_retained_type_identity_uses_the_missing_type_diagnostic() {
+    use crate::catalog::{
+        cache::RegtypeOutputCache,
+        test_support::{empty_catalog, CatalogServices},
+    };
+    let catalog = empty_catalog();
+    let services = CatalogServices::default();
+    let cache = RegtypeOutputCache::default();
+    let context = services.context(&catalog, &cache);
+    let mut ty = uqa_sql::ColumnType::Composite(uqa_sql::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "dropped_identity".into(),
+        oid: 50_001,
+        array_oid: 50_002,
+        relation_oid: 50_003,
+    });
+    for _ in 0..3 {
+        let identity = ty.user_type_identity().unwrap();
+        let error =
+            super::super::resolve_catalog_column_type_name(&context, &identity).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42704"), "{identity}: {error}");
+        assert_eq!(error.to_string(), "type with OID 50001 does not exist");
+        ty = uqa_sql::ColumnType::Array(Box::new(ty));
+    }
+    assert_eq!(
+        super::super::resolve_catalog_column_type_name(&context, "pg_catalog.int4").unwrap(),
+        uqa_sql::ColumnType::Integer
+    );
+    let error =
+        super::super::resolve_catalog_column_type_name(&context, "public.absent_type").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42704"));
+    assert_eq!(
+        error.to_string(),
+        "type \"public.absent_type\" does not exist"
+    );
+}

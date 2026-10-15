@@ -1,0 +1,551 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE SCHEMA node_bounds",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SET search_path=node_bounds,public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE ri(n integer) PARTITION BY RANGE(n)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ri_neg PARTITION OF ri FOR VALUES FROM (-10) TO (0)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ri_mid PARTITION OF ri FOR VALUES FROM (0) TO (10)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ri_low PARTITION OF ri FOR VALUES FROM (MINVALUE) TO (-10)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ri_high PARTITION OF ri FOR VALUES FROM (10) TO (MAXVALUE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ri_default PARTITION OF ri DEFAULT",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rt(n integer,t text) PARTITION BY RANGE(n,t)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rt_pair PARTITION OF rt FOR VALUES FROM (0,MINVALUE) TO (10,MAXVALUE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE lt(t text) PARTITION BY LIST(t)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE lt_values PARTITION OF lt FOR VALUES IN ('a', 'O''Reilly', E'back\\\\slash', NULL)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE lb(b boolean) PARTITION BY LIST(b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE lb_values PARTITION OF lb FOR VALUES IN (true,false,NULL)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rn(n numeric) PARTITION BY RANGE(n)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rn_values PARTITION OF rn FOR VALUES FROM (-1.25) TO ('Infinity')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rd(d date) PARTITION BY RANGE(d)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rd_values PARTITION OF rd FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ra(a integer[]) PARTITION BY RANGE(a)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE ra_values PARTITION OF ra FOR VALUES FROM (ARRAY[1,2]) TO (ARRAY[3,4])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE hh(n integer) PARTITION BY HASH(n)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE hh_part PARTITION OF hh FOR VALUES WITH (MODULUS 4, REMAINDER 3)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT relname,relpartbound::text,pg_get_expr(relpartbound,0,false),pg_get_expr(relpartbound,0,true),pg_get_expr(relpartbound,oid) FROM pg_class WHERE relnamespace='node_bounds'::regnamespace AND relispartition ORDER BY relname",
+      "command_tags": [
+        "SELECT 12"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "relpartbound",
+            "pg_get_expr",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "hh_part",
+              "{PARTITIONBOUNDSPEC :strategy h :is_default false :modulus 4 :remainder 3 :listdatums <> :lowerdatums <> :upperdatums <> :location -1}",
+              "FOR VALUES WITH (modulus 4, remainder 3)",
+              "FOR VALUES WITH (modulus 4, remainder 3)",
+              "FOR VALUES WITH (modulus 4, remainder 3)"
+            ],
+            [
+              "lb_values",
+              "{PARTITIONBOUNDSPEC :strategy l :is_default false :modulus 0 :remainder 0 :listdatums ({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull true :location -1 :constvalue <>}) :lowerdatums <> :upperdatums <> :location -1}",
+              "FOR VALUES IN (true, false, NULL)",
+              "FOR VALUES IN (true, false, NULL)",
+              "FOR VALUES IN (true, false, NULL)"
+            ],
+            [
+              "lt_values",
+              "{PARTITIONBOUNDSPEC :strategy l :is_default false :modulus 0 :remainder 0 :listdatums ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 79 39 82 101 105 108 108 121 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 14 [ 56 0 0 0 98 97 99 107 92 115 108 97 115 104 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :lowerdatums <> :upperdatums <> :location -1}",
+              "FOR VALUES IN ('a', 'O''Reilly', 'back\\slash', NULL)",
+              "FOR VALUES IN ('a', 'O''Reilly', 'back\\slash', NULL)",
+              "FOR VALUES IN ('a', 'O''Reilly', 'back\\slash', NULL)"
+            ],
+            [
+              "ra_values",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 1 0 0 0 0 0 0 0 23 0 0 0 2 0 0 0 1 0 0 0 1 0 0 0 2 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 1 0 0 0 0 0 0 0 23 0 0 0 2 0 0 0 1 0 0 0 3 0 0 0 4 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('{1,2}') TO ('{3,4}')",
+              "FOR VALUES FROM ('{1,2}') TO ('{3,4}')",
+              "FOR VALUES FROM ('{1,2}') TO ('{3,4}')"
+            ],
+            [
+              "rd_values",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 62 34 0 0 0 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 172 35 0 0 0 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+              "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+              "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')"
+            ],
+            [
+              "ri_default",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default true :modulus 0 :remainder 0 :listdatums <> :lowerdatums <> :upperdatums <> :location -1}",
+              "DEFAULT",
+              "DEFAULT",
+              "DEFAULT"
+            ],
+            [
+              "ri_high",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 1 :value <> :location -1}) :location -1}",
+              "FOR VALUES FROM (10) TO (MAXVALUE)",
+              "FOR VALUES FROM (10) TO (MAXVALUE)",
+              "FOR VALUES FROM (10) TO (MAXVALUE)"
+            ],
+            [
+              "ri_low",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind -1 :value <> :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 246 255 255 255 255 255 255 255 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM (MINVALUE) TO ('-10')",
+              "FOR VALUES FROM (MINVALUE) TO ('-10')",
+              "FOR VALUES FROM (MINVALUE) TO ('-10')"
+            ],
+            [
+              "ri_mid",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM (0) TO (10)",
+              "FOR VALUES FROM (0) TO (10)",
+              "FOR VALUES FROM (0) TO (10)"
+            ],
+            [
+              "ri_neg",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 246 255 255 255 255 255 255 255 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('-10') TO (0)",
+              "FOR VALUES FROM ('-10') TO (0)",
+              "FOR VALUES FROM ('-10') TO (0)"
+            ],
+            [
+              "rn_values",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 0 161 1 0 196 9 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 0 208 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('-1.25') TO ('Infinity')",
+              "FOR VALUES FROM ('-1.25') TO ('Infinity')",
+              "FOR VALUES FROM ('-1.25') TO ('Infinity')"
+            ],
+            [
+              "rt_pair",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :location -1} {PARTITIONRANGEDATUM :kind -1 :value <> :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]} :location -1} {PARTITIONRANGEDATUM :kind 1 :value <> :location -1}) :location -1}",
+              "FOR VALUES FROM (0, MINVALUE) TO (10, MAXVALUE)",
+              "FOR VALUES FROM (0, MINVALUE) TO (10, MAXVALUE)",
+              "FOR VALUES FROM (0, MINVALUE) TO (10, MAXVALUE)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET standard_conforming_strings=off",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT relname,relpartbound::text,pg_get_expr(relpartbound,0,false),pg_get_expr(relpartbound,0,true),pg_get_expr(relpartbound,oid) FROM pg_class WHERE relnamespace='node_bounds'::regnamespace AND relispartition ORDER BY relname",
+      "command_tags": [
+        "SELECT 12"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "relpartbound",
+            "pg_get_expr",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "hh_part",
+              "{PARTITIONBOUNDSPEC :strategy h :is_default false :modulus 4 :remainder 3 :listdatums <> :lowerdatums <> :upperdatums <> :location -1}",
+              "FOR VALUES WITH (modulus 4, remainder 3)",
+              "FOR VALUES WITH (modulus 4, remainder 3)",
+              "FOR VALUES WITH (modulus 4, remainder 3)"
+            ],
+            [
+              "lb_values",
+              "{PARTITIONBOUNDSPEC :strategy l :is_default false :modulus 0 :remainder 0 :listdatums ({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull true :location -1 :constvalue <>}) :lowerdatums <> :upperdatums <> :location -1}",
+              "FOR VALUES IN (true, false, NULL)",
+              "FOR VALUES IN (true, false, NULL)",
+              "FOR VALUES IN (true, false, NULL)"
+            ],
+            [
+              "lt_values",
+              "{PARTITIONBOUNDSPEC :strategy l :is_default false :modulus 0 :remainder 0 :listdatums ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 79 39 82 101 105 108 108 121 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 14 [ 56 0 0 0 98 97 99 107 92 115 108 97 115 104 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull true :location -1 :constvalue <>}) :lowerdatums <> :upperdatums <> :location -1}",
+              "FOR VALUES IN ('a', 'O''Reilly', 'back\\\\slash', NULL)",
+              "FOR VALUES IN ('a', 'O''Reilly', 'back\\\\slash', NULL)",
+              "FOR VALUES IN ('a', 'O''Reilly', 'back\\\\slash', NULL)"
+            ],
+            [
+              "ra_values",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 1 0 0 0 0 0 0 0 23 0 0 0 2 0 0 0 1 0 0 0 1 0 0 0 2 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1007 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 1 0 0 0 0 0 0 0 23 0 0 0 2 0 0 0 1 0 0 0 3 0 0 0 4 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('{1,2}') TO ('{3,4}')",
+              "FOR VALUES FROM ('{1,2}') TO ('{3,4}')",
+              "FOR VALUES FROM ('{1,2}') TO ('{3,4}')"
+            ],
+            [
+              "rd_values",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 62 34 0 0 0 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 172 35 0 0 0 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+              "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+              "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')"
+            ],
+            [
+              "ri_default",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default true :modulus 0 :remainder 0 :listdatums <> :lowerdatums <> :upperdatums <> :location -1}",
+              "DEFAULT",
+              "DEFAULT",
+              "DEFAULT"
+            ],
+            [
+              "ri_high",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 1 :value <> :location -1}) :location -1}",
+              "FOR VALUES FROM (10) TO (MAXVALUE)",
+              "FOR VALUES FROM (10) TO (MAXVALUE)",
+              "FOR VALUES FROM (10) TO (MAXVALUE)"
+            ],
+            [
+              "ri_low",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind -1 :value <> :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 246 255 255 255 255 255 255 255 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM (MINVALUE) TO ('-10')",
+              "FOR VALUES FROM (MINVALUE) TO ('-10')",
+              "FOR VALUES FROM (MINVALUE) TO ('-10')"
+            ],
+            [
+              "ri_mid",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM (0) TO (10)",
+              "FOR VALUES FROM (0) TO (10)",
+              "FOR VALUES FROM (0) TO (10)"
+            ],
+            [
+              "ri_neg",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 246 255 255 255 255 255 255 255 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('-10') TO (0)",
+              "FOR VALUES FROM ('-10') TO (0)",
+              "FOR VALUES FROM ('-10') TO (0)"
+            ],
+            [
+              "rn_values",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 0 161 1 0 196 9 ]} :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 0 208 ]} :location -1}) :location -1}",
+              "FOR VALUES FROM ('-1.25') TO ('Infinity')",
+              "FOR VALUES FROM ('-1.25') TO ('Infinity')",
+              "FOR VALUES FROM ('-1.25') TO ('Infinity')"
+            ],
+            [
+              "rt_pair",
+              "{PARTITIONBOUNDSPEC :strategy r :is_default false :modulus 0 :remainder 0 :listdatums <> :lowerdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]} :location -1} {PARTITIONRANGEDATUM :kind -1 :value <> :location -1}) :upperdatums ({PARTITIONRANGEDATUM :kind 0 :value {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]} :location -1} {PARTITIONRANGEDATUM :kind 1 :value <> :location -1}) :location -1}",
+              "FOR VALUES FROM (0, MINVALUE) TO (10, MAXVALUE)",
+              "FOR VALUES FROM (0, MINVALUE) TO (10, MAXVALUE)",
+              "FOR VALUES FROM (0, MINVALUE) TO (10, MAXVALUE)"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -69,7 +69,8 @@ pub(super) fn constant(value: &Value, ty: &ColumnType) -> Result<Node, SQLError>
     constant_with_source(value, ty, None, None)
 }
 
-pub(super) fn constant_with_source(
+/// Encode an already admitted typed constant, preserving any retained physical source and its catalog descriptors.
+pub fn constant_with_source(
     value: &Value,
     ty: &ColumnType,
     source: Option<&CompositeConstantSource>,

@@ -380,6 +380,27 @@ pub trait PersistentStorageBackend: Send + Sync {
         ))
     }
 
+    /// Retain the committed catalog/data record boundary of the active transaction. The opaque handle remains bound to this exact session and transaction lifetime.
+    fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<crate::mvcc::CommittedReadBoundary>> {
+        Err(StorageBackendError::Other(
+            "fixed committed read boundaries are not supported by this backend".into(),
+        ))
+    }
+
+    /// Bind a read-only catalog/backend pair to the selected committed boundary and this transaction's current private root. Providers must preserve affinity, original allowance and logical reader attribution.
+    fn open_read_session_with_private_changes(
+        &self,
+        _boundary: &crate::mvcc::CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "fixed committed/private read composition is not supported by this backend".into(),
+        ))
+    }
+
     /// Transaction ownership shared with the paired catalog. Legacy providers retain serialized Engine writer admission; versioned providers keep private writes and support command refresh without ending the transaction.
     fn transaction_model(&self) -> StorageTransactionModel {
         StorageTransactionModel::ProviderSerialized

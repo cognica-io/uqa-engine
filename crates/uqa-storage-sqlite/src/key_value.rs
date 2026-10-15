@@ -155,6 +155,23 @@ impl KeyValueStore for SQLiteKeyValueStore {
         Ok(Arc::new(Self::with_options(conn, self.records.options())?))
     }
 
+    fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<uqa_storage::mvcc::CommittedReadBoundary>> {
+        self.conn.capture_committed_read_boundary()
+    }
+
+    fn open_read_session_with_private_changes(
+        &self,
+        boundary: &uqa_storage::mvcc::CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        let conn = self
+            .conn
+            .new_read_session_with_private_changes(boundary, cancellation)?;
+        Ok(Arc::new(Self::with_options(conn, self.records.options())?))
+    }
+
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         self.records.transaction_model()
     }

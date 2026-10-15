@@ -141,6 +141,7 @@ pub fn tables(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
         .definitions
         .foreign_tables
         .values()
+        .filter(|table| table.server_reference.is_some())
         .map(|table| {
             Ok(row([
                 (

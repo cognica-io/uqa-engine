@@ -23,11 +23,13 @@ use uqa_sql::{
 
 pub(crate) struct CatalogServices {
     pub resolution: RelationNameResolution,
+    pub standard_conforming_strings: Option<bool>,
 }
 
 impl Default for CatalogServices {
     fn default() -> Self {
         Self {
+            standard_conforming_strings: None,
             resolution: RelationNameResolution {
                 search_path: vec!["public".into()],
                 temporary_schema: "pg_temp_1".into(),
@@ -68,7 +70,12 @@ impl CatalogSession for CatalogServices {
     fn relation_name_resolution(&self) -> RelationNameResolution {
         self.resolution.clone()
     }
-    fn show_parameter(&self, _: &str) -> Result<(String, String), SQLError> {
+    fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError> {
+        if let ("standard_conforming_strings", Some(enabled)) =
+            (name, self.standard_conforming_strings)
+        {
+            return Ok((name.into(), if enabled { "on" } else { "off" }.into()));
+        }
         Err(SQLError::Internal("unexpected parameter read".into()))
     }
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {

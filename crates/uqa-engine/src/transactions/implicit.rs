@@ -188,14 +188,18 @@ impl Engine {
             self.run_existing_transaction_operation(
                 || {
                     self.prepare_serializable_transaction_snapshot()?;
-                    f(self)
+                    let value = f(self)?;
+                    self.publish_catalog_constraint_tuples()?;
+                    Ok(value)
                 },
                 std::convert::identity,
             )
         } else {
             self.transaction(|engine| {
                 engine.prepare_serializable_transaction_snapshot()?;
-                f(engine)
+                let value = f(engine)?;
+                engine.publish_catalog_constraint_tuples()?;
+                Ok(value)
             })
         }
     }
@@ -279,6 +283,20 @@ impl Engine {
             ));
         }
         self.with_implicit_storage_transaction_inner(false, true, f)
+    }
+
+    /// Complete direct schema publication within the same storage transaction and preserve its public error type.
+    pub(crate) fn with_implicit_storage_definition_transaction<R>(
+        &self,
+        f: impl FnOnce(&Self) -> StorageBackendResult<R>,
+    ) -> StorageBackendResult<R> {
+        self.with_implicit_storage_transaction(|engine| {
+            let result = f(engine)?;
+            engine
+                .publish_catalog_constraint_tuples()
+                .map_err(|error| StorageBackendError::backend("constraint publication", error))?;
+            Ok(result)
+        })
     }
 
     /// Run storage maintenance that `PostgreSQL` permits in a read-only transaction. The transaction remains logically read-only, while its physical backend is allowed to persist maintenance metadata such as ANALYZE statistics.

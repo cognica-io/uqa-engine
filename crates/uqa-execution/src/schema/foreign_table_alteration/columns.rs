@@ -53,3 +53,45 @@ pub(super) fn drop_columns(
     }
     Ok(())
 }
+
+pub(super) fn drop_constraints(
+    context: &ForeignTableAlterContext<'_>,
+    relation: &RelationIdentity,
+    actions: &[uqa_sql::ast::DropConstraintAction],
+) -> Result<(), SQLError> {
+    let deletion = context.deletion.catalog_removal_context();
+    deletion
+        .events
+        .ensure_no_pending_trigger_events(&relation.qualified_name(), "ALTER TABLE")?;
+    for action in actions {
+        perform_deletion(
+            &deletion,
+            |dependencies| {
+                if let Some(address) = dependencies.relation_member_address(
+                    uqa_sql::catalog::dependencies::CONSTRAINT_CLASS,
+                    relation,
+                    &action.name,
+                ) {
+                    return Ok(vec![address]);
+                }
+                let message = format!(
+                    "constraint \"{}\" of relation \"{}\" does not exist",
+                    action.name, relation.name
+                );
+                if action.if_exists {
+                    context
+                        .notices
+                        .push(uqa_sql::SQLNotice::notice(format!("{message}, skipping")));
+                    Ok(Vec::new())
+                } else {
+                    Err(SQLError::Routine {
+                        sqlstate: "42704".into(),
+                        message,
+                    })
+                }
+            },
+            action.cascade,
+        )?;
+    }
+    Ok(())
+}

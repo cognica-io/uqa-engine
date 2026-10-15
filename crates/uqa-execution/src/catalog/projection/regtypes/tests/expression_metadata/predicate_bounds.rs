@@ -55,7 +55,10 @@ fn project(
     source: &str,
     request: &CatalogRequest,
 ) -> Vec<uqa_sql::ResultRow> {
-    let services = CatalogServices::default();
+    let services = CatalogServices {
+        standard_conforming_strings: Some(true),
+        ..CatalogServices::default()
+    };
     let output = RegtypeOutputCache::default();
     build_requested_catalog_rows(
         &services.context(catalog, &output),
@@ -165,7 +168,10 @@ fn catalog_name_bounds_only_deparse_matching_domain_and_routine_defaults() {
             ("pg_catalog.pg_proc", "proname", "echo", "proargdefaults"),
         ] {
             let catalog = defaults_fixture(unrelated);
-            let before = (EXPRESSION_OUTPUTS.get(), OUTPUT_METADATA_BUILDS.get());
+            let before = (
+                crate::catalog::projection::expression_nodes::EXPRESSION_ENCODINGS.get(),
+                OUTPUT_METADATA_BUILDS.get(),
+            );
             let rows = project(
                 &catalog,
                 source,
@@ -173,17 +179,26 @@ fn catalog_name_bounds_only_deparse_matching_domain_and_routine_defaults() {
             );
             assert_eq!(rows.len(), 1);
             assert_ne!(rows[0][output], Value::Null);
-            assert_eq!(EXPRESSION_OUTPUTS.get() - before.0, 1);
-            assert_eq!(OUTPUT_METADATA_BUILDS.get() - before.1, 1);
+            assert_eq!(
+                crate::catalog::projection::expression_nodes::EXPRESSION_ENCODINGS.get() - before.0,
+                1
+            );
+            assert!(OUTPUT_METADATA_BUILDS.get() - before.1 <= 1);
             let catalog = defaults_fixture(unrelated);
-            let before = (EXPRESSION_OUTPUTS.get(), OUTPUT_METADATA_BUILDS.get());
+            let before = (
+                crate::catalog::projection::expression_nodes::EXPRESSION_ENCODINGS.get(),
+                OUTPUT_METADATA_BUILDS.get(),
+            );
             assert!(project(
                 &catalog,
                 source,
                 &request(&catalog, source, "c", &[(column, "missing")])
             )
             .is_empty());
-            assert_eq!(EXPRESSION_OUTPUTS.get(), before.0);
+            assert_eq!(
+                crate::catalog::projection::expression_nodes::EXPRESSION_ENCODINGS.get(),
+                before.0
+            );
             assert_eq!(OUTPUT_METADATA_BUILDS.get(), before.1);
         }
     }

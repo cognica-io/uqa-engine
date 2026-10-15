@@ -46,13 +46,13 @@ pub fn build_pg_type_without_defaults(
 }
 
 pub(crate) fn build_requested_pg_type(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: &crate::catalog::context::CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     request: &super::super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
     build_pg_type_rows(
-        output,
+        Some(context),
         catalog,
         resolution,
         request.includes("typdefault") || request.includes("typdefaultbin"),
@@ -65,9 +65,9 @@ pub(crate) fn build_requested_pg_type(
     reason = "preserves catalog column and OID order"
 )]
 fn build_pg_type_rows(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: Option<&crate::catalog::context::CatalogContext<'_>>,
     catalog: &CatalogReadView,
-    resolution: &crate::catalog::RelationNameResolution,
+    _resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
     request: &super::super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
@@ -189,19 +189,45 @@ fn build_pg_type_rows(
             "typnotnull".into(),
             bool_value(domain.definition.not_null.is_some()),
         );
-        // `typdefaultbin` is the stored default, which `pg_get_expr` prints; `typdefault` its text.
-        let default = match domain
-            .definition
-            .default
-            .as_ref()
-            .filter(|_| with_defaults && request.matches_name("typname", &domain.identity.name))
-        {
-            Some(default) => str_value(super::super::view_definition::stored_expression_text(
-                output, catalog, resolution, default,
-            )?),
-            None => Value::Null,
+        let (default, node) = match (
+            context,
+            domain.definition.default.as_ref().filter(|_| {
+                with_defaults && request.matches_name("typname", &domain.identity.name)
+            }),
+        ) {
+            (Some(context), Some(expression)) => {
+                let node = uqa_sql::catalog::node_tree::Field::Node(
+                    super::super::expression_nodes::default_node(
+                        context,
+                        catalog,
+                        &[],
+                        expression,
+                        base,
+                    )?,
+                );
+                let text = if request.includes("typdefault") {
+                    str_value(super::super::expression_nodes::render(
+                        &crate::catalog::context::CatalogContext {
+                            catalog,
+                            ..*context
+                        },
+                        &[],
+                        &node,
+                        false,
+                    )?)
+                } else {
+                    Value::Null
+                };
+                let node = if request.includes("typdefaultbin") {
+                    str_value(node.to_string())
+                } else {
+                    Value::Null
+                };
+                (text, node)
+            }
+            _ => (Value::Null, Value::Null),
         };
-        entry.insert("typdefaultbin".into(), default.clone());
+        entry.insert("typdefaultbin".into(), node);
         entry.insert("typdefault".into(), default);
         entry.insert(
             "typacl".into(),

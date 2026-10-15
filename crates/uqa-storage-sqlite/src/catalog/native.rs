@@ -40,7 +40,10 @@ pub(super) fn optional_text(value: Option<&str>) -> ValueRef<'_> {
     value.map_or(ValueRef::Null, text)
 }
 pub(super) fn string(value: ValueRef<'_>) -> Result<String> {
-    value.as_str().map(str::to_owned).map_err(|_| {
+    string_ref(value).map(str::to_owned)
+}
+pub(super) fn string_ref(value: ValueRef<'_>) -> Result<&str> {
+    value.as_str().map_err(|_| {
         SQLiteError::StorageBackend("native catalog text column has another storage class".into())
     })
 }

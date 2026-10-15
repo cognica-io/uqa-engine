@@ -164,18 +164,17 @@ fn hash_join_prepares_constant_like_residual_once() {
             ]),
         ],
     );
-    let predicate = ScalarExpr::Not(Box::new(ScalarExpr::Func {
-        order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
-        name: "like".into(),
-        binding: None,
-        args: vec![
-            ScalarExpr::qualified_column("o", "comment"),
-            ScalarExpr::Literal(Value::Str("%special%requests%".into())),
-        ],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    }));
+    let statement = uqa_sql::compile("SELECT o.comment NOT LIKE '%special%requests%'")
+        .unwrap()
+        .remove(0);
+    let uqa_sql::plan::UnifiedPlan::Query(query) = uqa_sql::plan::UnifiedPlan::lower(statement)
+    else {
+        unreachable!()
+    };
+    let uqa_sql::plan::RelationalPlan::QueryBlock(mut block) = query.root else {
+        unreachable!()
+    };
+    let predicate = block.projections.remove(0).expr;
     let mut join = HashJoin::new_with_work_mem_and_predicate(
         Box::new(left),
         Box::new(right),

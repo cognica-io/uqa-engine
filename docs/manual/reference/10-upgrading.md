@@ -1,6 +1,12 @@
 # Upgrading UQA Engine
 
-This page describes upgrade requirements for UQA Engine 0.5.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/10-upgrading.md) when installing the 0.5.3 packages.
+This page describes upgrade requirements for current unreleased source changes and UQA Engine 0.5.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/10-upgrading.md) when installing the 0.5.3 packages.
+
+## Unreleased physical constraint catalogs
+
+SQLite record format 62 and redb record format 58 require every database owner to upgrade together. Native SQLite mapping remains 17 and shared coordination format 2 is unchanged. Close all owners and retain a pre-upgrade backup before the first open; older writers reject the upgraded format. Initial open creates physical constraint records for existing ordinary tables, foreign tables, domains and constraint triggers inside the catalog restoration transaction. A failed initialization rolls back its records and marker; a second open preserves their identities. User rows and retained value bytes are not rewritten. Return to a pre-upgrade backup to use an older binary.
+
+Versioned custom providers implement `capture_committed_read_boundary` and `open_read_session_with_private_changes` on their paired catalog/backend. The opaque boundary belongs to one database, session and transaction; readers preserve its committed snapshot, current private root, original memory allowance and serializable participant. Providers reject foreign or completed transaction boundaries. Catalog adapters expose borrowed metadata visitation and indexed fixed-width-key visitation; callbacks may stop successfully or return their original typed error, and may not reenter provider persistence.
 
 ## Unreleased native expression bindings
 

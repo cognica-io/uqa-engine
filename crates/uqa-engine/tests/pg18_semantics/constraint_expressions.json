@@ -1,0 +1,962 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE SCHEMA constraint_reference",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SET search_path=constraint_reference,public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN nonnegative AS integer CONSTRAINT domain_nonnegative CHECK (VALUE >= 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN pattern_text AS text DEFAULT 'a_b' CONSTRAINT domain_pattern CHECK (VALUE LIKE 'a!_%' ESCAPE '!') CONSTRAINT domain_required NOT NULL",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE subject(discarded integer, id integer PRIMARY KEY, n integer DEFAULT 3, txt text DEFAULT 'a_b', nums integer[] DEFAULT ARRAY[1,2], doc jsonb DEFAULT '{\"a\":2}'::jsonb)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "ALTER TABLE subject DROP COLUMN discarded",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "ALTER TABLE subject ADD CONSTRAINT subject_number CHECK (n BETWEEN SYMMETRIC 1 AND 4)",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "ALTER TABLE subject ADD CONSTRAINT subject_pattern CHECK (txt LIKE 'a!_%' ESCAPE '!')",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "ALTER TABLE subject ADD CONSTRAINT subject_array CHECK (nums[1] > 0)",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "ALTER TABLE subject ADD CONSTRAINT subject_json CHECK ((doc ->> 'a')::integer > 0)",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION constraint_reference.\"Chosen Name\"(integer) RETURNS boolean LANGUAGE sql IMMUTABLE RETURN $1 > 0",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "ALTER TABLE subject ADD CONSTRAINT subject_routine CHECK (constraint_reference.\"Chosen Name\"(n))",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE DOMAIN routine_value AS integer CONSTRAINT domain_routine CHECK (constraint_reference.\"Chosen Name\"(VALUE))",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SELECT conname,contype,conrelid='subject'::regclass AS is_subject,contypid IN ('nonnegative'::regtype,'pattern_text'::regtype,'routine_value'::regtype) AS is_domain,conbin IS NULL AS missing_node,pg_get_expr(conbin,conrelid,false) AS sql,pg_get_expr(conbin,conrelid,true) AS pretty,pg_get_constraintdef(oid,false) AS definition,pg_get_constraintdef(oid,true) AS pretty_definition FROM pg_constraint WHERE connamespace='constraint_reference'::regnamespace ORDER BY conname",
+      "command_tags": [
+        "SELECT 11"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "contype",
+            "is_subject",
+            "is_domain",
+            "missing_node",
+            "sql",
+            "pretty",
+            "definition",
+            "pretty_definition"
+          ],
+          "type_oids": [
+            19,
+            18,
+            16,
+            16,
+            16,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "domain_nonnegative",
+              "c",
+              "f",
+              "t",
+              "f",
+              "(VALUE >= 0)",
+              "VALUE >= 0",
+              "CHECK ((VALUE >= 0))",
+              "CHECK (VALUE >= 0)"
+            ],
+            [
+              "domain_pattern",
+              "c",
+              "f",
+              "t",
+              "f",
+              "(VALUE ~~ like_escape('a!_%'::text, '!'::text))",
+              "VALUE ~~ like_escape('a!_%'::text, '!'::text)",
+              "CHECK ((VALUE ~~ like_escape('a!_%'::text, '!'::text)))",
+              "CHECK (VALUE ~~ like_escape('a!_%'::text, '!'::text))"
+            ],
+            [
+              "domain_required",
+              "n",
+              "f",
+              "t",
+              "t",
+              null,
+              null,
+              "NOT NULL",
+              "NOT NULL"
+            ],
+            [
+              "domain_routine",
+              "c",
+              "f",
+              "t",
+              "f",
+              "\"Chosen Name\"(VALUE)",
+              "\"Chosen Name\"(VALUE)",
+              "CHECK (\"Chosen Name\"(VALUE))",
+              "CHECK (\"Chosen Name\"(VALUE))"
+            ],
+            [
+              "subject_array",
+              "c",
+              "t",
+              "f",
+              "f",
+              "(nums[1] > 0)",
+              "nums[1] > 0",
+              "CHECK ((nums[1] > 0))",
+              "CHECK (nums[1] > 0)"
+            ],
+            [
+              "subject_id_not_null",
+              "n",
+              "t",
+              "f",
+              "t",
+              null,
+              null,
+              "NOT NULL id",
+              "NOT NULL id"
+            ],
+            [
+              "subject_json",
+              "c",
+              "t",
+              "f",
+              "f",
+              "(((doc ->> 'a'::text))::integer > 0)",
+              "((doc ->> 'a'::text)::integer) > 0",
+              "CHECK ((((doc ->> 'a'::text))::integer > 0))",
+              "CHECK (((doc ->> 'a'::text)::integer) > 0)"
+            ],
+            [
+              "subject_number",
+              "c",
+              "t",
+              "f",
+              "f",
+              "(((n >= 1) AND (n <= 4)) OR ((n >= 4) AND (n <= 1)))",
+              "n >= 1 AND n <= 4 OR n >= 4 AND n <= 1",
+              "CHECK ((((n >= 1) AND (n <= 4)) OR ((n >= 4) AND (n <= 1))))",
+              "CHECK (n >= 1 AND n <= 4 OR n >= 4 AND n <= 1)"
+            ],
+            [
+              "subject_pattern",
+              "c",
+              "t",
+              "f",
+              "f",
+              "(txt ~~ like_escape('a!_%'::text, '!'::text))",
+              "txt ~~ like_escape('a!_%'::text, '!'::text)",
+              "CHECK ((txt ~~ like_escape('a!_%'::text, '!'::text)))",
+              "CHECK (txt ~~ like_escape('a!_%'::text, '!'::text))"
+            ],
+            [
+              "subject_pkey",
+              "p",
+              "t",
+              "f",
+              "t",
+              null,
+              null,
+              "PRIMARY KEY (id)",
+              "PRIMARY KEY (id)"
+            ],
+            [
+              "subject_routine",
+              "c",
+              "t",
+              "f",
+              "f",
+              "\"Chosen Name\"(n)",
+              "\"Chosen Name\"(n)",
+              "CHECK (\"Chosen Name\"(n))",
+              "CHECK (\"Chosen Name\"(n))"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,conbin::text FROM pg_constraint WHERE connamespace='constraint_reference'::regnamespace AND contype='c' AND conname NOT IN ('subject_routine','domain_routine') ORDER BY conname",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "conbin"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "domain_nonnegative",
+              "{OPEXPR :opno 525 :opfuncid 150 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}"
+            ],
+            [
+              "domain_pattern",
+              "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}"
+            ],
+            [
+              "subject_array",
+              "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({SUBSCRIPTINGREF :refcontainertype 1007 :refelemtype 23 :refrestype 23 :reftypmod -1 :refcollid 0 :refupperindexpr ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :reflowerindexpr <> :refexpr {VAR :varno 1 :varattno 5 :vartype 1007 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 5 :location -1} :refassgnexpr <>} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}"
+            ],
+            [
+              "subject_json",
+              "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {OPEXPR :opno 3477 :opfuncid 3214 :opresulttype 25 :opretset false :opcollid 100 :inputcollid 100 :args ({VAR :varno 1 :varattno 6 :vartype 3802 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 6 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 97 ]}) :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}"
+            ],
+            [
+              "subject_number",
+              "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop and :args ({OPEXPR :opno 525 :opfuncid 150 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 523 :opfuncid 149 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {BOOLEXPR :boolop and :args ({OPEXPR :opno 525 :opfuncid 150 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 523 :opfuncid 149 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 3 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 3 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}) :location -1}"
+            ],
+            [
+              "subject_pattern",
+              "{OPEXPR :opno 1209 :opfuncid 850 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({VAR :varno 1 :varattno 4 :vartype 25 :vartypmod -1 :varcollid 100 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 4 :location -1} {FUNCEXPR :funcid 1637 :funcresulttype 25 :funcretset false :funcvariadic false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 97 33 95 37 ]} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 5 [ 20 0 0 0 33 ]}) :location -1}) :location -1}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,0) FROM pg_constraint WHERE conname='subject_number'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "expression contains variables",
+        "detail": null,
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,4294967294::oid) IS NULL FROM pg_constraint WHERE connamespace='constraint_reference'::regnamespace ORDER BY conname",
+      "command_tags": [
+        "SELECT 11"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "?column?"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "domain_nonnegative",
+              "t"
+            ],
+            [
+              "domain_pattern",
+              "t"
+            ],
+            [
+              "domain_required",
+              "t"
+            ],
+            [
+              "domain_routine",
+              "t"
+            ],
+            [
+              "subject_array",
+              "t"
+            ],
+            [
+              "subject_id_not_null",
+              "t"
+            ],
+            [
+              "subject_json",
+              "t"
+            ],
+            [
+              "subject_number",
+              "t"
+            ],
+            [
+              "subject_pattern",
+              "t"
+            ],
+            [
+              "subject_pkey",
+              "t"
+            ],
+            [
+              "subject_routine",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,'subject'::regclass) FROM pg_constraint WHERE conname='domain_nonnegative'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "domain_nonnegative",
+              "(VALUE >= 0)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_get_expr(NULL,0),pg_get_expr(NULL,0,true),pg_get_expr(NULL,NULL),pg_get_constraintdef(NULL),pg_get_constraintdef(4294967294::oid)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_get_expr",
+            "pg_get_expr",
+            "pg_get_expr",
+            "pg_get_constraintdef",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a.attname,pg_get_expr(d.adbin,d.adrelid,false),pg_get_expr(d.adbin,d.adrelid,true) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='subject'::regclass ORDER BY a.attnum",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "n",
+              "3",
+              "3"
+            ],
+            [
+              "txt",
+              "'a_b'::text",
+              "'a_b'::text"
+            ],
+            [
+              "nums",
+              "ARRAY[1, 2]",
+              "ARRAY[1, 2]"
+            ],
+            [
+              "doc",
+              "'{\"a\": 2}'::jsonb",
+              "'{\"a\": 2}'::jsonb"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT typname,typdefault,pg_get_expr(typdefaultbin,0) FROM pg_type WHERE typnamespace='constraint_reference'::regnamespace AND typtype='d' ORDER BY typname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typdefault",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "nonnegative",
+              null,
+              null
+            ],
+            [
+              "pattern_text",
+              "'a_b'::text",
+              "'a_b'::text"
+            ],
+            [
+              "routine_value",
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT constraint_schema,constraint_name,check_clause FROM information_schema.check_constraints WHERE constraint_schema='constraint_reference' ORDER BY constraint_name",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "constraint_schema",
+            "constraint_name",
+            "check_clause"
+          ],
+          "type_oids": [
+            19,
+            19,
+            1043
+          ],
+          "rows": [
+            [
+              "constraint_reference",
+              "domain_nonnegative",
+              "(VALUE >= 0)"
+            ],
+            [
+              "constraint_reference",
+              "domain_pattern",
+              "(VALUE ~~ like_escape('a!_%'::text, '!'::text))"
+            ],
+            [
+              "constraint_reference",
+              "domain_required",
+              "VALUE IS NOT NULL"
+            ],
+            [
+              "constraint_reference",
+              "domain_routine",
+              "\"Chosen Name\"(VALUE)"
+            ],
+            [
+              "constraint_reference",
+              "subject_array",
+              "(nums[1] > 0)"
+            ],
+            [
+              "constraint_reference",
+              "subject_id_not_null",
+              "id IS NOT NULL"
+            ],
+            [
+              "constraint_reference",
+              "subject_json",
+              "(((doc ->> 'a'::text))::integer > 0)"
+            ],
+            [
+              "constraint_reference",
+              "subject_number",
+              "(((n >= 1) AND (n <= 4)) OR ((n >= 4) AND (n <= 1)))"
+            ],
+            [
+              "constraint_reference",
+              "subject_pattern",
+              "(txt ~~ like_escape('a!_%'::text, '!'::text))"
+            ],
+            [
+              "constraint_reference",
+              "subject_routine",
+              "\"Chosen Name\"(n)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT domain_schema,domain_name,constraint_schema,constraint_name,is_deferrable,initially_deferred FROM information_schema.domain_constraints WHERE domain_schema='constraint_reference' ORDER BY domain_name,constraint_name",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_schema",
+            "domain_name",
+            "constraint_schema",
+            "constraint_name",
+            "is_deferrable",
+            "initially_deferred"
+          ],
+          "type_oids": [
+            19,
+            19,
+            19,
+            19,
+            1043,
+            1043
+          ],
+          "rows": [
+            [
+              "constraint_reference",
+              "nonnegative",
+              "constraint_reference",
+              "domain_nonnegative",
+              "NO",
+              "NO"
+            ],
+            [
+              "constraint_reference",
+              "pattern_text",
+              "constraint_reference",
+              "domain_pattern",
+              "NO",
+              "NO"
+            ],
+            [
+              "constraint_reference",
+              "pattern_text",
+              "constraint_reference",
+              "domain_required",
+              "NO",
+              "NO"
+            ],
+            [
+              "constraint_reference",
+              "routine_value",
+              "constraint_reference",
+              "domain_routine",
+              "NO",
+              "NO"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE subject RENAME COLUMN n TO renamed",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,conrelid,false),pg_get_constraintdef(oid,true) FROM pg_constraint WHERE conname IN ('subject_number','subject_routine') ORDER BY conname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "subject_number",
+              "(((renamed >= 1) AND (renamed <= 4)) OR ((renamed >= 4) AND (renamed <= 1)))",
+              "CHECK (renamed >= 1 AND renamed <= 4 OR renamed >= 4 AND renamed <= 1)"
+            ],
+            [
+              "subject_routine",
+              "\"Chosen Name\"(renamed)",
+              "CHECK (\"Chosen Name\"(renamed))"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,conrelid,false),pg_get_constraintdef(oid,true) FROM pg_constraint WHERE conname IN ('subject_number','subject_routine') ORDER BY conname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "subject_number",
+              "(((n >= 1) AND (n <= 4)) OR ((n >= 4) AND (n <= 1)))",
+              "CHECK (n >= 1 AND n <= 4 OR n >= 4 AND n <= 1)"
+            ],
+            [
+              "subject_routine",
+              "\"Chosen Name\"(n)",
+              "CHECK (\"Chosen Name\"(n))"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER DOMAIN nonnegative ADD CONSTRAINT domain_small CHECK (VALUE < 10)",
+      "command_tags": [
+        "ALTER DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,0),pg_get_constraintdef(oid) FROM pg_constraint WHERE contypid='nonnegative'::regtype ORDER BY conname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "domain_nonnegative",
+              "(VALUE >= 0)",
+              "CHECK ((VALUE >= 0))"
+            ],
+            [
+              "domain_small",
+              "(VALUE < 10)",
+              "CHECK ((VALUE < 10))"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,0),pg_get_constraintdef(oid) FROM pg_constraint WHERE contypid='nonnegative'::regtype ORDER BY conname",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "domain_nonnegative",
+              "(VALUE >= 0)",
+              "CHECK ((VALUE >= 0))"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -206,6 +206,52 @@ fn backend_capabilities_keep_original_attribution_budget_and_reader_cancellation
 }
 
 #[test]
+fn fixed_read_boundaries_preserve_original_serializable_attribution() {
+    let persistence = Persistence::new();
+    let source = persistence.session(1 << 20);
+    source.begin_transaction().unwrap();
+    let before_actor = source.capture_committed_read_boundary().unwrap();
+    let actor = source.establish_serializable_snapshot().unwrap();
+    let cancellation = uqa_core::CancellationToken::new();
+    assert!(source
+        .new_read_session_with_private_changes(&before_actor, &cancellation)
+        .is_err());
+    let boundary = source.capture_committed_read_boundary().unwrap();
+    let reader = source
+        .new_read_session_with_private_changes(&boundary, &cancellation)
+        .unwrap();
+    let view = reader.record_snapshot().unwrap();
+    let retained_actor = view.serializable().unwrap();
+    assert_eq!(retained_actor.id(), actor.id());
+    let control = retained_actor.read_control(&cancellation);
+    assert!(control
+        .memory()
+        .shares_allowance(source.retention_control().memory()));
+    read(retained_actor, b"through fixed view");
+    reader.begin_read_transaction().unwrap();
+    reader.commit_transaction().unwrap();
+    assert_eq!(
+        persistence.actor_status(actor.id()).unwrap(),
+        SerializableStatus::Active
+    );
+    cancellation.cancel();
+    assert!(matches!(
+        retained_actor
+            .observe_read(predicate(b"cancelled fixed view"), &control)
+            .unwrap_err()
+            .into_storage_error(),
+        StorageBackendError::Cancelled(_)
+    ));
+    source.retention_control().check().unwrap();
+    source.commit_transaction().unwrap();
+    assert_eq!(
+        persistence.actor_status(actor.id()).unwrap(),
+        SerializableStatus::Committed
+    );
+    assert_eq!(view.serializable().unwrap().id(), actor.id());
+}
+
+#[test]
 fn empty_sessions_finish_without_a_physical_allocation_and_views_retain_the_original_actor() {
     for read_only in [false, true] {
         let persistence = Persistence::new();

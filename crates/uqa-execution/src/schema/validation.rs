@@ -16,6 +16,7 @@ pub struct CheckValidationContext<'a> {
     pub columns: &'a dyn AssignmentColumnCatalog,
     pub reads: &'a dyn MutationRead,
     pub expressions: &'a dyn PartitionExpressions,
+    pub types: &'a dyn uqa_sql::FunctionTypeResolver,
 }
 fn ddl_storage_error(action: &str, error: ColumnCatalogError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, error.as_ref())
@@ -165,16 +166,7 @@ pub fn validate_check_rows(
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error("VALIDATE CHECK", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let schema = crate::RowSchema::with_types(
-        definitions
-            .iter()
-            .map(|column| column.name.clone())
-            .collect(),
-        definitions
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let scope = super::check_rows::CheckRowScope::new(context.types, table, &definitions)?;
     for doc_id in context.reads.live_table_doc_ids(table)? {
         let Some(mut document) = context.reads.get_document(table, doc_id)? else {
             continue;
@@ -183,9 +175,7 @@ pub fn validate_check_rows(
             &definitions,
             &mut document,
         )?;
-        let value = context
-            .expressions
-            .evaluate_row(expression, &document, &schema, &[])?;
+        let value = scope.evaluate(context.expressions, expression, &document, &[])?;
         if !matches!(value, Value::Null) && !uqa_sql::expr::truthy(&value) {
             let relation = uqa_core::RelationIdentity::from_legacy_name(table)
                 .map_or_else(|_| table.to_string(), |identity| identity.name);

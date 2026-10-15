@@ -14,11 +14,14 @@ mod coercions;
 mod control;
 mod fields;
 mod operators;
+mod partition;
+mod relation;
 mod rows;
 mod subscripts;
 mod types;
 
 pub use bodies::return_body;
+pub use relation::validate_relation;
 
 #[cfg(test)]
 mod tests;
@@ -60,12 +63,19 @@ pub fn expression(
     names: &dyn ExpressionNames,
     pretty: bool,
 ) -> Result<String, SQLError> {
-    Renderer {
+    let renderer = Renderer {
         names,
         pretty,
         indent: 0,
+    };
+    match value {
+        Field::List(values) => values
+            .iter()
+            .map(|value| renderer.field(coercions::implicit_cast_input(value)?, pretty))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|values| values.join(", ")),
+        _ => renderer.field(coercions::implicit_cast_input(value)?, pretty),
     }
-    .field(value, pretty)
 }
 
 struct Renderer<'a> {
@@ -95,6 +105,7 @@ impl Renderer<'_> {
             "SUBSCRIPTINGREF" => self.array_access(node),
             "FIELDSELECT" => self.field_select(node),
             "CONST" => self.constant(node),
+            "PARTITIONBOUNDSPEC" => self.partition_bound(node),
             "COLLATEEXPR" => self.collate(node, outer),
             "OPEXPR" | "DISTINCTEXPR" => self.operator(node, outer),
             "ROWEXPR" => self.row(node),

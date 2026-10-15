@@ -433,6 +433,7 @@ fn validate_check_rows(
             columns: context.foreign_keys.columns,
             reads: context.rows.reads,
             expressions: context.rows.partitions.expressions,
+            types: context.rows.partitions.types,
         },
         table,
         name,
@@ -476,7 +477,9 @@ pub fn alter_constraint(
         .as_ref()
         .map(|foreign_key| foreign_key_constraint_identity(context, table, foreign_key))
         .transpose()?;
-    publish_constraint_state(context, table, columns, constraints)?;
+    if effects.changed {
+        publish_constraint_state(context, table, columns, constraints)?;
+    }
     if let Some(family) = family.filter(|_| partitioned) {
         super::partition_foreign_keys::alter_partition_foreign_keys(
             context,

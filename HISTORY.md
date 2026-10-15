@@ -12,6 +12,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views. Accept foreign-table CHECK and NOT NULL constraint deletion through the existing transactional dependency path.
+
+- Retain physical constraint catalog rows across concurrent DDL, REPEATABLE READ, SERIALIZABLE, savepoint rollback and held cursors. Publish ordinary, foreign, domain and trigger constraints atomically, preserving independent partition catalog identities. Complete SQL table/index changes and direct schema/constraint API publication inside their owning transactions so unrelated writers and no-op declarations do not replay unfinished catalog work. The all-owner storage upgrade initializes existing definitions without rewriting user rows.
+
+- Restore role definitions and validate OID claims without first copying all selected metadata payloads, preserving snapshot boundaries and callback errors.
+
+- Preserve PostgreSQL result type modifiers across unknown CASE inputs, selected constant or column arms and retained collation metadata, without changing returned values.
+
+- Preserve plain projected column names in view definitions when analyzed expressions retain collation metadata, while keeping explicit COLLATE and renamed outputs.
+
+- Report PostgreSQL `42704` when a retained expression names a deleted type, preserving the original type OID in the diagnostic.
+
 - Preserve private regular and materialized views when another session publishes catalog changes during a fixed-isolation transaction. Retain view creation, replacement, rename, deletion, materialized rows and original owner identities through catalog refresh, commit, rollback and reopening.
 
 - Reuse a current catalog view across object-ID reservations while preserving collision checks after private DDL, lock waits and rollback, including memory and temporary tables.
@@ -22,7 +34,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Retain byte-identical native SQLite B-tree postings and their equality projections during publication, avoiding physical rewrites while preserving MVCC history, write conflicts, retry receipts and changes to SQL-equal stored representations.
 
-- Match PostgreSQL stored generated-column dependency selection during UPDATE, preserving unrelated values and using destination expressions when rows move between partitions. Reuse typed expression plans during generated-column rewrites, including PostgreSQL constant planning for empty relations.
+- Bind generated columns to their declared row scope outside search_path and preserve typed catalog nodes. Match PostgreSQL stored generated-column dependency selection during UPDATE, preserving unrelated values and using destination expressions when rows move between partitions. Reuse typed expression plans during generated-column rewrites, including PostgreSQL constant planning for empty relations.
 
 - Open each persistent table store once and reuse immutable index preparation when creating independent sessions, preserving validated row counts, analyzer bindings, selected vector indexes and independent transaction state. Resolve relation, array, index and constraint names from selected metadata; avoid unrelated table copies during unrestricted builtin routine checks while preserving retained catalog authority.
 
@@ -46,7 +58,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve the unlimited length of catalog-qualified `bpchar`, avoiding premature one-character truncation in character casts, enum and date input, stored values and analytical query results.
 
+- Print CHECK definitions with PostgreSQL variadic-array calls, typed cast parentheses and session string escaping, preserving domain values, current names and durable definitions.
+
 - Dropping an ordinary or foreign column preserves CHECK constraints that do not depend on that attribute, including constant predicates and checks of another surviving column, with their original identities, flags and enforcement after rollback or reopening.
+- Analyze and enforce CHECK predicates in their declared row scope, with actual composite identity, physical `tableoid`, PostgreSQL diagnostics and ordered catalog dependencies. Whole-row checks follow current columns and ordinary or quoted table renames; omitted fields remain SQL NULL during writes and validation, including after persistent reopening.
 
 - Make foreign-table relation and row/array identities visible while binding defaults, before the server association. Retain in-progress declarations across catalog refreshes and restore all foreign row descriptors before validating persisted expressions, preserving rollback, independent sessions and reopened composite defaults.
 

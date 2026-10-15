@@ -228,9 +228,10 @@ fn index_key_ordinals(
 }
 
 pub fn build_pg_index(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: &crate::catalog::context::CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
+    request: &super::super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for index in catalog_index_relations(catalog, resolution)? {
@@ -246,10 +247,12 @@ pub fn build_pg_index(
                 uqa_sql::ast::IndexKey::Expression(expression) => Some(expression.as_ref()),
                 uqa_sql::ast::IndexKey::Column(_) => None,
             })
+            .filter(|_| request.includes("indexprs"))
             .map(|expression| {
-                super::super::view_definition::stored_expression_definition(
-                    output, catalog, resolution, expression, false,
+                super::super::expression_nodes::encode(
+                    context, catalog, table_cols, None, expression, None,
                 )
+                .map(uqa_sql::catalog::node_tree::Field::from)
             })
             .collect::<Result<Vec<_>, _>>()?;
         let column_count = catalog_usize(index.columns.len(), "pg_index column count")?;
@@ -298,7 +301,7 @@ pub fn build_pg_index(
                 if expressions.is_empty() {
                     Value::Null
                 } else {
-                    Value::Str(expressions.join(", "))
+                    Value::Str(uqa_sql::catalog::node_tree::Field::List(expressions).to_string())
                 },
             ),
             (
@@ -307,10 +310,17 @@ pub fn build_pg_index(
                     .definition
                     .predicate
                     .as_deref()
+                    .filter(|_| request.includes("indpred"))
                     .map(|predicate| {
-                        super::super::view_definition::stored_expression_definition(
-                            output, catalog, resolution, predicate, false,
+                        super::super::expression_nodes::encode(
+                            context,
+                            catalog,
+                            table_cols,
+                            None,
+                            predicate,
+                            Some(&uqa_sql::ColumnType::Boolean),
                         )
+                        .map(|node| node.to_string())
                     })
                     .transpose()?
                     .map_or(Value::Null, Value::Str),

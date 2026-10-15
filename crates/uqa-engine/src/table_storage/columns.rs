@@ -29,7 +29,7 @@ impl Engine {
         table: &str,
         column: uqa_sql::ast::ColumnDef,
     ) -> StorageBackendResult<()> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.try_register_column_inner(table, column, None)
         })
     }
@@ -205,7 +205,7 @@ impl Engine {
         from: &str,
         to: &str,
     ) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
+        self.with_implicit_storage_definition_transaction(|engine| {
             engine.try_rename_column_inner(table, from, to)
         })
     }
@@ -386,7 +386,9 @@ impl Engine {
     }
 
     pub(crate) fn try_rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| engine.try_rename_table_inner(from, to))
+        self.with_implicit_storage_definition_transaction(|engine| {
+            engine.try_rename_table_inner(from, to)
+        })
     }
 
     fn reserve_table_array_rename(

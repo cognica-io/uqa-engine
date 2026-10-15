@@ -22,6 +22,7 @@ pub trait EventCatalogGuards {
 pub trait EventCatalogPublication {
     fn persist_triggers(&self, triggers: &TriggerCatalog) -> Result<(), SQLError>;
     fn persist_rules(&self, rules: &RuleCatalog) -> Result<(), SQLError>;
+    fn finish_publication(&self) -> Result<(), SQLError>;
 }
 #[derive(Clone, Copy)]
 pub struct EventCatalogContext<'a> {
@@ -55,7 +56,10 @@ pub fn rename_relation_events(
     drop(rules);
     drop(triggers);
     context.changes.catalog_registry_changed();
-    Ok(())
+    context
+        .publication
+        .finish_publication()
+        .map_err(|error| StorageBackendError::backend("publish event catalog", error))
 }
 
 pub mod context;

@@ -121,8 +121,10 @@ fn user_sql_and_procedural_routines_join_the_same_language_identities() {
         lookup_mode: RelationLookupMode::Bound,
     };
     let languages = build_pg_language();
+    let services = crate::catalog::test_support::CatalogServices::default();
+    let cache = crate::catalog::cache::RegtypeOutputCache::default();
     let mut rows = build_requested_pg_proc(
-        None,
+        &services.context(&catalog, &cache),
         &catalog,
         &resolution,
         &crate::catalog::projection::CatalogRequest::default(),

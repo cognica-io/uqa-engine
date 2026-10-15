@@ -64,6 +64,18 @@ impl ForeignTableRemovalContext<'_> {
         drop(table_security);
         drop(tables);
         if let Some(table) = &removed {
+            if let Some(catalog) = self
+                .catalog
+                .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
+            {
+                crate::catalog::tuples::publication::queue_relation(
+                    catalog,
+                    &relation,
+                    table.object_id,
+                    true,
+                )
+                .map_err(|error| format!("remove foreign constraint rows: {error}"))?;
+            }
             self.changes.catalog_registry_changed();
             self.changes.prepared_catalog_changed(
                 crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(

@@ -165,6 +165,9 @@ pub fn alter_foreign_table(
             AlterForeignTableAction::DropColumns(columns) => {
                 columns::drop_columns(context, &binding.value.relation, columns)
             }
+            AlterForeignTableAction::DropConstraints(constraints) => {
+                columns::drop_constraints(context, &binding.value.relation, constraints)
+            }
             AlterForeignTableAction::OwnerTo(owner) => {
                 alter_foreign_table_role_owner(context, &canonical, owner)
             }

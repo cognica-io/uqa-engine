@@ -18,39 +18,87 @@ use super::{
 };
 use crate::mvcc::native::NativeRecordFamily as Family;
 
+fn visit_metadata_rows(
+    connection: &rusqlite::Connection,
+    prefix: &str,
+    key_bytes: Option<usize>,
+    visit: &mut uqa_storage::catalog::MetadataReadVisitor<'_>,
+) -> uqa_storage::StorageBackendResult<()> {
+    let mut statement = connection
+        .prepare("SELECT key, value FROM _metadata WHERE key >= ?1 COLLATE BINARY ORDER BY key")
+        .map_err(SQLiteError::from)?;
+    let mut rows = statement.query([prefix]).map_err(SQLiteError::from)?;
+    while let Some(row) = rows.next().map_err(SQLiteError::from)? {
+        let key = super::native::string_ref(row.get_ref(0).map_err(SQLiteError::from)?)?;
+        if !key.starts_with(prefix) {
+            break;
+        }
+        if key_bytes.is_none_or(|length| key.len() == length) {
+            visit(
+                key,
+                super::native::string_ref(row.get_ref(1).map_err(SQLiteError::from)?)?,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 impl Catalog {
     pub fn metadata_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
-        if let Some(entries) = self.read_native(|snapshot| {
-            let mut entries = Vec::new();
+        let mut entries = Vec::new();
+        self.visit_metadata_with_prefix(prefix, &mut |key, value| {
+            entries.push((key.to_owned(), value.to_owned()));
+            Ok(())
+        })?;
+        Ok(entries)
+    }
+
+    /// Borrow matching metadata records from one read boundary; callbacks must not reenter persistence.
+    pub fn visit_metadata_with_prefix(
+        &self,
+        prefix: &str,
+        visit: &mut uqa_storage::catalog::MetadataReadVisitor<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.visit_metadata_keys(prefix, None, visit)
+    }
+
+    pub fn visit_metadata_with_key_length(
+        &self,
+        prefix: &str,
+        key_bytes: usize,
+        visit: &mut uqa_storage::catalog::MetadataReadVisitor<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.visit_metadata_keys(prefix, Some(key_bytes), visit)
+    }
+
+    fn visit_metadata_keys(
+        &self,
+        prefix: &str,
+        key_bytes: Option<usize>,
+        visit: &mut uqa_storage::catalog::MetadataReadVisitor<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            snapshot.control.check()?;
+            if key_bytes.is_some_and(|length| length < prefix.len()) {
+                return Ok(());
+            }
             snapshot.visit_text_prefix_rows(
                 Family::Metadata,
                 crate::mvcc::native::NativeRecordOwner::Database(snapshot.database),
                 prefix,
                 |row| {
-                    let key = super::native::string(row[0])?;
-                    entries.push((key, super::native::string(row[1])?));
-                    Ok(())
+                    let key = super::native::string_ref(row[0])?;
+                    if key_bytes.is_none_or(|length| key.len() == length) {
+                        visit(key, super::native::string_ref(row[1])?)?;
+                    }
+                    snapshot.control.check()
                 },
             )?;
-            Ok(entries)
-        })? {
-            return Ok(entries);
+            return snapshot.control.check();
         }
-        self.conn.with(|connection| {
-            let mut statement =
-                connection.prepare("SELECT key, value FROM _metadata ORDER BY key")?;
-            let mut entries = Vec::new();
-            let rows = statement.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            for row in rows {
-                let (key, value) = row?;
-                if key.starts_with(prefix) {
-                    entries.push((key, value));
-                }
-            }
-            Ok(entries)
-        })
+        // Preserve the callback's storage error independently of physical connection failures.
+        self.conn
+            .with(|connection| Ok(visit_metadata_rows(connection, prefix, key_bytes, visit)))?
     }
     /// Store an arbitrary key/value pair in the `_metadata` table.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {

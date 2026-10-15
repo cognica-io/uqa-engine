@@ -6,6 +6,13 @@
 
 use super::*;
 
+fn default_node(name: &str) -> Value {
+    // PostgreSQL 18.4 catalog values, independently captured for the declarations below.
+    let nodes: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(include_str!("default_nodes.json")).unwrap();
+    Value::Str(nodes[name].clone())
+}
+
 fn user_routine_catalog_row<'a>(
     result: &'a SQLResult,
     name: &str,
@@ -115,7 +122,7 @@ fn assert_procedure_user_routine_catalog(result: &SQLResult) {
         procedure["proargnames"],
         array(vec![Value::Str("y".into()), Value::Str("a".into())])
     );
-    assert_eq!(procedure["proargdefaults"], Value::Str("7".into()));
+    assert_eq!(procedure["proargdefaults"], default_node("cat_proc"));
 }
 
 fn assert_variadic_user_routine_catalog(result: &SQLResult) {
@@ -148,7 +155,7 @@ fn assert_variadic_user_routine_catalog(result: &SQLResult) {
             Value::Str("total".into())
         ])
     );
-    assert_eq!(variadic["proargdefaults"], Value::Str("ARRAY[1, 2]".into()));
+    assert_eq!(variadic["proargdefaults"], default_node("cat_variadic"));
 }
 
 fn assert_polymorphic_variadic_user_routine_catalog(result: &SQLResult) {

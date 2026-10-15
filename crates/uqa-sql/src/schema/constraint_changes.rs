@@ -12,6 +12,9 @@ pub mod not_null_removal;
 pub mod renaming;
 pub mod validation;
 
+#[cfg(test)]
+mod tests;
+
 use crate::schema::foreign_keys::column_foreign_key;
 use crate::{
     ast::{ColumnType, ForeignKey, TableCheck},
@@ -331,6 +334,8 @@ pub fn derived_constraint_alteration(
 pub struct ConstraintAlterEffects {
     pub recreated_foreign_key: Option<ForeignKey>,
     pub validate_after_publish: bool,
+    /// A real change to the selected constraint; unrelated constraints and repeated modes retain their catalog tuples.
+    pub changed: bool,
 }
 /// The kind of constraint each requested change applies to: enforceability and deferrability to foreign keys, inheritability to `NOT NULL` constraints.
 fn ensure_alteration_applies(
@@ -440,29 +445,27 @@ pub fn apply_constraint_alteration(
         None
     };
     let mut validate_after_publish = false;
+    let mut changed = false;
     match location {
         ConstraintLocation::NotNull(index) => {
             if let Some(no_inherit) = no_inherit {
+                changed = columns[index].not_null_no_inherit != no_inherit;
                 columns[index].not_null_no_inherit = no_inherit;
             }
         }
         ConstraintLocation::ColumnForeignKey(index) => {
-            validate_after_publish =
-                crate::schema::inheritance::foreign_keys::DeclaredForeignKey::Column(index).alter(
-                    columns,
-                    constraints,
-                    enforceability,
-                    deferrability,
-                );
+            let effects =
+                crate::schema::inheritance::foreign_keys::DeclaredForeignKey::Column(index)
+                    .alter_with_effects(columns, constraints, enforceability, deferrability);
+            changed = effects.changed;
+            validate_after_publish = effects.became_enforced;
         }
         ConstraintLocation::TableForeignKey(index) => {
-            validate_after_publish =
-                crate::schema::inheritance::foreign_keys::DeclaredForeignKey::Table(index).alter(
-                    columns,
-                    constraints,
-                    enforceability,
-                    deferrability,
-                );
+            let effects =
+                crate::schema::inheritance::foreign_keys::DeclaredForeignKey::Table(index)
+                    .alter_with_effects(columns, constraints, enforceability, deferrability);
+            changed = effects.changed;
+            validate_after_publish = effects.became_enforced;
         }
         ConstraintLocation::ColumnCheck(_)
         | ConstraintLocation::TableCheck(_)
@@ -472,5 +475,6 @@ pub fn apply_constraint_alteration(
     Ok(ConstraintAlterEffects {
         recreated_foreign_key,
         validate_after_publish,
+        changed,
     })
 }
