@@ -1,6 +1,6 @@
 # Upgrading UQA Engine
 
-This page describes upgrade requirements for UQA Engine 0.5.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/10-upgrading.md) when installing the 0.5.3 packages.
+This page describes upgrade requirements for current unreleased source changes and UQA Engine 0.5.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/10-upgrading.md) when installing the 0.5.3 packages.
 
 ## Unreleased physical constraint catalogs
 
