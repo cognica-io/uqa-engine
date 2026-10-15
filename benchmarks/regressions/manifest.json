@@ -9200,6 +9200,22 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "composite_consumer_matrix_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Composite field equality across consumers",
+      "workload": "169 independent PostgreSQL 18.4 observations across twelve field families on memory, native SQLite, SQLite Key/Value and redb, including twelve fresh-connection observations.",
+      "invariant": "Comparison laws, DISTINCT/groups/window peers/joins/set operations, indexed probes and uniqueness retain the same field equality and ordering before and after persistent reopen."
     }
   ]
 }

@@ -1,0 +1,4973 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "CREATE TYPE cm_float8_row AS (value double precision); CREATE TABLE cm_float8 (id integer PRIMARY KEY, v cm_float8_row); INSERT INTO cm_float8 VALUES (1,ROW('-0'::float8)),(2,ROW('0'::float8)),(3,ROW('NaN'::float8)),(4,ROW('NaN'::float8)),(5,ROW('infinity'::float8)),(6,ROW(1::float8)),(7,ROW(NULL)),(8,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "float8_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_float8 a CROSS JOIN cm_float8 b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,304,403,404,505,606,707}",
+              "{103,104,105,106,107,203,204,205,206,207,307,407,503,504,507,603,604,605,607}",
+              "{101,102,103,104,105,106,107,201,202,203,204,205,206,207,303,304,307,403,404,407,503,504,505,507,603,604,605,606,607,707}",
+              "{101,102,201,202,303,304,403,404,505,606,707,808}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_float8 a CROSS JOIN cm_float8 b CROSS JOIN cm_float8 c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_float8) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_float8 GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3,4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ],
+            [
+              "{8}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_float8 ORDER BY v,id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "6",
+              "2"
+            ],
+            [
+              "5",
+              "3"
+            ],
+            [
+              "3",
+              "4"
+            ],
+            [
+              "4",
+              "4"
+            ],
+            [
+              "7",
+              "5"
+            ],
+            [
+              "8",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_float8 a JOIN cm_float8 b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3,4}"
+            ],
+            [
+              "4",
+              "{3,4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ],
+            [
+              "7",
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_float8 INTERSECT SELECT v FROM cm_float8) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_float8_v_idx ON cm_float8(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "float8_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_float8_unique(v cm_float8_row UNIQUE); INSERT INTO cm_float8_unique SELECT v FROM cm_float8 WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "float8_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_float8_unique SELECT v FROM cm_float8 WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_float8_unique_v_key\"",
+        "detail": "Key (v)=((0)) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "float8_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_numeric_row AS (value numeric); CREATE TABLE cm_numeric (id integer PRIMARY KEY, v cm_numeric_row); INSERT INTO cm_numeric VALUES (1,ROW(1.0::numeric)),(2,ROW(1.000::numeric)),(3,ROW('NaN'::numeric)),(4,ROW('NaN'::numeric)),(5,ROW('infinity'::numeric)),(6,ROW(2::numeric)),(7,ROW(NULL)),(8,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_numeric a CROSS JOIN cm_numeric b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,304,403,404,505,606,707}",
+              "{103,104,105,106,107,203,204,205,206,207,307,407,503,504,507,603,604,605,607}",
+              "{101,102,103,104,105,106,107,201,202,203,204,205,206,207,303,304,307,403,404,407,503,504,505,507,603,604,605,606,607,707}",
+              "{101,102,201,202,303,304,403,404,505,606,707,808}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_numeric a CROSS JOIN cm_numeric b CROSS JOIN cm_numeric c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_numeric) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_numeric GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3,4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ],
+            [
+              "{8}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_numeric ORDER BY v,id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "1"
+            ],
+            [
+              "6",
+              "2"
+            ],
+            [
+              "5",
+              "3"
+            ],
+            [
+              "3",
+              "4"
+            ],
+            [
+              "4",
+              "4"
+            ],
+            [
+              "7",
+              "5"
+            ],
+            [
+              "8",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_numeric a JOIN cm_numeric b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3,4}"
+            ],
+            [
+              "4",
+              "{3,4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ],
+            [
+              "7",
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_numeric INTERSECT SELECT v FROM cm_numeric) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_numeric WHERE v=ROW(1.0::numeric)::cm_numeric_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_numeric_v_idx ON cm_numeric(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_numeric WHERE v=ROW(1.0::numeric)::cm_numeric_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_numeric_unique(v cm_numeric_row UNIQUE); INSERT INTO cm_numeric_unique SELECT v FROM cm_numeric WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "numeric_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_numeric_unique SELECT v FROM cm_numeric WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_numeric_unique_v_key\"",
+        "detail": "Key (v)=((1.000)) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "numeric_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_bpchar_row AS (value bpchar); CREATE TABLE cm_bpchar (id integer PRIMARY KEY, v cm_bpchar_row); INSERT INTO cm_bpchar VALUES (1,ROW('a'::bpchar)),(2,ROW('a   '::bpchar)),(3,ROW('b'::bpchar)),(4,ROW(''::bpchar)),(5,ROW('   '::bpchar)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_bpchar a CROSS JOIN cm_bpchar b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,405,504,505,606}",
+              "{103,106,203,206,306,401,402,403,406,501,502,503,506}",
+              "{101,102,103,106,201,202,203,206,303,306,401,402,403,404,405,406,501,502,503,504,505,506,606}",
+              "{101,102,201,202,303,404,405,504,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_bpchar a CROSS JOIN cm_bpchar b CROSS JOIN cm_bpchar c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_bpchar) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_bpchar GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4,5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_bpchar ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "4",
+              "1"
+            ],
+            [
+              "5",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "6",
+              "4"
+            ],
+            [
+              "7",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_bpchar a JOIN cm_bpchar b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3}"
+            ],
+            [
+              "4",
+              "{4,5}"
+            ],
+            [
+              "5",
+              "{4,5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_bpchar INTERSECT SELECT v FROM cm_bpchar) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_bpchar WHERE v=ROW('a'::bpchar)::cm_bpchar_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_bpchar_v_idx ON cm_bpchar(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_bpchar WHERE v=ROW('a'::bpchar)::cm_bpchar_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_bpchar_unique(v cm_bpchar_row UNIQUE); INSERT INTO cm_bpchar_unique SELECT v FROM cm_bpchar WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_bpchar_unique SELECT v FROM cm_bpchar WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_bpchar_unique_v_key\"",
+        "detail": "Key (v)=((\"a   \")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "bpchar_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_timetz_row AS (value timetz); CREATE TABLE cm_timetz (id integer PRIMARY KEY, v cm_timetz_row); INSERT INTO cm_timetz VALUES (1,ROW('10:00+01'::timetz)),(2,ROW('09:00+00'::timetz)),(3,ROW('09:00+00'::timetz)),(4,ROW('10:00+00'::timetz)),(5,ROW('24:00+00'::timetz)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "timetz_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_timetz a CROSS JOIN cm_timetz b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,202,203,302,303,404,505,606}",
+              "{102,103,104,105,106,204,205,206,304,305,306,405,406,506}",
+              "{101,102,103,104,105,106,202,203,204,205,206,302,303,304,305,306,404,405,406,505,506,606}",
+              "{101,202,203,302,303,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_timetz a CROSS JOIN cm_timetz b CROSS JOIN cm_timetz c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_timetz) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_timetz GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1}"
+            ],
+            [
+              "{2,3}"
+            ],
+            [
+              "{4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_timetz ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "3"
+            ],
+            [
+              "5",
+              "4"
+            ],
+            [
+              "6",
+              "5"
+            ],
+            [
+              "7",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_timetz a JOIN cm_timetz b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1}"
+            ],
+            [
+              "2",
+              "{2,3}"
+            ],
+            [
+              "3",
+              "{2,3}"
+            ],
+            [
+              "4",
+              "{4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_timetz INTERSECT SELECT v FROM cm_timetz) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_timetz WHERE v=ROW('10:00+01'::timetz)::cm_timetz_row ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_timetz_v_idx ON cm_timetz(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "timetz_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_timetz WHERE v=ROW('10:00+01'::timetz)::cm_timetz_row ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_timetz_unique(v cm_timetz_row UNIQUE); INSERT INTO cm_timetz_unique SELECT v FROM cm_timetz WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "timetz_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_timetz_unique SELECT v FROM cm_timetz WHERE id=2",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "timetz_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_interval_row AS (value interval); CREATE TABLE cm_interval (id integer PRIMARY KEY, v cm_interval_row); INSERT INTO cm_interval VALUES (1,ROW('1 mon'::interval)),(2,ROW('30 days'::interval)),(3,ROW('720 hours'::interval)),(4,ROW('1 day'::interval)),(5,ROW('24 hours'::interval)),(6,ROW('infinity'::interval)),(7,ROW(NULL)),(8,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "interval_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_interval a CROSS JOIN cm_interval b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,103,201,202,203,301,302,303,404,405,504,505,606,707}",
+              "{106,107,206,207,306,307,401,402,403,406,407,501,502,503,506,507,607}",
+              "{101,102,103,106,107,201,202,203,206,207,301,302,303,306,307,401,402,403,404,405,406,407,501,502,503,504,505,506,507,606,607,707}",
+              "{101,102,103,201,202,203,301,302,303,404,405,504,505,606,707,808}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_interval a CROSS JOIN cm_interval b CROSS JOIN cm_interval c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_interval) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_interval GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2,3}"
+            ],
+            [
+              "{4,5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ],
+            [
+              "{8}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_interval ORDER BY v,id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "4",
+              "1"
+            ],
+            [
+              "5",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "6",
+              "3"
+            ],
+            [
+              "7",
+              "4"
+            ],
+            [
+              "8",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_interval a JOIN cm_interval b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2,3}"
+            ],
+            [
+              "2",
+              "{1,2,3}"
+            ],
+            [
+              "3",
+              "{1,2,3}"
+            ],
+            [
+              "4",
+              "{4,5}"
+            ],
+            [
+              "5",
+              "{4,5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ],
+            [
+              "7",
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_interval INTERSECT SELECT v FROM cm_interval) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_interval WHERE v=ROW('1 mon'::interval)::cm_interval_row ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_interval_v_idx ON cm_interval(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "interval_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_interval WHERE v=ROW('1 mon'::interval)::cm_interval_row ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_interval_unique(v cm_interval_row UNIQUE); INSERT INTO cm_interval_unique SELECT v FROM cm_interval WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "interval_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_interval_unique SELECT v FROM cm_interval WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_interval_unique_v_key\"",
+        "detail": "Key (v)=((\"30 days\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "interval_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_jsonb_row AS (value jsonb); CREATE TABLE cm_jsonb (id integer PRIMARY KEY, v cm_jsonb_row); INSERT INTO cm_jsonb VALUES (1,ROW('{\"a\":1,\"b\":2}'::jsonb)),(2,ROW('{\"b\":2,\"a\":1.0}'::jsonb)),(3,ROW('null'::jsonb)),(4,ROW('null'::jsonb)),(5,ROW('[]'::jsonb)),(6,ROW('{}'::jsonb)),(7,ROW(NULL)),(8,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_jsonb a CROSS JOIN cm_jsonb b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,304,403,404,505,606,707}",
+              "{107,207,301,302,306,307,401,402,406,407,501,502,503,504,506,507,601,602,607}",
+              "{101,102,107,201,202,207,301,302,303,304,306,307,401,402,403,404,406,407,501,502,503,504,505,506,507,601,602,606,607,707}",
+              "{101,102,201,202,303,304,403,404,505,606,707,808}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_jsonb a CROSS JOIN cm_jsonb b CROSS JOIN cm_jsonb c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_jsonb) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_jsonb GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3,4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ],
+            [
+              "{8}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_jsonb ORDER BY v,id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "5",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "2"
+            ],
+            [
+              "6",
+              "3"
+            ],
+            [
+              "1",
+              "4"
+            ],
+            [
+              "2",
+              "4"
+            ],
+            [
+              "7",
+              "5"
+            ],
+            [
+              "8",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_jsonb a JOIN cm_jsonb b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3,4}"
+            ],
+            [
+              "4",
+              "{3,4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ],
+            [
+              "7",
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_jsonb INTERSECT SELECT v FROM cm_jsonb) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_jsonb WHERE v=ROW('{\"a\":1,\"b\":2}'::jsonb)::cm_jsonb_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_jsonb_v_idx ON cm_jsonb(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_jsonb WHERE v=ROW('{\"a\":1,\"b\":2}'::jsonb)::cm_jsonb_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_jsonb_unique(v cm_jsonb_row UNIQUE); INSERT INTO cm_jsonb_unique SELECT v FROM cm_jsonb WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_jsonb_unique SELECT v FROM cm_jsonb WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_jsonb_unique_v_key\"",
+        "detail": "Key (v)=((\"{\"\"a\"\": 1.0, \"\"b\"\": 2}\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "jsonb_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_bytea_row AS (value bytea); CREATE TABLE cm_bytea (id integer PRIMARY KEY, v cm_bytea_row); INSERT INTO cm_bytea VALUES (1,ROW('\\x0001'::bytea)),(2,ROW('\\x0001'::bytea)),(3,ROW('\\x00'::bytea)),(4,ROW('\\xff'::bytea)),(5,ROW('\\x'::bytea)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bytea_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_bytea a CROSS JOIN cm_bytea b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,505,606}",
+              "{104,106,204,206,301,302,304,306,406,501,502,503,504,506}",
+              "{101,102,104,106,201,202,204,206,301,302,303,304,306,404,406,501,502,503,504,505,506,606}",
+              "{101,102,201,202,303,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_bytea a CROSS JOIN cm_bytea b CROSS JOIN cm_bytea c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_bytea) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_bytea GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_bytea ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "5",
+              "1"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "4",
+              "4"
+            ],
+            [
+              "6",
+              "5"
+            ],
+            [
+              "7",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_bytea a JOIN cm_bytea b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3}"
+            ],
+            [
+              "4",
+              "{4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_bytea INTERSECT SELECT v FROM cm_bytea) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_bytea WHERE v=ROW('\\x0001'::bytea)::cm_bytea_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_bytea_v_idx ON cm_bytea(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bytea_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_bytea WHERE v=ROW('\\x0001'::bytea)::cm_bytea_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_bytea_unique(v cm_bytea_row UNIQUE); INSERT INTO cm_bytea_unique SELECT v FROM cm_bytea WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bytea_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_bytea_unique SELECT v FROM cm_bytea WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_bytea_unique_v_key\"",
+        "detail": "Key (v)=((\"\\\\x0001\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "bytea_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_bits_row AS (value varbit); CREATE TABLE cm_bits (id integer PRIMARY KEY, v cm_bits_row); INSERT INTO cm_bits VALUES (1,ROW(B'1'::varbit)),(2,ROW(B'1'::varbit)),(3,ROW(B'10'::varbit)),(4,ROW(B'0'::varbit)),(5,ROW(B''::varbit)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bits_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_bits a CROSS JOIN cm_bits b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,505,606}",
+              "{103,106,203,206,306,401,402,403,406,501,502,503,504,506}",
+              "{101,102,103,106,201,202,203,206,303,306,401,402,403,404,406,501,502,503,504,505,506,606}",
+              "{101,102,201,202,303,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_bits a CROSS JOIN cm_bits b CROSS JOIN cm_bits c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_bits) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_bits GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_bits ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "5",
+              "1"
+            ],
+            [
+              "4",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "4"
+            ],
+            [
+              "6",
+              "5"
+            ],
+            [
+              "7",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_bits a JOIN cm_bits b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3}"
+            ],
+            [
+              "4",
+              "{4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_bits INTERSECT SELECT v FROM cm_bits) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_bits WHERE v=ROW(B'1'::varbit)::cm_bits_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_bits_v_idx ON cm_bits(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bits_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_bits WHERE v=ROW(B'1'::varbit)::cm_bits_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_bits_unique(v cm_bits_row UNIQUE); INSERT INTO cm_bits_unique SELECT v FROM cm_bits WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "bits_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_bits_unique SELECT v FROM cm_bits WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_bits_unique_v_key\"",
+        "detail": "Key (v)=((1)) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "bits_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_array_row AS (value integer[]); CREATE TABLE cm_array (id integer PRIMARY KEY, v cm_array_row); INSERT INTO cm_array VALUES (1,ROW(ARRAY[1,NULL])),(2,ROW(ARRAY[1,NULL])),(3,ROW('[0:1]={1,NULL}'::integer[])),(4,ROW(ARRAY[1,2])),(5,ROW(ARRAY[]::integer[])),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_array a CROSS JOIN cm_array b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,505,606}",
+              "{106,206,301,302,306,401,402,403,406,501,502,503,504,506}",
+              "{101,102,106,201,202,206,301,302,303,306,401,402,403,404,406,501,502,503,504,505,506,606}",
+              "{101,102,201,202,303,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_array a CROSS JOIN cm_array b CROSS JOIN cm_array c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_array) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_array GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_array ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "5",
+              "1"
+            ],
+            [
+              "4",
+              "2"
+            ],
+            [
+              "3",
+              "3"
+            ],
+            [
+              "1",
+              "4"
+            ],
+            [
+              "2",
+              "4"
+            ],
+            [
+              "6",
+              "5"
+            ],
+            [
+              "7",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_array a JOIN cm_array b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3}"
+            ],
+            [
+              "4",
+              "{4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_array INTERSECT SELECT v FROM cm_array) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_array WHERE v=ROW(ARRAY[1,NULL])::cm_array_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_array_v_idx ON cm_array(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_array WHERE v=ROW(ARRAY[1,NULL])::cm_array_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_array_unique(v cm_array_row UNIQUE); INSERT INTO cm_array_unique SELECT v FROM cm_array WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "array_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_array_unique SELECT v FROM cm_array WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_array_unique_v_key\"",
+        "detail": "Key (v)=((\"{1,NULL}\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_range_row AS (value int4range); CREATE TABLE cm_range (id integer PRIMARY KEY, v cm_range_row); INSERT INTO cm_range VALUES (1,ROW('[1,3)'::int4range)),(2,ROW('(0,2]'::int4range)),(3,ROW('empty'::int4range)),(4,ROW('empty'::int4range)),(5,ROW('[3,5)'::int4range)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "range_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_range a CROSS JOIN cm_range b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,304,403,404,505,606}",
+              "{105,106,205,206,301,302,305,306,401,402,405,406,506}",
+              "{101,102,105,106,201,202,205,206,301,302,303,304,305,306,401,402,403,404,405,406,505,506,606}",
+              "{101,102,201,202,303,304,403,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_range a CROSS JOIN cm_range b CROSS JOIN cm_range c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_range) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_range GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3,4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_range ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ],
+            [
+              "4",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "5",
+              "3"
+            ],
+            [
+              "6",
+              "4"
+            ],
+            [
+              "7",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_range a JOIN cm_range b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3,4}"
+            ],
+            [
+              "4",
+              "{3,4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_range INTERSECT SELECT v FROM cm_range) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_range WHERE v=ROW('[1,3)'::int4range)::cm_range_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_range_v_idx ON cm_range(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "range_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_range WHERE v=ROW('[1,3)'::int4range)::cm_range_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_range_unique(v cm_range_row UNIQUE); INSERT INTO cm_range_unique SELECT v FROM cm_range WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "range_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_range_unique SELECT v FROM cm_range WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_range_unique_v_key\"",
+        "detail": "Key (v)=((\"[1,3)\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "range_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_multirange_row AS (value int4multirange); CREATE TABLE cm_multirange (id integer PRIMARY KEY, v cm_multirange_row); INSERT INTO cm_multirange VALUES (1,ROW('{[1,3),[3,5)}'::int4multirange)),(2,ROW('{[1,5)}'::int4multirange)),(3,ROW('{}'::int4multirange)),(4,ROW('{}'::int4multirange)),(5,ROW('{[8,9)}'::int4multirange)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "multirange_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_multirange a CROSS JOIN cm_multirange b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,304,403,404,505,606}",
+              "{105,106,205,206,301,302,305,306,401,402,405,406,506}",
+              "{101,102,105,106,201,202,205,206,301,302,303,304,305,306,401,402,403,404,405,406,505,506,606}",
+              "{101,102,201,202,303,304,403,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_multirange a CROSS JOIN cm_multirange b CROSS JOIN cm_multirange c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_multirange) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_multirange GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3,4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_multirange ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "3",
+              "1"
+            ],
+            [
+              "4",
+              "1"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              "2"
+            ],
+            [
+              "5",
+              "3"
+            ],
+            [
+              "6",
+              "4"
+            ],
+            [
+              "7",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_multirange a JOIN cm_multirange b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3,4}"
+            ],
+            [
+              "4",
+              "{3,4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_multirange INTERSECT SELECT v FROM cm_multirange) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_multirange WHERE v=ROW('{[1,3),[3,5)}'::int4multirange)::cm_multirange_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_multirange_v_idx ON cm_multirange(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "multirange_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_multirange WHERE v=ROW('{[1,3),[3,5)}'::int4multirange)::cm_multirange_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_multirange_unique(v cm_multirange_row UNIQUE); INSERT INTO cm_multirange_unique SELECT v FROM cm_multirange WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "multirange_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_multirange_unique SELECT v FROM cm_multirange WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_multirange_unique_v_key\"",
+        "detail": "Key (v)=((\"{[1,5)}\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "multirange_unique_duplicate"
+    },
+    {
+      "sql": "CREATE TYPE cm_oidvector_row AS (value oidvector); CREATE TABLE cm_oidvector (id integer PRIMARY KEY, v cm_oidvector_row); INSERT INTO cm_oidvector VALUES (1,ROW('1 2'::oidvector)),(2,ROW('1 2'::oidvector)),(3,ROW('0 9 8'::oidvector)),(4,ROW('2'::oidvector)),(5,ROW(''::oidvector)),(6,ROW(NULL)),(7,NULL)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE",
+        "INSERT 0 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_setup"
+    },
+    {
+      "sql": "SELECT array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v=b.v)::text AS eq,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<b.v)::text AS lt,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v<=b.v)::text AS le,array_agg(a.id*100+b.id ORDER BY a.id,b.id) FILTER (WHERE a.v IS NOT DISTINCT FROM b.v)::text AS same FROM cm_oidvector a CROSS JOIN cm_oidvector b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "lt",
+            "le",
+            "same"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "{101,102,201,202,303,404,505,606}",
+              "{103,106,203,206,306,401,402,403,406,501,502,503,504,506}",
+              "{101,102,103,106,201,202,203,206,303,306,401,402,403,404,406,501,502,503,504,505,506,606}",
+              "{101,102,201,202,303,404,505,606,707}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_comparison"
+    },
+    {
+      "sql": "SELECT count(*) FILTER (WHERE a.v=a.v IS FALSE) AS nonreflexive,count(*) FILTER (WHERE (a.v=b.v) IS DISTINCT FROM (b.v=a.v)) AS asymmetric,count(*) FILTER (WHERE a.v<b.v AND b.v<c.v AND NOT a.v<c.v) AS nontransitive FROM cm_oidvector a CROSS JOIN cm_oidvector b CROSS JOIN cm_oidvector c",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nonreflexive",
+            "asymmetric",
+            "nontransitive"
+          ],
+          "type_oids": [
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_laws"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT DISTINCT v FROM cm_oidvector) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_distinct"
+    },
+    {
+      "sql": "SELECT array_agg(id ORDER BY id)::text AS ids FROM cm_oidvector GROUP BY v ORDER BY min(id)",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ids"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2}"
+            ],
+            [
+              "{3}"
+            ],
+            [
+              "{4}"
+            ],
+            [
+              "{5}"
+            ],
+            [
+              "{6}"
+            ],
+            [
+              "{7}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_group"
+    },
+    {
+      "sql": "SELECT id,dense_rank() OVER (ORDER BY v) AS r FROM cm_oidvector ORDER BY v,id",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "5",
+              "1"
+            ],
+            [
+              "4",
+              "2"
+            ],
+            [
+              "1",
+              "3"
+            ],
+            [
+              "2",
+              "3"
+            ],
+            [
+              "3",
+              "4"
+            ],
+            [
+              "6",
+              "5"
+            ],
+            [
+              "7",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_order"
+    },
+    {
+      "sql": "SELECT a.id AS a,array_agg(b.id ORDER BY b.id)::text AS ids FROM cm_oidvector a JOIN cm_oidvector b ON a.v=b.v GROUP BY a.id ORDER BY a.id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "ids"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "{1,2}"
+            ],
+            [
+              "2",
+              "{1,2}"
+            ],
+            [
+              "3",
+              "{3}"
+            ],
+            [
+              "4",
+              "{4}"
+            ],
+            [
+              "5",
+              "{5}"
+            ],
+            [
+              "6",
+              "{6}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_join"
+    },
+    {
+      "sql": "SELECT count(*) AS n FROM (SELECT v FROM cm_oidvector INTERSECT SELECT v FROM cm_oidvector) q",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "n"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_set"
+    },
+    {
+      "sql": "SELECT id FROM cm_oidvector WHERE v=ROW('1 2'::oidvector)::cm_oidvector_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_lookup"
+    },
+    {
+      "sql": "CREATE INDEX cm_oidvector_v_idx ON cm_oidvector(v)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_index"
+    },
+    {
+      "sql": "SELECT id FROM cm_oidvector WHERE v=ROW('1 2'::oidvector)::cm_oidvector_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_indexed_lookup"
+    },
+    {
+      "sql": "CREATE TABLE cm_oidvector_unique(v cm_oidvector_row UNIQUE); INSERT INTO cm_oidvector_unique SELECT v FROM cm_oidvector WHERE id=1",
+      "command_tags": [
+        "CREATE TABLE",
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_unique_setup"
+    },
+    {
+      "sql": "INSERT INTO cm_oidvector_unique SELECT v FROM cm_oidvector WHERE id=2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cm_oidvector_unique_v_key\"",
+        "detail": "Key (v)=((\"1 2\")) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "oidvector_unique_duplicate"
+    },
+    {
+      "sql": "SELECT id FROM cm_float8 WHERE v=ROW('-0'::float8)::cm_float8_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "float8_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_numeric WHERE v=ROW(1.0::numeric)::cm_numeric_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "numeric_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_bpchar WHERE v=ROW('a'::bpchar)::cm_bpchar_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bpchar_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_timetz WHERE v=ROW('10:00+01'::timetz)::cm_timetz_row ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "timetz_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_interval WHERE v=ROW('1 mon'::interval)::cm_interval_row ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "interval_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_jsonb WHERE v=ROW('{\"a\":1,\"b\":2}'::jsonb)::cm_jsonb_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "jsonb_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_bytea WHERE v=ROW('\\x0001'::bytea)::cm_bytea_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bytea_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_bits WHERE v=ROW(B'1'::varbit)::cm_bits_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "bits_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_array WHERE v=ROW(ARRAY[1,NULL])::cm_array_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_range WHERE v=ROW('[1,3)'::int4range)::cm_range_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "range_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_multirange WHERE v=ROW('{[1,3),[3,5)}'::int4multirange)::cm_multirange_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "multirange_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cm_oidvector WHERE v=ROW('1 2'::oidvector)::cm_oidvector_row ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "oidvector_reopen",
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "a7388a5afac0679d482071dbf481b4da0e393596984a8dfd062fc2f4727108a5",
+    "options": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "container_image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "fresh_connection_cases": 12,
+    "fresh_connection_output_sha256": "3862d0893e26c8a626f748eb0390630dd09976ec7136df388dabc24cca7e08db"
+  }
+}

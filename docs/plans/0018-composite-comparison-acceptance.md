@@ -20,6 +20,10 @@ The named files below are existing independently captured PostgreSQL references 
 | Index probes, uniqueness, FK actions and command overlays | `composite_key_semantics` plus owner tests | Verify the same equality/order classes, representation-changing writes and persistent reopening. |
 | Retained physical/enum consumers | `composite_datum_consumers`, `composite_catalog_array`, `composite_enum_*` | Reconcile shared versus private comparison state and lazy-read behavior with every consumer above. |
 
+## Cross-consumer field reference
+
+The independent `composite_consumer_matrix_oracle` captures 169 PostgreSQL 18.4 observations for double precision, numeric, bpchar, timetz, interval, JSONB, bytea, varying bits, integer arrays, int4range, int4multirange and oidvector fields. Each family uses the same retained composite values for scalar truth tables, comparison laws, DISTINCT, GROUP BY, window peers, joins, INTERSECT, B-tree probes and unique checks. The twelve final observations use a fresh PostgreSQL connection and actual provider reopening. Version, collector/input hashes and container identity are retained in the compact fixture provenance. Current-source replay is in progress; this is reference coverage, not passing Engine evidence.
+
 ## Progress
 
 - [x] Confirm PR #855 is merged, its delivered issues are closed and current main includes the catalog and release corrections.
