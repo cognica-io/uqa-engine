@@ -2,7 +2,7 @@
 
 This is the current status of the original [PR #638 task records](https://github.com/cognica-io/uqa-engine/pull/638), with implementation and evidence kept in the [extension plan](0018-extension-packages-and-types.md). Successor PRs retain the original 80 checkbox records verbatim as historical input. Their 50 checked and 30 unchecked entries are not a measurement of subsequent progress. The record numbers below are their one-based positions, including the five historical verification records.
 
-Status checkpoint: the #119/#309/#823 catalog delivery is verified in PR #855 on source `8019e6b0c015cf19501c7a1a4fedadfc60d739f3`, including current main `842db9e52` and corrections #903–#906. Automatic run [38706144831](https://github.com/cognica-io/uqa-engine/actions/runs/38706144831) passes all 638 bounded-work, memory and output checks / 989 cases and eight independent-process correctness histories on each of Linux and macOS. Every manifest/test-source hash and tested tree matches, with zero JUnit failures, errors or skips; all six memory/Arrow/DuckDB jobs also pass. SQL owns CHECK/catalog node semantics, Execution owns physical publication, Storage owns retained committed/private boundaries, and Engine supplies transaction/retention adapters. Release preparation stays paused. The original records and unfinished extension units below retain their scope.
+Status checkpoint: PR #855 merged as `70b3c7a4b`, closing #119/#309/#823 and their delivered corrections. Release 0.5.4 includes that work and the release-qualification fixes in #901/#910 at main `c84b2601ae5cb238a18071b6633c2b107f0d9c6f`. The composite comparison/consumer audit resumes from that source. The original records and unfinished extension units below retain their scope; the released catalog prerequisite does not complete record 64.
 
 ## Original items and current status
 
@@ -41,7 +41,7 @@ Every originally unchecked record is represented below. An open row without new 
 | 74 | Migration, wire and restoration | Not started | Deliver extension format changes, wire I/O, backup/restore and cross-language reopen. |
 | 75 | Public acceptance and documentation | Not started | Complete public contracts, examples and final acceptance for all preceding units. |
 
-## Current follow-up and its original scope
+## Delivered catalog prerequisite and its original scope
 
 [#119](https://github.com/cognica-io/uqa-engine/issues/119) was taken up while verifying record 64 and also advances the catalog/deparse requirements in records 37 and 40. It covers typed catalog expressions and constraint introspection, not package registration or SQL extension installation. [#823](https://github.com/cognica-io/uqa-engine/issues/823) is a reproduced transactional visibility defect in that runtime integration. PR #855 completes #119, #309 and #823 with independent public/provider references and actual automatic platform acceptance; the broader original records retain their separate completion conditions.
 
@@ -67,4 +67,4 @@ After current-main integration, all 93 public constraint-expression and visibili
 
 ## Completion path
 
-The #119/#309/#823 catalog delivery passes actual Linux/macOS acceptance in PR #855. The next original requirement is the combined record-64 comparison/consumer audit before another extension unit. Other original rows retain the scope and completion conditions above; discovered fixes must name the row they advance and cannot silently replace it. Failed runs 38692398066 and 38698952288 remain historical failure evidence; corrected run 38706144831 qualifies the delivery without changing resource allowances.
+The #119/#309/#823 catalog delivery is merged and released. The active requirement is the combined record-64 comparison/consumer audit before another extension unit. The [acceptance matrix](0018-composite-comparison-acceptance.md) maps the original exit conditions to actual fixtures, owning implementations and current verification. Existing tests are evidence only for the behavior they exercise; missing field families or consumers require additional independent PostgreSQL cases and any necessary owner corrections. Other original rows retain their scope. Failed runs 38692398066 and 38698952288 remain historical failure evidence; corrected run 38706144831 qualified the catalog delivery without changing resource allowances.
