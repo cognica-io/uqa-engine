@@ -71,6 +71,9 @@ impl CatalogSession for CatalogServices {
         self.resolution.clone()
     }
     fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError> {
+        if name == "IntervalStyle" {
+            return Ok((name.into(), "postgres".into()));
+        }
         if let ("standard_conforming_strings", Some(enabled)) =
             (name, self.standard_conforming_strings)
         {

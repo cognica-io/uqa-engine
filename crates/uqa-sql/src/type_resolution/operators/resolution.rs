@@ -149,6 +149,17 @@ fn candidates(
         if operator != name {
             continue;
         }
+        if let Some([left, right]) = range_operands(lhs, rhs, [left, right]) {
+            let result = catalog_type_with_control(result, control)?
+                .expect("range containment has a concrete result");
+            candidates.push_produced(overload(
+                name,
+                left.clone_with_control(control)?,
+                right.clone_with_control(control)?,
+                result,
+                control,
+            )?)?;
+        }
         if let (Some(lhs), Some(rhs), Some(result)) = (
             catalog_type_with_control(lhs, control)?,
             catalog_type_with_control(rhs, control)?,
@@ -211,6 +222,45 @@ fn candidates(
     candidates.finish().map_err(Into::into)
 }
 
+/// Instantiate asymmetric range signatures from one shared subtype; known operands must already agree with that subtype.
+pub(super) fn range_operands(
+    left: &str,
+    right: &str,
+    actual: [Option<&ColumnType>; 2],
+) -> Option<[ColumnType; 2]> {
+    if left == right
+        || ![left, right]
+            .iter()
+            .any(|ty| matches!(*ty, "anyrange" | "anymultirange"))
+    {
+        return None;
+    }
+    let subtype = actual
+        .into_iter()
+        .flatten()
+        .find_map(|ty| match base_type(ty) {
+            ColumnType::Range(subtype) | ColumnType::Multirange(subtype) => Some(*subtype),
+            _ => None,
+        })?;
+    let instantiate = |ty| match ty {
+        "anyrange" => Some(ColumnType::Range(subtype)),
+        "anymultirange" => Some(ColumnType::Multirange(subtype)),
+        "anyelement" => Some(subtype.scalar_type()),
+        _ => None,
+    };
+    let expected = [instantiate(left)?, instantiate(right)?];
+    actual
+        .into_iter()
+        .zip(&expected)
+        .all(|(actual, expected)| {
+            actual.is_none_or(|actual| {
+                crate::catalog::type_metadata::pg_type_oid(base_type(actual))
+                    == crate::catalog::type_metadata::pg_type_oid(expected)
+            })
+        })
+        .then_some(expected)
+}
+
 pub(super) fn catalog_type(name: &str) -> Option<ColumnType> {
     catalog_type_with_control(name, &ProductionControl::uncontrolled())
         .expect("ordinary catalog type construction cannot be cancelled or limited")
@@ -241,7 +291,7 @@ pub(super) fn catalog_type_with_control(
             .map(Some)
             .map_err(Into::into)
         }
-        "anyarray" | "anyrange" | "anymultirange" | "anyenum" => Ok(None),
+        "anyarray" | "anyrange" | "anymultirange" | "anyenum" | "anyelement" => Ok(None),
         _ => match ColumnType::from_sql_name_with_control(name, control) {
             Ok(ty) => Ok(Some(ty)),
             Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
@@ -252,7 +302,10 @@ pub(super) fn catalog_type_with_control(
 
 fn scalar_catalog_type(name: &str) -> Option<&'static ColumnType> {
     // Polymorphic declarations are instantiated from their operands, not the catalog's pseudo type.
-    if matches!(name, "anyarray" | "anyrange" | "anymultirange" | "anyenum") {
+    if matches!(
+        name,
+        "anyarray" | "anyrange" | "anymultirange" | "anyenum" | "anyelement"
+    ) {
         return None;
     }
     crate::catalog::type_metadata::builtin_scalar_type_by_name(name)

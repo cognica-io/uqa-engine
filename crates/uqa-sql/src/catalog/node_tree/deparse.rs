@@ -267,14 +267,12 @@ impl Renderer<'_> {
                     quoted(&value.to_string())
                 }
             }
-            700 | 701 => {
-                let value = if oid == 700 {
-                    f64::from(f32::from_le_bytes(prefix(bytes)?))
-                } else {
-                    f64::from_le_bytes(prefix(bytes)?)
-                };
-                quoted(&uqa_core::format_float_pg(value))
-            }
+            700 => quoted(&crate::expr::format_real(f32::from_le_bytes(prefix(
+                bytes,
+            )?))),
+            701 => quoted(&uqa_core::format_float_pg(f64::from_le_bytes(prefix(
+                bytes,
+            )?))),
             18 => {
                 let byte = *bytes
                     .first()
@@ -311,9 +309,9 @@ impl Renderer<'_> {
                     quoted(&text)
                 }
             }
-            1082 | 1083 | 1114 | 1184 | 1186 | 1266 => {
-                quoted(&values::temporal::decode(bytes, oid)?.to_sql_string())
-            }
+            1082 | 1083 | 1114 | 1184 | 1186 | 1266 => quoted(&crate::expr::value_to_string(
+                &uqa_core::Value::Temporal(values::temporal::decode(bytes, oid)?),
+            )?),
             _ => match values::catalog_text(node, self.names.value_catalog())? {
                 Some(text) => quoted(&text),
                 None => Err(SQLError::Unsupported(format!(
