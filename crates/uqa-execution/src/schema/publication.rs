@@ -33,6 +33,8 @@ pub trait TableSchemaState {
 
     fn columns_declared(&self) -> bool;
     fn mark_statistics_dirty(&self) -> StorageBackendResult<()>;
+    /// Refresh derived constraint rows after a parent changes without replacing this relation definition.
+    fn queue_constraint_publication(&self) -> StorageBackendResult<()>;
     fn persist_candidate(
         &self,
         columns: &[ColumnDef],
@@ -111,6 +113,19 @@ impl<'a> SchemaPublicationContext<'a> {
         self.identities
             .allocator(crate::catalog::identity::allocate_catalog_object_id)
     }
+}
+
+/// The relation's inherited catalog fields changed while its declared schema stayed the same.
+pub fn queue_constraint_publication(
+    context: &SchemaPublicationContext<'_>,
+    table: &str,
+) -> StorageBackendResult<()> {
+    let table = resolve_table_name(context.catalog, table)?;
+    context
+        .catalog
+        .table_state(&table)?
+        .ok_or_else(|| table_not_found(&table))?
+        .queue_constraint_publication()
 }
 
 fn resolve_table_name(

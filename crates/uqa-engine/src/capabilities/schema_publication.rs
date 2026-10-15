@@ -11,7 +11,7 @@ use uqa_execution::schema::publication::{
     SchemaPublicationContext, TableSchemaCatalog, TableSchemaState,
 };
 use uqa_sql::ast::{ColumnDef, TableConstraintSet};
-use uqa_storage::StorageBackendResult;
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 impl Engine {
     /// Give the foreign keys that reference partitioned tables the constraints they derive on the referenced partitions, which earlier releases did not record, when a writer opens the database.
@@ -170,6 +170,20 @@ impl TableSchemaState for SchemaTableBinding<'_> {
     }
     fn mark_statistics_dirty(&self) -> StorageBackendResult<()> {
         self.engine.mark_column_stats_dirty(&self.name, &self.state)
+    }
+    fn queue_constraint_publication(&self) -> StorageBackendResult<()> {
+        if self.state.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+            if let Some(catalog) = self.engine.storage.catalog.as_ref() {
+                uqa_execution::catalog::tuples::publication::queue_relation(
+                    catalog.as_ref(),
+                    &uqa_core::RelationIdentity::from_legacy_name(&self.name)
+                        .map_err(StorageBackendError::Other)?,
+                    self.state.object_id(),
+                    true,
+                )?;
+            }
+        }
+        Ok(())
     }
     fn persist_candidate(
         &self,

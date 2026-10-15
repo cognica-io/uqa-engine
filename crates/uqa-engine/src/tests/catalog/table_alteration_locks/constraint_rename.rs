@@ -209,6 +209,7 @@ fn legacy_not_null_conversion_is_initial_only_and_rolls_back_on_later_restore_fa
         schema.columns_json = serde_json::to_string(&columns).unwrap();
         raw.catalog.save_table(&schema).unwrap();
         raw.catalog.delete_metadata(IDENTITY_METADATA_KEY).unwrap();
+        crate::tests::catalog::hierarchy_restoration::legacy_constraint_rows(raw.catalog.as_ref());
         let Err(failure) = first.new_session() else {
             panic!("secondary session migrated NOT NULL identities")
         };

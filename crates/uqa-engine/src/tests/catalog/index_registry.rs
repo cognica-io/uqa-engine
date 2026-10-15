@@ -200,7 +200,7 @@ fn adding_partition_key_materializes_descendants_and_renamed_foreign_key_depende
         assert_eq!(
             sql(
                 &first,
-                "SELECT conindid FROM pg_constraint WHERE conrelid='ref'::regclass AND contype='f'"
+                "SELECT conindid FROM pg_constraint WHERE conrelid='ref'::regclass AND contype='f' AND conparentid=0"
             )
             .rows[0]["conindid"],
             Value::Int(root.identity.oid)

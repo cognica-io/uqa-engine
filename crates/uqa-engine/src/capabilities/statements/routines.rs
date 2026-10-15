@@ -35,9 +35,13 @@ impl RoutineStatementInputs for Engine {
 }
 impl RoutineStatementTransactions for Engine {
     fn with_rename(&self, operation: RoutineRenameWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| operation(&engine.routine_rename_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            operation(&engine.routine_rename_context())
+        })
     }
     fn with_removal(&self, operation: RoutineRemovalWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| operation(&engine.routine_removal_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            operation(&engine.routine_removal_context())
+        })
     }
 }

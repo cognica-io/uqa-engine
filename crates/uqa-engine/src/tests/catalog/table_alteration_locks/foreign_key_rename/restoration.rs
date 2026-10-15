@@ -15,6 +15,7 @@ fn legacy_foreign_key_conversion_is_initial_only_and_rolls_back_with_later_resto
         sql(&first, "CREATE TABLE referenced(id integer PRIMARY KEY); ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES referenced(id) NOT VALID");
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
+        crate::tests::catalog::hierarchy_restoration::legacy_constraint_rows(raw.catalog.as_ref());
         let mut schema = raw
             .catalog
             .load_tables()

@@ -326,32 +326,39 @@ pub(super) fn merge_existing_recursive_action<S: Clone + 'static>(
         }
         AlterTableAction::AddNotNullConstraint { column, .. }
         | AlterTableAction::SetNotNull { name: column } => {
-            let definition = context
-                .hierarchy
-                .catalog
-                .try_describe_table(table)
-                .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
-                .and_then(|columns| {
-                    columns
-                        .into_iter()
-                        .find(|definition| definition.name == *column)
-                });
-            let Some(definition) = definition.filter(|definition| definition.not_null) else {
-                return Ok(false);
-            };
             let sqlstate = if matches!(action, AlterTableAction::SetNotNull { .. }) {
                 "0A000"
             } else {
                 "55000"
             };
-            uqa_sql::schema::constraint_changes::ensure_not_null_inheritable(
-                table,
-                &definition,
-                sqlstate,
-            )?;
-            // An inherited merge preserves the existing child's validation state.
-            Ok(true)
+            merge_existing_not_null(context, table, column, sqlstate)
         }
         _ => Ok(false),
     }
+}
+
+fn merge_existing_not_null<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    column: &str,
+    sqlstate: &str,
+) -> Result<bool, SQLError> {
+    let definition = context
+        .hierarchy
+        .catalog
+        .try_describe_table(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
+        .and_then(|columns| {
+            columns
+                .into_iter()
+                .find(|definition| definition.name == column)
+        });
+    let Some(definition) = definition.filter(|definition| definition.not_null) else {
+        return Ok(false);
+    };
+    uqa_sql::schema::constraint_changes::ensure_not_null_inheritable(table, &definition, sqlstate)?;
+    // An inherited merge preserves the existing child's validation state but changes its parent count.
+    crate::schema::publication::queue_constraint_publication(&context.hierarchy.publication, table)
+        .map_err(|error| ddl_storage_error("publish inherited constraint count", error))?;
+    Ok(true)
 }

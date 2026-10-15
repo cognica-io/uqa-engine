@@ -106,7 +106,13 @@ fn drop_branch(
                 make_constraint_local(&mut columns, &mut constraints, &name)?;
                 publish_constraint_state(context, &child, columns, constraints)?;
             }
-            InheritedConstraintRemoval::Keep => {}
+            InheritedConstraintRemoval::Keep => {
+                crate::schema::publication::queue_constraint_publication(
+                    &context.publication,
+                    &child,
+                )
+                .map_err(|error| ddl_storage_error("publish inherited constraint count", error))?;
+            }
         }
     }
     visiting.remove(table);

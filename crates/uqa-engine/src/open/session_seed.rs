@@ -21,6 +21,9 @@ impl Engine {
         storage: &PersistentStorageSession,
         provider: &Arc<dyn PersistentStorageProvider>,
     ) -> StorageBackendResult<Option<Self>> {
+        uqa_execution::schema::constraints::restoration::validate_constraint_formats(
+            storage.catalog.as_ref(),
+        )?;
         let source_backend = self
             .storage
             .backend
