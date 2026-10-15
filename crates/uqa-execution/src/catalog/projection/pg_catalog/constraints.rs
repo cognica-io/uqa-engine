@@ -62,6 +62,7 @@ pub(crate) fn build_requested_pg_constraint(
                     resolution,
                     relation,
                     table,
+                    request,
                     &mut |_, tuple| {
                         rows.push(tuple.into_row());
                         Ok(())
@@ -77,6 +78,7 @@ pub(crate) fn build_requested_pg_constraint(
                     resolution,
                     relation,
                     table,
+                    request,
                     &mut |_, tuple| {
                         rows.push(tuple.into_row());
                         Ok(())
@@ -282,17 +284,19 @@ pub(crate) fn visit_table_constraint_tuples(
     resolution: &RelationNameResolution,
     relation: &uqa_core::RelationIdentity,
     table: &crate::catalog::CatalogTableSnapshot,
+    request: &super::super::CatalogRequest,
     visitor: &mut dyn FnMut(
         uqa_core::catalog_identity::CatalogObjectIdentity,
         ConstraintTuple,
     ) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    let rows = super::super::helpers::constraints::table_constraint_catalog_rows(
+    let mut rows = super::super::helpers::constraints::table_constraint_catalog_rows(
         catalog,
         resolution,
         &relation.qualified_name(),
         table,
     )?;
+    rows.retain(|row| request.matches_name("conname", &row.name));
     let has_index = rows.iter().any(|row| {
         matches!(
             row.kind,
@@ -321,7 +325,7 @@ pub(crate) fn visit_table_constraint_tuples(
                 Some(context),
                 catalog,
                 resolution,
-                &super::super::CatalogRequest::default(),
+                request,
                 row,
                 indexes,
                 Some(table),
@@ -337,6 +341,7 @@ pub(crate) fn visit_foreign_constraint_tuples(
     resolution: &RelationNameResolution,
     relation: &uqa_core::RelationIdentity,
     table: &crate::catalog::foreign::StoredForeignTable,
+    request: &super::super::CatalogRequest,
     visitor: &mut dyn FnMut(
         uqa_core::catalog_identity::CatalogObjectIdentity,
         ConstraintTuple,
@@ -346,6 +351,9 @@ pub(crate) fn visit_foreign_constraint_tuples(
         &relation.qualified_name(),
         table.clone(),
     )? {
+        if !request.matches_name("conname", &row.name) {
+            continue;
+        }
         let identity = uqa_core::catalog_identity::CatalogObjectIdentity {
             oid: row
                 .catalog_oid
@@ -356,15 +364,7 @@ pub(crate) fn visit_foreign_constraint_tuples(
         };
         visitor(
             identity,
-            constraint_tuple(
-                Some(context),
-                catalog,
-                resolution,
-                &super::super::CatalogRequest::default(),
-                &row,
-                &[],
-                None,
-            )?,
+            constraint_tuple(Some(context), catalog, resolution, request, &row, &[], None)?,
         )?;
     }
     Ok(())

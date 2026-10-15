@@ -270,6 +270,7 @@ fn visit_selected(
                     resolution,
                     &publication.relation,
                     table,
+                    &crate::catalog::projection::CatalogRequest::default(),
                     visitor,
                 )?;
             } else if let Some(table) = catalog
@@ -285,6 +286,7 @@ fn visit_selected(
                     resolution,
                     &publication.relation,
                     table,
+                    &crate::catalog::projection::CatalogRequest::default(),
                     visitor,
                 )?;
             }

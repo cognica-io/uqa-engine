@@ -8578,6 +8578,19 @@
       "capability": "Foreign constraint dependency publication",
       "workload": "PostgreSQL CHECK and NOT NULL deletion, ordered actions, missing-name diagnostics, savepoints and reopen.",
       "invariant": "Compiler preserves statement flags; dependency deletion publishes the exact removed catalog row atomically without losing other constraints or retained readers."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporary_constraint_requests_skip_unselected_expression_nodes",
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/tests/expression_metadata/requested_fields.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Requested constraint expression work",
+      "workload": "Temporary ordinary and foreign constraint rows beside a retained physical catalog; name-only, excluded-name and selected-conbin requests.",
+      "invariant": "Unrequested or excluded CHECK nodes perform zero encodings; selecting conbin encodes exactly the matching node and retains its value."
     }
   ]
 }

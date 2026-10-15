@@ -194,3 +194,61 @@ fn catalog_field_requests_follow_source_aliases_and_whole_row_demand() {
     );
     assert!(columns.iter().all(|column| !request.includes(column)));
 }
+
+#[test]
+fn temporary_constraint_requests_skip_unselected_expression_nodes() {
+    use crate::catalog::projection::expression_nodes::EXPRESSION_ENCODINGS;
+    for foreign in [false, true] {
+        let mut column = ColumnDef::nullable("value", ColumnType::Integer);
+        column.check = Some(Expr::Literal(Value::Bool(true)));
+        column.check_name = Some("selected_check".into());
+        column.check_object_id = Some([23; 16]);
+        column.check_catalog_oid = Some(60_023);
+        let relation = RelationIdentity::new("public", "temporary_checks");
+        let mut snapshot = empty_catalog().snapshot().clone();
+        if foreign {
+            let (mut table, _) = crate::catalog::foreign::StoredForeignTable::from_catalog(
+                relation.qualified_name(),
+                "unused".into(),
+                BTreeMap::new(),
+                &serde_json::to_string(&vec![column]).unwrap(),
+            )
+            .unwrap();
+            table.persistence = uqa_sql::ast::RelationPersistence::Temporary;
+            snapshot.definitions.foreign_tables = Arc::new(BTreeMap::from([(relation, table)]));
+        } else {
+            let constraints = TableConstraintSet {
+                persistence: uqa_sql::ast::RelationPersistence::Temporary,
+                ..TableConstraintSet::default()
+            };
+            snapshot.tables.insert(
+                relation,
+                table_snapshot([24; 16], vec![column], constraints),
+            );
+        }
+        let physical = Arc::new(uqa_storage::KeyValueCatalog::new(Arc::new(
+            uqa_storage::MemoryKeyValueStore::new(),
+        )));
+        let catalog = CatalogReadView::new(snapshot).with_physical_catalog(physical);
+        let before = EXPRESSION_ENCODINGS.get();
+        let rows = project(
+            &catalog,
+            "pg_catalog.pg_constraint",
+            &CatalogRequest::columns(["conname".into()]),
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["conbin"], Value::Null);
+        assert_eq!(EXPRESSION_ENCODINGS.get(), before);
+        let mut request = CatalogRequest::columns(["conbin".into()]);
+        request.require_name("conname".into(), "absent".into());
+        assert!(project(&catalog, "pg_catalog.pg_constraint", &request).is_empty());
+        assert_eq!(EXPRESSION_ENCODINGS.get(), before);
+        let rows = project(
+            &catalog,
+            "pg_catalog.pg_constraint",
+            &CatalogRequest::columns(["conbin".into()]),
+        );
+        assert!(matches!(rows[0]["conbin"], Value::Str(_)));
+        assert_eq!(EXPRESSION_ENCODINGS.get(), before + 1);
+    }
+}
