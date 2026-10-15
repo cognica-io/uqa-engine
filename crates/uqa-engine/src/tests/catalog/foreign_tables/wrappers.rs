@@ -365,7 +365,6 @@ fn a_wrapper_without_a_handler_cannot_choose_a_native_adapter_by_name() {
     engine
         .sql("CREATE VIEW visible AS SELECT a FROM items", &[])
         .unwrap();
-    #[cfg(feature = "fdw")]
     assert!(engine
         .load_memory_foreign_table("items", Vec::new())
         .unwrap_err()

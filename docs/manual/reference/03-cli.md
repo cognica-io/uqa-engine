@@ -19,7 +19,7 @@ cargo run -p uqa-cli --bin usql
 
 The Rust CLI enables the bundled `nori` analyzer by default, matching the Python-installed command. A custom `cargo build -p uqa-cli --no-default-features` omits Nori and rejects requests for that analyzer. Enabling `--features nori` forwards the feature to the existing Engine and analysis owners.
 
-Current source builds omit foreign source handlers by default. Add `--features fdw` for memory and native Arrow execution, or `--features duckdb` for DuckDB as well. Foreign-table definitions, `\d`, `\dft`, `\dfs` and completion use SQL catalog metadata and remain available without handlers.
+Current source builds include the memory foreign-data wrapper. Add `--features arrow` for native Arrow IPC execution or `--features duckdb` for native DuckDB execution; neither feature enables the other. Foreign-table definitions, `\d`, `\dft`, `\dfs` and completion use SQL catalog metadata and remain available for omitted native handlers.
 
 Common forms are:
 

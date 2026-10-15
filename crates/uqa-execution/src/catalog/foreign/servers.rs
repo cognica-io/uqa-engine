@@ -25,7 +25,6 @@ struct ServerEnvelope {
     metadata: ForeignServerMetadata,
 }
 
-#[cfg(feature = "fdw")]
 pub fn fdw_definition(server: &ForeignServerDefinition) -> uqa_fdw::ForeignServer {
     uqa_fdw::ForeignServer {
         name: server.name.clone(),

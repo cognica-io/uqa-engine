@@ -13,7 +13,7 @@ use super::columns::open;
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
-fn foreign_definitions_survive_without_handlers(#[case] provider: usize) {
+fn foreign_definitions_survive_independent_handler_selection(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("foreign-definitions.db");
     let engine = open(provider, &path);
@@ -53,16 +53,33 @@ fn foreign_definitions_survive_without_handlers(#[case] provider: usize) {
                 .fdw_type,
             wrapper
         );
+        let memory = wrapper == "memory_fdw";
+        let unavailable = match wrapper {
+            "arrow_fdw" => !cfg!(all(feature = "arrow", not(target_os = "emscripten"))),
+            "duckdb_fdw" => !cfg!(all(feature = "duckdb", not(target_os = "emscripten"))),
+            _ => false,
+        };
+        if memory {
+            engine
+                .load_memory_foreign_table(&name, vec![super::row(&[("id", super::Value::Int(7))])])
+                .unwrap();
+        }
         for sql in [
             format!("SELECT * FROM {name}"),
             format!("SELECT a.id FROM {name} a JOIN {name} b ON a.id=b.id"),
         ] {
-            let error = engine.sql(&sql, &[]).unwrap_err();
-            assert_eq!(error.sqlstate(), Some("0A000"));
-            assert_eq!(
-                error.to_string(),
-                "FDW support is not available in this build"
-            );
+            if memory {
+                let result = engine.sql(&sql, &[]).unwrap();
+                assert_eq!(result.rows.len(), 1);
+                assert_eq!(result.rows[0]["id"], super::Value::Int(7));
+            } else if unavailable {
+                let error = engine.sql(&sql, &[]).unwrap_err();
+                assert_eq!(error.sqlstate(), Some("0A000"));
+                assert_eq!(
+                    error.to_string(),
+                    format!("FDW type `{wrapper}` is not available in this build")
+                );
+            }
         }
         engine
             .sql(&format!("DROP SERVER {wrapper}_source CASCADE"), &[])

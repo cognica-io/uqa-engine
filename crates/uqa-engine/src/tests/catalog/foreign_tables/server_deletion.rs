@@ -324,7 +324,6 @@ fn foreign_table_server_reference_survives_concurrent_server_deletion() {
                         "{query}"
                     );
                 }
-                #[cfg(feature = "fdw")]
                 assert!(observer
                     .load_memory_foreign_table("ds414_orphan.remote", vec![])
                     .unwrap_err()

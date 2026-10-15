@@ -5,14 +5,11 @@
 //
 
 use super::Engine;
-#[cfg(feature = "fdw")]
 use super::RelationIdentity;
-#[cfg(feature = "fdw")]
 use uqa_fdw::arrays::{column_type_is_array, normalize_array_columns};
 
 pub(crate) use uqa_execution::catalog::foreign::StoredForeignTable;
 
-#[cfg(feature = "fdw")]
 struct MemoryForeignRowStream<'a> {
     engine: &'a Engine,
     table_name: RelationIdentity,
@@ -23,7 +20,6 @@ struct MemoryForeignRowStream<'a> {
     emitted: u64,
 }
 
-#[cfg(feature = "fdw")]
 impl Iterator for MemoryForeignRowStream<'_> {
     type Item = std::result::Result<uqa_fdw::Row, String>;
 
@@ -148,7 +144,6 @@ impl Engine {
         )
     }
 
-    #[cfg(feature = "fdw")]
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
         self.with_direct_query_snapshot(
             true,
@@ -157,7 +152,6 @@ impl Engine {
         )
     }
 
-    #[cfg(feature = "fdw")]
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
         self.with_direct_query_snapshot(
             true,
@@ -190,7 +184,6 @@ impl Engine {
         )
     }
 
-    #[cfg(feature = "fdw")]
     pub fn load_memory_foreign_table(
         &self,
         table_name: impl Into<String>,
@@ -229,7 +222,6 @@ impl Engine {
         Ok(())
     }
 
-    #[cfg(feature = "fdw")]
     pub(crate) fn scan_foreign_table_stream<'a>(
         &'a self,
         table_name: &str,
@@ -240,7 +232,10 @@ impl Engine {
         Box<dyn Iterator<Item = std::result::Result<uqa_fdw::Row, String>> + Send + 'a>,
         String,
     > {
-        #[cfg(not(target_os = "emscripten"))]
+        #[cfg(all(
+            not(target_os = "emscripten"),
+            any(feature = "arrow", feature = "duckdb")
+        ))]
         use uqa_fdw::FDWHandler as _;
 
         let (table, server) = self
@@ -288,7 +283,7 @@ impl Engine {
                             .map(|row| row.map_err(|error| error.to_string())),
                     )
                 }
-                #[cfg(not(target_os = "emscripten"))]
+                #[cfg(all(not(target_os = "emscripten"), feature = "arrow"))]
                 "arrow_fdw" => {
                     let handler = uqa_fdw::ArrowIpcHandler::new(server);
                     Box::new(

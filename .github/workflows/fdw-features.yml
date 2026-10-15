@@ -35,7 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-14]
-        configuration: [catalog, fdw, duckdb]
+        configuration: [memory, arrow, duckdb]
     env:
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-D warnings -C linker-features=-lld"
       CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "-D warnings"
@@ -58,33 +58,36 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fetch --locked
       - name: Verify native, development and browser dependency isolation
-        if: matrix.configuration == 'catalog'
+        if: matrix.configuration == 'memory'
         run: python3 scripts/check-fdw-feature-isolation.py
-      - name: Test foreign catalogs without source handlers
-        if: matrix.configuration == 'catalog'
+      - name: Test default memory handlers and foreign catalogs
+        if: matrix.configuration == 'memory'
         run: |
+          cargo test -p uqa-fdw --no-default-features --locked
           cargo test -p uqa-engine --no-default-features --locked --lib catalog::foreign_tables
           cargo test -p uqa-engine --no-default-features --locked --lib catalog::row_type_arrays
           cargo test -p uqa-engine --no-default-features --locked --test integration sql_foreign_ddl
+          cargo test -p uqa-engine --no-default-features --locked --test integration foreign_table_ownership
+          cargo test -p uqa-engine --no-default-features --locked --test integration catalog::sql_rules::relation_dependencies
           cargo test -p uqa-engine --no-default-features --locked --test integration manual_sql_examples_compile_or_execute
           cargo test -p uqa-cli --no-default-features --locked --test integration
-      - name: Test memory and Arrow handlers
-        if: matrix.configuration == 'fdw'
+      - name: Test independently selected Arrow handlers
+        if: matrix.configuration == 'arrow'
         run: |
-          cargo test -p uqa-fdw --locked
-          cargo test -p uqa-engine --no-default-features --features fdw --locked --lib catalog::foreign_tables
-          cargo test -p uqa-engine --no-default-features --features fdw --locked --lib catalog::row_type_arrays
-          cargo test -p uqa-engine --no-default-features --features fdw --locked --test integration sql_foreign_ddl
-          cargo test -p uqa-engine --no-default-features --features fdw --locked --test integration foreign_table_ownership
-          cargo test -p uqa-engine --no-default-features --features fdw --locked --test integration catalog::sql_rules::relation_dependencies
-      - name: Verify independently enabled Execution adapters
-        if: matrix.configuration == 'fdw'
-        run: cargo check -p uqa-engine --lib --no-default-features --features uqa-execution/fdw --locked
+          cargo test -p uqa-fdw --features arrow --locked
+          cargo test -p uqa-engine --no-default-features --features arrow --locked --lib catalog::foreign_tables
+          cargo test -p uqa-engine --no-default-features --features arrow --locked --lib catalog::row_type_arrays
+          cargo test -p uqa-engine --no-default-features --features arrow --locked --test integration sql_foreign_ddl
+          cargo test -p uqa-engine --no-default-features --features arrow --locked --test integration foreign_table_ownership
+          cargo test -p uqa-engine --no-default-features --features arrow --locked --test integration catalog::sql_rules::relation_dependencies
+      - name: Verify dependency feature unification
+        if: matrix.configuration == 'arrow'
+        run: cargo check -p uqa-engine --lib --no-default-features --features uqa-fdw/arrow --locked
       - name: Test explicitly selected DuckDB
         if: matrix.configuration == 'duckdb'
         run: |
           cargo test -p uqa-fdw --features duckdb --locked
-          cargo test -p uqa-engine --no-default-features --features duckdb --locked duckdb
-      - name: Check enabled handlers and benchmark targets
+          cargo test -p uqa-engine --no-default-features --features duckdb --locked --test integration sql_foreign_ddl
+      - name: Check combined handlers and benchmark targets
         if: matrix.configuration == 'duckdb'
-        run: cargo clippy -p uqa-engine -p uqa-fdw -p uqa-cli --all-targets --no-default-features --features uqa-engine/duckdb,uqa-cli/duckdb,uqa-fdw/duckdb --locked -- -D warnings
+        run: cargo clippy -p uqa-engine -p uqa-fdw -p uqa-cli --all-targets --no-default-features --features uqa-engine/arrow,uqa-engine/duckdb,uqa-cli/arrow,uqa-cli/duckdb,uqa-fdw/arrow,uqa-fdw/duckdb --locked -- -D warnings

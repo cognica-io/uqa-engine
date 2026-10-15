@@ -235,7 +235,7 @@ Released Node.js applications install `@cognica-io/uqa` from npm; npm selects an
 
 Prebuilt Linux Python wheels target glibc 2.28 or newer.
 
-Source builds exclude foreign source handlers by default. Enable `fdw` for memory and native Arrow sources, or `duckdb` for those handlers plus DuckDB. Foreign-table definitions and catalog inspection remain available without handlers; see the [feature contract](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
+Source builds include the memory foreign-data wrapper by default. Enable `arrow` for native Arrow IPC sources or `duckdb` for native DuckDB sources; the features are independent and disabled by default. Foreign-table definitions and catalog inspection remain available for every handler; see the [feature contract](https://github.com/cognica-io/uqa-engine/blob/v0.5.3/docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
 
 ## Build and test
 

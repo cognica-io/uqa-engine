@@ -13,7 +13,7 @@ publish = false
 
 [features]
 default = ["nori", "kuromoji"]
-fdw = ["uqa-engine/fdw", "uqa-cli/fdw"]
+arrow = ["uqa-engine/arrow", "uqa-cli/arrow"]
 duckdb = ["uqa-engine/duckdb", "uqa-cli/duckdb"]
 nori = ["uqa-engine/nori", "uqa-cli/nori"]
 kuromoji = ["uqa-engine/kuromoji", "uqa-cli/kuromoji"]

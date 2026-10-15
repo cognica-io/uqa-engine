@@ -12,9 +12,7 @@ use super::{
     SourceContext,
 };
 
-#[cfg(feature = "fdw")]
 mod predicates;
-#[cfg(feature = "fdw")]
 pub use predicates::*;
 
 pub fn run_single_foreign_select_output<'a, S: Clone + Send + Sync + 'static>(

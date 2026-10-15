@@ -5,9 +5,7 @@
 //
 
 use crate::Engine;
-#[cfg(feature = "fdw")]
 use std::sync::Arc;
-#[cfg(feature = "fdw")]
 use uqa_core::{RelationIdentity, Value};
 
 #[test]
@@ -56,7 +54,6 @@ fn pinned_foreign_catalog_retains_definitions_and_does_not_fall_back_to_live_ent
     );
 }
 
-#[cfg(feature = "fdw")]
 #[test]
 fn memory_stream_reads_current_rows_and_reports_removed_loaded_data() {
     let engine = Engine::new();
@@ -81,7 +78,6 @@ fn memory_stream_reads_current_rows_and_reports_removed_loaded_data() {
     );
 }
 
-#[cfg(feature = "fdw")]
 #[test]
 fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication() {
     let directory = tempfile::tempdir().unwrap();
@@ -134,7 +130,6 @@ fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication(
         .insert(relation, security);
 }
 
-#[cfg(feature = "fdw")]
 #[test]
 fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state() {
     let directory = tempfile::tempdir().unwrap();
