@@ -6536,6 +6536,1064 @@
       "capability": "Conditional result type modifiers",
       "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
       "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repeated_constraint_modes_preserve_durable_definition_revisions",
+      "source": "crates/uqa-engine/src/tests/catalog/schema_publication.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Constraint publication intent",
+      "workload": "Fixed enforcement, deferral and inheritance transitions plus a partitioned foreign key on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Repeated modes do not write new definition revisions, while genuine changes publish both the selected relation and affected partition definitions."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "catalog_node_inputs_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "check_row_scope_and_enforcement_match_postgresql",
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/check_rows.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_definition_output_matches_postgresql",
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/constraint_output.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Constraint definition output",
+      "workload": "Independent PostgreSQL constraint expression, namespace and durable reopen reference across four providers.",
+      "invariant": "Constraint output preserves selected routine/type identities, invoking output settings, declared fields and persistent reconstruction."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_expression_catalogs_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_relation_context_matches_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_usage_views_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_information.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "declaration_visibility_matches_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "declaration_visibility_survives_reopen",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "defaults_indexes_and_domain_collations_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_node_catalogs_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "postgresql_18_user_routine_catalog_preserves_argument_modes_and_type_oids",
+      "source": "crates/uqa-engine/tests/sql_information_schema/pg18_routines/arguments.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed routine catalog defaults and identities",
+      "workload": "Independent PostgreSQL language catalog rows, relation/array descriptors, routine argument modes, OIDs and stored default nodes.",
+      "invariant": "Routine catalog projection keeps language and declared argument identities while publishing independently verified PostgreSQL default expression nodes."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "selected_constraint_calls_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "check_catalog_keys_match_postgresql_whole_rows_system_attributes_and_order",
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests/references.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "check_dependencies_match_postgresql_automatic_and_normal_attribute_edges",
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests/references.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "check_rows_borrow_fields_and_use_the_physical_relation_oid",
+      "source": "crates/uqa-execution/src/schema/check_rows/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constraint_usage_preserves_distinct_columns_system_attributes_and_owner_visibility",
+      "source": "crates/uqa-execution/src/catalog/projection/information_schema/constraint_usage/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "domain_addresses_preserve_first_match_and_ignore_unassigned_identities",
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests/domains.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Constraint definition output",
+      "workload": "Retained domain address lookup across distinct immutable catalog generations.",
+      "invariant": "Constraint lookup keeps the exact selected declaration and does not leak replacement or removed definitions across retained generations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "domain_addresses_remain_with_their_original_generation",
+      "source": "crates/uqa-execution/src/catalog/projection/helpers/constraints/cache/tests/domains.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Constraint definition output",
+      "workload": "Retained domain address lookup across distinct immutable catalog generations.",
+      "invariant": "Constraint lookup keeps the exact selected declaration and does not leak replacement or removed definitions across retained generations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "empty_check_rows_keep_the_named_namespace_without_system_fields",
+      "source": "crates/uqa-execution/src/schema/check_rows/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/tuples/tests.rs",
+      "test": "invalid_format_keys_and_definition_links_fail_before_publication",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Catalog tuple corruption boundaries",
+      "workload": "Invalid format, class, logical identity, JSON and a current head naming another object.",
+      "invariant": "Selected corruption returns XX001 before publication and does not repair or overwrite the invalid source record."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "language_row_and_array_types_share_the_catalog_relation_identity",
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/languages/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed routine catalog defaults and identities",
+      "workload": "Independent PostgreSQL language catalog rows, relation/array descriptors, routine argument modes, OIDs and stored default nodes.",
+      "invariant": "Routine catalog projection keeps language and declared argument identities while publishing independently verified PostgreSQL default expression nodes."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "language_rows_and_attribute_descriptors_match_postgresql",
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/languages/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed routine catalog defaults and identities",
+      "workload": "Independent PostgreSQL language catalog rows, relation/array descriptors, routine argument modes, OIDs and stored default nodes.",
+      "invariant": "Routine catalog projection keeps language and declared argument identities while publishing independently verified PostgreSQL default expression nodes."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/tuples/tests.rs",
+      "test": "physical_visits_preserve_same_oid_rows_without_joining_current_heads",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Physical catalog row multiplicity",
+      "workload": "Two selected physical rows share one logical OID while the current-definition head names only the newer row.",
+      "invariant": "The visitor returns both physical rows without joining current heads or deduplicating by OID or payload."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/tuples/tests.rs",
+      "test": "publication_requires_an_active_transaction_and_failure_restores_all_writes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Atomic catalog tuple publication",
+      "workload": "Reject autocommit use; inject a typed cancellation after nested deletion and insertion inside an existing transaction.",
+      "invariant": "Physical rows and current-definition links roll back together, earlier transaction work remains usable, and the original typed cancellation is preserved."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/tuples/tests.rs",
+      "test": "replacements_preserve_logical_identity_and_replace_only_the_selected_physical_tuple",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Explicit physical catalog replacements",
+      "workload": "A real rename and an equal-payload replacement beside an unrelated tuple, stale handles, savepoint undo and deletion.",
+      "invariant": "Each explicit replacement gets a fresh physical key; the logical OID remains stable, stale predecessors return 40001, and unrelated rows and ancestor savepoints survive."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/tests.rs",
+      "test": "role_name_moves_update_the_original_oid_claim_without_rewriting_other_roles",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Streamed role identity validation",
+      "workload": "Role rename with retained original OID and an independent unrelated role.",
+      "invariant": "Restoration matches the original name/OID claims and preserves unrelated definitions."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/tests.rs",
+      "test": "role_records_validate_format_name_and_oid_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Streamed role record validation",
+      "workload": "Durable role format, name and OID claims including malformed or missing records.",
+      "invariant": "Borrowed metadata restoration preserves format, bootstrap and exact OID ownership validation."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_domain_tuple_visits_stop_before_unused_rows",
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/constraint_definitions/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Selected domain constraint tuple inputs",
+      "workload": "Selected NOT NULL and typed CHECK rows, renamed domain identity, portable encoding, early termination and callback cancellation.",
+      "invariant": "Logical constraint/type OIDs and typed payloads survive domain rename; a successful break and callback errors stop before inspecting unused rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_domain_tuples_keep_identity_through_rename_and_encoding",
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/constraint_definitions/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Selected domain constraint tuple inputs",
+      "workload": "Selected NOT NULL and typed CHECK rows, renamed domain identity, portable encoding, early termination and callback cancellation.",
+      "invariant": "Logical constraint/type OIDs and typed payloads survive domain rename; a successful break and callback errors stop before inspecting unused rows."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/tuples/tests.rs",
+      "test": "tuple_visitors_borrow_large_payloads_and_preserve_callback_errors",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded catalog tuple payload reads",
+      "workload": "Validate the current physical predecessor and visit its 2 MiB raw tuple payload, then fail a selected callback.",
+      "invariant": "Peak additional allocations stay below 8 KiB; the selected payload remains borrowed and the callback error remains unchanged."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "source": "crates/uqa-execution/src/catalog/tuples/tests.rs",
+      "test": "typed_nodes_round_trip_without_rendered_sql_or_payload_collection",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Stored constraint expression identity",
+      "workload": "A typed constraint payload containing machine-width Datum bytes passes through physical publication, borrowed selection and public catalog projection.",
+      "invariant": "Logical identity, typed node fields, original bytes and final conbin output are preserved without resolving current metadata or parsing rendered SQL."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "user_sql_and_procedural_routines_join_the_same_language_identities",
+      "source": "crates/uqa-execution/src/catalog/projection/pg_catalog/languages/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed routine catalog defaults and identities",
+      "workload": "Independent PostgreSQL language catalog rows, relation/array descriptors, routine argument modes, OIDs and stored default nodes.",
+      "invariant": "Routine catalog projection keeps language and declared argument identities while publishing independently verified PostgreSQL default expression nodes."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "a_surviving_column_check_moves_to_the_table_with_its_original_identity",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests/lifecycle.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "assignment_nodes_and_hidden_root_casts_match_postgresql",
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/defaults.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Default assignment catalog nodes",
+      "workload": "Independent PostgreSQL default and generated-column expression nodes with hidden root conversions and both output modes.",
+      "invariant": "Assignment nodes retain declared target types and modifiers, serialize without loss and reconstruct the independently captured PostgreSQL SQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "check_reference_order_and_automatic_names_match_postgresql",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests/catalog_references.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "check_references_borrow_names_and_keep_only_the_first_variable_position",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests/catalog_references.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "check_row_scope_retains_real_identity_without_exposing_system_attributes_as_fields",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constraint_alteration_reports_postgresql_tuple_replacements",
+      "source": "crates/uqa-sql/src/schema/constraint_changes/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Constraint publication intent",
+      "workload": "Thirteen independent PostgreSQL physical-row observations replay against inline and table foreign keys and NOT NULL inheritance settings.",
+      "invariant": "Real metadata transitions request publication; repeated modes preserve physical identity, while newly enforced constraints retain their validation effect."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "external_parameters_keep_positional_spelling_and_cast_prettiness",
+      "source": "crates/uqa-sql/src/catalog/node_tree/deparse/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Constraint definition output",
+      "workload": "Native node reconstruction with positional parameters and explicit relabel casts in both PostgreSQL output modes.",
+      "invariant": "Implicit root conversions stay hidden while explicit conversions retain target identity, positional spelling and grouping."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_checks_bind_declared_and_restored_row_types",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests/foreign.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "inheritance_rejects_whole_rows_but_preserves_explicit_field_checks",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests/lifecycle.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "partition_nodes_render_without_relation_lookup_like_postgresql",
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/partitions.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_context_validation_precedes_relation_lookup",
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests/defaults.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed catalog expressions and constraint usage",
+      "workload": "Independent PostgreSQL expression nodes and reconstruction, relation validation, declared catalog fields, partition bounds, dependency visibility and persistent reopen.",
+      "invariant": "Typed catalog output retains declared type, relation and argument identities, exact diagnostics and PostgreSQL visible fields across memory and all persistent providers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "source": "crates/uqa-sql/src/catalog/node_tree/tests.rs",
+      "test": "stored_typed_nodes_preserve_postgresql_fields_and_original_datum_bytes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Typed catalog node persistence",
+      "workload": "Independently captured PostgreSQL domain/default nodes and every scalar, quoted-string and Datum field representation pass through the typed codec.",
+      "invariant": "Field order, node kinds, raw Datum bytes and public node text survive serialization; unknown stored Datum fields are rejected."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_check_analysis_matches_postgresql_row_scope_and_error_order",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "whole_row_checks_keep_relation_dependencies_when_columns_change",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests/lifecycle.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "whole_row_field_diagnostics_follow_postgresql_column_analysis_order",
+      "source": "crates/uqa-sql/src/schema/constraints/checks/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "CHECK physical row scope and references",
+      "workload": "PostgreSQL whole-row and field diagnostics, quoted/foreign/inherited row scopes, borrowed physical row fields, dependency keys, runtime enforcement and persistent reopen.",
+      "invariant": "CHECK uses its declared physical row identity and PostgreSQL analysis order, borrows only required fields and preserves enforcement and dependencies across four providers and durable reopen."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "source": "crates/uqa-storage/src/key_value/catalog/tests/metadata_reads.rs",
+      "test": "fixed_length_metadata_visits_seek_only_selected_records",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Fixed-width metadata range selection",
+      "workload": "Two literal wildcard/NUL/Unicode keys with zero or 1024 unrelated records, a malformed value at another key length, zero allowance and callback cancellation.",
+      "invariant": "Exactly two underlying values are visited, an absent range visits zero, prefix workspace obeys the original allowance and typed cancellation stops after one callback."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "source": "crates/uqa-storage/src/key_value/catalog/tests/metadata_reads.rs",
+      "test": "metadata_visitors_borrow_keys_and_payloads_without_corpus_allocations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed catalog metadata",
+      "workload": "128 selected 16 KiB values, literal wildcard/NUL/Unicode prefix, and unrelated metadata.",
+      "invariant": "Visits every selected value with zero added allocation; an absent prefix produces no callback."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "source": "crates/uqa-storage/src/key_value/catalog/tests/metadata_reads.rs",
+      "test": "metadata_visitors_observe_provider_cancellation_after_the_last_record",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Catalog read cancellation",
+      "workload": "A single selected value cancels its original provider read allowance from the visitor.",
+      "invariant": "Cancellation after the final callback and before an empty scan is reported without publishing output."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "source": "crates/uqa-storage/src/key_value/catalog/tests/metadata_reads.rs",
+      "test": "metadata_visitors_preserve_errors_and_validate_only_selected_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed catalog error propagation",
+      "workload": "Two selected valid values and an unrelated invalid UTF-8 value.",
+      "invariant": "A callback cancellation stops before a second value; unselected invalid payloads are not decoded and selected invalid text is rejected."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/metadata.rs",
+      "test": "borrowed_metadata_visits_retain_private_and_committed_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Catalog committed/private read boundaries",
+      "workload": "A pinned reader, independent peer replacement, own replacement/deletion, savepoint undo and transaction completion.",
+      "invariant": "Ordinary and fixed-width visitors return the same original committed values plus exact private changes; transaction completion exposes the peer commit and cancellation stops without changing records."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/retained.rs",
+      "test": "fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Fixed committed and current private catalog records",
+      "workload": "Five exact-key replacement histories, paired catalog/backend reads, savepoint undo, source completion, nested retention and exhausted original allowances.",
+      "invariant": "Old committed records compose only with the same active transaction's current private root; equal payloads never collapse physical versions, foreign or completed sessions reject attachment, and read-only ownership and typed cancellation remain intact."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/serializable.rs",
+      "test": "fixed_read_boundaries_preserve_original_serializable_attribution",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Fixed read serializable attribution",
+      "workload": "Establish an SSI actor after an earlier capture, retain a fresh fixed reader, complete that reader and cancel its reads before completing the source.",
+      "invariant": "An unattributed boundary cannot cross SSI admission; the reader retains the original actor and budget, reader completion does not complete that actor, and read cancellation does not cancel the source."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/retained.rs",
+      "test": "fixed_read_boundaries_reject_savepoint_time_travel_and_retain_independent_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Fixed read boundary lifetime and cancellation",
+      "workload": "Capture after a peer commit, roll back the mutable source to an earlier savepoint and cancel the original owner.",
+      "invariant": "A newer committed boundary cannot attach to an older command view; capture requires an active mutable owner, source cancellation stays typed, and existing reader cancellation is independent."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "test",
+      "source": "crates/uqa-storage/tests/cases/mvcc_sessions/retained.rs",
+      "test": "fixed_read_composition_retains_spilled_private_rows_without_copying_payloads",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Bounded fixed/private snapshot retention",
+      "workload": "Capture 8 and 256 private records with 16 KiB payloads under a 1 MiB allowance, including spilled roots; abort and drop the source.",
+      "invariant": "Capture peak allocations stay below 32 KiB regardless of selected payload volume; every retained row remains readable and the last owner releases the original allowance."
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "source": "crates/uqa-storage-redb/tests/store_contract/compound.rs",
+      "test": "borrowed_metadata_visits_retain_private_and_committed_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Catalog committed/private read boundaries",
+      "workload": "A pinned reader, independent peer replacement, own replacement/deletion, savepoint undo and transaction completion.",
+      "invariant": "Ordinary and fixed-width visitors return the same original committed values plus exact private changes; transaction completion exposes the peer commit and cancellation stops without changing records."
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "source": "crates/uqa-storage-redb/tests/store_contract/compound.rs",
+      "test": "fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Fixed committed and current private catalog records",
+      "workload": "Five exact-key replacement histories, paired catalog/backend reads, savepoint undo, source completion, nested retention and exhausted original allowances.",
+      "invariant": "Old committed records compose only with the same active transaction's current private root; equal payloads never collapse physical versions, foreign or completed sessions reject attachment, and read-only ownership and typed cancellation remain intact."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "borrowed_metadata_visits_check_native_cancellation_after_the_last_row",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native catalog read cancellation",
+      "workload": "Cancel the retained native read allowance from its sole metadata callback.",
+      "invariant": "The final callback and an empty subsequent scan both report cancellation."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "borrowed_metadata_visits_keep_only_record_workspace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "SQLite catalog read workspace",
+      "workload": "128 selected 16 KiB metadata values on serialized and native versioned catalogs.",
+      "invariant": "Both readers return every exact value with less than 512 KiB peak Rust allocation rather than collecting two MiB of values."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "borrowed_metadata_visits_stop_on_typed_errors_without_changing_records",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "SQLite catalog error propagation",
+      "workload": "Cancellation, JSON and custom storage failures from serialized and native metadata visitors.",
+      "invariant": "Callback error variants and custom messages survive the adapter; failed scans stop and leave records unchanged."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "fixed_length_metadata_visits_use_utf8_bytes_and_keep_typed_failures",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "SQLite fixed-width metadata reads",
+      "workload": "Serialized and native catalogs with wildcard, NUL and multibyte Unicode prefixes and three distinct complete key lengths.",
+      "invariant": "Only the selected UTF-8 byte length is returned; impossible lengths return no rows and callback cancellation keeps its variant and stops after one row."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "metadata_prefix_preserves_private_changes_rollback_and_reopen",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native metadata visibility",
+      "workload": "Private replacement/deletion/insertion, savepoint rollback, commit and durable reopen.",
+      "invariant": "Literal prefix output keeps its selected private boundary and exact rows through rollback and reopen."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "native_metadata_prefix_work_is_independent_of_unrelated_records",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native metadata prefix work",
+      "workload": "1024 unrelated records with selected and absent literal wildcard/NUL/Unicode prefixes, using ordinary and fixed-width visitors.",
+      "invariant": "Native metadata selection and empty relation restoration each execute fewer than 4096 SQLite virtual-machine steps."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/metadata_prefix.rs",
+      "test": "serialized_metadata_prefix_work_is_independent_of_unrelated_records",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Serialized metadata prefix work",
+      "workload": "1024 unrelated metadata records with selected and absent literal prefixes, using ordinary and fixed-width visitors.",
+      "invariant": "Each metadata selection and empty relation restoration uses fewer than 4096 SQLite virtual-machine steps; borrowed prefix reads seek the primary-key range."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "test",
+      "source": "crates/uqa-storage-sqlite/tests/cases/mvcc/key_value.rs",
+      "test": "borrowed_metadata_visits_retain_private_and_committed_boundaries",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Catalog committed/private read boundaries",
+      "workload": "A pinned reader, independent peer replacement, own replacement/deletion, savepoint undo and transaction completion.",
+      "invariant": "Ordinary and fixed-width visitors return the same original committed values plus exact private changes; transaction completion exposes the peer commit and cancellation stops without changing records."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "test",
+      "source": "crates/uqa-storage-sqlite/tests/cases/mvcc/key_value.rs",
+      "test": "fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Fixed committed and current private catalog records",
+      "workload": "Five exact-key replacement histories, paired catalog/backend reads, savepoint undo, source completion, nested retention and exhausted original allowances.",
+      "invariant": "Old committed records compose only with the same active transaction's current private root; equal payloads never collapse physical versions, foreign or completed sessions reject attachment, and read-only ownership and typed cancellation remain intact."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "catalog_private_row_versions_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 15,
+      "case_names": [
+        "case_01_sqlite_add",
+        "case_02_sqlite_rename",
+        "case_03_sqlite_drop",
+        "case_04_sqlite_key_value_add",
+        "case_05_sqlite_key_value_rename",
+        "case_06_sqlite_key_value_drop",
+        "case_07_redb_add",
+        "case_08_redb_rename",
+        "case_09_redb_drop",
+        "case_10_sqlite_equal_payload",
+        "case_11_sqlite_unrelated",
+        "case_12_sqlite_key_value_equal_payload",
+        "case_13_sqlite_key_value_unrelated",
+        "case_14_redb_equal_payload",
+        "case_15_redb_unrelated"
+      ],
+      "capability": "Physical constraint catalog visibility",
+      "workload": "Independent PostgreSQL committed/private row histories, derived information views, domain validation, foreign definitions, constraint triggers, held cursors and initialization of existing definitions on every persistent provider.",
+      "invariant": "Direct scans preserve physical row multiplicity at the transaction snapshot while current name binding remains fresh; private DDL, savepoint undo, portal retention and atomic format initialization preserve the selected rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "catalog_serializable_row_versions_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 15,
+      "case_names": [
+        "case_1_sqlite::history_1___add__",
+        "case_1_sqlite::history_2___rename__",
+        "case_1_sqlite::history_3___drop__",
+        "case_1_sqlite::history_4___equal_payload__",
+        "case_1_sqlite::history_5___unrelated__",
+        "case_2_sqlite_key_value::history_1___add__",
+        "case_2_sqlite_key_value::history_2___rename__",
+        "case_2_sqlite_key_value::history_3___drop__",
+        "case_2_sqlite_key_value::history_4___equal_payload__",
+        "case_2_sqlite_key_value::history_5___unrelated__",
+        "case_3_redb::history_1___add__",
+        "case_3_redb::history_2___rename__",
+        "case_3_redb::history_3___drop__",
+        "case_3_redb::history_4___equal_payload__",
+        "case_3_redb::history_5___unrelated__"
+      ],
+      "capability": "Physical constraint catalog visibility",
+      "workload": "Independent PostgreSQL committed/private row histories, derived information views, domain validation, foreign definitions, constraint triggers, held cursors and initialization of existing definitions on every persistent provider.",
+      "invariant": "Direct scans preserve physical row multiplicity at the transaction snapshot while current name binding remains fresh; private DDL, savepoint undo, portal retention and atomic format initialization preserve the selected rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "constraint_catalog_publication_matches_postgresql_sessions",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "capability": "Physical constraint catalog visibility",
+      "workload": "Independent PostgreSQL committed/private row histories, derived information views, domain validation, foreign definitions, constraint triggers, held cursors and initialization of existing definitions on every persistent provider.",
+      "invariant": "Direct scans preserve physical row multiplicity at the transaction snapshot while current name binding remains fresh; private DDL, savepoint undo, portal retention and atomic format initialization preserve the selected rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "derived_catalog_row_versions_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 15,
+      "case_names": [
+        "case_1_sqlite::history_1___views__",
+        "case_1_sqlite::history_2___domain_validation__",
+        "case_1_sqlite::history_3___foreign__",
+        "case_1_sqlite::history_4___trigger__",
+        "case_1_sqlite::history_5___portal__",
+        "case_2_sqlite_key_value::history_1___views__",
+        "case_2_sqlite_key_value::history_2___domain_validation__",
+        "case_2_sqlite_key_value::history_3___foreign__",
+        "case_2_sqlite_key_value::history_4___trigger__",
+        "case_2_sqlite_key_value::history_5___portal__",
+        "case_3_redb::history_1___views__",
+        "case_3_redb::history_2___domain_validation__",
+        "case_3_redb::history_3___foreign__",
+        "case_3_redb::history_4___trigger__",
+        "case_3_redb::history_5___portal__"
+      ],
+      "capability": "Physical constraint catalog visibility",
+      "workload": "Independent PostgreSQL committed/private row histories, derived information views, domain validation, foreign definitions, constraint triggers, held cursors and initialization of existing definitions on every persistent provider.",
+      "invariant": "Direct scans preserve physical row multiplicity at the transaction snapshot while current name binding remains fresh; private DDL, savepoint undo, portal retention and atomic format initialization preserve the selected rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "physical_constraint_initialization_preserves_all_definition_owners",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions/catalog_upgrade.rs",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "capability": "Physical constraint catalog visibility",
+      "workload": "Independent PostgreSQL committed/private row histories, derived information views, domain validation, foreign definitions, constraint triggers, held cursors and initialization of existing definitions on every persistent provider.",
+      "invariant": "Direct scans preserve physical row multiplicity at the transaction snapshot while current name binding remains fresh; private DDL, savepoint undo, portal retention and atomic format initialization preserve the selected rows."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "partition_foreign_keys_keep_independent_physical_rows",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "capability": "PostgreSQL constraint catalog identities and retained physical rows",
+      "workload": "Partitioned foreign keys with independently allocated catalog identities",
+      "invariant": "Partition family enforcement identity cannot replace the independent physical catalog incarnation"
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "foreign_key_delete_columns_match_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "PostgreSQL constraint catalog identities and retained physical rows",
+      "workload": "Independent PostgreSQL catalog observations across persistent providers and reopen",
+      "invariant": "Preserve durable attribute positions, explicit delete subsets and current quoted names through rollback and reopen"
     }
   ]
 }

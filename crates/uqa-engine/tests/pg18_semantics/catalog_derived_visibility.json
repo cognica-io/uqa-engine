@@ -1,0 +1,1760 @@
+{
+  "views": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "cases": [
+      {
+        "sql": "CREATE TABLE visible_row(n integer,CONSTRAINT visible_row_original CHECK(n>0))",
+        "command_tags": [
+          "CREATE TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ",
+        "command_tags": [
+          "BEGIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated,conkey::text,pg_get_expr(conbin,conrelid) AS expression FROM pg_constraint WHERE conrelid='visible_row'::regclass ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated",
+              "conkey",
+              "expression"
+            ],
+            "type_oids": [
+              19,
+              16,
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "t",
+                "{1}",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,constraint_type::text FROM information_schema.table_constraints WHERE table_name='visible_row' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "constraint_type"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "CHECK"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,column_name::text FROM information_schema.constraint_column_usage WHERE table_name='visible_row' ORDER BY constraint_name,column_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "column_name"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "n"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,check_clause FROM information_schema.check_constraints WHERE constraint_name LIKE 'visible_row_%' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "check_clause"
+            ],
+            "type_oids": [
+              25,
+              1043
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ALTER TABLE visible_row RENAME CONSTRAINT visible_row_original TO visible_row_external",
+        "command_tags": [
+          "ALTER TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "SAVEPOINT mine",
+        "command_tags": [
+          "SAVEPOINT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ALTER TABLE visible_row RENAME CONSTRAINT visible_row_external TO visible_row_own",
+        "command_tags": [
+          "ALTER TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated,conkey::text,pg_get_expr(conbin,conrelid) AS expression FROM pg_constraint WHERE conrelid='visible_row'::regclass ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated",
+              "conkey",
+              "expression"
+            ],
+            "type_oids": [
+              19,
+              16,
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "t",
+                "{1}",
+                "(n > 0)"
+              ],
+              [
+                "visible_row_own",
+                "t",
+                "{1}",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,constraint_type::text FROM information_schema.table_constraints WHERE table_name='visible_row' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "constraint_type"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "CHECK"
+              ],
+              [
+                "visible_row_own",
+                "CHECK"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,column_name::text FROM information_schema.constraint_column_usage WHERE table_name='visible_row' ORDER BY constraint_name,column_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "column_name"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "n"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,check_clause FROM information_schema.check_constraints WHERE constraint_name LIKE 'visible_row_%' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "check_clause"
+            ],
+            "type_oids": [
+              25,
+              1043
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "(n > 0)"
+              ],
+              [
+                "visible_row_own",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ROLLBACK TO mine",
+        "command_tags": [
+          "ROLLBACK"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated,conkey::text,pg_get_expr(conbin,conrelid) AS expression FROM pg_constraint WHERE conrelid='visible_row'::regclass ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated",
+              "conkey",
+              "expression"
+            ],
+            "type_oids": [
+              19,
+              16,
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "t",
+                "{1}",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,constraint_type::text FROM information_schema.table_constraints WHERE table_name='visible_row' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "constraint_type"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "CHECK"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,column_name::text FROM information_schema.constraint_column_usage WHERE table_name='visible_row' ORDER BY constraint_name,column_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "column_name"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "n"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,check_clause FROM information_schema.check_constraints WHERE constraint_name LIKE 'visible_row_%' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "check_clause"
+            ],
+            "type_oids": [
+              25,
+              1043
+            ],
+            "rows": [
+              [
+                "visible_row_original",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "COMMIT",
+        "command_tags": [
+          "COMMIT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated,conkey::text,pg_get_expr(conbin,conrelid) AS expression FROM pg_constraint WHERE conrelid='visible_row'::regclass ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated",
+              "conkey",
+              "expression"
+            ],
+            "type_oids": [
+              19,
+              16,
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_external",
+                "t",
+                "{1}",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,constraint_type::text FROM information_schema.table_constraints WHERE table_name='visible_row' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "constraint_type"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_external",
+                "CHECK"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,column_name::text FROM information_schema.constraint_column_usage WHERE table_name='visible_row' ORDER BY constraint_name,column_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "column_name"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_row_external",
+                "n"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,check_clause FROM information_schema.check_constraints WHERE constraint_name LIKE 'visible_row_%' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "check_clause"
+            ],
+            "type_oids": [
+              25,
+              1043
+            ],
+            "rows": [
+              [
+                "visible_row_external",
+                "(n > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      }
+    ]
+  },
+  "domain_validation": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "cases": [
+      {
+        "sql": "CREATE DOMAIN visible_domain AS integer CONSTRAINT visible_domain_positive CHECK(VALUE>0)",
+        "command_tags": [
+          "CREATE DOMAIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ",
+        "command_tags": [
+          "BEGIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated FROM pg_constraint WHERE contypid='visible_domain'::regtype ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated"
+            ],
+            "type_oids": [
+              19,
+              16
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ALTER DOMAIN visible_domain VALIDATE CONSTRAINT visible_domain_positive",
+        "command_tags": [
+          "ALTER DOMAIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "SAVEPOINT mine",
+        "command_tags": [
+          "SAVEPOINT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ALTER DOMAIN visible_domain VALIDATE CONSTRAINT visible_domain_positive",
+        "command_tags": [
+          "ALTER DOMAIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated FROM pg_constraint WHERE contypid='visible_domain'::regtype ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated"
+            ],
+            "type_oids": [
+              19,
+              16
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "t"
+              ],
+              [
+                "visible_domain_positive",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT count(*),count(DISTINCT oid) FROM pg_constraint WHERE contypid='visible_domain'::regtype",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "count",
+              "count"
+            ],
+            "type_oids": [
+              20,
+              20
+            ],
+            "rows": [
+              [
+                "2",
+                "1"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,check_clause FROM information_schema.check_constraints WHERE constraint_name LIKE 'visible_domain_%' ORDER BY constraint_name,check_clause",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "check_clause"
+            ],
+            "type_oids": [
+              25,
+              1043
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "(VALUE > 0)"
+              ],
+              [
+                "visible_domain_positive",
+                "(VALUE > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,domain_name::text FROM information_schema.domain_constraints WHERE domain_name='visible_domain' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "domain_name"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "visible_domain"
+              ],
+              [
+                "visible_domain_positive",
+                "visible_domain"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ROLLBACK TO mine",
+        "command_tags": [
+          "ROLLBACK"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated FROM pg_constraint WHERE contypid='visible_domain'::regtype ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated"
+            ],
+            "type_oids": [
+              19,
+              16
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT count(*),count(DISTINCT oid) FROM pg_constraint WHERE contypid='visible_domain'::regtype",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "count",
+              "count"
+            ],
+            "type_oids": [
+              20,
+              20
+            ],
+            "rows": [
+              [
+                "1",
+                "1"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,check_clause FROM information_schema.check_constraints WHERE constraint_name LIKE 'visible_domain_%' ORDER BY constraint_name,check_clause",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "check_clause"
+            ],
+            "type_oids": [
+              25,
+              1043
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "(VALUE > 0)"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT constraint_name::text,domain_name::text FROM information_schema.domain_constraints WHERE domain_name='visible_domain' ORDER BY constraint_name",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "constraint_name",
+              "domain_name"
+            ],
+            "type_oids": [
+              25,
+              25
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "visible_domain"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "COMMIT",
+        "command_tags": [
+          "COMMIT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,convalidated FROM pg_constraint WHERE contypid='visible_domain'::regtype ORDER BY conname,convalidated",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "convalidated"
+            ],
+            "type_oids": [
+              19,
+              16
+            ],
+            "rows": [
+              [
+                "visible_domain_positive",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      }
+    ]
+  },
+  "foreign": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "cases": [
+      {
+        "sql": "CREATE FOREIGN DATA WRAPPER memory",
+        "command_tags": [
+          "CREATE FOREIGN DATA WRAPPER"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "CREATE SERVER visible_server FOREIGN DATA WRAPPER memory",
+        "command_tags": [
+          "CREATE SERVER"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "CREATE FOREIGN TABLE visible_foreign(n integer,m integer,CONSTRAINT visible_foreign_positive CHECK(n>0)) SERVER visible_server",
+        "command_tags": [
+          "CREATE FOREIGN TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ",
+        "command_tags": [
+          "BEGIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conname LIKE 'visible_foreign_%' ORDER BY conname",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "conkey",
+              "has_node"
+            ],
+            "type_oids": [
+              19,
+              25,
+              16
+            ],
+            "rows": [
+              [
+                "visible_foreign_positive",
+                "{1}",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ALTER FOREIGN TABLE visible_foreign DROP COLUMN n",
+        "command_tags": [
+          "ALTER FOREIGN TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "SELECT conname,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conname LIKE 'visible_foreign_%' ORDER BY conname",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "conkey",
+              "has_node"
+            ],
+            "type_oids": [
+              19,
+              25,
+              16
+            ],
+            "rows": [
+              [
+                "visible_foreign_positive",
+                "{1}",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SAVEPOINT mine",
+        "command_tags": [
+          "SAVEPOINT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "CREATE FOREIGN TABLE visible_foreign_private(m integer,CONSTRAINT visible_foreign_private_check CHECK(m<9)) SERVER visible_server",
+        "command_tags": [
+          "CREATE FOREIGN TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conname LIKE 'visible_foreign_%' ORDER BY conname",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "conkey",
+              "has_node"
+            ],
+            "type_oids": [
+              19,
+              25,
+              16
+            ],
+            "rows": [
+              [
+                "visible_foreign_positive",
+                "{1}",
+                "t"
+              ],
+              [
+                "visible_foreign_private_check",
+                "{1}",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ROLLBACK TO mine",
+        "command_tags": [
+          "ROLLBACK"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conname LIKE 'visible_foreign_%' ORDER BY conname",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "conkey",
+              "has_node"
+            ],
+            "type_oids": [
+              19,
+              25,
+              16
+            ],
+            "rows": [
+              [
+                "visible_foreign_positive",
+                "{1}",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "COMMIT",
+        "command_tags": [
+          "COMMIT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conname LIKE 'visible_foreign_%' ORDER BY conname",
+        "command_tags": [
+          "SELECT 0"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "conkey",
+              "has_node"
+            ],
+            "type_oids": [
+              19,
+              25,
+              16
+            ],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      }
+    ]
+  },
+  "trigger": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "cases": [
+      {
+        "sql": "CREATE TABLE visible_trigger(n integer)",
+        "command_tags": [
+          "CREATE TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "CREATE FUNCTION visible_trigger_function() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+        "command_tags": [
+          "CREATE FUNCTION"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "CREATE CONSTRAINT TRIGGER visible_trigger_original AFTER INSERT ON visible_trigger DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION visible_trigger_function()",
+        "command_tags": [
+          "CREATE TRIGGER"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ",
+        "command_tags": [
+          "BEGIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,condeferrable,condeferred FROM pg_constraint WHERE conrelid='visible_trigger'::regclass ORDER BY conname",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "condeferrable",
+              "condeferred"
+            ],
+            "type_oids": [
+              19,
+              16,
+              16
+            ],
+            "rows": [
+              [
+                "visible_trigger_original",
+                "t",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "DROP TRIGGER visible_trigger_original ON visible_trigger",
+        "command_tags": [
+          "DROP TRIGGER"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "SELECT conname,condeferrable,condeferred FROM pg_constraint WHERE conrelid='visible_trigger'::regclass ORDER BY conname",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "condeferrable",
+              "condeferred"
+            ],
+            "type_oids": [
+              19,
+              16,
+              16
+            ],
+            "rows": [
+              [
+                "visible_trigger_original",
+                "t",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SAVEPOINT mine",
+        "command_tags": [
+          "SAVEPOINT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "CREATE CONSTRAINT TRIGGER visible_trigger_private AFTER INSERT ON visible_trigger FOR EACH ROW EXECUTE FUNCTION visible_trigger_function()",
+        "command_tags": [
+          "CREATE TRIGGER"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,condeferrable,condeferred FROM pg_constraint WHERE conrelid='visible_trigger'::regclass ORDER BY conname",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "condeferrable",
+              "condeferred"
+            ],
+            "type_oids": [
+              19,
+              16,
+              16
+            ],
+            "rows": [
+              [
+                "visible_trigger_original",
+                "t",
+                "t"
+              ],
+              [
+                "visible_trigger_private",
+                "f",
+                "f"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ROLLBACK TO mine",
+        "command_tags": [
+          "ROLLBACK"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,condeferrable,condeferred FROM pg_constraint WHERE conrelid='visible_trigger'::regclass ORDER BY conname",
+        "command_tags": [
+          "SELECT 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "condeferrable",
+              "condeferred"
+            ],
+            "type_oids": [
+              19,
+              16,
+              16
+            ],
+            "rows": [
+              [
+                "visible_trigger_original",
+                "t",
+                "t"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "COMMIT",
+        "command_tags": [
+          "COMMIT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname,condeferrable,condeferred FROM pg_constraint WHERE conrelid='visible_trigger'::regclass ORDER BY conname",
+        "command_tags": [
+          "SELECT 0"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname",
+              "condeferrable",
+              "condeferred"
+            ],
+            "type_oids": [
+              19,
+              16,
+              16
+            ],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      }
+    ]
+  },
+  "portal": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "cases": [
+      {
+        "sql": "CREATE TABLE visible_portal(n integer,CONSTRAINT visible_portal_a CHECK(n>0),CONSTRAINT visible_portal_b CHECK(n<9))",
+        "command_tags": [
+          "CREATE TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "BEGIN",
+        "command_tags": [
+          "BEGIN"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "DECLARE retained_catalog CURSOR WITH HOLD FOR SELECT conname FROM pg_constraint WHERE conrelid='visible_portal'::regclass ORDER BY conname",
+        "command_tags": [
+          "DECLARE CURSOR"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "FETCH 1 FROM retained_catalog",
+        "command_tags": [
+          "FETCH 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname"
+            ],
+            "type_oids": [
+              19
+            ],
+            "rows": [
+              [
+                "visible_portal_a"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "ALTER TABLE visible_portal RENAME CONSTRAINT visible_portal_b TO visible_portal_c",
+        "command_tags": [
+          "ALTER TABLE"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 0
+      },
+      {
+        "sql": "COMMIT",
+        "command_tags": [
+          "COMMIT"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "FETCH ALL FROM retained_catalog",
+        "command_tags": [
+          "FETCH 1"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname"
+            ],
+            "type_oids": [
+              19
+            ],
+            "rows": [
+              [
+                "visible_portal_b"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "CLOSE retained_catalog",
+        "command_tags": [
+          "CLOSE CURSOR"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [],
+            "type_oids": [],
+            "rows": []
+          }
+        ],
+        "notices": [],
+        "session": 1
+      },
+      {
+        "sql": "SELECT conname FROM pg_constraint WHERE conrelid='visible_portal'::regclass ORDER BY conname",
+        "command_tags": [
+          "SELECT 2"
+        ],
+        "error": null,
+        "results": [
+          {
+            "columns": [
+              "conname"
+            ],
+            "type_oids": [
+              19
+            ],
+            "rows": [
+              [
+                "visible_portal_a"
+              ],
+              [
+                "visible_portal_c"
+              ]
+            ]
+          }
+        ],
+        "notices": [],
+        "session": 1
+      }
+    ]
+  }
+}
