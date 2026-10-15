@@ -8,6 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views.
+
+- Retain physical constraint catalog rows across concurrent DDL, REPEATABLE READ, SERIALIZABLE, savepoint rollback and held cursors. Publish ordinary, foreign, domain and trigger constraints atomically, preserving independent partition catalog identities. The all-owner storage upgrade initializes existing definitions without rewriting user rows.
+
+- Restore role definitions and validate OID claims without first copying all selected metadata payloads, preserving snapshot boundaries and callback errors.
+
 - Preserve PostgreSQL result type modifiers across unknown CASE inputs, selected constant or column arms and retained collation metadata, without changing returned values.
 
 - Preserve plain projected column names in view definitions when analyzed expressions retain collation metadata, while keeping explicit COLLATE and renamed outputs.
@@ -30,7 +36,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Preserve the unlimited length of catalog-qualified `bpchar`, avoiding premature one-character truncation in character casts, enum and date input, stored values and analytical query results.
 
+- Print CHECK definitions with PostgreSQL variadic-array calls, typed cast parentheses and session string escaping, preserving domain values, current names and durable definitions.
+
 - Dropping an ordinary or foreign column preserves CHECK constraints that do not depend on that attribute, including constant predicates and checks of another surviving column, with their original identities, flags and enforcement after rollback or reopening.
+- Analyze and enforce CHECK predicates in their declared row scope, with actual composite identity, physical `tableoid`, PostgreSQL diagnostics and ordered catalog dependencies. Whole-row checks follow current columns and ordinary or quoted table renames; omitted fields remain SQL NULL during writes and validation, including after persistent reopening.
 
 - Make foreign-table relation and row/array identities visible while binding defaults, before the server association. Retain in-progress declarations across catalog refreshes and restore all foreign row descriptors before validating persisted expressions, preserving rollback, independent sessions and reopened composite defaults.
 
