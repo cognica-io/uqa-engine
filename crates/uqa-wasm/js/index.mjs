@@ -721,6 +721,8 @@ function requireSafeHTTPInteger(value) {
 
 function formatHTTPDate(days) {
   requireSafeHTTPInteger(days);
+  if (days === -2_147_483_648) return "-infinity";
+  if (days === 2_147_483_647) return "infinity";
   const date = new Date(days * 86_400_000);
   if (Number.isNaN(date.valueOf())) {
     return String(days);
@@ -731,17 +733,18 @@ function formatHTTPDate(days) {
   }
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
-  return `${formatHTTPYear(year)}-${month}-${day}`;
+  return `${formatHTTPYear(year)}-${month}-${day}${year <= 0 ? " BC" : ""}`;
 }
 
 function formatHTTPYear(year) {
-  const magnitude = String(Math.abs(year)).padStart(4, "0");
-  return year < 0 ? `-${magnitude}` : year > 9_999 ? `+${magnitude}` : magnitude;
+  return String(year > 0 ? year : 1 - year).padStart(4, "0");
 }
 
 function formatHTTPTime(source) {
   const day = 86_400_000_000;
-  const micros = ((requireSafeHTTPInteger(source) % day) + day) % day;
+  const input = requireSafeHTTPInteger(source);
+  if (input === day) return "24:00:00";
+  const micros = ((input % day) + day) % day;
   const hours = Math.floor(micros / 3_600_000_000);
   const minutes = Math.floor((micros % 3_600_000_000) / 60_000_000);
   const seconds = Math.floor((micros % 60_000_000) / 1_000_000);
@@ -757,7 +760,8 @@ function formatHTTPOffset(source) {
   const minutes = requireSafeHTTPInteger(source);
   const sign = minutes < 0 ? "-" : "+";
   const absolute = Math.abs(minutes);
-  return `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
+  const hours = `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}`;
+  return absolute % 60 === 0 ? hours : `${hours}:${String(absolute % 60).padStart(2, "0")}`;
 }
 
 function formatHTTPTimestamp(source, utc) {
@@ -779,7 +783,7 @@ function formatHTTPTimestamp(source, utc) {
   if (fraction !== 0) {
     output += `.${String(fraction).padStart(6, "0").replace(/0+$/, "")}`;
   }
-  return utc ? `${output}+00` : output;
+  return output + (utc ? "+00" : "") + (year <= 0 ? " BC" : "");
 }
 
 function formatHTTPInterval(monthsSource, daysSource, microsSource) {
@@ -794,7 +798,7 @@ function formatHTTPInterval(monthsSource, daysSource, microsSource) {
     if (value !== 0) {
       const sign = negativeFieldSeen && value > 0 ? "+" : "";
       fields.push(`${sign}${value} ${singular}${value === 1 ? "" : "s"}`);
-      negativeFieldSeen ||= value < 0;
+      negativeFieldSeen = value < 0;
     }
   }
   if (micros !== 0 || fields.length === 0) {

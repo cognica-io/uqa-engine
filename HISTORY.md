@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match Node.js and browser HTTP temporal output to PostgreSQL and native clients, including infinite dates, BC and extended years, `24:00`, whole-hour timezone offsets and mixed-sign intervals. Preserve exact Node.js timestamp/interval infinity carriers and browser safe-integer rejection.
+
 - Preserve deferred foreign-key modes and pending events across physical constraint catalog publication, partition changes, renames, nested execution and savepoint rollback by retaining the independent enforcement identity.
 
 - Publish inherited constraint counts and routine-dependent foreign-table changes atomically, repair physical constraint rows during legacy conversion and reject missing or unknown constraint formats when creating independent sessions.

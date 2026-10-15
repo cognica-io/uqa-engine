@@ -17,6 +17,7 @@ import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/co
 import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/vector-knn.mjs";
 import { registerNativeNotificationTests } from "./notifications/native.mjs";
 import { runCLIFixture } from "./http_cli.mjs";
+import { temporalOracle } from "../parity/http_temporal.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
@@ -201,6 +202,7 @@ test("JavaScript HTTP values agree with the native client across SQL carriers", 
     '{"$uqa_type":"timestamp","micros":-9223372036854775808}',
     '{"$uqa_type":"timestamp","micros":9223372036854775807}',
     '{"$uqa_type":"interval","months":-13,"days":2,"micros":9223372036854775807}',
+    ...temporalOracle.cases.map((fixture) => fixture.wire),
   ];
   const server = createServer(async (request, response) => {
     const query = await readRequestJSON(request);
@@ -215,7 +217,12 @@ test("JavaScript HTTP values agree with the native client across SQL carriers", 
     const current = new uqa.HttpEngine(url, "token");
     const native = new NativeHttpEngine(url, "token");
     for (let index = 0; index < fixtures.length; index += 1) {
-      assert.deepEqual(await current.sql(String(index)), await native.sql(String(index)), fixtures[index]);
+      const output = await current.sql(String(index));
+      assert.deepEqual(output, await native.sql(String(index)), fixtures[index]);
+      const oracleIndex = index - (fixtures.length - temporalOracle.cases.length);
+      if (oracleIndex >= 0) {
+        assert.equal(output.rows[0].v, temporalOracle.cases[oracleIndex].expected, fixtures[index]);
+      }
     }
   } finally {
     await new Promise((resolve) => server.close(resolve));

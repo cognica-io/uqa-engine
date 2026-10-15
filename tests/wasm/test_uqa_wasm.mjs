@@ -18,6 +18,7 @@ import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mj
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 import { runDirectNotifications } from "./notifications/direct.mjs";
 import { registerHTTPLimitTests } from "../parity/http_limits.mjs";
+import { registerHTTPTemporalTests } from "../parity/http_temporal.mjs";
 
 const {
   Engine,
@@ -33,6 +34,7 @@ const {
   ? pathToFileURL(resolve(process.env.UQA_TEST_PACKAGE)).href
   : "../../crates/uqa-wasm/js/index.mjs");
 registerHTTPLimitTests("Browser", HttpEngine, HttpEngineError);
+registerHTTPTemporalTests("Browser", HttpEngine, { browser: true });
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 
 test("direct WASM notification acceptance", { timeout: 60000 }, async () => {
@@ -214,8 +216,8 @@ test("HTTP engine executes SQL, atomic batches, and streams", async (context) =>
     JSON.parse('{"__proto__":"preserved"}'),
     SQLParam.scalar({ $bytes: "ordinary-json", $vector: [1, 2] }),
   ]);
-  assert.equal(special.rows[0].created_on, "+10000-01-01");
-  assert.equal(special.rows[0].duration, "-1 mons +1 day +01:00:00");
+  assert.equal(special.rows[0].created_on, "10000-01-01");
+  assert.equal(special.rows[0].duration, "-1 mons +1 day 01:00:00");
   assert.equal(special.rows[0].$uqa_type, "bytes");
   assert.equal(special.rows[0].hex, "column");
   assert.equal(special.rows[0].document.$uqa_type, "bytes");
