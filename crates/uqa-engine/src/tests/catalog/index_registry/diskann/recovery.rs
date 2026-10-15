@@ -69,6 +69,11 @@ fn diskann_publication_cache_restore_failure_keeps_the_confirmed_commit() {
             first.commit().unwrap();
             assert_eq!(first.transaction_depth(), 0);
             assert!(first.pending_commit().is_none());
+            // The committing session already owns its published caches. A later peer definition forces an actual refresh.
+            sql(
+                &peer,
+                "ALTER TABLE diskann_docs ADD COLUMN restore_probe integer",
+            );
             let backend = first.storage.backend.as_ref().unwrap();
             let committed = backend.change_version().unwrap().unwrap();
             let control = first.query_retention_control().unwrap();

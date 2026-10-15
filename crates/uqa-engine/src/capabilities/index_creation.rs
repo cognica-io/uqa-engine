@@ -127,6 +127,33 @@ impl IndexRegistryPublication for Engine {
         self.note_catalog_registry_changed();
     }
 
+    fn rebind_diskann_index(&self, row: &CatalogIndexRow) -> StorageBackendResult<()> {
+        let (field, dimensions, parameters) =
+            uqa_execution::schema::indexes::diskann::target(self, row)?;
+        let index = self.build_catalog_diskann_index(
+            row,
+            &field,
+            dimensions,
+            parameters,
+            uqa_storage::VectorIndexOpenMode::Restore,
+        )?;
+        let relation = uqa_core::RelationIdentity::from_legacy_name(&row.table_name)
+            .map_err(StorageBackendError::Other)?;
+        let table = self
+            .storage
+            .tables
+            .read()
+            .get(&relation)
+            .cloned()
+            .ok_or_else(|| StorageBackendError::Other("renamed index table disappeared".into()))?;
+        table
+            .vector_indexes
+            .write()
+            .live_mut()?
+            .insert(field, index);
+        Ok(())
+    }
+
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()> {
         self.refresh_value_indexes_for_table(table)
     }
