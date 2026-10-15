@@ -10,6 +10,90 @@ use super::*;
 use uqa_storage::{KeyValueStorageBackend, PersistentStorageBackend};
 
 #[test]
+fn fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes() {
+    let persistence = Persistence::new();
+    let store = Arc::new(persistence.session(1 << 20));
+    let session = uqa_storage::PersistentStorageSession::new(
+        Arc::new(uqa_storage::KeyValueCatalog::new(store.clone())),
+        Arc::new(KeyValueStorageBackend::new(store)),
+    );
+    uqa_storage::key_value::conformance::verify_catalog_read_boundaries(&session).unwrap();
+}
+
+#[test]
+fn fixed_read_composition_retains_spilled_private_rows_without_copying_payloads() {
+    for count in [8_u32, 256] {
+        let persistence = Persistence::new();
+        let source = persistence.session(1 << 20);
+        let control = source.retention_control();
+        source.put(b"base", b"original").unwrap();
+        source.begin_transaction().unwrap();
+        let boundary = source.capture_committed_read_boundary().unwrap();
+        let payload = vec![b'x'; 16 * 1024];
+        for id in 0..count {
+            source.put(&id.to_be_bytes(), &payload).unwrap();
+        }
+        let cancellation = uqa_core::CancellationToken::new();
+        let mut reader = None;
+        let capture = allocation_counter::measure(|| {
+            reader = Some(
+                source
+                    .new_read_session_with_private_changes(&boundary, &cancellation)
+                    .unwrap(),
+            );
+        });
+        assert!(capture.bytes_max < 32 * 1024, "{capture:?}");
+        let reader = reader.unwrap();
+        assert!(reader
+            .retention_control()
+            .memory()
+            .shares_allowance(control.memory()));
+        source.rollback_transaction().unwrap();
+        drop((source, boundary));
+        assert_eq!(reader.get(b"base").unwrap().unwrap(), b"original");
+        for id in 0..count {
+            assert_eq!(reader.get(&id.to_be_bytes()).unwrap().unwrap(), payload);
+        }
+        drop(reader);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn fixed_read_boundaries_reject_savepoint_time_travel_and_retain_independent_cancellation() {
+    let persistence = Persistence::new();
+    let source = persistence.session(1 << 20);
+    let peer = persistence.session(1 << 20);
+    let cancellation = uqa_core::CancellationToken::new();
+    assert!(source.capture_committed_read_boundary().is_err());
+    source.begin_transaction().unwrap();
+    source.savepoint("before-peer").unwrap();
+    peer.put(b"later", b"committed").unwrap();
+    source.refresh_transaction_snapshot(&cancellation).unwrap();
+    let boundary = source.capture_committed_read_boundary().unwrap();
+    let reader = source
+        .new_read_session_with_private_changes(&boundary, &cancellation)
+        .unwrap();
+    source.rollback_to_savepoint("before-peer").unwrap();
+    assert!(source
+        .new_read_session_with_private_changes(&boundary, &cancellation)
+        .is_err());
+    let original_control = source.retention_control();
+    original_control.cancellation().cancel();
+    assert!(matches!(
+        source.capture_committed_read_boundary(),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(reader.get(b"later").unwrap().unwrap(), b"committed");
+    assert!(reader.capture_committed_read_boundary().is_err());
+    assert!(reader
+        .new_read_session_with_private_changes(&boundary, &cancellation)
+        .is_err());
+    original_control.cancellation().reset();
+    source.rollback_transaction().unwrap();
+}
+
+#[test]
 fn retained_backend_readers_share_the_original_limit_and_release_their_last_charge() {
     let persistence = Persistence::new();
     let source = Arc::new(persistence.session(1 << 20));

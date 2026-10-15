@@ -50,6 +50,9 @@ mod table;
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
 pub use table::{TableAclEntry, TablePrivileges};
 
+/// A borrowed metadata record on one catalog read boundary. Callbacks must not reenter persistence.
+pub type MetadataReadVisitor<'a> = dyn FnMut(&str, &str) -> StorageBackendResult<()> + 'a;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
@@ -314,8 +317,36 @@ pub trait CatalogFacade: Send + Sync {
     /// Remove one metadata record, retaining its private deletion and write precondition until transaction end.
     fn delete_metadata(&self, key: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
-    /// Read matching metadata keys from one catalog snapshot; the prefix is literal, including NUL and wildcard characters.
-    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>>;
+    /// Visit matching metadata records on one catalog snapshot without collecting their payloads. The prefix is literal, including NUL and wildcard characters. Providers retain their original read allowance and cancellation; an error stops the scan before the next record. The callback must not reenter persistence and owns any retained output. Unsupported providers must reject this operation instead of materializing all records.
+    fn visit_metadata_with_prefix(
+        &self,
+        _prefix: &str,
+        _visit: &mut MetadataReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "borrowed metadata reads are not supported by this catalog".into(),
+        ))
+    }
+    /// Visit a literal metadata prefix whose complete keys have the supplied UTF-8 byte length. Preserve the same borrowed read boundary and error contract as `visit_metadata_with_prefix`. Length-prefixed providers can seek the encoded length and prefix together instead of scanning unrelated metadata families. Unsupported providers must reject the operation.
+    fn visit_metadata_with_key_length(
+        &self,
+        _prefix: &str,
+        _key_bytes: usize,
+        _visit: &mut MetadataReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "fixed-length metadata reads are not supported by this catalog".into(),
+        ))
+    }
+    /// Collect matching metadata records from one catalog snapshot; output allocation belongs to the caller. The prefix is literal, including NUL and wildcard characters.
+    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
+        let mut entries = Vec::new();
+        self.visit_metadata_with_prefix(prefix, &mut |key, value| {
+            entries.push((key.to_owned(), value.to_owned()));
+            Ok(())
+        })?;
+        Ok(entries)
+    }
     /// Replace one already bound relation or attribute ACL without rewriting its definition. The caller holds the relation lifetime and catalog tuple locks until transaction end.
     fn save_relation_acl(
         &self,

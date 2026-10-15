@@ -170,7 +170,7 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 61)"));
+        assert!(definition.contains("CHECK(format = 62)"));
         if format < 59 { super::version_metadata::install_predecessor(connection, format)?; }
         let definition = if format < 60 { definition.split(", sequence_durable BLOB").next().unwrap().to_owned() + ")" } else { definition };
         let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else if format < 44 { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" } else { definition };
@@ -186,7 +186,7 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 61)", &format!("CHECK(format = {format})")))?;
+        connection.execute_batch(&definition.replace("CHECK(format = 62)", &format!("CHECK(format = {format})")))?;
         let restore = if format < 43 { "" } else if format < 44 { ", restore_target" } else if format < 60 { ", restore_target, receipt_limit" } else { ", restore_target, receipt_limit, sequence_durable" };
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping{restore} FROM saved_metadata; DROP TABLE saved_metadata;"))?;
         if format < 44 {
@@ -510,7 +510,7 @@ fn closed_record_format_files_upgrade_in_every_sqlite_mode(
 #[rstest::rstest]
 fn latest_record_format_files_upgrade_in_every_sqlite_mode(
     #[values(0, 1, 2, 3)] mode: usize,
-    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60)] format: i64,
+    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61)] format: i64,
 ) {
     closed_record_formats_upgrade(mode, format);
 }

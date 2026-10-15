@@ -22,9 +22,10 @@ impl NativeSnapshot {
             &prefix,
             |row| {
                 let key = string(row[0])?;
-                visitor(&key, &string(row[1])?)
+                visitor(&key, &string(row[1])?).map_err(Into::into)
             },
         )
+        .map_err(Into::into)
     }
 
     pub(in crate::catalog) fn load_relation_acls(

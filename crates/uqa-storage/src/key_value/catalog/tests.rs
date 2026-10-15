@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 
 mod diskann;
 mod foreign_servers;
+mod metadata_reads;
 mod relation_acls;
 mod sequence_values;
 

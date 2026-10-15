@@ -455,3 +455,28 @@ fn selected_catalog_record_revisions_preserve_replacement_and_undo_identity() {
         std::sync::Arc::new(SQLiteKeyValueStore::new(connection).unwrap());
     uqa_storage::key_value::conformance::verify_catalog_record_revisions(&store).unwrap();
 }
+
+#[test]
+fn borrowed_metadata_visits_retain_private_and_committed_boundaries() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store: std::sync::Arc<dyn uqa_storage::KeyValueStore> =
+        std::sync::Arc::new(SQLiteKeyValueStore::new(connection).unwrap());
+    uqa_storage::key_value::conformance::verify_catalog_metadata_visits(&store).unwrap();
+}
+
+#[test]
+fn fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes() {
+    use uqa_storage::PersistentStorageProvider;
+    for native in [false, true] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let provider: Box<dyn PersistentStorageProvider> = if native {
+            Box::new(uqa_storage_sqlite::SQLiteStorageProvider::new(connection))
+        } else {
+            Box::new(
+                uqa_storage_sqlite::SQLiteKeyValueStorage::from_connection(connection).unwrap(),
+            )
+        };
+        let session = provider.open_session().unwrap();
+        uqa_storage::key_value::conformance::verify_catalog_read_boundaries(&session).unwrap();
+    }
+}

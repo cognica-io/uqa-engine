@@ -91,6 +91,25 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         Ok(PersistentStorageSession::new(catalog, backend))
     }
 
+    fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<crate::mvcc::CommittedReadBoundary>> {
+        self.store.capture_committed_read_boundary()
+    }
+
+    fn open_read_session_with_private_changes(
+        &self,
+        boundary: &crate::mvcc::CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let store = self
+            .store
+            .open_read_session_with_private_changes(boundary, cancellation)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         self.store.transaction_model()
     }
