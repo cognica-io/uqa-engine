@@ -200,7 +200,12 @@ impl Preparation<'_> {
                 // The wrapped node has already been assigned. Analyze its inputs without scheduling another wrapper around that same node.
                 let mut value = self.expression_inner(expr, input, subqueries)?;
                 collation.validate(ty)?;
-                value.ty = Some(ty.clone());
+                // Collation assignment retains type identity, while a simplified arm keeps its own modifier.
+                if value.ty.as_ref().is_none_or(|inner| {
+                    inner != ty && inner.without_type_modifiers() != ty.without_type_modifiers()
+                }) {
+                    value.ty = Some(ty.clone());
+                }
                 value.derivation = value
                     .derivation
                     .error_only()

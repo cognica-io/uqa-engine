@@ -185,3 +185,42 @@ fn folding_constant_expressions_preserves_selected_output_collation() {
         }
     }
 }
+
+#[test]
+fn simplified_case_retains_selected_branch_modifiers_and_collation() {
+    use uqa_sql::binding::statements::{analyze_plan_result, AnalyzedResult};
+    use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
+    for (condition, selected, expected) in [(true, "abc", 7), (false, "x", 13)] {
+        let sql =
+            format!("SELECT CASE WHEN {condition} THEN 'abc'::varchar(3) ELSE 'x'::varchar(9) END");
+        let catalog = fixture::NoRoutines;
+        let mut plan = UnifiedPlan::lower(uqa_sql::compile(&sql).unwrap().remove(0));
+        analyze_plan_result(&catalog, &catalog, &mut plan, &[], &catalog).unwrap();
+        let UnifiedPlan::Query(query) = &mut plan else {
+            panic!("query")
+        };
+        let RelationalPlan::QueryBlock(block) = &mut query.root else {
+            panic!("block")
+        };
+        let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        config.coerced_conditionals = true;
+        crate::optimizer::optimize_scalar_expression(&mut block.projections[0].expr, &config)
+            .unwrap();
+        assert_eq!(
+            uqa_execution::scalar::eval_constant_scalar(&block.projections[0].expr).unwrap(),
+            Value::Str(selected.into())
+        );
+        let once = serde_json::to_value(&plan).unwrap();
+        plan = serde_json::from_value(once).unwrap();
+        let AnalyzedResult::Schema(schema) =
+            analyze_plan_result(&catalog, &catalog, &mut plan, &[], &catalog).unwrap()
+        else {
+            panic!("schema")
+        };
+        assert_eq!(
+            uqa_sql::catalog::type_metadata::pg_type_modifier(schema.column_type(0).unwrap()),
+            expected
+        );
+        assert_eq!(schema.column_collation(0), Some(100));
+    }
+}

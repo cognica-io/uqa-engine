@@ -277,3 +277,24 @@ fn common_input_selection_retains_one_type_and_propagates_resource_errors() {
     );
     assert_eq!(empty.used(), 0);
 }
+
+#[test]
+fn common_unknown_array_inputs_reuse_one_selected_type() {
+    let ty = ColumnType::Array(Box::new(ColumnType::Varchar(None)));
+    let budget = MemoryBudget::new(size_of::<ColumnType>());
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let selected = select_common_input_type_in_with_control(
+        CommonTypeContext::Case,
+        [Some(&ty)]
+            .into_iter()
+            .chain(std::iter::repeat_n(None, 4096)),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(*selected, ty);
+    assert_eq!(budget.used(), selected.reserved_bytes());
+    assert_eq!(budget.peak(), size_of::<ColumnType>());
+    drop(selected);
+    assert_eq!(budget.used(), 0);
+}

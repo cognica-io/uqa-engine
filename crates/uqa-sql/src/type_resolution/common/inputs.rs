@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Common input selection preserves domains only while every input has exactly the same type.
+//! Common input selection preserves domains and modifiers only across identical inputs.
 
 use super::{
     base_type, select_pair_with_control, ColumnType, CommonTypeContext, CommonTypeFailure,
@@ -84,19 +84,24 @@ impl CommonInputType {
                 None
             }
             (None, Some(ty)) => Some(
-                (if self.same_type { ty } else { base_type(ty) })
-                    .clone_with_control(control)
-                    .map_err(CommonTypeFailure::failed)?,
+                if self.same_type {
+                    ty.clone_with_control(control)
+                } else {
+                    base_type(ty).without_type_modifiers_with_control(control)
+                }
+                .map_err(CommonTypeFailure::failed)?,
             ),
             (Some(previous), None) => {
                 self.same_type = false;
-                Some(if *previous == *base_type(&previous) {
-                    previous
-                } else {
-                    base_type(&previous)
-                        .clone_with_control(control)
-                        .map_err(CommonTypeFailure::failed)?
-                })
+                Some(
+                    if *previous == *base_type(&previous) && !previous.has_type_modifiers() {
+                        previous
+                    } else {
+                        base_type(&previous)
+                            .without_type_modifiers_with_control(control)
+                            .map_err(CommonTypeFailure::failed)?
+                    },
+                )
             }
             (Some(previous), Some(ty)) if self.same_type && *previous == *ty => Some(previous),
             (Some(previous), Some(ty)) => {

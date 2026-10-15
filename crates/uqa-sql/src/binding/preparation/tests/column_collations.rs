@@ -616,3 +616,53 @@ fn retained_view_projection(
     };
     (expr, ty, collation)
 }
+
+#[test]
+fn retained_case_output_modifiers_follow_every_coerced_result_arm() {
+    #[derive(serde::Deserialize)]
+    struct Case {
+        sql: String,
+        oid: i64,
+        modifier: i64,
+    }
+    let cases: Vec<Case> = serde_json::from_str(include_str!("case_modifiers.json")).unwrap();
+    assert_eq!(cases.len(), 9);
+    let context = crate::binding::fixture::empty_binding_context();
+    for case in cases {
+        let mut plan = UnifiedPlan::lower(crate::compile(&case.sql).unwrap().remove(0));
+        for _ in 0..2 {
+            read_prepared_inputs(&NoRoutines, &mut plan, &[], &context, None)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql));
+            let schema = crate::prepared::analyze_prepared_plan(&NoRoutines, &plan, &[], &context)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.sql))
+                .unwrap();
+            let ty = schema.column_type(0).expect("CASE result type");
+            assert_eq!(
+                crate::catalog::type_metadata::pg_type_oid(ty),
+                case.oid,
+                "{}",
+                case.sql
+            );
+            assert_eq!(
+                crate::catalog::type_metadata::pg_type_modifier(ty),
+                case.modifier,
+                "{}",
+                case.sql
+            );
+            if crate::schema::composites::type_is_collatable(ty) {
+                assert_eq!(
+                    schema.column_collation(0),
+                    Some(if case.sql.contains("COLLATE") {
+                        950
+                    } else {
+                        100
+                    }),
+                    "{}",
+                    case.sql
+                );
+            }
+            let serialized = serde_json::to_vec(&plan).unwrap();
+            plan = serde_json::from_slice(&serialized).unwrap();
+        }
+    }
+}

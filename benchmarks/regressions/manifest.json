@@ -6458,6 +6458,84 @@
       "capability": "Reported session parameters and typed TCP output",
       "workload": "Simple Query startup, IntervalStyle SET/SET LOCAL/rollback/RESET notifications and output, client setting reset, and the independent enum wire reference.",
       "invariant": "Session status follows the SQL parameter catalog and transaction boundaries; interval and enum text and metadata retain PostgreSQL behavior."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_case_output_modifiers_follow_every_coerced_result_arm",
+      "source": "crates/uqa-sql/src/binding/preparation/tests/column_collations.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Conditional result type modifiers",
+      "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
+      "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_collation_preserves_selected_arm_type_modifiers_and_budget",
+      "source": "crates/uqa-sql/src/type_resolution/inference/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Conditional result type modifiers",
+      "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
+      "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "common_unknown_array_inputs_reuse_one_selected_type",
+      "source": "crates/uqa-sql/src/type_resolution/common/production_tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Conditional result type modifiers",
+      "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
+      "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "simplified_case_retains_selected_branch_modifiers_and_collation",
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/collations.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Conditional result type modifiers",
+      "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
+      "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
+    },
+    {
+      "package": "uqa-pg-server",
+      "kind": "test",
+      "test": "case_result_modifiers_match_postgresql_over_tcp",
+      "source": "crates/uqa-pg-server/tests/server/simple_query.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Conditional result type modifiers",
+      "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
+      "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
+    },
+    {
+      "package": "uqa-pg-server",
+      "kind": "test",
+      "test": "result_fields_and_text_match_postgresql_over_tcp",
+      "source": "crates/uqa-pg-server/tests/server/simple_query.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Conditional result type modifiers",
+      "workload": "Independent PostgreSQL CASE field descriptors, unknown and NULL arms, equal and mixed modifiers, constant and column arms, explicit collations, and 4096 unknown array inputs.",
+      "invariant": "Retain a modifier only when the resulting expression supports it; preserve type and collation identity and values through simplification and serialization, using one selected array-type copy and the original cancellation budget."
     }
   ]
 }
