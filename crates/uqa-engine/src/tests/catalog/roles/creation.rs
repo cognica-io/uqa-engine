@@ -138,10 +138,12 @@ fn setup(engine: &Engine) -> SharedCatalogLock<'static> {
 }
 
 impl Target {
+    #[track_caller]
     fn assert_created(&self, engine: &Engine, created: bool) {
         self.assert_created_as(engine, created, "dependent");
     }
 
+    #[track_caller]
     fn assert_created_as(&self, engine: &Engine, created: bool, owner: &str) {
         let result = sql(engine, &format!("SELECT r.rolname AS owner FROM {} c JOIN pg_roles r ON r.oid = c.{} WHERE c.{} = 'created'", self.catalog, self.owner_column, self.name_column));
         assert_eq!(result.rows.len(), usize::from(created), "{}", self.create);
@@ -149,6 +151,60 @@ impl Target {
             assert_eq!(result.rows[0]["owner"], Value::Str(owner.into()));
         }
     }
+}
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn private_views_keep_renamed_owners_after_peer_catalog_publication(
+    #[case] provider: usize,
+    #[values("REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(4, 5)] target_index: usize,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    let lock = setup(&first);
+    sql(&first, "BEGIN");
+    first
+        .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+        .unwrap()
+        .retain();
+    sql(
+        &second,
+        &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+    );
+    let (second, result) = after_wait(
+        &first,
+        second,
+        target.create,
+        lock,
+        "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+    );
+    result.unwrap();
+    target.assert_created_as(&second, true, "renamed");
+    sql(&first, "CREATE ROLE peer_catalog_change");
+    // A peer can publish after this command pins its view, before a nested catalog lookup.
+    second.synchronize_catalog_registries().unwrap();
+    assert!(
+        second
+            .durable
+            .views
+            .read()
+            .contains_key(&uqa_core::RelationIdentity::new("public", "created")),
+        "private view disappeared during a catalog lookup: {}",
+        target.create
+    );
+    target.assert_created_as(&second, true, "renamed");
+    sql(&second, "COMMIT; RESET ROLE");
+    target.assert_created_as(&second, true, "renamed");
+    drop(second);
+    drop(first);
+    target.assert_created_as(
+        &reopen(provider, &directory.path().join("table-locks.db")),
+        true,
+        "renamed",
+    );
 }
 
 #[rstest::rstest]

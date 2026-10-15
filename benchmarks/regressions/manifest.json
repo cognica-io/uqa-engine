@@ -7090,6 +7090,99 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_views_keep_renamed_owners_after_peer_catalog_publication",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/catalog/roles/creation.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Twelve persistent-provider, fixed-isolation and regular/materialized view schedules after a role rename wait.",
+      "invariant": "A nested catalog lookup preserves the private view and original owner incarnation through commit and reopen.",
+      "case_names": [
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_1_4",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_1_4",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_1_4",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_1_4",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::target_index_2_5",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_1_4",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::target_index_2_5",
+        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_1_4",
+        "case_3_redb::isolation_2___SERIALIZABLE__::target_index_2_5"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_view_definitions_survive_refresh_commit_and_undo",
+      "cases": 18,
+      "source": "crates/uqa-engine/src/tests/catalog/roles/view_publication.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Eighteen provider/isolation/finish schedules with private view replacement, rename, deletion, creation and materialized refresh beside a committed peer replacement.",
+      "invariant": "Private definitions and peer changes survive catalog synchronization; commit, rollback, savepoint and reopen results match PostgreSQL 18.",
+      "case_names": [
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_1_native_sqlite::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_1_native_sqlite::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_2_sqlite_key_value::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_2_sqlite_key_value::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_1___COMMIT__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_2___ROLLBACK__",
+        "case_3_redb::isolation_1___REPEATABLEREAD__::finish_3___ROLLBACKTObefore_viewsCOMMIT__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_1___COMMIT__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_2___ROLLBACK__",
+        "case_3_redb::isolation_2___SERIALIZABLE__::finish_3___ROLLBACKTObefore_viewsCOMMIT__"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_view_records_preserve_complete_definitions_and_peer_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Private creation, same-identity replacement, rename, deletion and reincarnation beside a peer-only definition.",
+      "invariant": "One exact provenance inquiry per distinct key retains complete definitions and owner identities without changing the captured committed map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unchanged_views_share_the_committed_map_and_provenance_errors_do_not_publish",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
+      "capability": "Private view catalog publication",
+      "workload": "An unchanged view and a rejected private-provenance inquiry.",
+      "invariant": "Unchanged definitions reuse the committed allocation; provenance errors propagate without publishing a partial result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "view_private_provenance_tracks_exact_names_rename_deletion_and_undo",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/view_provenance.rs",
+      "capability": "Private view catalog publication",
+      "workload": "Serialized and native views with adjacent, Unicode, NUL and wildcard names through replacement, rename, deletion, savepoint undo and commit.",
+      "invariant": "Private provenance identifies exact view keys, including tombstones, without matching another name or schema.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

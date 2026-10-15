@@ -10,12 +10,16 @@ Preserve private regular and materialized view definitions when a fixed-isolatio
 
 - [x] Inspect the CI failure, crate features, dependency policy and ownership boundaries.
 - [x] Reproduce the missing private view with a deterministic peer-publication/catalog-lookup schedule: all twelve regular/materialized, fixed-isolation and persistent-provider combinations fail before the correction.
-- [ ] Add exact view-record provenance to native SQLite and shared Key/Value catalogs.
-- [ ] Preserve private view creation, replacement, rename, deletion and materialized rows during catalog refresh; retain committed peer changes and ACL behavior.
-- [ ] Verify owner incarnation, commit/reopen, rollback and savepoint behavior, with independent PostgreSQL 18 expectations.
+- [x] Add exact view-record provenance to native SQLite and shared Key/Value catalogs.
+- [x] Preserve private view creation, replacement, rename, deletion and materialized rows during catalog refresh; retain committed peer changes and ACL behavior.
+- [x] Verify owner incarnation, commit/reopen, rollback and savepoint behavior, with independent PostgreSQL 18 expectations.
 - [ ] Commit and push the implementation; review it and verify the actual Linux/macOS automatic regression results for that source revision.
 - [ ] Merge, close #899, remove the owned branch and return the isolated checkout to main.
 
 ## Evidence boundary
 
 The deterministic schedule calls the existing catalog synchronization adapter after the peer commits and before another SQL command can refresh the private read view. This represents publication between a command's snapshot acquisition and a nested catalog lookup. The defect is the absent private view, not merely a join choosing the wrong role name. Generated logs stay outside the repository. The separate controlled EC2 qualification of merged PR #897 remains tracked in that PR and must finish with the reusable instance stopped.
+
+The independent PostgreSQL 18.4 Docker capture is `tests/parity/pg18/capture_private_view_refresh.py`; its compact expected fixture records six two-session commit/rollback/savepoint schedules and is consumed by the Engine regression. Storage provenance reads exact physical view keys, including tombstones; Execution asks once per distinct relation and overlays only private definitions before applying the existing incarnation-aware ACL merge. The owning tests cover unchanged committed-map sharing and error propagation. These correctness checks do not establish a latency improvement.
+
+The correction is reviewed in [PR #900](https://github.com/cognica-io/uqa-engine/pull/900). Local verification passes the 33 new cases and the 126 original owner-wait cases plus existing private column-ACL and delegated-view-owner regressions. Formatting, crate dependency/ownership, single-harness, source-size/header, legal-file and deterministic-inventory checks pass. The automatic inventory now requires 787 cases in 533 checks; platform artifacts remain pending.
