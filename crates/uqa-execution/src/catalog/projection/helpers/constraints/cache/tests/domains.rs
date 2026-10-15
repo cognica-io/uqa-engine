@@ -59,7 +59,7 @@ fn domain_inquiries_build_addresses_once_without_copying_definitions() {
             .checks[0];
         for _ in 0..4 {
             let alias = catalog.clone();
-            let Some(DomainConstraint::Check(check)) =
+            let Some(DomainConstraint::Check(_, check)) =
                 domain_constraint_by_oid(&alias, resolution, 90_003).unwrap()
             else {
                 panic!("check");
@@ -100,7 +100,7 @@ fn concurrent_domain_readers_collect_addresses_once() {
                     let before = DOMAIN_READS.get();
                     assert!(matches!(
                         domain_constraint_by_oid(&catalog, &resolution, 90_003).unwrap(),
-                        Some(DomainConstraint::Check(_))
+                        Some(DomainConstraint::Check(_, _))
                     ));
                     DOMAIN_READS.get() - before
                 })
@@ -157,7 +157,7 @@ fn domain_addresses_preserve_first_match_and_ignore_unassigned_identities() {
 fn domain_addresses_remain_with_their_original_generation() {
     let catalog = with_domains(&fixture(0), 0);
     let resolution = CatalogServices::default().resolution;
-    let Some(DomainConstraint::Check(original)) =
+    let Some(DomainConstraint::Check(_, original)) =
         domain_constraint_by_oid(&catalog, &resolution, 90_003).unwrap()
     else {
         panic!("check");
@@ -171,7 +171,7 @@ fn domain_addresses_remain_with_their_original_generation() {
         .checks[0]
         .validated = false;
     let current = CatalogReadView::new(snapshot.clone());
-    let Some(DomainConstraint::Check(changed)) =
+    let Some(DomainConstraint::Check(_, changed)) =
         domain_constraint_by_oid(&current, &resolution, 90_003).unwrap()
     else {
         panic!("check");
@@ -183,7 +183,7 @@ fn domain_addresses_remain_with_their_original_generation() {
     assert!(domain_constraint_by_oid(&removed, &resolution, 90_003)
         .unwrap()
         .is_none());
-    let Some(DomainConstraint::Check(retained)) =
+    let Some(DomainConstraint::Check(_, retained)) =
         domain_constraint_by_oid(&catalog, &resolution, 90_003).unwrap()
     else {
         panic!("check");

@@ -200,12 +200,12 @@ impl uqa_sql::semantics::partition::PartitionExpressions for Fixture {
     fn evaluate_row(
         &self,
         expression: &uqa_sql::ast::Expr,
-        row: &Document,
+        row: &dyn uqa_sql::expr::RowLookup,
         _: &uqa_sql::RowSchema,
         _: &[uqa_sql::SQLParam],
     ) -> Result<Value, SQLError> {
         match expression {
-            uqa_sql::ast::Expr::Column(column) => Ok(row[column].clone()),
+            uqa_sql::ast::Expr::Column(column) => Ok(row.column(column).unwrap().clone()),
             _ => unreachable!("the fixture uses column expressions"),
         }
     }

@@ -35,7 +35,10 @@ impl DependencyBuilder<'_> {
         for (identity, table) in snapshot.definitions.foreign_tables.iter() {
             let oids = table.relation_oids();
             self.record_relation(identity, oids.relation, &table.columns, oids);
-            let server = ObjectAddress::whole(FOREIGN_SERVER_CLASS, table.server_oid()?);
+            let Some(reference) = table.server_reference else {
+                continue;
+            };
+            let server = ObjectAddress::whole(FOREIGN_SERVER_CLASS, reference.oid);
             // A concurrently removed server is still an unpinned reference; it must not disappear or bind a same-name replacement.
             self.objects.unpin(server);
             self.recorder.record(

@@ -3794,6 +3794,7 @@ name = "uqa-execution"
 version = "0.5.3"
 dependencies = [
  "ahash",
+ "allocation-counter",
  "ciborium",
  "getrandom 0.3.4",
  "libc",

@@ -216,6 +216,7 @@ pub(super) fn persist(
         }
         if !after.contains_key(name) {
             catalog.delete_metadata(&key(name))?;
+            crate::catalog::tuples::publication::queue_domain(catalog, domain, None)?;
         }
     }
     for (name, domain, json) in changed {
@@ -223,6 +224,7 @@ pub(super) fn persist(
             catalog.set_metadata(&oid_key(domain.oid), name)?;
         }
         catalog.set_metadata(&key(name), &json)?;
+        crate::catalog::tuples::publication::queue_domain(catalog, domain, None)?;
     }
     Ok(())
 }

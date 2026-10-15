@@ -11,9 +11,10 @@ use std::fmt::Write;
 use uqa_core::Value;
 use uqa_sql::ast::{ForeignKeyAction, ForeignKeyMatch};
 use uqa_sql::expr::quote_ident;
-use uqa_sql::{ResultRow, SQLError};
+use uqa_sql::SQLError;
 
 use crate::catalog::context::CatalogContext;
+use crate::catalog::tuples::constraint::ConstraintTuple;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::constraints::{
@@ -49,58 +50,39 @@ pub fn pg_get_constraintdef_value(
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
     if let Some(constraint) = constraint_catalog_row_by_oid(&catalog, &resolution, *oid)? {
-        return relation_constraint_definition(
-            Some(&crate::catalog::projection::CatalogOutput(*context)),
-            &catalog,
-            &resolution,
-            constraint,
-            *pretty,
-        )
-        .map(Value::Str);
+        return relation_constraint_definition(context, &catalog, &resolution, constraint, *pretty)
+            .map(Value::Str);
     }
-    domain_constraint_definition(
-        Some(&crate::catalog::projection::CatalogOutput(*context)),
-        &catalog,
-        &resolution,
-        *oid,
-        *pretty,
-    )
-    .map(|definition| definition.map_or(Value::Null, Value::Str))
+    domain_constraint_definition(context, &catalog, &resolution, *oid, *pretty)
+        .map(|definition| definition.map_or(Value::Null, Value::Str))
 }
 
 fn relation_constraint_definition(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     constraint: &ConstraintCatalogRow,
     pretty: bool,
 ) -> Result<String, SQLError> {
-    let mut definition =
-        match constraint.kind {
-            ConstraintCatalogKind::NotNull => {
-                let column = constraint.columns.first().ok_or_else(|| {
-                    SQLError::Internal("NOT NULL constraint has no column".into())
-                })?;
-                format!("NOT NULL {}", quote_ident(&column.name))
-            }
-            ConstraintCatalogKind::Check => {
-                let expression = constraint.expression.as_ref().ok_or_else(|| {
-                    SQLError::Internal("CHECK constraint has no expression".into())
-                })?;
-                format!(
-                    "CHECK ({})",
-                    super::super::view_definition::stored_expression_definition(
-                        output, catalog, resolution, expression, pretty,
-                    )?
-                )
-            }
-            ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. } => {
-                key_constraint_definition(catalog, constraint)?
-            }
-            ConstraintCatalogKind::ForeignKey => {
-                foreign_key_definition(catalog, resolution, constraint)?
-            }
-        };
+    let mut definition = match constraint.kind {
+        ConstraintCatalogKind::NotNull => {
+            let column = constraint
+                .columns
+                .first()
+                .ok_or_else(|| SQLError::Internal("NOT NULL constraint has no column".into()))?;
+            format!("NOT NULL {}", quote_ident(&column.name))
+        }
+        ConstraintCatalogKind::Check => format!(
+            "CHECK ({})",
+            super::super::expression_nodes::constraint_text(context, catalog, constraint, pretty)?
+        ),
+        ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. } => {
+            key_constraint_definition(catalog, constraint)?
+        }
+        ConstraintCatalogKind::ForeignKey => {
+            foreign_key_definition(catalog, resolution, constraint)?
+        }
+    };
     if constraint.state.no_inherit()
         && matches!(
             constraint.kind,
@@ -218,6 +200,24 @@ fn foreign_key_definition(
     }
     if let Some(action) = foreign_key_action(foreign_key.on_delete) {
         write!(definition, " ON DELETE {action}").expect("writing to a String cannot fail");
+        if !foreign_key.delete_set_ordinals.is_empty() {
+            let columns = foreign_key
+                .delete_set_ordinals
+                .iter()
+                .map(|ordinal| {
+                    constraint
+                        .columns
+                        .iter()
+                        .find(|column| column.table_ordinal == *ordinal)
+                        .map(|column| quote_ident(&column.name))
+                        .ok_or_else(|| {
+                            SQLError::Internal("foreign-key delete column disappeared".into())
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            write!(definition, " ({})", columns.join(", "))
+                .expect("writing to a String cannot fail");
+        }
     }
     Ok(definition)
 }
@@ -256,7 +256,7 @@ fn relation_display_name(
 }
 
 fn domain_constraint_definition(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     oid: i64,
@@ -264,81 +264,127 @@ fn domain_constraint_definition(
 ) -> Result<Option<String>, SQLError> {
     match domain_constraint_by_oid(catalog, resolution, oid)? {
         Some(DomainConstraint::NotNull) => Ok(Some("NOT NULL".into())),
-        Some(DomainConstraint::Check(check)) => {
-            super::super::view_definition::stored_domain_expression_definition(
-                output,
+        Some(DomainConstraint::Check(domain, check)) => {
+            let node = super::super::expression_nodes::domain_node(
+                context,
                 catalog,
-                resolution,
+                domain,
                 &check.expression,
+            )?;
+            let expression = super::super::expression_nodes::render(
+                &CatalogContext {
+                    catalog,
+                    ..*context
+                },
+                &[],
+                &node.into(),
                 pretty,
-            )
-            .map(|expression| {
-                let validation = if check.validated { "" } else { " NOT VALID" };
-                Some(format!("CHECK ({expression}){validation}"))
-            })
+            )?;
+            let validation = if check.validated { "" } else { " NOT VALID" };
+            Ok(Some(format!("CHECK ({expression}){validation}")))
         }
         None => Ok(None),
     }
 }
 
 /// `pg_constraint` rows of domain constraints: they constrain a type rather than a relation.
-pub fn domain_constraint_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+pub fn domain_constraint_tuples(
+    context: Option<&CatalogContext<'_>>,
+    catalog: &CatalogReadView,
+    request: &super::super::CatalogRequest,
+) -> Result<Vec<ConstraintTuple>, SQLError> {
     let mut rows = Vec::new();
     for domain in catalog.domains() {
-        let namespace = namespace_oid(catalog, &domain.identity.schema);
-        let not_null = domain.definition.not_null.iter().map(|constraint| {
-            (
-                constraint.name.as_deref(),
-                constraint.catalog_identity,
-                "n",
-                true,
-            )
-        });
-        let checks = domain.definition.checks.iter().map(|constraint| {
-            (
-                constraint.name.as_deref(),
-                constraint.catalog_identity,
-                "c",
-                constraint.validated,
-            )
-        });
-        for (name, identity, kind, validated) in not_null.chain(checks) {
-            let (Some(name), Some(identity)) = (name, identity) else {
-                return Err(SQLError::Internal(format!(
-                    "constraint of domain {} has no catalog identity",
-                    domain.identity.qualified_name()
-                )));
-            };
-            rows.push(row([
-                ("oid", int_value(identity.oid)),
-                ("conname", str_value(name.to_string())),
-                ("connamespace", int_value(namespace)),
-                ("contype", str_value(kind)),
-                ("condeferrable", bool_value(false)),
-                ("condeferred", bool_value(false)),
-                ("conenforced", bool_value(true)),
-                ("convalidated", bool_value(validated)),
-                ("conrelid", int_value(0)),
-                ("contypid", int_value(i64::from(domain.oid))),
-                ("conindid", int_value(0)),
-                ("conparentid", int_value(0)),
-                ("confrelid", int_value(0)),
-                ("confupdtype", str_value(" ")),
-                ("confdeltype", str_value(" ")),
-                ("confmatchtype", str_value(" ")),
-                ("conislocal", bool_value(true)),
-                ("coninhcount", int_value(0)),
-                ("connoinherit", bool_value(false)),
-                ("conperiod", bool_value(false)),
-                ("conkey", Value::Null),
-                ("confkey", Value::Null),
-                ("conpfeqop", Value::Null),
-                ("conppeqop", Value::Null),
-                ("conffeqop", Value::Null),
-                ("conexclop", Value::Null),
-                ("conbin", Value::Null),
-            ]));
-        }
+        let _ =
+            visit_domain_constraint_tuples(context, catalog, domain, request, &mut |_, tuple| {
+                rows.push(tuple);
+                Ok(std::ops::ControlFlow::Continue(()))
+            })?;
     }
     Ok(rows)
 }
+
+/// Construct one domain's tuples with their immutable logical identities. Publication callers can consume each typed row without materializing unrelated domains or deriving identity from a rendered field; a successful break does not inspect later constraints.
+pub(crate) fn visit_domain_constraint_tuples(
+    context: Option<&CatalogContext<'_>>,
+    catalog: &CatalogReadView,
+    domain: &uqa_sql::catalog::domain::StoredDomain,
+    request: &super::super::CatalogRequest,
+    visitor: &mut dyn FnMut(
+        uqa_core::catalog_identity::CatalogObjectIdentity,
+        ConstraintTuple,
+    ) -> Result<std::ops::ControlFlow<()>, SQLError>,
+) -> Result<std::ops::ControlFlow<()>, SQLError> {
+    let namespace = namespace_oid(catalog, &domain.identity.schema);
+    let not_null = domain.definition.not_null.iter().map(|constraint| {
+        (
+            constraint.name.as_deref(),
+            constraint.catalog_identity,
+            "n",
+            true,
+            None,
+        )
+    });
+    let checks = domain.definition.checks.iter().map(|constraint| {
+        (
+            constraint.name.as_deref(),
+            constraint.catalog_identity,
+            "c",
+            constraint.validated,
+            Some(&constraint.expression),
+        )
+    });
+    for (name, identity, kind, validated, expression) in not_null.chain(checks) {
+        let (Some(name), Some(identity)) = (name, identity) else {
+            return Err(SQLError::Internal(format!(
+                "constraint of domain {} has no catalog identity",
+                domain.identity.qualified_name()
+            )));
+        };
+        let expression = match (
+            context,
+            expression
+                .filter(|_| request.includes("conbin") && request.matches_name("conname", name)),
+        ) {
+            (Some(context), Some(expression)) => Some(super::super::expression_nodes::domain_node(
+                context, catalog, domain, expression,
+            )?),
+            _ => None,
+        };
+        let fields = row([
+            ("oid", int_value(identity.oid)),
+            ("conname", str_value(name.to_string())),
+            ("connamespace", int_value(namespace)),
+            ("contype", str_value(kind)),
+            ("condeferrable", bool_value(false)),
+            ("condeferred", bool_value(false)),
+            ("conenforced", bool_value(true)),
+            ("convalidated", bool_value(validated)),
+            ("conrelid", int_value(0)),
+            ("contypid", int_value(i64::from(domain.oid))),
+            ("conindid", int_value(0)),
+            ("conparentid", int_value(0)),
+            ("confrelid", int_value(0)),
+            ("confupdtype", str_value(" ")),
+            ("confdeltype", str_value(" ")),
+            ("confmatchtype", str_value(" ")),
+            ("conislocal", bool_value(true)),
+            ("coninhcount", int_value(0)),
+            ("connoinherit", bool_value(false)),
+            ("conperiod", bool_value(false)),
+            ("conkey", Value::Null),
+            ("confkey", Value::Null),
+            ("conpfeqop", Value::Null),
+            ("conppeqop", Value::Null),
+            ("conffeqop", Value::Null),
+            ("conexclop", Value::Null),
+        ]);
+        if visitor(identity, ConstraintTuple::new(fields, expression))?.is_break() {
+            return Ok(std::ops::ControlFlow::Break(()));
+        }
+    }
+    Ok(std::ops::ControlFlow::Continue(()))
+}
+
+#[cfg(test)]
+mod tests;

@@ -8,7 +8,7 @@
 
 use super::super::{
     helpers::{
-        constraints::{constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow},
+        constraints::{ConstraintCatalogKind, ConstraintCatalogRow},
         rows::{catalog_name, catalog_ordinal, int_value, row, str_value},
     },
     view_definition::{stored_domain_expression_definition, stored_expression_definition},
@@ -35,7 +35,7 @@ pub fn build_info_check_constraints(
         ..*context
     });
     let mut rows = Vec::new();
-    for constraint in constraint_catalog_rows(catalog, resolution)? {
+    for constraint in &super::constraint_rows::relations(catalog, resolution, request)? {
         if !matches!(
             constraint.kind,
             ConstraintCatalogKind::Check | ConstraintCatalogKind::NotNull
@@ -72,6 +72,12 @@ pub fn build_info_check_constraints(
             Value::Null
         };
         rows.push(check_row(&constraint.schema, &constraint.name, clause));
+    }
+    if let Some(stored) =
+        super::constraint_rows::stored(catalog, request, request.includes("check_clause"))?
+    {
+        append_stored_domain_checks(&output, catalog, resolution, request, &stored, &mut rows)?;
+        return Ok(rows);
     }
     for domain in catalog.domains() {
         if !catalog.role_is_enabled_for(resolution.current_user(), &domain.owner) {
@@ -112,6 +118,7 @@ pub fn build_info_domain_constraints(
     request: &CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
+    let stored = super::constraint_rows::stored(catalog, request, false)?;
     for domain in catalog.domains() {
         let identity = &domain.identity;
         if !request.matches_name("domain_schema", &identity.schema)
@@ -133,18 +140,34 @@ pub fn build_info_domain_constraints(
         {
             continue;
         }
-        let names = domain
-            .definition
-            .not_null
-            .iter()
-            .map(|constraint| constraint.name.as_deref())
-            .chain(
-                domain
-                    .definition
-                    .checks
-                    .iter()
-                    .map(|constraint| constraint.name.as_deref()),
-            );
+        let names = if let Some(stored) = &stored {
+            stored
+                .iter()
+                .filter_map(|tuple| {
+                    match super::constraint_rows::integer(tuple.fields(), "contypid") {
+                        Ok(oid) if oid == i64::from(domain.oid) => Some(
+                            super::constraint_rows::string(tuple.fields(), "conname").map(Some),
+                        ),
+                        Ok(_) => None,
+                        Err(error) => Some(Err(error)),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            domain
+                .definition
+                .not_null
+                .iter()
+                .map(|constraint| constraint.name.as_deref())
+                .chain(
+                    domain
+                        .definition
+                        .checks
+                        .iter()
+                        .map(|constraint| constraint.name.as_deref()),
+                )
+                .collect()
+        };
         for name in names {
             let name = constraint_name(name)?;
             if !selected(request, &identity.schema, name) {
@@ -174,7 +197,7 @@ fn relation_check_clause(
     output: &CatalogOutput<'_>,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-    constraint: &ConstraintCatalogRow,
+    constraint: &super::constraint_rows::RelationConstraint,
 ) -> Result<Value, SQLError> {
     if constraint.kind == ConstraintCatalogKind::NotNull {
         let column = constraint
@@ -183,6 +206,31 @@ fn relation_check_clause(
             .ok_or_else(|| SQLError::Internal("NOT NULL constraint has no column".into()))?;
         // PostgreSQL's view uses format('%s IS NOT NULL', attname), preserving the decoded name without identifier quoting.
         return Ok(str_value(format!("{} IS NOT NULL", column.name)));
+    }
+    if let Some(node) = &constraint.node {
+        let relation = RelationIdentity::new(&constraint.schema, &constraint.table);
+        let columns = catalog
+            .snapshot()
+            .tables
+            .get(&relation)
+            .map(|table| table.columns.as_slice())
+            .or_else(|| {
+                catalog
+                    .snapshot()
+                    .definitions
+                    .foreign_tables
+                    .get(&relation)
+                    .map(|table| table.columns.as_slice())
+            })
+            .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
+        return super::super::expression_nodes::render_with_relation(
+            &output.0,
+            columns,
+            Some(&constraint.table),
+            &node.clone().into(),
+            false,
+        )
+        .map(str_value);
     }
     let expression = constraint
         .expression
@@ -209,57 +257,59 @@ pub fn build_info_table_constraints(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(constraint_catalog_rows(catalog, resolution)?
-        .iter()
-        .filter(|constraint| table_constraint_is_visible(catalog, resolution, constraint))
-        .map(|constraint| {
-            let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
-                "CHECK"
-            } else {
-                constraint.kind.label()
-            };
-            let nulls_distinct = constraint
-                .kind
-                .nulls_distinct()
-                .map_or(Value::Null, |value| {
-                    str_value(if value { "YES" } else { "NO" })
-                });
-            row([
-                ("constraint_catalog", catalog_name()),
-                ("constraint_schema", str_value(constraint.schema.clone())),
-                ("constraint_name", str_value(constraint.name.as_str())),
-                ("table_catalog", catalog_name()),
-                ("table_schema", str_value(constraint.schema.as_str())),
-                ("table_name", str_value(constraint.table.as_str())),
-                ("constraint_type", str_value(constraint_type)),
-                (
-                    "is_deferrable",
-                    str_value(if constraint.state.deferrable() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                (
-                    "initially_deferred",
-                    str_value(if constraint.state.initially_deferred() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                (
-                    "enforced",
-                    str_value(if constraint.state.enforced() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                ("nulls_distinct", nulls_distinct),
-            ])
-        })
-        .collect())
+    Ok(
+        super::constraint_rows::relations(catalog, resolution, &CatalogRequest::columns([]))?
+            .iter()
+            .filter(|constraint| table_constraint_is_visible(catalog, resolution, constraint))
+            .map(|constraint| {
+                let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
+                    "CHECK"
+                } else {
+                    constraint.kind.label()
+                };
+                let nulls_distinct = constraint
+                    .kind
+                    .nulls_distinct()
+                    .map_or(Value::Null, |value| {
+                        str_value(if value { "YES" } else { "NO" })
+                    });
+                row([
+                    ("constraint_catalog", catalog_name()),
+                    ("constraint_schema", str_value(constraint.schema.clone())),
+                    ("constraint_name", str_value(constraint.name.as_str())),
+                    ("table_catalog", catalog_name()),
+                    ("table_schema", str_value(constraint.schema.as_str())),
+                    ("table_name", str_value(constraint.table.as_str())),
+                    ("constraint_type", str_value(constraint_type)),
+                    (
+                        "is_deferrable",
+                        str_value(if constraint.state.deferrable() {
+                            "YES"
+                        } else {
+                            "NO"
+                        }),
+                    ),
+                    (
+                        "initially_deferred",
+                        str_value(if constraint.state.initially_deferred() {
+                            "YES"
+                        } else {
+                            "NO"
+                        }),
+                    ),
+                    (
+                        "enforced",
+                        str_value(if constraint.state.enforced() {
+                            "YES"
+                        } else {
+                            "NO"
+                        }),
+                    ),
+                    ("nulls_distinct", nulls_distinct),
+                ])
+            })
+            .collect(),
+    )
 }
 
 pub fn build_info_key_column_usage(
@@ -267,7 +317,9 @@ pub fn build_info_key_column_usage(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for constraint in constraint_catalog_rows(catalog, resolution)? {
+    for constraint in
+        &super::constraint_rows::relations(catalog, resolution, &CatalogRequest::columns([]))?
+    {
         if !matches!(
             constraint.kind,
             ConstraintCatalogKind::PrimaryKey
@@ -351,4 +403,56 @@ fn table_constraint_is_visible(
                 catalog.table_column_has_privilege_to(table, &column.name, subject, privilege)
             })
         })
+}
+
+fn append_stored_domain_checks(
+    output: &CatalogOutput<'_>,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    request: &CatalogRequest,
+    stored: &[super::constraint_rows::VisibleTuple],
+    rows: &mut Vec<ResultRow>,
+) -> Result<(), SQLError> {
+    use super::constraint_rows::{integer, namespace, string};
+    for tuple in stored {
+        let fields = tuple.fields();
+        let oid = integer(fields, "contypid")?;
+        if oid == 0 {
+            continue;
+        }
+        let Some(domain) = catalog
+            .domains()
+            .find(|domain| i64::from(domain.oid) == oid)
+        else {
+            continue;
+        };
+        if !catalog.role_is_enabled_for(resolution.current_user(), &domain.owner) {
+            continue;
+        }
+        let Some(schema) = namespace(catalog, integer(fields, "connamespace")?) else {
+            continue;
+        };
+        let name = string(fields, "conname")?;
+        if !selected(request, &schema, name) {
+            continue;
+        }
+        let clause = if !request.includes("check_clause") {
+            Value::Null
+        } else if string(fields, "contype")? == "n" {
+            str_value("VALUE IS NOT NULL")
+        } else if let Some(node) = tuple.expression() {
+            str_value(super::super::expression_nodes::render(
+                &output.0,
+                &[],
+                &node.clone().into(),
+                false,
+            )?)
+        } else {
+            return Err(SQLError::Internal(
+                "stored domain CHECK has no expression".into(),
+            ));
+        };
+        rows.push(check_row(&schema, name, clause));
+    }
+    Ok(())
 }

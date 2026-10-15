@@ -94,13 +94,13 @@ impl Engine {
         kind: TablePublicationKind,
     ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            if kind == TablePublicationKind::Definition {
+            if kind != TablePublicationKind::ExpressionNames {
                 self.note_prepared_table_change(table);
             }
             return Ok(());
         }
         let Some(catalog) = self.storage.catalog.as_ref() else {
-            if kind == TablePublicationKind::Definition {
+            if kind != TablePublicationKind::ExpressionNames {
                 self.note_prepared_table_change(table);
             }
             return Ok(());
@@ -139,8 +139,21 @@ impl Engine {
             columns_json,
             constraints_json,
         })?;
+        if kind != TablePublicationKind::Declaration {
+            uqa_execution::catalog::tuples::publication::queue_relation(
+                catalog.as_ref(),
+                &RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?,
+                table.object_id(),
+                !constraints.checks.is_empty()
+                    || !constraints.foreign_keys.is_empty()
+                    || !constraints.key_constraints.is_empty()
+                    || columns.iter().any(|column| {
+                        column.not_null || column.check.is_some() || column.references.is_some()
+                    }),
+            )?;
+        }
         self.note_table_catalog_changed();
-        if kind == TablePublicationKind::Definition {
+        if kind != TablePublicationKind::ExpressionNames {
             uqa_execution::catalog::definition_revision::publish_table(
                 catalog.as_ref(),
                 table.object_id(),

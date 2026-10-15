@@ -188,14 +188,18 @@ impl Engine {
             self.run_existing_transaction_operation(
                 || {
                     self.prepare_serializable_transaction_snapshot()?;
-                    f(self)
+                    let value = f(self)?;
+                    self.publish_catalog_constraint_tuples()?;
+                    Ok(value)
                 },
                 std::convert::identity,
             )
         } else {
             self.transaction(|engine| {
                 engine.prepare_serializable_transaction_snapshot()?;
-                f(engine)
+                let value = f(engine)?;
+                engine.publish_catalog_constraint_tuples()?;
+                Ok(value)
             })
         }
     }

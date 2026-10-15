@@ -5,6 +5,7 @@
 //
 
 //! Physical schema changes and validation of stored rows.
+pub(crate) mod check_rows;
 pub mod columns;
 pub mod ctas;
 pub mod indexes;

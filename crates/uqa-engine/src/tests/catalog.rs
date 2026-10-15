@@ -19,6 +19,7 @@ mod relations;
 mod roles;
 mod routines;
 mod row_type_arrays;
+mod schema_publication;
 mod schemas;
 mod sequences;
 mod table_alteration;

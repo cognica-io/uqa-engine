@@ -11,6 +11,9 @@ use uqa_sql::{ResultRow, SQLError};
 use crate::catalog::context::CatalogContext;
 use crate::catalog::services::CatalogSession;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
+use information_schema::constraint_usage::{
+    build as build_constraint_usage, Usage as ConstraintUsage,
+};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::constraints::ConstraintIdentity;
 
@@ -22,6 +25,7 @@ pub use identity_claims::{
 };
 pub(crate) use identity_claims::{legacy_relation_claims, relation_claims};
 
+mod expression_nodes;
 mod request;
 pub(crate) use request::CatalogRequest;
 
@@ -94,6 +98,12 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::InformationKeyColumnUsage => {
             build_info_key_column_usage(catalog, resolution)?
         }
+        VirtualRelation::InformationConstraintColumnUsage => {
+            build_constraint_usage(catalog, resolution, request, ConstraintUsage::Columns)?
+        }
+        VirtualRelation::InformationConstraintTableUsage => {
+            build_constraint_usage(catalog, resolution, request, ConstraintUsage::Tables)?
+        }
         VirtualRelation::PgNamespace => build_pg_namespace(catalog)?,
         VirtualRelation::PgClass => build_pg_class(context, catalog, resolution)?,
         VirtualRelation::PgInherits => build_pg_inherits(catalog, resolution)?,
@@ -101,9 +111,11 @@ pub(crate) fn build_requested_catalog_rows(
             build_pg_partitioned_table(context, catalog, resolution)?
         }
         VirtualRelation::PgAttribute => build_pg_attribute(context, catalog, resolution)?,
-        VirtualRelation::PgAttrdef => build_pg_attrdef(output, catalog, resolution)?,
-        VirtualRelation::PgConstraint => build_pg_constraint(catalog, resolution)?,
-        VirtualRelation::PgIndex => build_pg_index(output, catalog, resolution)?,
+        VirtualRelation::PgAttrdef => build_pg_attrdef(context, catalog, resolution, request)?,
+        VirtualRelation::PgConstraint => {
+            pg_catalog::build_requested_pg_constraint(context, catalog, resolution, request)?
+        }
+        VirtualRelation::PgIndex => build_pg_index(context, catalog, resolution, request)?,
         VirtualRelation::PgTrigger => build_pg_trigger(context, catalog, resolution)?,
         VirtualRelation::PgRewrite => build_pg_rewrite(output, catalog, resolution)?,
         VirtualRelation::PgRules => build_pg_rules(output, catalog, resolution)?,
@@ -111,12 +123,12 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgViews => build_pg_views(output, catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(output, catalog, resolution)?,
         VirtualRelation::PgType => {
-            pg_catalog::build_requested_pg_type(output, catalog, resolution, request)?
+            pg_catalog::build_requested_pg_type(context, catalog, resolution, request)?
         }
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
         VirtualRelation::PgProc => {
-            pg_proc::build_requested_pg_proc(output, catalog, resolution, request)?
+            pg_proc::build_requested_pg_proc(context, catalog, resolution, request)?
         }
         VirtualRelation::PgLanguage => build_pg_language(),
         VirtualRelation::PgForeignDataWrapper => pg_catalog::foreign::wrappers(catalog)?,
@@ -163,7 +175,6 @@ pub use dependencies::{
 pub(super) use pg_catalog::IndexRelations;
 mod events;
 pub(super) use events::EventDefinitions;
-use uqa_sql::catalog::expression_text;
 mod index_definition;
 mod mutation;
 pub use index_definition::pg_get_indexdef_value;
@@ -189,6 +200,7 @@ mod output;
 pub use output::CatalogOutput;
 mod partitioning;
 mod pg_catalog;
+pub(crate) use pg_catalog::visit_table_constraint_tuples;
 #[cfg(test)]
 pub(crate) use pg_catalog::TYPE_PROJECTION_BUILDS;
 mod pg_namespace;
@@ -381,9 +393,9 @@ pub fn snapshot_table_relation_oid(
 }
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
-    build_pg_constraint, build_pg_database, build_pg_enum, build_pg_index, build_pg_indexes,
-    build_pg_language, build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences,
-    build_pg_tables, build_pg_user, build_pg_views,
+    build_pg_database, build_pg_enum, build_pg_index, build_pg_indexes, build_pg_language,
+    build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables,
+    build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
 pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};
@@ -464,3 +476,9 @@ pub use pg_catalog::pg_get_constraintdef_value;
 pub(crate) use pg_catalog::CatalogIndexRelation;
 
 pub(crate) use regtypes::relation_oid::resolved_relation_oid;
+
+pub(crate) use pg_catalog::visit_domain_constraint_tuples;
+
+pub(crate) use pg_catalog::visit_foreign_constraint_tuples;
+
+pub(crate) use events::visit_trigger_constraint_tuples;

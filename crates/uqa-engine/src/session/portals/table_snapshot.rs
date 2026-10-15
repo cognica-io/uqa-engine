@@ -35,7 +35,14 @@ impl Engine {
         let mut snapshot = self.durable.snapshot();
         snapshot.graphs = self
             .freeze_graph_read_handles(dependencies.graphs.as_ref(), dependencies.graph_catalog)?;
-        let read_view = self.catalog_read_view_from(&snapshot, self.storage.tables.read().clone());
+        let mut read_view =
+            self.catalog_read_view_from(&snapshot, self.storage.tables.read().clone());
+        if dependencies.graph_catalog {
+            read_view =
+                uqa_execution::catalog::services::CatalogSnapshotSource::retain_catalog_rows(
+                    self, read_view,
+                )?;
+        }
         Ok(std::sync::Arc::new(RetainedCatalogSnapshot {
             durable: snapshot,
             read_view,

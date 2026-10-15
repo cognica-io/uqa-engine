@@ -12,6 +12,7 @@ use uqa_storage::{CatalogFacade, StorageBackendResult};
 pub enum TablePublicationKind {
     Definition,
     ExpressionNames,
+    Declaration,
 }
 
 pub fn table_key(object: [u8; 16]) -> String {

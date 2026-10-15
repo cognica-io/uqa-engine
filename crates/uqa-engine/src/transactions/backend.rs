@@ -227,6 +227,12 @@ impl Engine {
         stack: &mut Vec<TransactionFrame>,
         backend: &dyn uqa_storage::PersistentStorageBackend,
     ) -> Result<(FixedTransactionSnapshot, uqa_graph::PersistentGraphStore), SQLError> {
+        if self.versioned_backend_transactions() {
+            let boundary = backend.capture_committed_read_boundary().map_err(|error| {
+                Self::storage_tx_error("retain catalog record boundary", &error)
+            })?;
+            stack[0].fixed_catalog_records = Some(boundary);
+        }
         if backend.supports_concurrent_pinned_read_and_write() {
             let snapshot: std::sync::Arc<Engine> =
                 self.open_retained_pinned_read_snapshot()?.into();

@@ -130,6 +130,34 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
         ))
     }
 
+    fn retain_catalog_rows(
+        &self,
+        snapshot: uqa_execution::catalog::CatalogReadView,
+    ) -> Result<uqa_execution::catalog::CatalogReadView, SQLError> {
+        if !self.versioned_backend_transactions() || snapshot.has_physical_catalog() {
+            return Ok(snapshot);
+        }
+        let boundary = self
+            .session
+            .transactions
+            .lock()
+            .first()
+            .and_then(|frame| frame.fixed_catalog_records.clone());
+        let backend =
+            self.storage.backend.as_ref().ok_or_else(|| {
+                SQLError::Internal("versioned catalog has no storage backend".into())
+            })?;
+        let source = match boundary {
+            Some(boundary) => backend
+                .open_read_session_with_private_changes(&boundary, &self.runtime.cancellation),
+            None => backend.open_retained_read_session(&self.runtime.cancellation),
+        }
+        .map_err(|error| {
+            uqa_execution::storage_errors::storage_error("retain physical catalog rows", &error)
+        })?;
+        Ok(snapshot.with_physical_catalog(source.catalog))
+    }
+
     fn refreshed_catalog_snapshot(
         &self,
     ) -> Result<uqa_execution::catalog::CatalogReadView, SQLError> {
@@ -233,5 +261,49 @@ impl ViewCatalogCapabilities for Engine {
             name,
             event,
         )
+    }
+}
+
+impl Engine {
+    pub(crate) fn publish_catalog_constraint_tuples(&self) -> Result<(), SQLError> {
+        let (Some(catalog), Some(backend)) = (&self.storage.catalog, &self.storage.backend) else {
+            return Ok(());
+        };
+        if !uqa_execution::catalog::tuples::publication::has_pending(catalog.as_ref()).map_err(
+            |error| {
+                uqa_execution::storage_errors::storage_error("inspect pending catalog rows", &error)
+            },
+        )? {
+            return Ok(());
+        }
+        let storage = uqa_storage::PersistentStorageSession::new(catalog.clone(), backend.clone());
+        uqa_execution::catalog::tuples::publication::publish_pending(
+            &self.catalog_execution(),
+            &self.restored_catalog_read_view(),
+            &self.session_execution_view().relation_name_resolution(),
+            &storage,
+        )
+    }
+}
+
+impl Engine {
+    pub(crate) fn initialize_catalog_constraint_tuples(
+        &self,
+        catalog: &std::sync::Arc<dyn uqa_storage::CatalogFacade>,
+        backend: &std::sync::Arc<dyn uqa_storage::PersistentStorageBackend>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        if !uqa_execution::catalog::tuples::publication::requires_initialization(catalog.as_ref())?
+        {
+            return Ok(());
+        }
+        uqa_execution::catalog::tuples::publication::initialize(
+            &self.catalog_execution(),
+            &self.restored_catalog_read_view(),
+            &self.session_execution_view().relation_name_resolution(),
+            &uqa_storage::PersistentStorageSession::new(catalog.clone(), backend.clone()),
+        )
+        .map_err(|error| {
+            uqa_storage::StorageBackendError::backend("initialize physical catalog", error)
+        })
     }
 }

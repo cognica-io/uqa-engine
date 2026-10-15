@@ -85,6 +85,13 @@ pub trait CatalogSnapshotSource: Sync {
     ) -> Result<super::CatalogReadView, SQLError> {
         Ok(snapshot)
     }
+    /// Retain direct catalog rows independently of name binding and SSI attribution.
+    fn retain_catalog_rows(
+        &self,
+        snapshot: super::CatalogReadView,
+    ) -> Result<super::CatalogReadView, SQLError> {
+        Ok(snapshot)
+    }
     /// Definition coordination uses the refreshed session catalog, independently from an ordinary query's retained snapshot.
     fn current_catalog_snapshot(&self) -> super::CatalogReadView;
 }

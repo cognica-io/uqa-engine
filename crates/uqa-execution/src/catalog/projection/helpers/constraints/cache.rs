@@ -24,7 +24,10 @@ struct DomainLocation {
 
 pub(crate) enum DomainConstraint<'a> {
     NotNull,
-    Check(&'a uqa_sql::ast::DomainCheck),
+    Check(
+        &'a uqa_sql::catalog::domain::StoredDomain,
+        &'a uqa_sql::ast::DomainCheck,
+    ),
 }
 
 fn retained<'a>(
@@ -79,7 +82,7 @@ pub(crate) fn domain_constraint_by_oid<'a>(
         location
             .check
             .map_or(DomainConstraint::NotNull, |position| {
-                DomainConstraint::Check(&domain.definition.checks[position])
+                DomainConstraint::Check(domain, &domain.definition.checks[position])
             })
     }))
 }

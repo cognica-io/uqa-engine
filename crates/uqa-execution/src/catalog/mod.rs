@@ -13,6 +13,7 @@ pub mod foreign;
 pub mod identity;
 pub mod security;
 pub mod sequence;
+pub mod tuples;
 pub mod type_identity_restoration;
 pub(crate) mod type_records;
 pub mod value_restoration;
@@ -52,6 +53,8 @@ pub struct CatalogReadView {
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
     /// The owning session's catalog records, read only inside its retained statement transaction.
     prepared_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
+    /// Physical system-catalog rows at the query's committed boundary and private root. Current name/authority inquiries continue to use definitions.
+    physical_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     /// The exact positions of sequences whose durable records run ahead of the values handed out. They move without a catalog change, so they are read when a sequence's values are.
     sequence_positions: Option<Arc<crate::row_locks::RowLockManager>>,
     /// The committed value records of sequences, which also move without a catalog change. A sequence's state is read from them when no position covers it.
@@ -166,6 +169,7 @@ impl CatalogReadView {
             alias_output: Arc::default(),
             graph_reads: None,
             prepared_catalog: None,
+            physical_catalog: None,
             sequence_positions: None,
             latest_sequence_values: None,
         }
@@ -196,6 +200,16 @@ impl CatalogReadView {
 
     pub fn snapshot(&self) -> &CatalogReadSnapshot {
         &self.snapshot
+    }
+
+    #[must_use]
+    pub fn with_physical_catalog(mut self, catalog: Arc<dyn uqa_storage::CatalogFacade>) -> Self {
+        self.physical_catalog = Some(catalog);
+        self
+    }
+
+    pub fn has_physical_catalog(&self) -> bool {
+        self.physical_catalog.is_some()
     }
 }
 

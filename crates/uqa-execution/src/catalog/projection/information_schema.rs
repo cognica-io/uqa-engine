@@ -7,6 +7,8 @@
 //! Virtual `information_schema` relation builders.
 
 mod columns;
+mod constraint_rows;
+pub(super) mod constraint_usage;
 mod constraints;
 mod foreign_tables;
 mod identity;

@@ -29,7 +29,10 @@ fn project(
     name: &str,
     request: &CatalogRequest,
 ) -> Vec<uqa_sql::ResultRow> {
-    let services = CatalogServices::default();
+    let services = CatalogServices {
+        standard_conforming_strings: Some(true),
+        ..CatalogServices::default()
+    };
     let output = RegtypeOutputCache::default();
     build_requested_catalog_rows(
         &services.context(catalog, &output),

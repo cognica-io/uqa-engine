@@ -217,6 +217,14 @@ impl StoredForeignTable {
         if self.persistence != uqa_sql::ast::RelationPersistence::Temporary {
             if let Some(catalog) = catalog {
                 catalog.save_foreign_table(&self.catalog_row(relation, security)?)?;
+                if self.server_reference.is_some() {
+                    super::tuples::publication::queue_relation(
+                        catalog,
+                        relation,
+                        self.object_id,
+                        true,
+                    )?;
+                }
             }
         }
         Ok(())

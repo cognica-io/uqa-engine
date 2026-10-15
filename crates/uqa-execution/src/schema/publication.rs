@@ -38,6 +38,11 @@ pub trait TableSchemaState {
         columns: &[ColumnDef],
         constraints: &TableConstraintSet,
     ) -> StorageBackendResult<()>;
+    fn persist_declaration(
+        &self,
+        columns: &[ColumnDef],
+        constraints: &TableConstraintSet,
+    ) -> StorageBackendResult<()>;
     /// Persist renamed, already-bound expression fields without declaring a new table definition.
     fn persist_expression_names(
         &self,
@@ -87,7 +92,7 @@ pub fn declare_row_columns(
         .ok_or_else(|| table_not_found(name))?;
     let mut constraints = table.constraint_header();
     constraints.columns_declared = Some(true);
-    table.persist_candidate(&columns, &constraints)?;
+    table.persist_declaration(&columns, &constraints)?;
     table.publish_columns(true, columns, constraints);
     context.changes.table_catalog_changed();
     Ok(())

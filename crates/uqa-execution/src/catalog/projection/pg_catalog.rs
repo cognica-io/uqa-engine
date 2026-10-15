@@ -28,6 +28,8 @@ pub use attributes::{
 pub use composites::composite_class_rows;
 pub use constraint_definitions::pg_get_constraintdef_value;
 pub use constraints::build_pg_constraint;
+pub(crate) use constraints::build_requested_pg_constraint;
+pub(crate) use constraints::visit_table_constraint_tuples;
 pub(crate) use constraints::{constraint_index_oid, constraint_parent_oid, constraint_row_oid};
 pub(crate) use indexes::legacy::catalog_index_relations as legacy_index_relations;
 pub use indexes::{
@@ -49,3 +51,7 @@ pub use types::{build_pg_enum, build_pg_range, build_pg_type_without_defaults};
 
 #[cfg(test)]
 pub(crate) use types::TYPE_PROJECTION_BUILDS;
+
+pub(crate) use constraint_definitions::visit_domain_constraint_tuples;
+
+pub(crate) use constraints::visit_foreign_constraint_tuples;
