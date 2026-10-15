@@ -1083,7 +1083,7 @@
         "session": 1
       },
       {
-        "sql": "ALTER FOREIGN TABLE visible_foreign DROP COLUMN n",
+        "sql": "ALTER FOREIGN TABLE visible_foreign DROP CONSTRAINT visible_foreign_positive",
         "command_tags": [
           "ALTER FOREIGN TABLE"
         ],

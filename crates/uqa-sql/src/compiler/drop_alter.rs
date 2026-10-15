@@ -232,12 +232,12 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
         return Ok(Statement::AlterSequence(alter));
     }
     if stmt.objtype() == ObjectType::ObjectForeignTable {
-        if let Some(columns) = super::foreign_tables::column_drops(&stmt.cmds) {
+        if let Some(action) = super::foreign_tables::drop_actions(&stmt.cmds) {
             return Ok(Statement::AlterForeignTable(
                 crate::ast::AlterForeignTableStmt {
                     name: table,
                     if_exists,
-                    action: crate::ast::AlterForeignTableAction::DropColumns(columns),
+                    action,
                 },
             ));
         }

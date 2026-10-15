@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views.
+- Publish typed CHECK catalog expressions and reconstruct constraint/default/index/routine expressions with retained type, operator, collation and value metadata. Preserve domain identities, foreign-key delete column subsets and privilege-sensitive constraint information views. Accept foreign-table CHECK and NOT NULL constraint deletion through the existing transactional dependency path.
 
 - Retain physical constraint catalog rows across concurrent DDL, REPEATABLE READ, SERIALIZABLE, savepoint rollback and held cursors. Publish ordinary, foreign, domain and trigger constraints atomically, preserving independent partition catalog identities. The all-owner storage upgrade initializes existing definitions without rewriting user rows.
 

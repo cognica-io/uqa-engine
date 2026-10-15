@@ -376,3 +376,40 @@ fn foreign_column_drop_keeps_written_actions_and_round_trips() {
     });
     assert!(serde_json::from_value::<crate::ast::AlterForeignTableStmt>(ambiguous).is_err());
 }
+
+#[test]
+fn foreign_constraint_drop_keeps_written_actions_and_round_trips() {
+    let Statement::AlterForeignTable(statement) = first("ALTER FOREIGN TABLE IF EXISTS app.items DROP CONSTRAINT IF EXISTS first CASCADE, DROP CONSTRAINT second RESTRICT") else {
+        panic!("expected foreign constraint deletion");
+    };
+    let crate::ast::AlterForeignTableAction::DropConstraints(actions) = &statement.action else {
+        panic!("expected constraint actions");
+    };
+    assert!(statement.if_exists);
+    assert_eq!(
+        actions,
+        &[
+            crate::ast::DropConstraintAction {
+                name: "first".into(),
+                if_exists: true,
+                cascade: true
+            },
+            crate::ast::DropConstraintAction {
+                name: "second".into(),
+                if_exists: false,
+                cascade: false
+            },
+        ]
+    );
+    let encoded = serde_json::to_string(&statement).unwrap();
+    assert_eq!(
+        serde_json::from_str::<crate::ast::AlterForeignTableStmt>(&encoded).unwrap(),
+        statement
+    );
+    for value in [
+        serde_json::json!({"name":"items","if_exists":false,"drop_constraints":[]}),
+        serde_json::json!({"name":"items","if_exists":false,"owner":"owner","drop_constraints":actions}),
+    ] {
+        assert!(serde_json::from_value::<crate::ast::AlterForeignTableStmt>(value).is_err());
+    }
+}

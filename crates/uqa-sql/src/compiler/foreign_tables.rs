@@ -183,3 +183,36 @@ pub(super) fn column_drops(
         })
         .collect()
 }
+
+/// Preserve constraint deletion flags and written order before resolving their catalog addresses.
+pub(super) fn drop_actions(
+    commands: &[pg_query::protobuf::Node],
+) -> Option<crate::ast::AlterForeignTableAction> {
+    if let Some(columns) = column_drops(commands) {
+        return Some(crate::ast::AlterForeignTableAction::DropColumns(columns));
+    }
+    if commands.is_empty() {
+        return None;
+    }
+    let constraints = commands
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::AlterTableCmd(command)) = node.node.as_ref() else {
+                return None;
+            };
+            (command.subtype() == pg_query::protobuf::AlterTableType::AtDropConstraint).then(|| {
+                crate::ast::DropConstraintAction {
+                    name: command.name.clone(),
+                    if_exists: command.missing_ok,
+                    cascade: matches!(
+                        command.behavior(),
+                        pg_query::protobuf::DropBehavior::DropCascade
+                    ),
+                }
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(crate::ast::AlterForeignTableAction::DropConstraints(
+        constraints,
+    ))
+}

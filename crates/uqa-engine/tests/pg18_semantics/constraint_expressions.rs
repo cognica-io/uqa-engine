@@ -23,9 +23,21 @@ fn constraint_expression_catalogs_match_postgresql(#[case] provider: usize) {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn foreign_key_delete_columns_match_postgresql(#[case] provider: usize) {
+    verify_with_reopen(provider, include_str!("constraint_delete_columns.json"));
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn foreign_constraint_deletion_matches_postgresql(#[case] provider: usize) {
+    verify_with_reopen(provider, include_str!("foreign_constraint_drop.json"));
+}
+
+fn verify_with_reopen(provider: usize, transcript: &str) {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("constraint-delete-columns.db");
-    let transcript = include_str!("constraint_delete_columns.json");
+    let path = directory.path().join("constraint-reopen.db");
     {
         let engine = open(provider, &path);
         verify_reference(&engine, transcript);

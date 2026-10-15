@@ -19,6 +19,27 @@ pub fn clear_foreign_column_default(columns: &mut [ColumnDef], column_name: &str
     column.default.take().is_some()
 }
 
+pub fn remove_foreign_constraint(
+    columns: &mut [ColumnDef],
+    checks: &mut Vec<TableCheck>,
+    constraint_name: &str,
+) -> bool {
+    if let Some(column) = columns
+        .iter_mut()
+        .find(|column| column.not_null && column.not_null_name.as_deref() == Some(constraint_name))
+    {
+        column.not_null = false;
+        column.not_null_explicit = false;
+        column.not_null_name = None;
+        column.not_null_identity = None;
+        column.not_null_validated = true;
+        column.not_null_no_inherit = false;
+        column.not_null_is_local = true;
+        return true;
+    }
+    remove_foreign_check(columns, checks, constraint_name)
+}
+
 pub fn remove_foreign_check(
     columns: &mut [ColumnDef],
     checks: &mut Vec<TableCheck>,

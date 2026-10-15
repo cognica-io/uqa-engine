@@ -8549,6 +8549,35 @@
       "capability": "PostgreSQL constraint catalog identities and retained physical rows",
       "workload": "Independent PostgreSQL catalog observations across persistent providers and reopen",
       "invariant": "Preserve durable attribute positions, explicit delete subsets and current quoted names through rollback and reopen"
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_constraint_drop_keeps_written_actions_and_round_trips",
+      "source": "crates/uqa-sql/src/compiler/tests/ddl_lifecycle/foreign_tables.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Foreign constraint dependency publication",
+      "workload": "PostgreSQL CHECK and NOT NULL deletion, ordered actions, missing-name diagnostics, savepoints and reopen.",
+      "invariant": "Compiler preserves statement flags; dependency deletion publishes the exact removed catalog row atomically without losing other constraints or retained readers."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "foreign_constraint_deletion_matches_postgresql",
+      "source": "crates/uqa-engine/tests/pg18_semantics/constraint_expressions.rs",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "capability": "Foreign constraint dependency publication",
+      "workload": "PostgreSQL CHECK and NOT NULL deletion, ordered actions, missing-name diagnostics, savepoints and reopen.",
+      "invariant": "Compiler preserves statement flags; dependency deletion publishes the exact removed catalog row atomically without losing other constraints or retained readers."
     }
   ]
 }

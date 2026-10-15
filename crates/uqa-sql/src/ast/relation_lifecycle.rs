@@ -70,8 +70,16 @@ pub struct DropColumnAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DropConstraintAction {
+    pub name: String,
+    pub if_exists: bool,
+    pub cascade: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlterForeignTableAction {
     DropColumns(Vec<DropColumnAction>),
+    DropConstraints(Vec<DropConstraintAction>),
     OwnerTo(RoleSpecification),
     RenameTo(String),
     SetSchema(String),
@@ -96,6 +104,8 @@ struct AlterForeignTableStmtSerde {
     set_schema: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     drop_columns: Option<Vec<DropColumnAction>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    drop_constraints: Option<Vec<DropConstraintAction>>,
 }
 
 impl Serialize for AlterForeignTableStmt {
@@ -103,23 +113,27 @@ impl Serialize for AlterForeignTableStmt {
     where
         S: serde::Serializer,
     {
-        let (owner, rename_to, set_schema, drop_columns) = match &self.action {
-            AlterForeignTableAction::OwnerTo(owner) => (Some(owner.clone()), None, None, None),
-            AlterForeignTableAction::RenameTo(name) => (None, Some(name.clone()), None, None),
-            AlterForeignTableAction::SetSchema(schema) => (None, None, Some(schema.clone()), None),
-            AlterForeignTableAction::DropColumns(columns) => {
-                (None, None, None, Some(columns.clone()))
-            }
-        };
-        AlterForeignTableStmtSerde {
+        let mut value = AlterForeignTableStmtSerde {
             name: self.name.clone(),
             if_exists: self.if_exists,
-            owner,
-            rename_to,
-            set_schema,
-            drop_columns,
+            owner: None,
+            rename_to: None,
+            set_schema: None,
+            drop_columns: None,
+            drop_constraints: None,
+        };
+        match &self.action {
+            AlterForeignTableAction::OwnerTo(owner) => value.owner = Some(owner.clone()),
+            AlterForeignTableAction::RenameTo(name) => value.rename_to = Some(name.clone()),
+            AlterForeignTableAction::SetSchema(schema) => value.set_schema = Some(schema.clone()),
+            AlterForeignTableAction::DropColumns(columns) => {
+                value.drop_columns = Some(columns.clone());
+            }
+            AlterForeignTableAction::DropConstraints(constraints) => {
+                value.drop_constraints = Some(constraints.clone());
+            }
         }
-        .serialize(serializer)
+        value.serialize(serializer)
     }
 }
 
@@ -134,21 +148,25 @@ impl<'de> Deserialize<'de> for AlterForeignTableStmt {
             value.rename_to,
             value.set_schema,
             value.drop_columns,
+            value.drop_constraints,
         ) {
-            (Some(owner), None, None, None) => AlterForeignTableAction::OwnerTo(owner),
-            (None, Some(name), None, None) => AlterForeignTableAction::RenameTo(name),
-            (None, None, Some(schema), None) => AlterForeignTableAction::SetSchema(schema),
-            (None, None, None, Some(columns)) if !columns.is_empty() => {
+            (Some(owner), None, None, None, None) => AlterForeignTableAction::OwnerTo(owner),
+            (None, Some(name), None, None, None) => AlterForeignTableAction::RenameTo(name),
+            (None, None, Some(schema), None, None) => AlterForeignTableAction::SetSchema(schema),
+            (None, None, None, Some(columns), None) if !columns.is_empty() => {
                 AlterForeignTableAction::DropColumns(columns)
             }
-            (Some(_), Some(_), None, None) => {
+            (None, None, None, None, Some(constraints)) if !constraints.is_empty() => {
+                AlterForeignTableAction::DropConstraints(constraints)
+            }
+            (Some(_), Some(_), None, None, None) => {
                 return Err(serde::de::Error::custom(
                     "ALTER FOREIGN TABLE cannot contain both owner and rename_to",
                 ));
             }
             _ => {
                 return Err(serde::de::Error::custom(
-                    "ALTER FOREIGN TABLE requires exactly one of owner, rename_to, set_schema or nonempty drop_columns",
+                    "ALTER FOREIGN TABLE requires exactly one of owner, rename_to, set_schema or a nonempty drop_columns/drop_constraints list",
                 ));
             }
         };
