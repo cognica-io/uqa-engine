@@ -4,6 +4,7 @@ Files in this directory record staged implementation work. A living plan must de
 
 | Plan | Lifecycle | Update rule |
 | --- | --- | --- |
+| [`0020-private-view-catalog-publication.md`](0020-private-view-catalog-publication.md) | Active | Fix #899 with exact private view provenance, deterministic refresh and transaction regressions, then verify automatic Linux/macOS results before merging. |
 | [`0001-uqa-engine-implementation-plan.md`](0001-uqa-engine-implementation-plan.md) | Living | Update when workspace ownership, public surfaces, engineering policy, verification, or release gates change. |
 | [`0002-benchmark-coverage.md`](0002-benchmark-coverage.md) | Complete | Update only when the completed benchmark-coverage contract or its evidence changes. |
 | [`0003-postgresql-18-compatibility.md`](0003-postgresql-18-compatibility.md) | Active | The [manifest-derived ledger](0003-postgresql-18-compatibility.md#current-implementation-status-and-open-postgresql-18-bugs) records verified and incomplete evidence. Composite ADD/DROP/RENAME/TYPE changes are merged through PR #702; complete SQL/type, upstream regression and client matrices remain open. Update the plan, manifest and manual together when a supported boundary or remaining gate changes. |
