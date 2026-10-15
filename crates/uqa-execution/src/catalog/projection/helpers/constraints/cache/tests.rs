@@ -204,3 +204,60 @@ fn duplicate_constraint_oid_selects_the_first_validated_row() {
         "items_000"
     );
 }
+
+#[test]
+fn foreign_key_modes_use_enforcement_identity_without_changing_catalog_rows() {
+    let mut snapshot = empty_catalog().snapshot().clone();
+    let mut next_object = 100_u128;
+    let mut enforcement = None;
+    let mut physical = None;
+    for sql in [
+        "CREATE TABLE parent(id integer PRIMARY KEY)",
+        "CREATE TABLE child(id integer, CONSTRAINT child_fk FOREIGN KEY(id) REFERENCES public.parent(id) DEFERRABLE)",
+    ] {
+        let Statement::CreateTable(mut table) = uqa_sql::compile(sql).unwrap().remove(0) else {
+            panic!("table declaration");
+        };
+        let relation = RelationIdentity::new("public", &table.name);
+        let mut constraints = TableConstraintSet {
+            key_constraints: table.key_constraints,
+            foreign_keys: table.foreign_keys,
+            ..Default::default()
+        };
+        uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
+            &relation,
+            &mut table.columns,
+            &mut constraints,
+            &mut |_: &str| {
+                next_object += 1;
+                Ok(next_object.to_le_bytes())
+            },
+        )
+        .unwrap();
+        if let Some(key) = constraints.foreign_keys.first() {
+            enforcement = key.object_id;
+            physical = key.catalog_identity;
+        }
+        snapshot.tables.insert(
+            relation,
+            table_snapshot(next_object.to_le_bytes(), table.columns, constraints),
+        );
+    }
+    let catalog = CatalogReadView::new(snapshot);
+    let services = CatalogServices::default();
+    let output = RegtypeOutputCache::default();
+    let context = services.context(&catalog, &output);
+    let runtime = crate::catalog::projection::runtime_constraints(&context).unwrap();
+    let runtime = runtime
+        .iter()
+        .find(|row| row.identity.name == "child_fk")
+        .unwrap();
+    let physical = physical.unwrap();
+    assert_ne!(enforcement, Some(physical.object_id));
+    assert_eq!(runtime.identity.object_id, enforcement);
+    assert_eq!(runtime.catalog_oid, Some(physical.oid));
+    let row = constraint_catalog_row_by_oid(&catalog, &services.resolution, physical.oid)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.object_id, Some(physical.object_id));
+}

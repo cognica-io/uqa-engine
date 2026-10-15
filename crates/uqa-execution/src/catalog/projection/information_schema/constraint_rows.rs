@@ -191,6 +191,7 @@ fn relation(
         let positions =
             referenced_key_positions(&names, index.map(|index| index.columns.as_slice()))?;
         Some(ForeignKeyCatalogData {
+            enforcement_identity: None,
             referenced_index: index.and_then(|index| {
                 index
                     .definition
