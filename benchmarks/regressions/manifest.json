@@ -180,6 +180,32 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "generated_columns_bind_their_declared_scope_without_relation_type_lookup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/generated/tests.rs",
+      "capability": "Generated column binding scope",
+      "workload": "Schema-qualified declarations, including quoted relation names and qualified column references, outside the visible type path.",
+      "invariant": "Binding uses the declaration column scope without resolving an unrelated composite row type or executing the expression.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "generated_column_catalog_metadata_matches_pg18",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_generated_columns/catalog_and_persistence.rs",
+      "capability": "Generated column catalog output",
+      "workload": "Virtual and stored generated columns with integer arithmetic, catalog node output and reconstructed SQL.",
+      "invariant": "pg_attribute, information_schema and pg_attrdef retain generated-column metadata; typed node fields and Datum bytes plus pg_get_expr match independently captured PostgreSQL 18.4 output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "test",
       "test": "generated_updates_follow_postgresql_target_dependencies",

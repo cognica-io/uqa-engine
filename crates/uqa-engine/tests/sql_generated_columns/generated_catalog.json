@@ -1,0 +1,20 @@
+{
+  "reference": {
+    "database": "PostgreSQL 18.4",
+    "image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "capture_sha256": "61e4e66b53c8b8d6d39b1a0eaa4c2d601ed9162951ea1f00f8eee942e4d20ad4",
+    "normalization": "Only source :location values are replaced with -1; all node fields and Datum bytes remain unchanged."
+  },
+  "rows": [
+    {
+      "adnum": 2,
+      "adbin": "{OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}",
+      "expression": "(source + 1)"
+    },
+    {
+      "adnum": 3,
+      "adbin": "{OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varnullingrels (b) :varlevelsup 0 :varreturningtype 0 :varnosyn 1 :varattnosyn 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}",
+      "expression": "(source * 2)"
+    }
+  ]
+}
