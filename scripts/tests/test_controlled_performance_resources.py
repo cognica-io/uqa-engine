@@ -4,6 +4,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
+import errno
 import json
 from pathlib import Path
 import sys
@@ -174,6 +175,68 @@ class ResourceEvidenceTest(unittest.TestCase):
                 (group / 'cpuset.cpus.effective').write_text('8-15')
                 with self.assertRaises(QualificationError):
                     monitor.sample()
+
+    def test_completed_cgroup_reads_keep_collected_evidence(self):
+        for filename in ('cgroup.procs', 'cpuset.cpus.effective'):
+            for code in (errno.ENOENT, errno.ENODEV):
+                with self.subTest(filename=filename, errno=code), tempfile.TemporaryDirectory() as temporary, \
+                        patch.object(resources, 'snapshot', return_value={}):
+                    root = Path(temporary)
+                    monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+                    monitor.tasks = {'100/100/123': {'CPU_nanoseconds': 10000}}
+                    monitor.samples = 57
+                    original_read = Path.read_text
+
+                    def read(path, *args, **kwargs):
+                        if path.name == filename:
+                            raise OSError(code, 'removed cgroup', str(path))
+                        if path.name == 'cgroup.procs':
+                            return '100\n'
+                        return original_read(path, *args, **kwargs)
+
+                    with patch.object(Path, 'read_text', read):
+                        monitor.sample()
+                        with monitor:
+                            monitor.stopped.set()
+                            monitor.thread.join()
+                    record = json.loads((root / 'result.json').read_text())
+                    self.assertIsNone(record['sampling_error'])
+                    self.assertEqual(record['samples'], 57)
+                    self.assertEqual(record['last_observed_tasks'], monitor.tasks)
+
+    def test_cgroup_read_errors_other_than_removal_remain_fatal(self):
+        for filename in ('cgroup.procs', 'cpuset.cpus.effective'):
+            for code in (errno.EACCES, errno.EIO):
+                with self.subTest(filename=filename, errno=code), tempfile.TemporaryDirectory() as temporary, \
+                        patch.object(resources, 'snapshot', return_value={}):
+                    root = Path(temporary)
+                    monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+
+                    def read(path, *args, **kwargs):
+                        if path.name == filename:
+                            raise OSError(code, 'cgroup read failed', str(path))
+                        return '100\n'
+
+                    with patch.object(Path, 'read_text', read):
+                        with self.assertRaisesRegex(QualificationError, 'cgroup read failed'):
+                            with monitor:
+                                monitor.thread.join(timeout=2)
+                                self.assertFalse(monitor.thread.is_alive())
+                    record = json.loads((root / 'result.json').read_text())
+                    self.assertIn('cgroup read failed', record['sampling_error'])
+
+    def test_removed_cgroup_without_task_evidence_still_fails(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):
+            root = Path(temporary)
+            monitor = resources.MeasurementResources(root, root / 'result.json', '8')
+            with patch.object(Path, 'read_text', side_effect=OSError(errno.ENODEV, 'removed cgroup')):
+                monitor.sample()
+                with self.assertRaisesRegex(QualificationError, 'no workload task'):
+                    with monitor:
+                        monitor.stopped.set()
+                        monitor.thread.join()
+            record = json.loads((root / 'result.json').read_text())
+            self.assertEqual(record['last_observed_tasks'], {})
 
     def test_missing_task_evidence_fails_and_retains_diagnostics(self):
         with tempfile.TemporaryDirectory() as temporary, patch.object(resources, 'snapshot', return_value={}):

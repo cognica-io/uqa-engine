@@ -201,7 +201,6 @@ fn rule_relation_dependencies_follow_table_rename_and_reopen() {
     assert_eq!(error.sqlstate(), Some("2BP01"), "{error}");
 }
 
-#[cfg(feature = "fdw")]
 fn create_relation_kind_rule_fixture(engine: &Engine) {
     exec(
         engine,
@@ -245,7 +244,6 @@ fn create_relation_kind_rule_fixture(engine: &Engine) {
     assert_eq!(error.sqlstate(), Some("42809"), "{error}");
 }
 
-#[cfg(feature = "fdw")]
 fn assert_renamed_relation_kind_rule_sources(engine: &Engine, identities: &[(Value, Value); 3]) {
     for (index, name) in [
         "renamed_relation_kind_view",
@@ -315,7 +313,6 @@ fn assert_renamed_relation_kind_rule_sources(engine: &Engine, identities: &[(Val
     );
 }
 
-#[cfg(feature = "fdw")]
 fn assert_reopened_relation_kind_rule_dependencies(
     engine: &Engine,
     identities: &[(Value, Value); 3],
@@ -403,7 +400,6 @@ fn assert_reopened_relation_kind_rule_dependencies(
     );
 }
 
-#[cfg(feature = "fdw")]
 #[test]
 fn rule_dependencies_follow_view_materialized_view_and_foreign_table_renames() {
     let directory = TempDir::new().unwrap();
@@ -467,7 +463,6 @@ fn rule_dependencies_follow_view_materialized_view_and_foreign_table_renames() {
     assert_reopened_relation_kind_rule_dependencies(&engine, &identities);
 }
 
-#[cfg(feature = "fdw")]
 fn rename_relation_kind_with_rollback(
     engine: &Engine,
     kind: &str,
@@ -516,7 +511,6 @@ fn rename_relation_kind_with_rollback(
     (renamed, original)
 }
 
-#[cfg(feature = "fdw")]
 fn assert_missing_relation_rename_semantics(engine: &Engine) {
     for kind in ["VIEW", "MATERIALIZED VIEW", "FOREIGN TABLE", "TABLE"] {
         engine.take_sql_notices();
@@ -543,7 +537,6 @@ fn assert_missing_relation_rename_semantics(engine: &Engine) {
     }
 }
 
-#[cfg(feature = "fdw")]
 #[test]
 fn relation_kind_renames_preserve_identity_across_table_syntax_and_rollback() {
     let directory = TempDir::new().unwrap();

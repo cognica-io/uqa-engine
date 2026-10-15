@@ -14,18 +14,18 @@ exclude.workspace = true
 
 [features]
 default = []
+arrow = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema"]
 duckdb = ["dep:duckdb"]
 
 [dependencies]
 uqa-core = { workspace = true }
 thiserror = { workspace = true }
 
-# Native handlers are unavailable in the browser; DuckDB also requires
-# explicit feature selection on native targets.
+# Native handlers require explicit feature selection and are unavailable in the browser.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
-arrow-array = { workspace = true }
-arrow-ipc = { workspace = true }
-arrow-schema = { workspace = true }
+arrow-array = { workspace = true, optional = true }
+arrow-ipc = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
 duckdb = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -70,14 +70,12 @@ impl ForeignLookupContext<'_> {
         let relation = RelationIdentity::from_legacy_name(&resolved)?;
         Ok(self.registry.tables().get(&relation).cloned())
     }
-    #[cfg(feature = "fdw")]
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
         Ok(self
             .foreign_server_definition(name)?
             .as_ref()
             .map(super::servers::fdw_definition))
     }
-    #[cfg(feature = "fdw")]
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
         Ok(self
             .foreign_table_definition(name)?
@@ -85,7 +83,6 @@ impl ForeignLookupContext<'_> {
             .map(StoredForeignTable::fdw_definition))
     }
     /// Select the connection from the same retained catalog as its table and validate the captured server identity before invoking a handler.
-    #[cfg(feature = "fdw")]
     pub fn foreign_table_source(
         &self,
         name: &str,
@@ -108,7 +105,6 @@ impl ForeignLookupContext<'_> {
         )
     }
 
-    #[cfg(feature = "fdw")]
     fn table_source(
         &self,
         name: &str,

@@ -13,7 +13,7 @@ autotests = false
 
 [features]
 default = []
-fdw = ["uqa-engine/fdw"]
+arrow = ["uqa-engine/arrow"]
 duckdb = ["uqa-engine/duckdb"]
 
 [dependencies]

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 import threading
@@ -138,7 +139,11 @@ class MeasurementResources:
         try:
             processes = (self.group / 'cgroup.procs').read_text().split()
             effective = (self.group / 'cpuset.cpus.effective').read_text().strip()
-        except FileNotFoundError:
+        except OSError as error:
+            # systemd collects the completed unit while we sample it. An open
+            # kernfs file reports ENODEV after deactivation, before unlink.
+            if error.errno not in (errno.ENOENT, errno.ENODEV):
+                raise
             return
         if effective != self.cpus:
             raise QualificationError('workload effective CPU allocation changed')

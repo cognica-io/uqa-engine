@@ -20,7 +20,6 @@ fn foreign_catalog_rows_and_wrapper_deletion_match_postgresql(#[case] provider: 
     );
 }
 
-#[cfg(feature = "fdw")]
 #[rstest::rstest]
 #[case::memory(0)]
 #[case::sqlite(1)]

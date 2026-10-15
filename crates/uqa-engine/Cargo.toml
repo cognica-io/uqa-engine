@@ -18,8 +18,8 @@ categories = ["database-implementations"]
 
 [features]
 default = []
-fdw = ["dep:uqa-fdw", "uqa-execution/fdw", "dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema"]
-duckdb = ["fdw", "dep:duckdb", "uqa-fdw/duckdb"]
+arrow = ["uqa-fdw/arrow", "dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema"]
+duckdb = ["dep:duckdb", "uqa-fdw/duckdb"]
 nori = ["uqa-analysis/nori"]
 kuromoji = ["uqa-analysis/kuromoji"]
 
@@ -37,7 +37,7 @@ uqa-graph = { workspace = true }
 uqa-joins = { workspace = true }
 uqa-planner = { workspace = true }
 uqa-execution = { workspace = true }
-uqa-fdw = { workspace = true, optional = true }
+uqa-fdw = { workspace = true }
 ahash = { workspace = true }
 parking_lot = { workspace = true }
 libc = { workspace = true }
