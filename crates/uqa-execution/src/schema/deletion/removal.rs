@@ -239,7 +239,7 @@ fn remove_relation_constraint(
             .sequences
             .dependencies
             .foreign
-            .drop_foreign_table_check_dependency(&table, name)
+            .drop_foreign_table_constraint_dependency(&table, name)
             .map_err(|error| storage_error("ALTER FOREIGN TABLE DROP CONSTRAINT", &error))?
         {
             Some(true) => Ok(()),

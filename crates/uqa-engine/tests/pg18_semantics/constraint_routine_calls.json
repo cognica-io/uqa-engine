@@ -1,0 +1,362 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE SCHEMA node_calls",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "SET search_path=node_calls,public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION chosen(a integer, b integer DEFAULT 2) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN a + b",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION total(VARIADIC items integer[]) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN items[1]",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE FUNCTION first_item(items anyarray) RETURNS anyelement LANGUAGE SQL IMMUTABLE AS $$SELECT items[1]$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "setup": true
+    },
+    {
+      "sql": "CREATE TABLE calls(n integer, a integer[], CONSTRAINT default_call CHECK(chosen(n)>0), CONSTRAINT named_call CHECK(chosen(b=>3,a=>n)>0), CONSTRAINT variadic_call CHECK(total(n,2)>0), CONSTRAINT explicit_variadic_call CHECK(total(VARIADIC a)>0), CONSTRAINT polymorphic_call CHECK(first_item(a)>0), CONSTRAINT array_length_call CHECK(array_length(a,1)>0), CONSTRAINT array_append_call CHECK((array_append(a,1))[1]>0))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,conrelid,false),pg_get_expr(conbin,conrelid,true),pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace='node_calls'::regnamespace ORDER BY conname",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr",
+            "pg_get_expr",
+            "pg_get_constraintdef"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "array_append_call",
+              "((array_append(a, 1))[1] > 0)",
+              "(array_append(a, 1))[1] > 0",
+              "CHECK (((array_append(a, 1))[1] > 0))"
+            ],
+            [
+              "array_length_call",
+              "(array_length(a, 1) > 0)",
+              "array_length(a, 1) > 0",
+              "CHECK ((array_length(a, 1) > 0))"
+            ],
+            [
+              "default_call",
+              "(chosen(n) > 0)",
+              "chosen(n) > 0",
+              "CHECK ((chosen(n) > 0))"
+            ],
+            [
+              "explicit_variadic_call",
+              "(total(VARIADIC a) > 0)",
+              "total(VARIADIC a) > 0",
+              "CHECK ((total(VARIADIC a) > 0))"
+            ],
+            [
+              "named_call",
+              "(chosen(b => 3, a => n) > 0)",
+              "chosen(b => 3, a => n) > 0",
+              "CHECK ((chosen(b => 3, a => n) > 0))"
+            ],
+            [
+              "polymorphic_call",
+              "(first_item(a) > 0)",
+              "first_item(a) > 0",
+              "CHECK ((first_item(a) > 0))"
+            ],
+            [
+              "variadic_call",
+              "(total(VARIADIC ARRAY[n, 2]) > 0)",
+              "total(VARIADIC ARRAY[n, 2]) > 0",
+              "CHECK ((total(VARIADIC ARRAY[n, 2]) > 0))"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE default_calls(n integer DEFAULT chosen(1), t text DEFAULT concat('a','b'), a integer[] DEFAULT array_append(ARRAY[1],2))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a.attname,pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='default_calls'::regclass ORDER BY a.attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "n",
+              "chosen(1)"
+            ],
+            [
+              "t",
+              "concat('a', 'b')"
+            ],
+            [
+              "a",
+              "array_append(ARRAY[1], 2)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE call_shapes (n integer, a integer[], CONSTRAINT named_var CHECK(total(VARIADIC items => a)>0), CONSTRAINT mixed_any CHECK(concat(n, 'a', NULL)<>''), CONSTRAINT explicit_any CHECK(concat(VARIADIC ARRAY['a','b'])<>''), CONSTRAINT sep_any CHECK(concat_ws('-',n,'a')<>''))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT conname,pg_get_expr(conbin,conrelid,false),pg_get_expr(conbin,conrelid,true) FROM pg_constraint WHERE conrelid='call_shapes'::regclass ORDER BY conname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "conname",
+            "pg_get_expr",
+            "pg_get_expr"
+          ],
+          "type_oids": [
+            19,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "explicit_any",
+              "(concat(VARIADIC ARRAY['a'::text, 'b'::text]) <> ''::text)",
+              "concat(VARIADIC ARRAY['a'::text, 'b'::text]) <> ''::text"
+            ],
+            [
+              "mixed_any",
+              "(concat(n, 'a', NULL::unknown) <> ''::text)",
+              "concat(n, 'a', NULL::unknown) <> ''::text"
+            ],
+            [
+              "named_var",
+              "(total(VARIADIC items => a) > 0)",
+              "total(VARIADIC items => a) > 0"
+            ],
+            [
+              "sep_any",
+              "(concat_ws('-'::text, n, 'a') <> ''::text)",
+              "concat_ws('-'::text, n, 'a') <> ''::text"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT oid,proname,prorettype,proargtypes::text,proallargtypes::text,proargmodes::text,provariadic,proisstrict,provolatile,proparallel,proleakproof,prosrc FROM pg_proc WHERE pronamespace='pg_catalog'::regnamespace AND proname IN ('array_append','concat','concat_ws','array_length') ORDER BY proname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "proname",
+            "prorettype",
+            "proargtypes",
+            "proallargtypes",
+            "proargmodes",
+            "provariadic",
+            "proisstrict",
+            "provolatile",
+            "proparallel",
+            "proleakproof",
+            "prosrc"
+          ],
+          "type_oids": [
+            26,
+            19,
+            26,
+            25,
+            25,
+            25,
+            26,
+            16,
+            18,
+            18,
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "378",
+              "array_append",
+              "5078",
+              "5078 5077",
+              null,
+              null,
+              "0",
+              "f",
+              "i",
+              "s",
+              "f",
+              "array_append"
+            ],
+            [
+              "2176",
+              "array_length",
+              "23",
+              "2277 23",
+              null,
+              null,
+              "0",
+              "t",
+              "i",
+              "s",
+              "f",
+              "array_length"
+            ],
+            [
+              "3058",
+              "concat",
+              "25",
+              "2276",
+              "{2276}",
+              "{v}",
+              "2276",
+              "f",
+              "s",
+              "s",
+              "f",
+              "text_concat"
+            ],
+            [
+              "3059",
+              "concat_ws",
+              "25",
+              "25 2276",
+              "{25,2276}",
+              "{i,v}",
+              "2276",
+              "f",
+              "s",
+              "s",
+              "f",
+              "text_concat_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

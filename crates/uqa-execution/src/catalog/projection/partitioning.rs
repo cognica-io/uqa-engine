@@ -6,13 +6,10 @@
 
 //! `PostgreSQL` 18 declarative-partition catalog rendering and helpers.
 
-use super::expression_text::schema_expr_text;
 use super::helpers::rows::{
     catalog_int2vector, catalog_oidvector, catalog_usize, int_value, row, str_value,
 };
-use super::helpers::type_metadata::{
-    pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier, pg_type_oid,
-};
+use super::helpers::type_metadata::pg_type_collation_oid;
 use super::pg_catalog::table_relation_oid_from;
 use super::view_definition::stored_expression_definition;
 use crate::catalog::context::CatalogContext;
@@ -21,7 +18,6 @@ use uqa_core::Value;
 use uqa_sql::ast::{
     ColumnType, Expr, PartitionBound, PartitionRangeDatum, PartitionSpec, PartitionStrategy,
 };
-use uqa_sql::semantics::partition::partition_datum_text;
 use uqa_sql::{ResultRow, SQLError};
 
 pub fn build_pg_partitioned_table(
@@ -66,13 +62,8 @@ pub fn build_pg_partitioned_table(
             .iter()
             .filter(|key| !matches!(key, Expr::Column(_)))
             .map(|expression| {
-                stored_expression_definition(
-                    Some(&super::CatalogOutput(*context)),
-                    catalog,
-                    resolution,
-                    expression,
-                    false,
-                )
+                super::expression_nodes::encode(context, catalog, columns, None, expression, None)
+                    .map(uqa_sql::catalog::node_tree::Field::from)
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
         rows.push(row([
@@ -115,14 +106,7 @@ pub fn build_pg_partitioned_table(
                 if expressions.is_empty() {
                     Value::Null
                 } else {
-                    str_value(format!(
-                        "({})",
-                        expressions
-                            .iter()
-                            .map(|expression| format!("{{UQAEXPR :sql {expression}}}"))
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    ))
+                    str_value(uqa_sql::catalog::node_tree::Field::List(expressions).to_string())
                 },
             ),
         ]));
@@ -157,33 +141,76 @@ pub fn pg_get_expr_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
             )));
         }
     }
+    let node_tree = uqa_sql::catalog::node_tree::parse(node)?;
+    uqa_sql::catalog::node_tree::deparse::validate_relation(&node_tree, relation_oid != 0)?;
     let catalog = context.catalog_read_view();
+    let context = CatalogContext {
+        catalog: &catalog,
+        ..*context
+    };
     let resolution = context.session_execution_view().relation_name_resolution();
-    for table in catalog.table_names() {
-        if table_relation_oid_from(&catalog, &resolution, &table)? != relation_oid {
-            continue;
-        }
-        let hierarchy = &catalog
-            .table(&resolution, &table)?
-            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
-            .hierarchy;
-        let Some(bound) = hierarchy.partition_bound.as_ref() else {
-            return Ok(str_value(node.clone()));
+    let relation = if relation_oid == 0 {
+        None
+    } else {
+        let Some(identity) = super::regtypes::relation_identity_by_oid(&context, relation_oid)?
+        else {
+            return Ok(Value::Null);
         };
-        let rendered_node = partition_bound_node(context, &catalog, &resolution, &table, bound)?;
-        if node == &rendered_node {
-            let parent = hierarchy
-                .parents
-                .first()
-                .ok_or_else(|| SQLError::Internal(format!("partition `{table}` has no parent")))?;
-            let key_types = partition_key_types_for_table(context, &catalog, &resolution, parent)?;
-            return Ok(str_value(partition_bound_expression(
-                context, &key_types, bound,
-            )?));
+        Some(identity)
+    };
+    let pretty = matches!(args.get(2), Some(Value::Bool(true)));
+    if let Some(identity) = relation.as_ref() {
+        let name = identity.qualified_name();
+        if let Some(table) = catalog.table(&resolution, &name)? {
+            return super::expression_nodes::render_with_relation(
+                &context,
+                &table.columns,
+                Some(&identity.name),
+                &node_tree,
+                pretty,
+            )
+            .map(str_value);
         }
-        return Ok(str_value(node.clone()));
+        if let Some(table) = catalog.snapshot().definitions.foreign_tables.get(identity) {
+            return super::expression_nodes::render_with_relation(
+                &context,
+                &table.columns,
+                Some(&identity.name),
+                &node_tree,
+                pretty,
+            )
+            .map(str_value);
+        }
+        if let Some(view) = catalog.snapshot().definitions.views.get(identity) {
+            let columns =
+                super::helpers::views::view_columns_for(&context, &catalog, &resolution, view)?;
+            return super::expression_nodes::render_with_relation(
+                &context,
+                &columns,
+                Some(&identity.name),
+                &node_tree,
+                pretty,
+            )
+            .map(str_value);
+        }
+        if let Some(schema) =
+            crate::catalog::schema::virtual_relation_schema(&catalog, &resolution, &name)?
+        {
+            let columns = schema
+                .into_iter()
+                .map(|(name, ty)| uqa_sql::ast::ColumnDef::nullable(name, ty))
+                .collect::<Vec<_>>();
+            return super::expression_nodes::render_with_relation(
+                &context,
+                &columns,
+                Some(&identity.name),
+                &node_tree,
+                pretty,
+            )
+            .map(str_value);
+        }
     }
-    Ok(str_value(node.clone()))
+    super::expression_nodes::render(&context, &[], &node_tree, pretty).map(str_value)
 }
 
 pub fn pg_get_partkeydef_value(
@@ -299,75 +326,6 @@ pub fn partition_bound_node(
         "{{PARTITIONBOUNDSPEC :strategy {} :is_default {is_default} :modulus {modulus} :remainder {remainder} :listdatums {listdatums} :lowerdatums {lowerdatums} :upperdatums {upperdatums} :location -1}}",
         partition_strategy_code(strategy)
     ))
-}
-
-/// `pg_get_expr` of a partition bound: each stored datum rendered by `get_const_expr` against its partition key type.
-fn partition_bound_expression(
-    context: &CatalogContext<'_>,
-    key_types: &[ColumnType],
-    bound: &PartitionBound,
-) -> Result<String, SQLError> {
-    let output = super::CatalogOutput(*context);
-    let engine: &dyn uqa_sql::expr::EngineHook = &output;
-    Ok(match bound {
-        PartitionBound::Default => "DEFAULT".into(),
-        PartitionBound::List(values) => {
-            let ty = key_types.first().ok_or_else(|| {
-                SQLError::Internal("LIST partition parent has no partition key".into())
-            })?;
-            let mut rendered = Vec::with_capacity(values.len());
-            for value in values {
-                rendered.push(partition_datum_text(
-                    &partition_datum_value(context, value)?,
-                    ty,
-                    Some(engine),
-                )?);
-            }
-            format!("FOR VALUES IN ({})", rendered.join(", "))
-        }
-        PartitionBound::Range { lower, upper } => format!(
-            "FOR VALUES FROM {} TO {}",
-            range_datum_text(context, lower, key_types, engine)?,
-            range_datum_text(context, upper, key_types, engine)?
-        ),
-        PartitionBound::Hash { modulus, remainder } => {
-            format!("FOR VALUES WITH (modulus {modulus}, remainder {remainder})")
-        }
-    })
-}
-
-fn range_datum_text(
-    context: &CatalogContext<'_>,
-    datums: &[PartitionRangeDatum],
-    key_types: &[ColumnType],
-    engine: &dyn uqa_sql::expr::EngineHook,
-) -> Result<String, SQLError> {
-    let mut rendered = Vec::with_capacity(datums.len());
-    for (position, datum) in datums.iter().enumerate() {
-        rendered.push(match datum {
-            PartitionRangeDatum::MinValue => "MINVALUE".into(),
-            PartitionRangeDatum::MaxValue => "MAXVALUE".into(),
-            PartitionRangeDatum::Value(value) => partition_datum_text(
-                &partition_datum_value(context, value)?,
-                key_types.get(position).ok_or_else(|| {
-                    SQLError::Internal("partition range bound is wider than its key".into())
-                })?,
-                Some(engine),
-            )?,
-        });
-    }
-    Ok(format!("({})", rendered.join(", ")))
-}
-
-/// A stored bound datum; bounds written before bound transformation are evaluated like any other constant expression.
-fn partition_datum_value(
-    context: &CatalogContext<'_>,
-    expression: &Expr,
-) -> Result<Value, SQLError> {
-    match uqa_sql::semantics::partition::stored_datum(expression) {
-        Ok(value) => Ok(value.clone()),
-        Err(_) => context.expressions.evaluate(expression),
-    }
 }
 
 /// Reconstruct a stored key for bound-coercion diagnostics with the caller's current catalog.
@@ -547,86 +505,10 @@ fn partition_const_node(
     expression: &Expr,
     ty: Option<&ColumnType>,
 ) -> Result<String, SQLError> {
-    let ty = ty.cloned().unwrap_or(ColumnType::Text);
+    let ty = ty.ok_or_else(|| SQLError::Internal("partition bound has no key type".into()))?;
     let value = context.expressions.evaluate(expression)?;
-    let type_oid = pg_type_oid(&ty);
-    let type_modifier = pg_type_modifier(&ty);
-    let collation_oid = pg_type_collation_oid(&ty);
-    let length = pg_type_len(&ty);
-    let by_value = pg_type_by_value(&ty);
-    let const_value = pg_const_value(context, &value, &ty)?;
-    Ok(format!(
-        "{{CONST :consttype {type_oid} :consttypmod {type_modifier} :constcollid {collation_oid} :constlen {length} :constbyval {by_value} :constisnull {} :location -1 :constvalue {const_value}}}",
-        matches!(value, Value::Null)
-    ))
-}
-
-fn pg_const_value(
-    context: &CatalogContext<'_>,
-    value: &Value,
-    ty: &ColumnType,
-) -> Result<String, SQLError> {
-    if matches!(value, Value::Null) {
-        return Ok("<>".into());
-    }
-    let mut bytes = match (value, base_type(ty)) {
-        (Value::Bool(value), ColumnType::Boolean) => vec![u8::from(*value)],
-        (Value::Int(value), ColumnType::SmallInteger) => {
-            i64::from(*value as i16).to_le_bytes().to_vec()
-        }
-        (Value::Int(value), ColumnType::Integer) => i64::from(*value as i32).to_le_bytes().to_vec(),
-        (Value::Int(value), ColumnType::Oid | ColumnType::Xid) => {
-            u64::from(*value as u32).to_le_bytes().to_vec()
-        }
-        (Value::Int(value), ColumnType::BigInteger) => value.to_le_bytes().to_vec(),
-        (Value::Float(value), ColumnType::Real) => (*value as f32).to_le_bytes().to_vec(),
-        (Value::Float(value), ColumnType::DoublePrecision) => value.to_le_bytes().to_vec(),
-        (Value::Str(value) | Value::FixedChar(value), _) => varlena_bytes(value.as_bytes()),
-        (Value::Bytes(value), ColumnType::Bytea) => varlena_bytes(value),
-        // An enum datum is its label OID.
-        (Value::Enum(label), ColumnType::Enum(_)) => u64::from(
-            uqa_sql::expr::enums::enum_label_oid(context.routines.enum_labels(), label)?,
-        )
-        .to_le_bytes()
-        .to_vec(),
-        _ => {
-            return Ok(format!(
-                "<{}>",
-                schema_expr_text(&Expr::Literal(value.clone()))?
-            ))
-        }
-    };
-    Ok(if pg_type_by_value(ty) {
-        bytes.resize(8, 0);
-        let width = pg_type_len(ty);
-        format!(
-            "{width} [ {} ]",
-            bytes
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(" ")
-        )
-    } else {
-        format!(
-            "{} [ {} ]",
-            bytes.len(),
-            bytes
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(" ")
-        )
-    })
-}
-
-fn varlena_bytes(payload: &[u8]) -> Vec<u8> {
-    let total = payload.len().saturating_add(4);
-    let header = u32::try_from(total)
-        .unwrap_or(u32::MAX)
-        .saturating_mul(4)
-        .to_le_bytes();
-    header.into_iter().chain(payload.iter().copied()).collect()
+    uqa_sql::catalog::node_tree::constant(&value, ty, None, context.routines.composite_types())
+        .map(|node| node.to_string())
 }
 
 fn base_type(ty: &ColumnType) -> &ColumnType {

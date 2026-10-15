@@ -143,8 +143,12 @@ impl DomainRegistryPublication for Engine {
     fn domain_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
         self.storage.catalog.as_deref()
     }
-    fn publish_domain_definitions(&self, registry: BTreeMap<String, StoredDomain>) {
+    fn publish_domain_definitions(
+        &self,
+        registry: BTreeMap<String, StoredDomain>,
+    ) -> Result<(), SQLError> {
         *self.durable.domains.write() = registry;
+        self.publish_catalog_constraint_tuples()
     }
 }
 

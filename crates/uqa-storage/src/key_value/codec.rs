@@ -237,6 +237,21 @@ pub(super) fn push_str(key: &mut Vec<u8>, segment: &str) -> StorageBackendResult
     push_segment(key, segment.as_bytes())
 }
 
+/// Seek part of a length-prefixed string segment without changing its complete encoded length.
+pub(super) fn single_str_key_prefix(
+    tag: u8,
+    prefix: &str,
+    key_bytes: usize,
+    budget: &uqa_core::memory::MemoryBudget,
+) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
+    let length = key_segment_length(key_bytes)?;
+    let mut key = uqa_core::memory::BudgetedVec::new(budget);
+    key.push(tag)?;
+    key.extend_from_slice(&length.to_be_bytes())?;
+    key.extend_from_slice(prefix.as_bytes())?;
+    Ok(key)
+}
+
 pub(super) fn push_u64(key: &mut Vec<u8>, value: u64) {
     key.extend_from_slice(&value.to_be_bytes());
 }

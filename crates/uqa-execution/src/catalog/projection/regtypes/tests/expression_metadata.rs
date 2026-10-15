@@ -68,6 +68,7 @@ fn fixture(unrelated: usize) -> CatalogReadView {
         },
     )]));
     let Statement::CreateFunction(mut definition) = uqa_sql::compile("CREATE FUNCTION hidden.echo(n regtype DEFAULT 'hidden.positive'::regtype) RETURNS regtype LANGUAGE SQL AS 'SELECT n'").unwrap().remove(0) else { panic!("function"); };
+    definition.params[0].default = Some(constant(60_000, "regtype"));
     definition.catalog_oid = Some(70_000);
     definition.owner = Some(RoleIdentity::BOOTSTRAP);
     snapshot.definitions.sql_user_functions = Arc::new(BTreeMap::from([(

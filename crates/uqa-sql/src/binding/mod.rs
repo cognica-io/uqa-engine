@@ -43,7 +43,8 @@ pub(crate) use preparation::{
     prepare_routine_body_inputs,
 };
 pub(crate) use preparation::{
-    analyze_domain_check, analyze_stored_expression_inputs, read_prepared_inputs,
+    analyze_domain_check, analyze_stored_expression_inputs, analyze_table_check,
+    read_prepared_inputs,
 };
 
 #[cfg(test)]

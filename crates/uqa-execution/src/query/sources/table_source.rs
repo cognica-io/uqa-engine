@@ -356,6 +356,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 } else {
                     catalog
                 };
+                let catalog = context.catalog.catalog.retain_catalog_rows(catalog)?;
                 let projection = context.catalog;
                 let name = name.clone();
                 let aliases = table_source_aliases(&columns, &[], column_aliases);

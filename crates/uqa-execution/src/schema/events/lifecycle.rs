@@ -135,6 +135,7 @@ impl EventLifecycleContext<'_> {
         **rules = next;
         drop(rules);
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -208,6 +209,7 @@ impl EventLifecycleContext<'_> {
         **rules = next;
         drop(rules);
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -246,6 +248,7 @@ impl EventLifecycleContext<'_> {
         self.catalog.publication.persist_rules(&next)?;
         **rules = next;
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -270,6 +273,7 @@ impl EventLifecycleContext<'_> {
         self.catalog.publication.persist_rules(&next)?;
         **rules = next;
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -354,6 +358,7 @@ impl EventLifecycleContext<'_> {
         **triggers = next;
         drop(triggers);
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -412,6 +417,7 @@ impl EventLifecycleContext<'_> {
             self.pending.forget(&removed.constraint_identity()?);
         }
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -444,6 +450,7 @@ impl EventLifecycleContext<'_> {
             self.pending.rename_trigger(identity, to);
         }
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -488,6 +495,7 @@ impl EventLifecycleContext<'_> {
         drop(triggers);
         self.pending.rename_constraint(&old_identity, to);
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 
@@ -515,6 +523,7 @@ impl EventLifecycleContext<'_> {
         self.catalog.publication.persist_triggers(&next)?;
         **triggers = next;
         self.catalog.changes.catalog_registry_changed();
+        self.catalog.publication.finish_publication()?;
         Ok(())
     }
 }

@@ -65,10 +65,11 @@ pub(super) fn read(
                 }
             };
             let mut roles = BTreeMap::new();
-            for (key, json) in catalog.metadata_with_prefix(ROLE_PREFIX)? {
+            catalog.visit_metadata_with_prefix(ROLE_PREFIX, &mut |key, json| {
                 let name = key.strip_prefix(ROLE_PREFIX).expect("metadata prefix");
-                roles.insert(name.to_owned(), serde_json::from_str(&json)?);
-            }
+                roles.insert(name.to_owned(), serde_json::from_str(json)?);
+                Ok(())
+            })?;
             if !roles.values().any(|role: &RoleDefinition| role.oid == 10) {
                 return Err(StorageBackendError::Other(
                     "role records are missing the bootstrap role".into(),
@@ -100,15 +101,18 @@ pub(super) fn validate_oids(
     catalog: &dyn CatalogFacade,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> StorageBackendResult<()> {
-    let claims = catalog.metadata_with_prefix(OID_PREFIX)?;
-    if claims.len() != roles.len()
-        || claims
-            .iter()
-            .any(|(key, name)| roles.get(name).is_none_or(|role| *key != oid_key(role.oid)))
-    {
-        return Err(StorageBackendError::Other(
-            "role OID records do not match role definitions".into(),
-        ));
+    let invalid =
+        || StorageBackendError::Other("role OID records do not match role definitions".into());
+    let mut count = 0;
+    catalog.visit_metadata_with_prefix(OID_PREFIX, &mut |key, name| {
+        if roles.get(name).is_none_or(|role| key != oid_key(role.oid)) {
+            return Err(invalid());
+        }
+        count += 1;
+        Ok(())
+    })?;
+    if count != roles.len() {
+        return Err(invalid());
     }
     Ok(())
 }

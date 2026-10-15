@@ -208,7 +208,7 @@ impl PartitionExpressions for Fixture {
     fn evaluate_row(
         &self,
         _: &Expr,
-        _: &ResultRow,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
         _: &[SQLParam],
     ) -> Result<Value, SQLError> {

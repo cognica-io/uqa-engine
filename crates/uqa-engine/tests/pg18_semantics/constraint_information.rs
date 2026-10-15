@@ -22,6 +22,15 @@ fn constraint_information_views_match_postgresql(#[case] provider: usize) {
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
+fn constraint_usage_views_match_postgresql(#[case] provider: usize) {
+    verify(provider, include_str!("constraint_usage.json"));
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
 fn constraint_key_visibility_matches_postgresql(#[case] provider: usize) {
     verify(provider, include_str!("constraint_key_visibility.json"));
 }

@@ -100,6 +100,7 @@ fn external_parameters_keep_positional_spelling_and_cast_prettiness() {
             ("arg", parameter),
             ("resulttype", 1114.into()),
             ("resulttypmod", (-1).into()),
+            ("relabelformat", 1.into()),
         ],
     )
     .into();

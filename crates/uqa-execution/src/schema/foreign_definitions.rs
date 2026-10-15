@@ -82,13 +82,13 @@ impl ForeignDefinitionContext<'_> {
         })
     }
 
-    pub fn drop_foreign_table_check_dependency(
+    pub fn drop_foreign_table_constraint_dependency(
         &self,
         table_name: &str,
         constraint_name: &str,
     ) -> StorageBackendResult<Option<bool>> {
         self.update_foreign_table_definition(table_name, |table| {
-            Ok(declarations::remove_foreign_check(
+            Ok(declarations::remove_foreign_constraint(
                 &mut table.columns,
                 &mut table.checks,
                 constraint_name,

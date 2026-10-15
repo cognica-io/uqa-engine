@@ -11,6 +11,13 @@ mod observed;
 use uqa_storage::{CatalogFacade, KeyValueCatalog};
 
 #[test]
+fn borrowed_metadata_visits_retain_private_and_committed_boundaries() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 24));
+    uqa_storage::key_value::conformance::verify_catalog_metadata_visits(&store).unwrap();
+}
+
+#[test]
 fn schema_private_provenance_preserves_deletions_and_exact_names_through_undo() {
     let persistence = Persistence::new();
     let first = Arc::new(persistence.session(1 << 24));

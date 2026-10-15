@@ -8,7 +8,7 @@
 
 use super::{ColumnScope, DependencyBuilder, MemberObject, References};
 use crate::catalog::projection::helpers::constraints::{
-    constraint_catalog_rows, ConstraintCatalogKind,
+    constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
 };
 use crate::catalog::projection::pg_catalog::{
     catalog_index_relations, constraint_index_oid, constraint_parent_oid, constraint_row_oid,
@@ -38,14 +38,9 @@ impl DependencyBuilder<'_> {
                 },
             );
             let address = ObjectAddress::whole(CONSTRAINT_CLASS, oid);
-            let mut constrained = References::default();
+            let mut constrained = attribute_references(constraint, relation_oid)?;
             if constraint.columns.is_empty() {
                 constrained.add_relation(relation_oid);
-            }
-            for column in &constraint.columns {
-                if let Ok(number) = i32::try_from(column.table_ordinal) {
-                    constrained.add_column(relation_oid, number);
-                }
             }
             // A key constraint covers every attribute of its index, its INCLUDE columns too, so dropping one of them drops the constraint.
             if matches!(
@@ -81,7 +76,8 @@ impl DependencyBuilder<'_> {
                 (constraint.kind, &constraint.expression)
             {
                 let table = self.relation_object(relation_oid)?.clone();
-                let mut references = References::default();
+                // Analyzed CHECK attributes, including tableoid, have both automatic and normal dependencies; a whole-row-only CHECK has only its automatic relation dependency.
+                let mut references = attribute_references(constraint, relation_oid)?;
                 self.expressions().collect(
                     expression,
                     ColumnScope::Relation(relation_oid, &table),
@@ -122,6 +118,20 @@ impl DependencyBuilder<'_> {
         }
         Ok(())
     }
+}
+
+fn attribute_references(
+    constraint: &ConstraintCatalogRow,
+    relation_oid: u32,
+) -> Result<References, SQLError> {
+    let mut references = References::default();
+    for column in &constraint.columns {
+        let number = i32::try_from(column.table_ordinal).map_err(|_| {
+            SQLError::Internal("constraint attribute number is out of range".into())
+        })?;
+        references.add_column(relation_oid, number);
+    }
+    Ok(references)
 }
 
 /// The INCLUDE columns of the key constraint `object_id` of `relation`.

@@ -256,17 +256,26 @@ fn window_definitions_follow_subquery_remapping_and_source_constants() {
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("expected query block")
     };
+    let ScalarExpr::TypedLiteral {
+        value,
+        ty,
+        collation_oid,
+        composite_source,
+        bound_type,
+        parameter_index,
+    } = &block.windows[0].spec.order_by[0].expr
+    else {
+        panic!("expected a folded integer constant");
+    };
+    assert_eq!(value, &Value::Int(3));
     assert_eq!(
-        block.windows[0].spec.order_by[0].expr,
-        ScalarExpr::TypedLiteral {
-            collation_oid: None,
-            composite_source: None,
-            value: Value::Int(3),
-            ty: "integer".into(),
-            bound_type: Some(uqa_sql::ColumnType::Integer),
-            parameter_index: None,
-        }
+        uqa_sql::ColumnType::from_sql_name(ty).unwrap(),
+        uqa_sql::ColumnType::Integer
     );
+    assert_eq!(*collation_oid, None);
+    assert_eq!(*composite_source, None);
+    assert_eq!(*bound_type, Some(uqa_sql::ColumnType::Integer));
+    assert_eq!(*parameter_index, None);
     let ScalarExpr::WindowCall { spec, .. } = &block.projections[0].expr else {
         panic!("expected window call")
     };

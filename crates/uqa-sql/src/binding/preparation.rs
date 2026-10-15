@@ -228,6 +228,22 @@ pub(crate) fn analyze_domain_check(
     )
 }
 
+/// Analyze table CHECK inputs in expression order, including their system-column restrictions.
+pub(crate) fn analyze_table_check(
+    catalog: &dyn crate::schema::SchemaExpressionCatalog,
+    expression: &mut crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: &BindingContext<'_>,
+) -> Result<Option<ColumnType>, SQLError> {
+    analyze_schema_expression(
+        catalog,
+        expression,
+        input,
+        binding,
+        SchemaExpressionKind::TableCheck,
+    )
+}
+
 fn analyze_schema_expression(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
     expression: &mut crate::plan::ExpressionPlan,

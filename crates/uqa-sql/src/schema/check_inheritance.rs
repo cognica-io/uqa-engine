@@ -11,11 +11,26 @@ use crate::SQLError;
 use crate::ScalarExpr;
 use uqa_core::Value;
 
-pub fn bind_parent_check_columns(parent: &str, expr: &mut Expr) -> Result<(), SQLError> {
+pub fn bind_parent_check_columns(parent: &str, check: &mut TableCheck) -> Result<(), SQLError> {
     let relation =
         uqa_core::RelationIdentity::from_legacy_name(parent).map_err(SQLError::Internal)?;
-    crate::schema::generated::bind_schema_column_references(expr, parent);
-    crate::schema::generated::bind_schema_column_references(expr, &relation.name);
+    crate::catalog::stored_ast::visit_stored_expression(&mut check.expr, &mut |node| {
+        if matches!(node, Expr::Star | Expr::QualifiedStar(_)) {
+            return Err(SQLError::Diagnostic {
+                sqlstate: "0A000".into(),
+                message: "cannot convert whole-row table reference".into(),
+                detail: Some(format!(
+                    "Constraint \"{}\" contains a whole-row reference to table \"{}\".",
+                    check.name.as_deref().unwrap_or("<unnamed>"),
+                    relation.name,
+                )),
+                hint: None,
+            });
+        }
+        Ok(())
+    })?;
+    crate::schema::generated::bind_schema_column_references(&mut check.expr, parent);
+    crate::schema::generated::bind_schema_column_references(&mut check.expr, &relation.name);
     Ok(())
 }
 

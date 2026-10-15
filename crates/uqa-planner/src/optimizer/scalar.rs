@@ -93,6 +93,7 @@ fn optimize_scalar(
             ty,
             collation,
         } => {
+            let selected_arm = matches!(*expr, ScalarExpr::Case { .. });
             let mut expr = optimize_scalar(*expr, config)?;
             if let Some(oid) = collation.implicit_oid() {
                 match &mut expr {
@@ -102,6 +103,14 @@ fn optimize_scalar(
                         collation_oid,
                         ..
                     } => {
+                        // Simplification may select an arm whose modifier is more specific than the original CASE result.
+                        let ty = bound_type
+                            .take()
+                            .filter(|inner| {
+                                selected_arm
+                                    && inner.without_type_modifiers() == ty.without_type_modifiers()
+                            })
+                            .unwrap_or(ty);
                         *name = ty.catalog_name();
                         *bound_type = Some(ty);
                         *collation_oid = Some(oid);

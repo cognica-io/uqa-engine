@@ -745,6 +745,19 @@ fn regtype_output_catalog(
         .get_or_try_init(|| RegtypeOutputCatalog::build(context))
 }
 
+pub(super) fn relation_identity_by_oid(
+    context: &CatalogContext<'_>,
+    oid: i64,
+) -> Result<Option<uqa_core::RelationIdentity>, SQLError> {
+    let catalog = regtype_output_catalog(context)?;
+    Ok(catalog.classes.get(&oid).and_then(|entry| {
+        catalog
+            .namespaces
+            .get(&entry.namespace_oid)
+            .map(|schema| uqa_core::RelationIdentity::new(schema, &entry.name))
+    }))
+}
+
 /// The type whose privileges govern `oid`: a generated array type answers with its element type, as `pg_type_aclmask` does. `None` when no type has the OID.
 pub fn type_privilege_oid(context: &CatalogContext<'_>, oid: i64) -> Result<Option<i64>, SQLError> {
     let catalog = regtype_output_catalog(context)?;

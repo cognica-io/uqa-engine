@@ -422,8 +422,10 @@ mod unified_plan_tests {
             UnifiedPlan::Command(command) if matches!(*command, CommandPlan::Update(_))
         ));
 
-        // The cache retains the structural IR alongside the parsed statement;
-        // execution still enters exclusively through UnifiedPlanExecutor.
+        // Exercise the public SQL cache boundary after the catalog-aware plan checks.
+        engine
+            .sql("SELECT amount * 2 + 1 AS adjusted FROM ledger", &[])
+            .expect("cache the executed statement");
         assert!(engine
             .cached_sql_plans("SELECT amount * 2 + 1 AS adjusted FROM ledger")
             .is_some_and(|plans| matches!(plans.as_slice(), [UnifiedPlan::Query(_)])));

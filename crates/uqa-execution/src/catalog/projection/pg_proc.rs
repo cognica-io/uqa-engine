@@ -67,13 +67,13 @@ pub fn build_pg_proc_without_defaults(
 }
 
 pub(super) fn build_requested_pg_proc(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: &crate::catalog::context::CatalogContext<'_>,
     catalog: &CatalogReadView,
     resolution: &crate::catalog::RelationNameResolution,
     request: &super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
     build_pg_proc_rows(
-        output,
+        Some(context),
         catalog,
         resolution,
         request.includes("proargdefaults"),
@@ -86,9 +86,9 @@ pub(super) fn build_requested_pg_proc(
     reason = "preserves catalog column and OID order"
 )]
 fn build_pg_proc_rows(
-    output: Option<&dyn uqa_sql::expr::EngineHook>,
+    context: Option<&crate::catalog::context::CatalogContext<'_>>,
     catalog: &CatalogReadView,
-    resolution: &crate::catalog::RelationNameResolution,
+    _resolution: &crate::catalog::RelationNameResolution,
     with_defaults: bool,
     request: &super::CatalogRequest,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -282,16 +282,29 @@ fn build_pg_proc_rows(
             .iter()
             .filter(|_| with_defaults)
             .filter_map(|parameter| {
-                super::routine_definitions::routine_parameter_default_text(
-                    output, catalog, resolution, parameter,
-                )
-                .transpose()
+                parameter
+                    .default
+                    .as_ref()
+                    .map(|expression| (parameter, expression))
+            })
+            .map(|(parameter, expression)| {
+                let context = context.ok_or_else(|| {
+                    SQLError::Internal("routine default projection has no context".into())
+                })?;
+                let ty =
+                    super::regtypes::resolve_catalog_column_type(context, &parameter.type_name)
+                        .map(Ok)
+                        .unwrap_or_else(|| {
+                            uqa_sql::ColumnType::from_sql_name(&parameter.type_name)
+                        })?;
+                super::expression_nodes::default_node(context, catalog, &[], expression, &ty)
+                    .map(uqa_sql::catalog::node_tree::Field::from)
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
         let argument_defaults = if argument_defaults.is_empty() {
             Value::Null
         } else {
-            str_value(argument_defaults.join(", "))
+            str_value(uqa_sql::catalog::node_tree::Field::List(argument_defaults).to_string())
         };
         let argument_type_oids = input_params
             .iter()

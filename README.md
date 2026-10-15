@@ -25,7 +25,7 @@ It is designed for applications that need more than a relational table but do no
 
 ## New in 0.5.4
 
-Version 0.5.4 reduces repeated catalog and index work during session creation, UPDATE and DDL, preserves private views across concurrent catalog changes, and corrects PostgreSQL expression, type and catalog behavior. Native Arrow and DuckDB foreign handlers are now independent, opt-in features; the memory handler remains available by default. See the [release history](HISTORY.md#054---2026-10-15).
+Version 0.5.4 reduces repeated catalog and index work during session creation, UPDATE and DDL. Typed constraint expressions preserve PostgreSQL identities and output; constraint catalog scans and private views retain their transaction semantics across concurrent DDL. Native Arrow and DuckDB foreign handlers are independent, opt-in features, with memory available by default. See the [release history](HISTORY.md#054---2026-10-15).
 
 Catalog lookups reuse retained metadata, native SQLite equality probes seek stored keys directly, and retrieval filters read selected candidates. HNSW, IVF and full-text occurrence commits avoid repeated decoding and spill work within their existing memory allowances. Idle maintenance skips unnecessary wakeups and statistics passes.
 
@@ -33,7 +33,7 @@ The engine provides native DiskANN vector indexes through memory, native SQLite,
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-Persistent databases retain SQLite record format 61, native mapping 17 and redb record format 57, with coordination format 2. Retained native expressions acquire dispatch identities that older binaries cannot read. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.4 upgrade guide](docs/manual/reference/10-upgrading.md#054) for expression migration, feature selection, custom Rust adapters and rollback requirements.
+Persistent databases upgrade to SQLite record format 62 and redb record format 58; native mapping 17 and coordination format 2 are unchanged. Initial open creates physical constraint catalog records and restores retained expression identities atomically, preserving user rows. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.4 upgrade guide](docs/manual/reference/10-upgrading.md#054) for migration, feature selection, custom Rust adapters and rollback requirements.
 
 ## Mathematical foundation
 

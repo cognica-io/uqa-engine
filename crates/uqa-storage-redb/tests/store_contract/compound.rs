@@ -142,3 +142,20 @@ fn selected_catalog_record_revisions_preserve_replacement_and_undo_identity() {
     let store: Arc<dyn KeyValueStore> = Arc::new(storage.store());
     verify_catalog_record_revisions(&store).unwrap();
 }
+
+#[test]
+fn borrowed_metadata_visits_retain_private_and_committed_boundaries() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = RedbStorage::open(directory.path().join("metadata.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(storage.store());
+    verify_catalog_metadata_visits(&store).unwrap();
+}
+
+#[test]
+fn fixed_catalog_reads_compose_private_roots_and_fence_transaction_lifetimes() {
+    use uqa_storage::PersistentStorageProvider;
+    let directory = tempfile::tempdir().unwrap();
+    let storage = RedbStorage::open(directory.path().join("fixed-catalog.redb")).unwrap();
+    let session = storage.open_session().unwrap();
+    verify_catalog_read_boundaries(&session).unwrap();
+}

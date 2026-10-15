@@ -21,6 +21,7 @@ use uqa_sql::ast::{CreateTrigger, RuleEvent, TriggerEvent, TriggerTiming};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
+use crate::catalog::tuples::constraint::ConstraintTuple;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
 use uqa_sql::canonical_routine_type_name;
@@ -210,78 +211,128 @@ fn build_catalog_triggers(
     Ok(catalog.into_values().collect())
 }
 
-pub fn build_trigger_constraints(
+pub fn build_trigger_constraint_tuples(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<Vec<ConstraintTuple>, SQLError> {
     let mut rows = Vec::new();
     for (trigger, _) in catalog_triggers(catalog, resolution)? {
         if !trigger.definition.constraint {
             continue;
         }
-        let definition = &trigger.definition;
-        let constraint_name = trigger
-            .constraint_name
-            .as_deref()
-            .unwrap_or(&definition.name);
-        let relation = RelationIdentity::from_legacy_name(&definition.table).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode constraint-trigger relation `{}`: {error}",
-                definition.table
-            ))
-        })?;
-        rows.push(row([
-            (
-                "oid",
-                int_value(trigger_constraint_catalog_oid(
-                    catalog, resolution, trigger,
-                )?),
-            ),
-            ("conname", str_value(constraint_name)),
-            (
-                "connamespace",
-                int_value(namespace_oid(catalog, &relation.schema)),
-            ),
-            ("contype", str_value("t")),
-            (
-                "condeferrable",
-                bool_value(definition.deferrability.is_deferrable()),
-            ),
-            (
-                "condeferred",
-                bool_value(definition.deferrability.is_initially_deferred()),
-            ),
-            ("conenforced", bool_value(true)),
-            ("convalidated", bool_value(true)),
-            (
-                "conrelid",
-                int_value(table_relation_oid_from(
-                    catalog,
-                    resolution,
-                    &definition.table,
-                )?),
-            ),
-            ("contypid", int_value(0)),
-            ("conindid", int_value(0)),
-            ("conparentid", int_value(0)),
-            ("confrelid", int_value(0)),
-            ("confupdtype", str_value(" ")),
-            ("confdeltype", str_value(" ")),
-            ("confmatchtype", str_value(" ")),
-            ("conislocal", bool_value(true)),
-            ("coninhcount", int_value(0)),
-            ("connoinherit", bool_value(true)),
-            ("conperiod", bool_value(false)),
-            ("conkey", Value::Null),
-            ("confkey", Value::Null),
-            ("conpfeqop", Value::Null),
-            ("conppeqop", Value::Null),
-            ("conffeqop", Value::Null),
-            ("conexclop", Value::Null),
-            ("conbin", Value::Null),
-        ]));
+        rows.push(trigger_constraint_tuple(catalog, resolution, trigger)?);
     }
     Ok(rows)
+}
+
+pub(crate) fn trigger_constraint_tuple(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    trigger: &StoredTrigger,
+) -> Result<ConstraintTuple, SQLError> {
+    let definition = &trigger.definition;
+    let constraint_name = trigger
+        .constraint_name
+        .as_deref()
+        .unwrap_or(&definition.name);
+    let relation = RelationIdentity::from_legacy_name(&definition.table).map_err(|error| {
+        SQLError::Internal(format!(
+            "decode constraint-trigger relation `{}`: {error}",
+            definition.table
+        ))
+    })?;
+    let fields = row([
+        (
+            "oid",
+            int_value(trigger_constraint_catalog_oid(
+                catalog, resolution, trigger,
+            )?),
+        ),
+        ("conname", str_value(constraint_name)),
+        (
+            "connamespace",
+            int_value(namespace_oid(catalog, &relation.schema)),
+        ),
+        ("contype", str_value("t")),
+        (
+            "condeferrable",
+            bool_value(definition.deferrability.is_deferrable()),
+        ),
+        (
+            "condeferred",
+            bool_value(definition.deferrability.is_initially_deferred()),
+        ),
+        ("conenforced", bool_value(true)),
+        ("convalidated", bool_value(true)),
+        (
+            "conrelid",
+            int_value(table_relation_oid_from(
+                catalog,
+                resolution,
+                &definition.table,
+            )?),
+        ),
+        ("contypid", int_value(0)),
+        ("conindid", int_value(0)),
+        ("conparentid", int_value(0)),
+        ("confrelid", int_value(0)),
+        ("confupdtype", str_value(" ")),
+        ("confdeltype", str_value(" ")),
+        ("confmatchtype", str_value(" ")),
+        ("conislocal", bool_value(true)),
+        ("coninhcount", int_value(0)),
+        ("connoinherit", bool_value(true)),
+        ("conperiod", bool_value(false)),
+        ("conkey", Value::Null),
+        ("confkey", Value::Null),
+        ("conpfeqop", Value::Null),
+        ("conppeqop", Value::Null),
+        ("conffeqop", Value::Null),
+        ("conexclop", Value::Null),
+    ]);
+    Ok(ConstraintTuple::new(fields, None))
+}
+
+pub(crate) fn visit_trigger_constraint_tuples(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    object: [u8; 16],
+    visitor: &mut dyn FnMut(
+        uqa_core::catalog_identity::CatalogObjectIdentity,
+        ConstraintTuple,
+    ) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    use sha2::{Digest, Sha256};
+    for (trigger, parent_oid) in catalog_triggers(catalog, resolution)? {
+        if !trigger.definition.constraint || trigger.object_id != Some(object) {
+            continue;
+        }
+        let oid = trigger_constraint_catalog_oid(catalog, resolution, trigger)?;
+        let object_id = if *parent_oid == 0 {
+            object
+        } else {
+            let mut digest = Sha256::new();
+            digest.update(b"uqa:inherited-constraint-trigger\0");
+            digest.update(object);
+            let relation = RelationIdentity::from_legacy_name(&trigger.definition.table)
+                .map_err(SQLError::Internal)?;
+            let table = catalog
+                .snapshot()
+                .tables
+                .get(&relation)
+                .ok_or_else(|| SQLError::UnknownTable(trigger.definition.table.clone()))?;
+            digest.update(table.object_id);
+            let digest = digest.finalize();
+            let mut object_id = [0; 16];
+            object_id.copy_from_slice(&digest[..16]);
+            object_id
+        };
+        visitor(
+            uqa_core::catalog_identity::CatalogObjectIdentity { object_id, oid },
+            trigger_constraint_tuple(catalog, resolution, trigger)?,
+        )?;
+    }
+    Ok(())
 }
 
 fn pg_trigger_row(

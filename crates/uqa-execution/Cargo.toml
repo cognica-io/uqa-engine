@@ -32,12 +32,13 @@ smallvec = { workspace = true }
 ahash = { workspace = true }
 getrandom = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = { workspace = true }
 tempfile = "3.13"
 thiserror = { workspace = true }
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
 proptest = { workspace = true }
 
 # Browser execution uses the sequential implementations of the parallel interfaces.

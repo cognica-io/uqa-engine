@@ -104,6 +104,13 @@ pub enum DeclaredForeignKey {
     Table(usize),
 }
 
+/// Whether ALTER changes this constraint's catalog tuple and requires validation of newly enforced rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ForeignKeyAlterEffects {
+    pub changed: bool,
+    pub became_enforced: bool,
+}
+
 impl DeclaredForeignKey {
     /// The foreign key of the declaration whose catalog row is `identity`.
     pub fn by_catalog_identity(
@@ -204,10 +211,22 @@ impl DeclaredForeignKey {
         enforceability: Option<bool>,
         deferrability: Option<(bool, bool)>,
     ) -> bool {
+        self.alter_with_effects(columns, constraints, enforceability, deferrability)
+            .became_enforced
+    }
+
+    /// Retain the actual catalog-write decision separately from validation. Repeating an already selected enforcement or deferral mode does not replace the constraint tuple.
+    pub fn alter_with_effects(
+        self,
+        columns: &mut [ColumnDef],
+        constraints: &mut TableConstraintSet,
+        enforceability: Option<bool>,
+        deferrability: Option<(bool, bool)>,
+    ) -> ForeignKeyAlterEffects {
         let (enforced, validated, deferrable, initially_deferred) = match self {
             Self::Column(index) => {
                 let Some(reference) = columns[index].references.as_mut() else {
-                    return false;
+                    return ForeignKeyAlterEffects::default();
                 };
                 (
                     &mut reference.enforced,
@@ -226,6 +245,7 @@ impl DeclaredForeignKey {
                 )
             }
         };
+        let previous = (*enforced, *validated, *deferrable, *initially_deferred);
         let mut became_enforced = false;
         match enforceability {
             Some(false) => {
@@ -243,7 +263,10 @@ impl DeclaredForeignKey {
             *deferrable = deferrable_value;
             *initially_deferred = initially_deferred_value;
         }
-        became_enforced
+        ForeignKeyAlterEffects {
+            changed: previous != (*enforced, *validated, *deferrable, *initially_deferred),
+            became_enforced,
+        }
     }
 
     pub fn set_family(

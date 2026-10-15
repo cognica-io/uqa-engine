@@ -1,0 +1,54 @@
+[
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f NOT DEFERRABLE",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f DEFERRABLE",
+    "replaced": true
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f DEFERRABLE",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f INITIALLY DEFERRED",
+    "replaced": true
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f INITIALLY DEFERRED",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f NOT ENFORCED",
+    "replaced": true
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f NOT ENFORCED",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f ENFORCED",
+    "replaced": true
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT f ENFORCED",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT n INHERIT",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT n NO INHERIT",
+    "replaced": true
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT n NO INHERIT",
+    "replaced": false
+  },
+  {
+    "sql": "ALTER TABLE c ALTER CONSTRAINT n INHERIT",
+    "replaced": true
+  }
+]

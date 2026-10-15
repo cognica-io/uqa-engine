@@ -13,6 +13,9 @@ use crate::{semantics::aggregates, ColumnType, SQLError};
 pub(crate) mod eligibility;
 mod virtual_security;
 
+#[cfg(test)]
+mod tests;
+
 pub fn prepare_generated_columns(
     context: &super::SchemaBindingContext<'_, '_>,
     qualifier: &str,
@@ -119,12 +122,12 @@ pub fn prepare_generated_column(
         &column.ty,
         crate::FunctionTypeResolver::enum_labels(engine),
     )?;
-    super::constraints::bind_stored_check_expression(
+    let typed = (*prepared.expression).clone();
+    super::defaults::bind_stored_schema_expression_with_schema(
         context,
-        qualifier,
-        qualifier,
-        snapshot,
         &mut prepared.expression,
+        typed,
+        &crate::RowSchema::with_column_definitions(Some(qualifier), snapshot),
     )?;
     Ok(())
 }

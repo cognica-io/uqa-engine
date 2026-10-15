@@ -199,6 +199,22 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
 }
 
 impl ColumnType {
+    /// Whether modifier removal changes this type; a domain retains its declared base.
+    pub(crate) fn has_type_modifiers(&self) -> bool {
+        match self {
+            Self::Varchar(length) => length.is_some(),
+            Self::Numeric { precision, scale } => precision.is_some() || scale.is_some(),
+            Self::Array(element) => element.has_type_modifiers(),
+            Self::Character(_)
+            | Self::TimePrecision(_)
+            | Self::TimeTzPrecision(_)
+            | Self::TimestampPrecision(_)
+            | Self::TimestampTzPrecision(_)
+            | Self::IntervalWithFields { .. } => true,
+            _ => false,
+        }
+    }
+
     /// Retain the SQL type identity without a declaration's length, scale, or temporal precision.
     #[must_use]
     pub fn without_type_modifiers(&self) -> Self {

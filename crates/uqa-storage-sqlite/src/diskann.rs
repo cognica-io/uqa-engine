@@ -153,6 +153,23 @@ impl KeyValueStore for Records {
         self.wrap(self.inner.open_retained_read_session(cancellation)?)
     }
 
+    fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<uqa_storage::mvcc::CommittedReadBoundary>> {
+        self.inner.capture_committed_read_boundary()
+    }
+
+    fn open_read_session_with_private_changes(
+        &self,
+        boundary: &uqa_storage::mvcc::CommittedReadBoundary,
+        cancellation: &CancellationToken,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        self.wrap(
+            self.inner
+                .open_read_session_with_private_changes(boundary, cancellation)?,
+        )
+    }
+
     fn with_read_view(&self, read: &mut KeyValueReadScope<'_>) -> StorageBackendResult<()> {
         self.inner.with_read_view(&mut |inner| {
             read(&Read {

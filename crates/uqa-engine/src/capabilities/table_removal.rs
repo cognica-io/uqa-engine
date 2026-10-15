@@ -59,6 +59,12 @@ impl TableRemovalPublication for Engine {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.drop_table_and_data(name)?;
                 if let Some(table) = &table {
+                    uqa_execution::catalog::tuples::publication::queue_relation(
+                        catalog.as_ref(),
+                        relation,
+                        table.object_id(),
+                        false,
+                    )?;
                     uqa_execution::catalog::definition_revision::remove_table(
                         catalog.as_ref(),
                         table.object_id(),

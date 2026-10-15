@@ -493,6 +493,7 @@ impl Engine {
                     &engine,
                 )?;
                 engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
+                engine.initialize_catalog_constraint_tuples(&restore_catalog, &restore_backend)?;
                 Ok(cache_revisions)
             })();
             cache_revisions_before = match restore_result {

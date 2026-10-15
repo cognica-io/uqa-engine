@@ -45,6 +45,7 @@ struct Savepoint {
 
 pub(super) struct Transaction {
     committed: Arc<dyn CommittedRecordSnapshot>,
+    pub(super) retention_identity: Arc<()>,
     pub(super) changes: PrivateRecordChanges,
     read_only: bool,
     pub(super) allocation: Option<StorageTransactionId>,
@@ -110,6 +111,7 @@ impl Transaction {
     ) -> Self {
         Self {
             committed,
+            retention_identity: Arc::new(()),
             changes: PrivateRecordChanges::new(control.memory()),
             read_only,
             allocation: None,

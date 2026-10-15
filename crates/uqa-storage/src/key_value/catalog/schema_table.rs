@@ -103,30 +103,61 @@ fn rename_document_scoped_fts_fields(
     Ok(())
 }
 
+pub(super) fn visit_metadata(
+    read: &dyn crate::key_value::KeyValueRead,
+    prefix: &str,
+    key_bytes: Option<usize>,
+    visit: &mut crate::catalog::MetadataReadVisitor<'_>,
+) -> StorageBackendResult<()> {
+    read.control().check()?;
+    if key_bytes.is_some_and(|length| length < prefix.len()) {
+        return Ok(());
+    }
+    let encoded = key_bytes
+        .map(|length| {
+            super::super::codec::single_str_key_prefix(
+                TAG_METADATA,
+                prefix,
+                length,
+                read.control().memory(),
+            )
+        })
+        .transpose()?;
+    let seek = encoded.as_deref().unwrap_or(&[TAG_METADATA]);
+    read.visit_prefix(seek, &mut |key, value| {
+        read.control().check()?;
+        let mut offset = 1;
+        let name = std::str::from_utf8(super::super::codec::read_segment(key, &mut offset)?)
+            .map_err(|error| {
+                StorageBackendError::Other(format!("invalid UTF-8 metadata key: {error}"))
+            })?;
+        if offset != key.len() {
+            return Err(StorageBackendError::Other(
+                "metadata key has trailing bytes".into(),
+            ));
+        }
+        if name.starts_with(prefix) && key_bytes.is_none_or(|length| name.len() == length) {
+            visit(
+                name,
+                std::str::from_utf8(value).map_err(|error| {
+                    StorageBackendError::Other(format!("invalid UTF-8 metadata value: {error}"))
+                })?,
+            )?;
+        }
+        read.control().check()
+    })?;
+    read.control().check()
+}
+
 impl KeyValueCatalog {
-    pub(super) fn metadata_with_prefix_impl(
+    pub(super) fn visit_metadata_with_prefix_impl(
         &self,
         prefix: &str,
-    ) -> StorageBackendResult<Vec<(String, String)>> {
+        key_bytes: Option<usize>,
+        visit: &mut crate::catalog::MetadataReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
         crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
-            let mut entries = Vec::new();
-            read.visit_prefix(&[TAG_METADATA], &mut |key, value| {
-                let name = read_str(key, &mut 1)?;
-                if name.starts_with(prefix) {
-                    entries.push((
-                        name,
-                        std::str::from_utf8(value)
-                            .map_err(|error| {
-                                StorageBackendError::Other(format!(
-                                    "invalid UTF-8 metadata value: {error}"
-                                ))
-                            })?
-                            .to_owned(),
-                    ));
-                }
-                Ok(())
-            })?;
-            Ok(entries)
+            visit_metadata(read, prefix, key_bytes, visit)
         })
     }
     pub(super) fn set_metadata_impl(&self, key: &str, value: &str) -> StorageBackendResult<()> {

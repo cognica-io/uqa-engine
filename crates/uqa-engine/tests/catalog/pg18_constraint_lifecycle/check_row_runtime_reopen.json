@@ -1,0 +1,16 @@
+{"postgresql_version":"PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit","cases":[
+{"sql":"SET search_path=runtime_check,public","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"INSERT INTO changed VALUES(9,NULL)","command_tags":[],"error":{"sqlstate":"23514","message":"new row for relation \"changed\" violates check constraint \"all_fields\"","detail":"Failing row contains (9, null).","hint":null},"results":[]},
+{"sql":"INSERT INTO changed VALUES(9,10)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"INSERT INTO physical_child VALUES(3,4)","command_tags":[],"error":{"sqlstate":"23514","message":"new row for relation \"physical_child\" violates check constraint \"physical_tableoid_check\"","detail":"Failing row contains (3, 4).","hint":null},"results":[]},
+{"sql":"SELECT conname,conkey::text,pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='foreign_row'::regclass ORDER BY conname","command_tags":["SELECT 3"],"error":null,"results":[{"columns":["conname","conkey","pg_get_constraintdef"],"type_oids":[19,25,25],"rows":[["foreign_row_check","{0}","CHECK (((pg_typeof(foreign_row.*))::oid = ('foreign_row'::regtype)::oid))"],["foreign_row_tableoid_check","{-6}","CHECK ((tableoid > (0)::oid))"],["foreign_whole","{0}","CHECK ((foreign_row.* IS NOT NULL))"]]}]},
+{"sql":"INSERT INTO existing VALUES(3,NULL)","command_tags":[],"error":{"sqlstate":"23514","message":"new row for relation \"existing\" violates check constraint \"existing_all\"","detail":"Failing row contains (3, null).","hint":null},"results":[]},
+{"sql":"INSERT INTO named VALUES(2)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"INSERT INTO empty_row DEFAULT VALUES","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"SELECT * FROM changed ORDER BY renamed","command_tags":["SELECT 4"],"error":null,"results":[{"columns":["renamed","extra"],"type_oids":[23,23],"rows":[["1",null],["3","4"],["5","6"],["9","10"]]}]},
+{"sql":"SET search_path=quoted_checks,public","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"INSERT INTO \"new.name\"(n) VALUES(4)","command_tags":[],"error":{"sqlstate":"23514","message":"new row for relation \"new.name\" violates check constraint \"full_row\"","detail":"Failing row contains (4, null).","hint":null},"results":[]},
+{"sql":"INSERT INTO \"new.name\" VALUES(4,5)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}]},
+{"sql":"SELECT conname,conkey::text,pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='\"new.name\"'::regclass ORDER BY conname","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["conname","conkey","pg_get_constraintdef"],"type_oids":[19,25,25],"rows":[["full_row","{0}","CHECK ((\"new.name\".* IS NOT NULL))"]]}]},
+{"sql":"SELECT * FROM \"new.name\" ORDER BY n","command_tags":["SELECT 4"],"error":null,"results":[{"columns":["n","more.data"],"type_oids":[23,23],"rows":[["1",null],["2",null],["3","4"],["4","5"]]}]}
+]}

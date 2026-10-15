@@ -1,0 +1,167 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(1))",
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of CHECK must be type boolean, not type integer",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(sum(missing_column)>0))",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(sum(true)>0))",
+      "error": {
+        "sqlstate": "42883",
+        "message": "function sum(boolean) does not exist",
+        "detail": null,
+        "hint": "No function matches the given name and argument types. You might need to add explicit type casts."
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(sum(n)>0 AND missing_column))",
+      "error": {
+        "sqlstate": "42803",
+        "message": "aggregate functions are not allowed in check constraints",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(missing_column AND sum(n)>0))",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(row_number() OVER (ORDER BY missing_column)>0))",
+      "error": {
+        "sqlstate": "42P20",
+        "message": "window functions are not allowed in check constraints",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(sum(missing_column) OVER ()>0))",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(generate_series(1,2)>0 AND missing_column))",
+      "error": {
+        "sqlstate": "0A000",
+        "message": "set-returning functions are not allowed in check constraints",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(generate_series(missing_column,2)>0))",
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(other.ctid IS NOT NULL))",
+      "error": {
+        "sqlstate": "42P01",
+        "message": "missing FROM-clause entry for table \"other\"",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(scope.ctid IS NOT NULL))",
+      "error": {
+        "sqlstate": "42P10",
+        "message": "system column \"ctid\" reference in check constraint is invalid",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK((SELECT missing_column)))",
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in check constraint",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK('invalid'))",
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type boolean: \"invalid\"",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK($1))",
+      "error": {
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "detail": null,
+        "hint": null
+      }
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(scope IS NOT NULL))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(scope.* IS NOT NULL))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(scope.n>0))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(tableoid>0))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(scope.tableoid>0))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK('true'))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE scope(n integer,CHECK(NULL))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE empty_scope(CHECK(empty_scope IS NOT NULL))",
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE column_shadow(column_shadow integer,CHECK(column_shadow>0))",
+      "error": null
+    }
+  ]
+}

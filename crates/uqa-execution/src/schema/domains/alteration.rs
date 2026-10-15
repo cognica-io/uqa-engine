@@ -120,6 +120,16 @@ pub fn alter_domain<S: Clone + 'static>(
             // PostgreSQL repeats validation even when convalidated was already true.
             validate_values(&validation, &domain, Some(&domain.definition.checks[index]))?;
             domain.definition.checks[index].validated = true;
+            if let Some(catalog) = context.types.registries.domains.domain_catalog() {
+                crate::catalog::tuples::publication::queue_domain(
+                    catalog,
+                    &domain,
+                    domain.definition.checks[index].catalog_identity,
+                )
+                .map_err(|error| {
+                    uqa_sql::catalog::errors::storage_error("replace domain constraint", &error)
+                })?;
+            }
             publish(context, &mut domain)?;
         }
     }

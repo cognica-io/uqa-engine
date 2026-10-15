@@ -50,16 +50,28 @@ fn assert_frozen(row: &TableSchema, oid: &Value) {
     let Expr::Func { args, binding, .. } = definitions[0].default.as_ref().unwrap() else {
         panic!("expected a selected sequence default")
     };
+    let Expr::TypedLiteral {
+        value,
+        ty,
+        collation_oid,
+        composite_source,
+    } = &args[0]
+    else {
+        panic!("expected a stored sequence OID constant");
+    };
+    assert_eq!(value, oid);
     assert_eq!(
-        args[0],
-        Expr::TypedLiteral {
-            collation_oid: None,
-            composite_source: None,
-            value: oid.clone(),
-            ty: "regclass".into()
-        }
+        uqa_sql::ColumnType::from_sql_name(ty).unwrap(),
+        uqa_sql::ColumnType::Regclass
     );
-    assert_eq!(binding.as_ref().unwrap().argument_types[0], "regclass");
+    assert_eq!(*collation_oid, None);
+    assert_eq!(*composite_source, None);
+    let binding = binding.as_ref().unwrap();
+    assert!(binding.builtin);
+    assert_eq!(
+        uqa_sql::ColumnType::from_sql_name(&binding.argument_types[0]).unwrap(),
+        uqa_sql::ColumnType::Regclass
+    );
 }
 
 #[test]

@@ -27,6 +27,20 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+# A PID file's existence is the readiness boundary observed before signalling the process group.
+LISTING_WITH_DESCENDANT = (
+    "import os,pathlib,time\n"
+    "def publish_pid(name):\n"
+    " pending=pathlib.Path(name+'.pending')\n"
+    " pending.write_text(str(os.getpid()))\n"
+    " pending.replace(name)\n"
+    "publish_pid('parent.pid')\n"
+    "if os.fork() == 0:\n"
+    " publish_pid('child.pid')\n"
+    "time.sleep(30)\n"
+)
+
+
 class PerformanceChecksTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -301,13 +315,7 @@ class PerformanceChecksTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
     def test_signals_stop_listing_descendants_and_restore_prior_handlers(self):
-        child_script = (
-            "import os,pathlib,time\n"
-            "pathlib.Path('parent.pid').write_text(str(os.getpid()))\n"
-            "if os.fork() == 0:\n"
-            " pathlib.Path('child.pid').write_text(str(os.getpid()))\n"
-            "time.sleep(30)\n"
-        )
+        child_script = LISTING_WITH_DESCENDANT
         for signum in (signal.SIGINT, signal.SIGTERM):
             with self.subTest(signal=signum.name), tempfile.TemporaryFile(mode="w+") as output:
                 directory = self.root / signum.name
@@ -361,13 +369,7 @@ class PerformanceChecksTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
     def test_bounded_capture_terminates_the_listing_and_its_descendant(self):
-        script = (
-            "import os,pathlib,time\n"
-            "pathlib.Path('parent.pid').write_text(str(os.getpid()))\n"
-            "if os.fork() == 0:\n"
-            " pathlib.Path('child.pid').write_text(str(os.getpid()))\n"
-            "time.sleep(30)\n"
-        )
+        script = LISTING_WITH_DESCENDANT
         try:
             with self.assertRaises(subprocess.TimeoutExpired):
                 runner.capture(sys.executable, "-c", script, timeout=3)

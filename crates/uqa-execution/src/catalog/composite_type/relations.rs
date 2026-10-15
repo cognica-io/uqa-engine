@@ -55,13 +55,7 @@ fn definitions(
 }
 
 fn column_type(identity: &RelationIdentity, oids: RelationCatalogOids) -> Option<ColumnType> {
-    Some(ColumnType::Composite(CompositeTypeReference {
-        schema: identity.schema.clone(),
-        name: identity.name.clone(),
-        oid: oids.row_type?,
-        array_oid: oids.array_type.unwrap_or(0),
-        relation_oid: oids.relation,
-    }))
+    oids.row_type_reference(identity).map(ColumnType::Composite)
 }
 
 pub(crate) fn by_name(catalog: &CatalogReadView, schema: &str, name: &str) -> Option<ColumnType> {

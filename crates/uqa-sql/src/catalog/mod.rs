@@ -224,6 +224,23 @@ impl VirtualRelation {
                 "ordinal_position" => cardinal_number(),
                 "position_in_unique_constraint" => cardinal_number(),
             ],
+            Self::InformationConstraintColumnUsage => columns![
+                "table_catalog" => sql_identifier(),
+                "table_schema" => sql_identifier(),
+                "table_name" => sql_identifier(),
+                "column_name" => sql_identifier(),
+                "constraint_catalog" => sql_identifier(),
+                "constraint_schema" => sql_identifier(),
+                "constraint_name" => sql_identifier(),
+            ],
+            Self::InformationConstraintTableUsage => columns![
+                "table_catalog" => sql_identifier(),
+                "table_schema" => sql_identifier(),
+                "table_name" => sql_identifier(),
+                "constraint_catalog" => sql_identifier(),
+                "constraint_schema" => sql_identifier(),
+                "constraint_name" => sql_identifier(),
+            ],
             Self::PgNamespace => columns![
                 "oid" => ColumnType::Oid,
                 "nspname" => ColumnType::Name,

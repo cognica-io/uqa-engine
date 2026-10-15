@@ -30,6 +30,9 @@ impl Engine {
         self.with_implicit_string_transaction(|engine| {
             engine
                 .add_fts_field_with_analyzer_inner(table, field, analyzer)
+                .map_err(|error| error.to_string())?;
+            engine
+                .publish_catalog_constraint_tuples()
                 .map_err(|error| error.to_string())
         })
     }

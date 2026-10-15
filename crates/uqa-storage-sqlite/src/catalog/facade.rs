@@ -166,8 +166,21 @@ impl CatalogFacade for Catalog {
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
         into_storage_result(self.native_metadata_has_private_changes(key))
     }
-    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
-        into_storage_result(Catalog::metadata_with_prefix(self, prefix))
+    fn visit_metadata_with_prefix(
+        &self,
+        prefix: &str,
+        visit: &mut uqa_storage::catalog::MetadataReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        Catalog::visit_metadata_with_prefix(self, prefix, visit)
+    }
+
+    fn visit_metadata_with_key_length(
+        &self,
+        prefix: &str,
+        key_bytes: usize,
+        visit: &mut uqa_storage::catalog::MetadataReadVisitor<'_>,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        Catalog::visit_metadata_with_key_length(self, prefix, key_bytes, visit)
     }
 
     fn save_statistics_maintenance(

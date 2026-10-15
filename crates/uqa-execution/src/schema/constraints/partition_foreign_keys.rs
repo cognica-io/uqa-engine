@@ -496,13 +496,15 @@ pub fn alter_partition_foreign_keys(
                     node.table
                 ))
             })?;
-        location.alter(
+        let effects = location.alter_with_effects(
             &mut columns,
             &mut constraints,
             enforceability,
             deferrability,
         );
-        publish_constraint_state(context, &node.table, columns, constraints)?;
+        if effects.changed {
+            publish_constraint_state(context, &node.table, columns, constraints)?;
+        }
     }
     Ok(())
 }

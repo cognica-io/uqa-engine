@@ -342,6 +342,7 @@ struct TransactionFrame {
     characteristics: TransactionCharacteristicsState,
     first_snapshot_set: bool,
     fixed_snapshot: Option<FixedTransactionSnapshot>,
+    fixed_catalog_records: Option<Arc<uqa_storage::mvcc::CommittedReadBoundary>>,
     /// Last committed table catalog installed while a fixed row snapshot is active. Immutable fingerprints distinguish this transaction's own DDL overlay from definitions refreshed from sibling commits.
     fixed_catalog_baseline: Option<FixedTransactionCatalogBaseline>,
     /// `PostgreSQL` transaction/subtransaction IDs along the active frame path. The first slot belongs to this frame and each following slot to the correspondingly indexed SQL savepoint.

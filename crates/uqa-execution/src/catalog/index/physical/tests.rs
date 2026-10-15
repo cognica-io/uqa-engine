@@ -34,7 +34,7 @@ impl uqa_sql::semantics::partition::PartitionExpressions for Context {
     fn evaluate_row(
         &self,
         expression: &Expr,
-        _: &Document,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
         _: &[SQLParam],
     ) -> Result<Value, SQLError> {

@@ -249,8 +249,21 @@ impl CatalogFacade for KeyValueCatalog {
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
         self.metadata_has_private_changes_impl(key)
     }
-    fn metadata_with_prefix(&self, prefix: &str) -> StorageBackendResult<Vec<(String, String)>> {
-        self.metadata_with_prefix_impl(prefix)
+    fn visit_metadata_with_prefix(
+        &self,
+        prefix: &str,
+        visit: &mut crate::catalog::MetadataReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.visit_metadata_with_prefix_impl(prefix, None, visit)
+    }
+
+    fn visit_metadata_with_key_length(
+        &self,
+        prefix: &str,
+        key_bytes: usize,
+        visit: &mut crate::catalog::MetadataReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.visit_metadata_with_prefix_impl(prefix, Some(key_bytes), visit)
     }
 
     fn save_statistics_maintenance(

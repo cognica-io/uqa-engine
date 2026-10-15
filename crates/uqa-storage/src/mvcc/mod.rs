@@ -96,9 +96,9 @@ pub use serializable::{
     SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{
-    RecordRead, SequencePublicationLease, SerializableReadContext, SerializableSession,
-    SerializableSnapshotCapture, SerializableSnapshotOptions, VersionedKeyValueStore,
-    VersionedSessionOptions,
+    CommittedReadBoundary, RecordRead, SequencePublicationLease, SerializableReadContext,
+    SerializableSession, SerializableSnapshotCapture, SerializableSnapshotOptions,
+    VersionedKeyValueStore, VersionedSessionOptions,
 };
 pub use tombstones::{
     reclaim_key_value_diskann_tombstones, reclaim_tombstone_prefix, verify_tombstone_reclamation,

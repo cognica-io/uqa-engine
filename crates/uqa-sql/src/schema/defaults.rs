@@ -175,6 +175,21 @@ pub fn bind_stored_schema_expression(
     expression: &mut Expr,
     typed_expression: Expr,
 ) -> Result<bool, SQLError> {
+    bind_stored_schema_expression_with_schema(
+        context,
+        expression,
+        typed_expression,
+        &RowSchema::default(),
+    )
+}
+
+/// Bind stored syntax in its real declared row scope, including named whole rows and system attributes supplied by that scope.
+pub(super) fn bind_stored_schema_expression_with_schema(
+    context: &SchemaBindingContext<'_, '_>,
+    expression: &mut Expr,
+    typed_expression: Expr,
+    schema: &RowSchema,
+) -> Result<bool, SQLError> {
     let lowered = crate::plan::ExpressionPlan::lower_with(typed_expression, &|name: &str| {
         context.catalog.has_registered_aggregate_function(name)
     });
@@ -183,14 +198,14 @@ pub fn bind_stored_schema_expression(
         context.catalog,
         &mut plan,
         context.binding,
-        &RowSchema::default(),
+        schema,
     )?;
     crate::binding::bind_expression_plan_routines_for_storage(
         context.catalog,
         &mut plan,
         &[],
         context.binding,
-        &RowSchema::default(),
+        schema,
     )?;
     let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
     let changed = crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)?;

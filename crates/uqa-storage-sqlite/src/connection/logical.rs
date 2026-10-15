@@ -166,6 +166,14 @@ impl ManagedConnection {
         &self,
         cancellation: &uqa_core::CancellationToken,
     ) -> Result<Self> {
+        self.new_record_read_session(cancellation, |store| {
+            store.new_retained_read_session(cancellation)
+        })
+    }
+
+    pub(crate) fn capture_committed_read_boundary(
+        &self,
+    ) -> StorageBackendResult<Arc<uqa_storage::mvcc::CommittedReadBoundary>> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
         let logical = self
@@ -173,7 +181,34 @@ impl ManagedConnection {
             .logical
             .get()
             .ok_or(SQLiteError::LogicalSessionRequired)?;
-        let store = logical.new_retained_read_session(cancellation)?;
+        logical.capture_committed_read_boundary()
+    }
+
+    pub(crate) fn new_read_session_with_private_changes(
+        &self,
+        boundary: &uqa_storage::mvcc::CommittedReadBoundary,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<Self> {
+        self.new_record_read_session(cancellation, |store| {
+            store.new_read_session_with_private_changes(boundary, cancellation)
+        })
+    }
+
+    fn new_record_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+        retain: impl FnOnce(
+            &uqa_storage::mvcc::VersionedKeyValueStore,
+        ) -> StorageBackendResult<uqa_storage::mvcc::VersionedKeyValueStore>,
+    ) -> Result<Self> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .ok_or(SQLiteError::LogicalSessionRequired)?;
+        let store = retain(&logical.store)?;
         let session = SessionState::with_cancellation(cancellation.clone());
         let _ = session.logical.set(Arc::new(BoundRecordSession {
             store: Arc::new(store),

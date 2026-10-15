@@ -228,3 +228,34 @@ fn scalar_inference_preserves_cast_and_comparison_error_states() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn retained_collation_preserves_selected_arm_type_modifiers_and_budget() {
+    use crate::catalog::collations::derivation::Derivation;
+    let ty = ColumnType::Varchar(None);
+    let schema = RowSchema::with_types(
+        vec!["selected".into()],
+        vec![Some(ColumnType::Varchar(Some(3)))],
+    );
+    let expression = ScalarExpr::Collated {
+        expr: Box::new(ScalarExpr::Column("selected".into())),
+        ty,
+        collation: crate::ir::ResultCollation::new(Derivation::implicit(950), 100),
+    };
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let output = infer(&expression, &schema, &[], &control).unwrap().unwrap();
+    assert_eq!(*output, ColumnType::Varchar(Some(3)));
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    assert_eq!(
+        infer(&expression, &schema, &[], &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}

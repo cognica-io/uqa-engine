@@ -1,0 +1,47 @@
+[
+  {
+    "sql": "SELECT CASE WHEN flag THEN 'longtext' ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1043,
+    "modifier": -1
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN NULL ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1043,
+    "modifier": -1
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN 'abc'::varchar(3) ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1043,
+    "modifier": 7
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN 'abc'::varchar(3) ELSE 'x'::varchar(9) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1043,
+    "modifier": -1
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN 'abc'::char(3) ELSE 'x'::char(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1042,
+    "modifier": 7
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN 'abc'::char(3) ELSE 'longtext' END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1042,
+    "modifier": -1
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN 'longtext' COLLATE \"C\" ELSE 'x'::varchar(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1043,
+    "modifier": -1
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN '04:05:06.12345' ELSE '00:00'::time(3) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1083,
+    "modifier": -1
+  },
+  {
+    "sql": "SELECT CASE WHEN flag THEN 1.25::numeric(4,2) ELSE 2::numeric(4,2) END AS result FROM (VALUES (true), (false)) t(flag)",
+    "oid": 1700,
+    "modifier": 262150
+  }
+]

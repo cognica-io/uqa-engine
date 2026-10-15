@@ -13,8 +13,10 @@ mod coercions;
 mod collations;
 mod composites;
 mod concatenation;
+mod defaults;
 mod fields;
 mod json_extraction;
+mod partitions;
 mod patterns;
 mod relation_scope;
 mod routine_calls;
@@ -23,6 +25,40 @@ mod scalar;
 mod subscripts;
 
 const DOMAIN_CHECK: &str = "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}";
+
+#[test]
+fn stored_typed_nodes_preserve_postgresql_fields_and_original_datum_bytes() {
+    let mut inputs = vec![parse(DOMAIN_CHECK).unwrap()];
+    let defaults: serde_json::Value =
+        serde_json::from_str(include_str!("tests/defaults.json")).unwrap();
+    for case in defaults["defaults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(defaults["other"].as_array().unwrap())
+    {
+        inputs.push(parse(case["node"].as_str().unwrap()).unwrap());
+    }
+    inputs.extend([
+        Field::Null,
+        Field::String("한글\\\"\n".into()),
+        Field::StringValue("quoted value".into()),
+        Field::Datum {
+            length: 3,
+            bytes: vec![0, 128, 255],
+        },
+    ]);
+    for original in inputs {
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let retained: Field = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(retained, original);
+        assert_eq!(retained.to_string(), original.to_string());
+    }
+    assert!(
+        serde_json::from_str::<Field>(r#"{"Datum":{"length":1,"bytes":[0],"unknown":true}}"#)
+            .is_err()
+    );
+}
 
 #[test]
 fn reads_postgresql_domain_check_with_typed_value_and_machine_width_datum() {

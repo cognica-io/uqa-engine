@@ -229,7 +229,7 @@ pub fn merge_create_table_hierarchy(
             .collect::<Vec<_>>();
         parent_checks.sort_by(|left, right| left.name.cmp(&right.name));
         for mut check in parent_checks {
-            super::check_inheritance::bind_parent_check_columns(parent, &mut check.expr)?;
+            super::check_inheritance::bind_parent_check_columns(parent, &mut check)?;
             check.is_local = false;
             check.object_id = None;
             check.catalog_oid = None;

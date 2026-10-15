@@ -11,7 +11,7 @@ use uqa_core::Value;
 use uqa_sql::semantics::partition::{PartitionCatalog, PartitionContext, PartitionExpressions};
 use uqa_sql::{
     ast::{ColumnDef, Expr, TableHierarchy},
-    ResultRow, RowSchema, SQLError, SQLParam,
+    RowSchema, SQLError, SQLParam,
 };
 
 impl Engine {
@@ -61,7 +61,7 @@ impl PartitionExpressions for Engine {
     fn evaluate_row(
         &self,
         expression: &Expr,
-        row: &ResultRow,
+        row: &dyn uqa_sql::expr::RowLookup,
         schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
