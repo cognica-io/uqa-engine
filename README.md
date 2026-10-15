@@ -23,9 +23,9 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.5.3
+## New in 0.5.4
 
-Version 0.5.3 adds PostgreSQL composite attribute changes, preserves retained composite and enum values across prepared execution and persistence, and corrects comparison, catalog and expression behavior. Rust, Python and Node.js HTTP clients retain bounded SQL diagnostics, and Rust exposes the failing statement in an atomic batch. See the [release history](HISTORY.md#053---2026-10-11).
+Version 0.5.4 reduces repeated catalog and index work during session creation, UPDATE and DDL, preserves private views across concurrent catalog changes, and corrects PostgreSQL expression, type and catalog behavior. Native Arrow and DuckDB foreign handlers are now independent, opt-in features; the memory handler remains available by default. See the [release history](HISTORY.md#054---2026-10-15).
 
 Catalog lookups reuse retained metadata, native SQLite equality probes seek stored keys directly, and retrieval filters read selected candidates. HNSW, IVF and full-text occurrence commits avoid repeated decoding and spill work within their existing memory allowances. Idle maintenance skips unnecessary wakeups and statistics passes.
 
@@ -33,7 +33,7 @@ The engine provides native DiskANN vector indexes through memory, native SQLite,
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-Persistent databases use SQLite record format 61, native mapping 17 or redb record format 57. Initial open atomically upgrades retained composite metadata and native equality projections; row-claim tables and relation registries retain coordination format 2. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.3 upgrade guide](docs/manual/reference/10-upgrading.md#053) for migration requirements, custom Rust adapters and rollback to an older binary.
+Persistent databases retain SQLite record format 61, native mapping 17 and redb record format 57, with coordination format 2. Retained native expressions acquire dispatch identities that older binaries cannot read. Close every owner before taking a pre-upgrade backup, update all owners together, and follow the [0.5.4 upgrade guide](docs/manual/reference/10-upgrading.md#054) for expression migration, feature selection, custom Rust adapters and rollback requirements.
 
 ## Mathematical foundation
 
@@ -46,7 +46,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.5.3
+python -m pip install uqa==0.5.4
 usql
 ```
 
@@ -98,10 +98,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.5.3
+cargo add uqa@0.5.4
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.3 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.5.4 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
@@ -235,7 +235,7 @@ Released Node.js applications install `@cognica-io/uqa` from npm; npm selects an
 
 Prebuilt Linux Python wheels target glibc 2.28 or newer.
 
-Source builds include the memory foreign-data wrapper by default. Enable `arrow` for native Arrow IPC sources or `duckdb` for native DuckDB sources; the features are independent and disabled by default. Foreign-table definitions and catalog inspection remain available for every handler; see the [feature contract](docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
+The memory foreign-data wrapper is included by default. Enable `arrow` for native Arrow IPC sources or `duckdb` for native DuckDB sources; the features are independent and disabled by default. Foreign-table definitions and catalog inspection remain available for every handler; see the [feature contract](docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
 
 ## Build and test
 

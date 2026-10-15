@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-15
+
 ### Changed
 
 - Make native foreign handlers independently opt-in through `arrow` and `duckdb`, both disabled by default. Keep the memory handler and its Rust APIs available in every build. Preserve foreign-table SQL declarations, catalog inspection, rollback and persistent reopening for omitted handlers; unavailable scans fail explicitly. Rust metadata inspection uses `foreign_server_definition` and `foreign_table_definition` independently of handler projections.
