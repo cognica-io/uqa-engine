@@ -6,12 +6,8 @@
 
 //! Decode array contents with the element OID in the physical header, independently of the current attribute declaration.
 
-use super::{
-    corrupt, fixed, read_payload, word, Produced, ProductionControl, ProductionVec, SQLError, Value,
-};
-use crate::catalog::type_metadata::{
-    builtin_scalar_type, pg_type_align, pg_type_by_value, pg_type_len,
-};
+use super::{corrupt, inline, word, Produced, ProductionControl, ProductionVec, SQLError, Value};
+use crate::catalog::type_metadata::builtin_scalar_type;
 use uqa_core::ArrayValue;
 
 pub(crate) struct ArrayShape {
@@ -97,7 +93,7 @@ pub(super) fn read(
         )
     };
     let offset = if dataoffset == 0 {
-        align(bitmap_start + 4, b'd')?
+        inline::align(bitmap_start + 4, b'd')?
     } else {
         usize::try_from(dataoffset).map_err(|_| corrupt("invalid array data offset"))?
     }
@@ -160,48 +156,14 @@ impl Elements<'_, '_> {
                 .control
                 .finish(Value::Null, self.control.empty_reservation())?);
         }
-        let alignment = pg_type_align(self.element).as_bytes()[0];
-        self.offset = align(
-            self.offset
-                .checked_add(4)
-                .ok_or_else(|| corrupt("invalid array length"))?,
-            alignment,
-        )? - 4;
-        let remaining = self
-            .bytes
-            .get(self.offset..)
-            .ok_or_else(|| corrupt("invalid array length"))?;
-        let length = pg_type_len(self.element);
-        let value = if length == -1 {
-            let header = word(remaining).ok_or_else(|| corrupt("invalid array element length"))?;
-            let length = (header >> 2) as usize;
-            let payload = remaining
-                .get(4..length)
-                .filter(|_| header.trailing_zeros() >= 2)
-                .ok_or_else(|| corrupt("invalid array element length"))?;
-            self.offset += length;
-            read_payload(base_oid(self.element), payload, self.catalog, &self.control)?
-        } else {
-            let length =
-                usize::try_from(length).map_err(|_| corrupt("invalid array element length"))?;
-            let bytes = remaining
-                .get(..length)
-                .ok_or_else(|| corrupt("invalid array element length"))?;
-            self.offset += length;
-            if pg_type_by_value(self.element) && length <= 8 {
-                let mut bits = [0; 8];
-                bits[..length].copy_from_slice(bytes);
-                let value = crate::expr::composites::datum::decode_bits(
-                    u64::from_le_bytes(bits),
-                    self.element,
-                )
-                .ok_or_else(|| corrupt("invalid array element datum"))?;
-                self.control.copy_value(&value)?
-            } else {
-                fixed::read_bytes(base_oid(self.element), bytes, &self.control)?
-            }
-        };
-        Ok(value)
+        inline::read(
+            self.bytes,
+            &mut self.offset,
+            4,
+            self.element,
+            self.catalog,
+            &self.control,
+        )
     }
 }
 
@@ -209,25 +171,4 @@ fn integer(bytes: &[u8], offset: usize) -> Result<i32, SQLError> {
     word(bytes.get(offset..).unwrap_or_default())
         .map(|value| value as i32)
         .ok_or_else(|| corrupt("invalid array header"))
-}
-
-pub(super) fn align(offset: usize, alignment: u8) -> Result<usize, SQLError> {
-    let mask = match alignment {
-        b'c' => 0,
-        b's' => 1,
-        b'i' => 3,
-        b'd' => 7,
-        _ => return Err(corrupt("invalid array element alignment")),
-    };
-    offset
-        .checked_add(mask)
-        .map(|value| value & !mask)
-        .ok_or_else(|| corrupt("invalid array length"))
-}
-
-fn base_oid(mut ty: &crate::ColumnType) -> u32 {
-    while let crate::ColumnType::Domain { base, .. } = ty {
-        ty = base;
-    }
-    crate::catalog::type_metadata::pg_type_oid(ty) as u32
 }

@@ -8,6 +8,11 @@
 
 use std::sync::Arc;
 
+use crate::{
+    memory::{Produced, ProductionControl},
+    ValueRetentionError,
+};
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DatumValue {
     type_oid: u32,
@@ -23,6 +28,19 @@ impl DatumValue {
             offset,
             bytes: Arc::new(bytes),
         }
+    }
+
+    /// Transfer admitted physical bytes and reserve their shared allocation header before constructing a retained view. Reading the offset remains the SQL consumer's responsibility.
+    pub fn with_control(
+        type_oid: u32,
+        offset: u32,
+        bytes: Produced<Vec<u8>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
+        let header = control.reserve(Self::retained_header_bytes())?;
+        let (bytes, memory) = bytes.into_parts();
+        let memory = control.combine(header, memory);
+        control.finish(Self::new(type_oid, offset, bytes), memory)
     }
 
     /// A second field view shares the original allocation.
@@ -46,7 +64,11 @@ impl DatumValue {
 
     /// Charge each retained view for its full backing allocation. This conservative ownership rule keeps independently retained views bounded even when the original plan is released.
     pub fn retained_bytes(&self) -> usize {
-        self.bytes.capacity() + size_of::<Vec<u8>>() + 2 * size_of::<usize>()
+        self.bytes.capacity() + Self::retained_header_bytes()
+    }
+
+    const fn retained_header_bytes() -> usize {
+        size_of::<Vec<u8>>() + 2 * size_of::<usize>()
     }
 }
 
@@ -70,7 +92,66 @@ impl<'de> serde::Deserialize<'de> for DatumValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{memory::MemoryBudget, CancellationToken, Value};
+    use crate::{
+        memory::{MemoryBudget, ProductionVec},
+        CancellationToken, Value,
+    };
+
+    #[test]
+    fn admitted_datum_production_transfers_bytes_and_reserves_its_shared_header() {
+        let token = CancellationToken::new();
+        let header = DatumValue::retained_header_bytes();
+        for limit in [0, header - 1, header, 4096] {
+            let memory = MemoryBudget::new(limit);
+            let control = ProductionControl::new(&memory, &token, &token);
+            let bytes = ProductionVec::new(control).finish().unwrap();
+            let result = DatumValue::with_control(25, u32::MAX, bytes, &control);
+            assert_eq!(result.is_ok(), limit >= header);
+            if let Ok(datum) = result {
+                assert_eq!(datum.type_oid(), 25);
+                assert_eq!(datum.offset(), u32::MAX);
+                assert_eq!(datum.reserved_bytes(), datum.retained_bytes());
+            }
+            assert_eq!(memory.used(), 0);
+        }
+        let memory = MemoryBudget::new(4096);
+        let control = ProductionControl::new(&memory, &token, &token);
+        let mut bytes = ProductionVec::new(control);
+        bytes.reserve(128).unwrap();
+        bytes.push_copy(7).unwrap();
+        let pointer = bytes.as_ptr();
+        let datum = DatumValue::with_control(25, 0, bytes.finish().unwrap(), &control).unwrap();
+        assert_eq!(pointer, datum.bytes().as_ptr());
+        assert_eq!(datum.reserved_bytes(), datum.retained_bytes());
+        drop(datum);
+        assert_eq!(memory.used(), 0);
+    }
+
+    #[test]
+    fn admitted_datum_failure_releases_owned_bytes_and_honors_both_cancellations() {
+        for cancelled in [None, Some(false), Some(true)] {
+            let memory = MemoryBudget::new(if cancelled.is_none() {
+                DatumValue::retained_header_bytes()
+            } else {
+                4096
+            });
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&memory, &original, &invoking);
+            let mut bytes = ProductionVec::new(control);
+            bytes.push_copy(1).unwrap();
+            let bytes = bytes.finish().unwrap();
+            if let Some(invoking_cancelled) = cancelled {
+                if invoking_cancelled {
+                    invoking.cancel();
+                } else {
+                    original.cancel();
+                }
+            }
+            assert!(DatumValue::with_control(25, 0, bytes, &control).is_err());
+            assert_eq!(memory.used(), 0);
+        }
+    }
 
     #[test]
     fn field_views_retain_original_bytes_identity_and_an_independent_lease() {

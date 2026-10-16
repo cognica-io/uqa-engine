@@ -7,11 +7,11 @@
 //! `PostgreSQL` native range payloads shared by catalog constants and retained tuple fields.
 
 use super::{CanonicalMultirange, CanonicalRange, RangeComparisonValue, RangeSubtype};
-use crate::catalog::type_metadata::{pg_type_align, pg_type_len};
+use crate::catalog::type_metadata::pg_type_align;
 use crate::{ColumnType, SQLError};
 use uqa_core::{
     memory::{Produced, ProductionControl, ProductionString, ProductionVec},
-    DecimalValue, Value,
+    Value,
 };
 
 const EMPTY: u8 = 1;
@@ -288,49 +288,8 @@ fn read_bound(
     if infinite {
         return Ok(control.finish(None, control.empty_reservation())?);
     }
-    let ty = subtype.scalar_type();
-    let value = if subtype == RangeSubtype::Numeric {
-        let first = *bytes
-            .get(*offset)
-            .ok_or_else(|| corrupt("truncated numeric bound"))?;
-        let (header, size) = if first & 1 != 0 {
-            (1, usize::from(first >> 1))
-        } else {
-            *offset = align(*offset, subtype)?;
-            let header = word(bytes.get(*offset..).unwrap_or_default())?;
-            if header & 3 != 0 {
-                return Err(corrupt("invalid numeric bound header"));
-            }
-            (4, (header >> 2) as usize)
-        };
-        let end = offset
-            .checked_add(size)
-            .ok_or_else(|| corrupt("invalid numeric bound length"))?;
-        let payload = bytes
-            .get(*offset + header..end)
-            .filter(|_| size >= header)
-            .ok_or_else(|| corrupt("invalid numeric bound length"))?;
-        let text = crate::catalog::node_tree::decode_numeric_datum_with_control(payload, control)?;
-        let (number, memory) = DecimalValue::parse_with_control(&text, control)?
-            .ok_or_else(|| corrupt("invalid numeric bound"))?
-            .into_parts();
-        *offset = end;
-        control.finish(Value::Decimal(number), memory)?
-    } else {
-        let size = pg_type_len(&ty) as usize;
-        let end = offset
-            .checked_add(size)
-            .ok_or_else(|| corrupt("invalid range bound length"))?;
-        let source = bytes
-            .get(*offset..end)
-            .ok_or_else(|| corrupt("truncated range bound"))?;
-        let mut bits = [0; 8];
-        bits[..size].copy_from_slice(source);
-        let value = crate::expr::composites::datum::decode_bits(u64::from_le_bytes(bits), &ty)
-            .ok_or_else(|| corrupt("invalid range bound"))?;
-        *offset = end;
-        control.finish(value, control.empty_reservation())?
-    };
+    let value =
+        crate::expr::datums::inline::read(bytes, offset, 0, &subtype.scalar_type(), None, control)?;
     let (value, memory) = value.into_parts();
     Ok(control.finish(Some(value), memory)?)
 }
