@@ -7,13 +7,15 @@
 //! Streaming LIMIT/OFFSET, including ordered `FETCH ... WITH TIES`.
 
 use super::{
-    equal_sort_key_values, BackwardScanSupport, Batch, ExecError, ExecResult, PhysicalOperator,
-    PhysicalScanDirection, RowSchema, ScalarExpr, SharedExpressionEvaluator, SortKey, Value,
+    equal_typed_sort_key_values, BackwardScanSupport, Batch, ExecError, ExecResult,
+    PhysicalOperator, PhysicalScanDirection, RowSchema, ScalarExpr, SharedExpressionEvaluator,
+    SortKey, Value,
 };
 use crate::PhysicalRow;
 
 struct WithTies<'a> {
     keys: crate::scalar::PreparedExpressions<Vec<SortKey>>,
+    types: Vec<Option<uqa_sql::ColumnType>>,
     evaluator: SharedExpressionEvaluator<'a>,
     boundary: Option<Vec<Value>>,
     finished: bool,
@@ -83,6 +85,7 @@ impl<'a> Limit<'a> {
             schema,
             with_ties: Some(WithTies {
                 keys: crate::scalar::PreparedExpressions::sort_keys(keys),
+                types: Vec::new(),
                 evaluator,
                 boundary: None,
                 finished: false,
@@ -165,7 +168,12 @@ impl<'a> Limit<'a> {
             .boundary
             .as_ref()
             .ok_or_else(|| ExecError::Other("LIMIT tie boundary is absent".into()))?;
-        equal_sort_key_values(boundary, &values, with_ties.evaluator.enum_labels())
+        equal_typed_sort_key_values(
+            boundary,
+            &values,
+            &with_ties.types,
+            with_ties.evaluator.enum_labels(),
+        )
     }
 
     fn directional_batch(&self, row: PhysicalRow) -> Batch {
@@ -359,6 +367,7 @@ impl PhysicalOperator for Limit<'_> {
         self.emitted = 0;
         if let Some(with_ties) = self.with_ties.as_mut() {
             with_ties.boundary = None;
+            with_ties.types = Vec::new();
             with_ties.finished = false;
         }
         self.directional_state = DirectionalLimitState::Initial;
@@ -366,6 +375,13 @@ impl PhysicalOperator for Limit<'_> {
         self.directional_current = None;
         if self.limit == Some(0) {
             return Ok(());
+        }
+        if let Some(with_ties) = self.with_ties.as_mut() {
+            with_ties.types = with_ties
+                .keys
+                .iter()
+                .map(|key| with_ties.evaluator.expression_type(&key.expr, &self.schema))
+                .collect::<Result<_, _>>()?;
         }
         self.child.open()
     }
@@ -416,9 +432,10 @@ impl PhysicalOperator for Limit<'_> {
                                 "WITH TIES boundary was not captured".to_string(),
                             )
                         })?;
-                        if !equal_sort_key_values(
+                        if !equal_typed_sort_key_values(
                             boundary,
                             &values,
+                            &with_ties.types,
                             with_ties.evaluator.enum_labels(),
                         )? {
                             with_ties.finished = true;
@@ -465,6 +482,11 @@ impl PhysicalOperator for Limit<'_> {
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.directional_current = None;
+        if let Some(with_ties) = self.with_ties.as_mut() {
+            with_ties.boundary = None;
+            with_ties.types = Vec::new();
+        }
         self.child.close()
     }
 }

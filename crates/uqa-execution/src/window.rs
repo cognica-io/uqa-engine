@@ -62,6 +62,27 @@ struct WindowPass {
     slots: Vec<WindowSlot>,
 }
 
+impl WindowPass {
+    fn sort_keys(&self) -> Vec<SortKey> {
+        let mut keys = self
+            .partition_by
+            .iter()
+            .cloned()
+            .map(|expr| SortKey {
+                expr,
+                descending: false,
+                nulls_first: None,
+            })
+            .collect::<Vec<_>>();
+        keys.extend(self.order_by.iter().map(|order| SortKey {
+            expr: order.expr.clone(),
+            descending: order.descending,
+            nulls_first: order.nulls.map(|nulls| matches!(nulls, NullsOrder::First)),
+        }));
+        keys
+    }
+}
+
 pub struct PreparedWindowPlan {
     passes: Vec<WindowPass>,
     projections: Vec<ProjectionPlan>,
@@ -241,22 +262,13 @@ fn execute_window_pass(
         .map(|slot| prepare_slot(context, slot, schema, params, phase_budget))
         .collect::<Result<Vec<_>, _>>()?;
     let scan: Box<dyn PhysicalOperator + '_> = Box::new(SpillScan::new(schema.clone(), input));
-    let mut keys = pass
-        .partition_by
-        .iter()
-        .cloned()
-        .map(|expr| SortKey {
-            expr,
-            descending: false,
-            nulls_first: None,
-        })
-        .collect::<Vec<_>>();
-    keys.extend(pass.order_by.iter().map(|order| SortKey {
-        expr: order.expr.clone(),
-        descending: order.descending,
-        nulls_first: order.nulls.map(|nulls| matches!(nulls, NullsOrder::First)),
-    }));
+    let keys = pass.sort_keys();
     let evaluator = context.expression_evaluator(params);
+    let key_types = keys
+        .iter()
+        .map(|key| evaluator.expression_type(&key.expr, schema))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (partition_types, order_types) = key_types.split_at(pass.partition_by.len());
     let mut sorted = ExternalSort::new(scan, keys, evaluator, None, phase_budget);
     sorted.open().map_err(exec_to_sql_error)?;
 
@@ -281,9 +293,10 @@ fn execute_window_pass(
                     &subquery_arena,
                 )?;
                 let same_partition = match &partition_key {
-                    Some(current) => crate::relational::equal_sort_key_values(
+                    Some(current) => crate::relational::equal_typed_sort_key_values(
                         current,
                         &key,
+                        partition_types,
                         uqa_sql::expr::EngineHook::enum_labels(hook),
                     )
                     .map_err(exec_to_sql_error)?,
@@ -292,6 +305,7 @@ fn execute_window_pass(
                 if !same_partition {
                     emit_partition(
                         pass,
+                        order_types,
                         &mut slots,
                         &mut partition,
                         (&output_schema, &mut output),
@@ -323,6 +337,7 @@ fn execute_window_pass(
         } else {
             emit_partition(
                 pass,
+                order_types,
                 &mut slots,
                 &mut partition,
                 (&output_schema, &mut output),
@@ -567,6 +582,7 @@ fn frame_offset_value(
 /// Evaluate every window call of a pass for each row of one sorted partition and append the results to the row.
 fn emit_partition(
     pass: &WindowPass,
+    order_types: &[Option<ColumnType>],
     slots: &mut [PreparedSlot],
     partition: &mut BufferedIndexedSpill,
     (schema, output): (&RowSchema, &mut SpillBuffer),
@@ -577,7 +593,14 @@ fn emit_partition(
     ),
     offsets_evaluated: &mut bool,
 ) -> Result<(), SQLError> {
-    let mut rows = PartitionRows::new(partition, &pass.order_by, params, hook, subqueries)?;
+    let mut rows = PartitionRows::new(
+        partition,
+        &pass.order_by,
+        order_types,
+        params,
+        hook,
+        subqueries,
+    )?;
     if rows.len() == 0 {
         return Ok(());
     }

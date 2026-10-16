@@ -208,14 +208,6 @@ impl SortComparison<'_> {
 }
 
 /// DISTINCT and WITH TIES use equality, without invoking a scalar ordering support function.
-pub(crate) fn equal_sort_key_values(
-    left: &[Value],
-    right: &[Value],
-    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
-) -> ExecResult<bool> {
-    equal_typed_sort_key_values(left, right, &[], enums)
-}
-
 pub(crate) fn equal_typed_sort_key_values(
     left: &[Value],
     right: &[Value],

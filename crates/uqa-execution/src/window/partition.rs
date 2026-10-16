@@ -12,7 +12,7 @@ use crate::{
     ScalarSubqueryRunner,
 };
 use uqa_core::Value;
-use uqa_sql::{SQLError, SQLParam, ScalarExpr};
+use uqa_sql::{ColumnType, SQLError, SQLParam, ScalarExpr};
 
 /// Rows read most recently; the frame and peer-group pointers revisit a few neighboring positions for every current row.
 const CACHED_ROWS: usize = 8;
@@ -28,6 +28,7 @@ pub(super) struct PartitionRows<'a> {
     schema: RowSchema,
     len: i64,
     order_by: &'a [ScalarOrder],
+    order_types: &'a [Option<ColumnType>],
     params: &'a [SQLParam],
     hook: &'a dyn uqa_sql::expr::EngineHook,
     subqueries: &'a dyn ScalarSubqueryRunner,
@@ -39,6 +40,7 @@ impl<'a> PartitionRows<'a> {
     pub(super) fn new(
         rows: &'a mut BufferedIndexedSpill,
         order_by: &'a [ScalarOrder],
+        order_types: &'a [Option<ColumnType>],
         params: &'a [SQLParam],
         hook: &'a dyn uqa_sql::expr::EngineHook,
         subqueries: &'a dyn ScalarSubqueryRunner,
@@ -50,6 +52,7 @@ impl<'a> PartitionRows<'a> {
             rows,
             len,
             order_by,
+            order_types,
             params,
             hook,
             subqueries,
@@ -183,8 +186,13 @@ impl<'a> PartitionRows<'a> {
         }
         let left = self.order_key(left)?;
         let right = self.order_key(right)?;
-        crate::relational::equal_sort_key_values(&left, &right, self.enum_labels())
-            .map_err(super::exec_to_sql_error)
+        crate::relational::equal_typed_sort_key_values(
+            &left,
+            &right,
+            self.order_types,
+            self.enum_labels(),
+        )
+        .map_err(super::exec_to_sql_error)
     }
 }
 
