@@ -90,6 +90,11 @@ pub(super) fn aggregate_sorted_input(
     let templates =
         aggregate_accumulator_templates(context, &aggregate_targets, input_schema, params)?;
     let accumulator_budget = (phase_budget / aggregate_targets.len().max(1)).max(1);
+    let group_types = statement
+        .group_by
+        .iter()
+        .map(|key| crate::scalar_type_with_resolver(key, input_schema, params, context))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut current_key: Option<Vec<Value>> = None;
     let mut current_accumulators = Vec::new();
     let mut output = SpillBuffer::new(phase_budget);
@@ -116,7 +121,14 @@ pub(super) fn aggregate_sorted_input(
 
                 if current_key
                     .as_ref()
-                    .map(|current| crate::relational::equal_sort_key_values(current, &key, enums))
+                    .map(|current| {
+                        crate::relational::equal_typed_sort_key_values(
+                            current,
+                            &key,
+                            &group_types,
+                            enums,
+                        )
+                    })
                     .transpose()
                     .map_err(exec_to_sql_error)?
                     .is_some_and(|equal| !equal)

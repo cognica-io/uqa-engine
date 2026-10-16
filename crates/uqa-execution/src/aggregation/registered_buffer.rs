@@ -31,6 +31,7 @@ pub struct RegisteredAggregateBuffer {
     pub(super) budget_bytes: usize,
     pub(super) memory_bytes: usize,
     pub(super) comparison_states: Option<std::sync::Arc<[EnumComparisonState]>>,
+    pub(super) key_types: Option<std::sync::Arc<[Option<uqa_sql::ColumnType>]>>,
 }
 
 impl Default for RegisteredAggregateBuffer {
@@ -48,6 +49,7 @@ impl RegisteredAggregateBuffer {
             budget_bytes: budget_bytes.max(1),
             memory_bytes: 0,
             comparison_states: None,
+            key_types: None,
         }
     }
 
@@ -122,6 +124,7 @@ impl RegisteredAggregateBuffer {
                     right,
                     enums,
                     self.comparison_states.as_deref().unwrap_or_default(),
+                    self.key_types.as_deref().unwrap_or_default(),
                 )
             })?;
             for row in rows {
@@ -137,6 +140,7 @@ impl RegisteredAggregateBuffer {
                 right,
                 enums,
                 self.comparison_states.as_deref().unwrap_or_default(),
+                self.key_types.as_deref().unwrap_or_default(),
             )
         })?;
         let mut readers = Vec::with_capacity(self.runs.len() + usize::from(!rows.is_empty()));
@@ -158,6 +162,7 @@ impl RegisteredAggregateBuffer {
                     b,
                     enums,
                     self.comparison_states.as_deref().unwrap_or_default(),
+                    self.key_types.as_deref().unwrap_or_default(),
                 )
             },
         )? {
@@ -180,6 +185,7 @@ impl RegisteredAggregateBuffer {
                 right,
                 enums,
                 self.comparison_states.as_deref().unwrap_or_default(),
+                self.key_types.as_deref().unwrap_or_default(),
             )
         })?;
         let mut run = uqa_storage::temporary_file::TemporaryFile::new().map_err(|err| {
@@ -220,6 +226,7 @@ impl RegisteredAggregateBuffer {
                 inputs,
                 enums,
                 self.comparison_states.as_deref().unwrap_or_default(),
+                self.key_types.as_deref().unwrap_or_default(),
             )?);
         }
         Ok(())
@@ -307,13 +314,14 @@ pub fn read_registered_aggregate_record(
 }
 
 pub fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRun, SQLError> {
-    merge_registered_aggregate_runs_with_catalog(runs, None, &[])
+    merge_registered_aggregate_runs_with_catalog(runs, None, &[], &[])
 }
 
 fn merge_registered_aggregate_runs_with_catalog(
     runs: Vec<JsonSpillRun>,
     enums: Option<&dyn EnumLabelCatalog>,
     states: &[EnumComparisonState],
+    types: &[Option<uqa_sql::ColumnType>],
 ) -> Result<JsonSpillRun, SQLError> {
     let mut readers = runs
         .iter()
@@ -333,7 +341,7 @@ fn merge_registered_aggregate_runs_with_catalog(
                 .enumerate()
                 .filter_map(|(index, reader)| reader.current().map(|record| (index, record))),
             |(_, left), (_, right)| {
-                compare_registered_aggregate_records_with_catalog(left, right, enums, states)
+                compare_registered_aggregate_records_with_catalog(left, right, enums, states, types)
             },
         )? {
             let record = readers[index].take_current()?;
@@ -374,7 +382,9 @@ fn compare_registered_aggregate_records_with_catalog(
     b: &RegisteredAggregateRecord,
     enums: Option<&dyn EnumLabelCatalog>,
     states: &[EnumComparisonState],
+    types: &[Option<uqa_sql::ColumnType>],
 ) -> Result<Ordering, SQLError> {
-    let ordering = compare_sort_keys_with_catalog(&a.sort_keys, &b.sort_keys, enums, states)?;
+    let ordering =
+        compare_sort_keys_with_catalog(&a.sort_keys, &b.sort_keys, enums, states, types)?;
     Ok(ordering.then_with(|| a.sequence.cmp(&b.sequence)))
 }

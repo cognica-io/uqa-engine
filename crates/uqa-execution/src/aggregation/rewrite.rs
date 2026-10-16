@@ -119,15 +119,32 @@ pub fn aggregate_accumulator_templates(
                 order_by,
                 ..
             } => {
-                let key_count = if has_enums {
-                    order_by.len() + usize::from(*distinct)
-                } else {
-                    0
-                };
+                let mut ordering_types = order_by
+                    .iter()
+                    .map(|key| {
+                        crate::scalar_type_with_resolver(&key.expr, input_schema, params, context)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 if let Some(function) = context.registered_aggregate_function(name) {
-                    return Ok(
-                        AggregateAccumulatorTemplate::registered(function).with_ordering(key_count)
-                    );
+                    let mut template = AggregateAccumulatorTemplate::registered(function);
+                    if *distinct {
+                        ordering_types.extend(
+                            args.iter()
+                                .map(|argument| {
+                                    crate::scalar_type_with_resolver(
+                                        argument,
+                                        input_schema,
+                                        params,
+                                        context,
+                                    )
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
+                        template = template.with_distinct_arguments(args.len());
+                    }
+                    return Ok(template
+                        .with_ordering(if has_enums { ordering_types.len() } else { 0 })
+                        .with_ordering_types(ordering_types));
                 }
                 let input_type = args
                     .first()
@@ -136,10 +153,35 @@ pub fn aggregate_accumulator_templates(
                     })
                     .transpose()?
                     .flatten();
-                Ok(
-                    AggregateAccumulatorTemplate::builtin(name, input_type.as_ref())
-                        .with_ordering(key_count),
-                )
+                let mut template = AggregateAccumulatorTemplate::builtin(name, input_type.as_ref());
+                if *distinct {
+                    if is_json_object_aggregate(name) || name.eq_ignore_ascii_case("string_agg") {
+                        ordering_types.push(input_type.clone());
+                        ordering_types.extend(
+                            args.iter()
+                                .skip(1)
+                                .map(|argument| {
+                                    crate::scalar_type_with_resolver(
+                                        argument,
+                                        input_schema,
+                                        params,
+                                        context,
+                                    )
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
+                        template = template.with_distinct_arguments(args.len());
+                    } else {
+                        ordering_types.push(if is_ordered_set_aggregate(name) {
+                            ordering_types.first().cloned().flatten()
+                        } else {
+                            input_type.clone()
+                        });
+                    }
+                }
+                Ok(template
+                    .with_ordering(if has_enums { ordering_types.len() } else { 0 })
+                    .with_ordering_types(ordering_types))
             }
             _ => Ok(AggregateAccumulatorTemplate::generic()),
         })

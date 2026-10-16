@@ -13,7 +13,7 @@ use std::hash::BuildHasher;
 use smallvec::SmallVec;
 use uqa_core::Value;
 
-use crate::distinct::hash_canonical_row_with_enum_catalog;
+use crate::distinct::hash_typed_row_with_catalog;
 use crate::{ExecResult, PhysicalRow, RowSchema};
 use uqa_sql::expr::enums::EnumLabelCatalog;
 
@@ -123,9 +123,11 @@ pub(super) fn positional_key_hash<S: BuildHasher>(
     }) {
         return Ok(None);
     }
-    hash_canonical_row_with_enum_catalog(
+    hash_typed_row_with_catalog(
         build_hasher,
-        positions.iter().map(|position| view.value_at(*position)),
+        positions
+            .iter()
+            .map(|position| (view.value_at(*position), schema.column_type(*position))),
         catalog,
     )
     .map(Some)
@@ -152,9 +154,12 @@ fn positional_keys_equal(
         ) else {
             return Ok(false);
         };
-        if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
+        if !uqa_sql::expr::equal_selected_values_with_catalog(
             left,
             right,
+            left_schema
+                .column_type(*left_position)
+                .or_else(|| right_schema.column_type(*right_position)),
             &uqa_core::memory::ProductionControl::uncontrolled(),
             catalog,
         )? {

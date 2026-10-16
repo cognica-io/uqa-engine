@@ -7,10 +7,12 @@
 use super::*;
 use uqa_core::ArrayValue;
 
+mod argument_types;
 mod enums;
 mod interval;
 mod legacy_vectors;
 mod mode;
+mod ranges;
 
 #[test]
 fn numeric_extrema_preserve_total_order_and_nan_regardless_of_input_order() {

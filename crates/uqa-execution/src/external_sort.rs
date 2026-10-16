@@ -48,6 +48,7 @@ pub struct ExternalSort<'a> {
     keys: crate::scalar::PreparedExpressions<Vec<SortKey>>,
     evaluator: SharedExpressionEvaluator<'a>,
     comparison_states: Vec<EnumComparisonState>,
+    key_types: Vec<Option<uqa_sql::ColumnType>>,
     equality_keys: bool,
     keep: Option<usize>,
     work_mem_bytes: usize,
@@ -104,6 +105,7 @@ impl<'a> ExternalSort<'a> {
             keys: crate::scalar::PreparedExpressions::sort_keys(keys),
             evaluator,
             equality_keys: false,
+            key_types: Vec::new(),
             keep,
             work_mem_bytes,
             spill_directory: None,
@@ -114,15 +116,6 @@ impl<'a> ExternalSort<'a> {
             output: None,
             initial_run_count: 0,
             merge_pass_count: 0,
-        }
-    }
-
-    fn comparison(&self) -> SortComparison<'_> {
-        SortComparison {
-            keys: &self.keys,
-            enums: self.evaluator.enum_labels(),
-            states: &self.comparison_states,
-            equality_keys: self.equality_keys,
         }
     }
 
@@ -315,6 +308,11 @@ impl PhysicalOperator for ExternalSort<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
+        self.key_types = self
+            .keys
+            .iter()
+            .map(|key| self.evaluator.expression_type(&key.expr, &self.schema))
+            .collect::<Result<_, _>>()?;
         for state in &mut self.comparison_states {
             *state = EnumComparisonState::default();
         }
@@ -832,6 +830,7 @@ mod tests {
             vec![SortedRun { buffer }],
             &SortComparison {
                 keys: &keys,
+                types: &[],
                 enums: None,
                 states: &[],
                 equality_keys: false,

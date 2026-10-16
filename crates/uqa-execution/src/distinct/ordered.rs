@@ -16,6 +16,7 @@ use uqa_core::Value;
 pub(crate) fn operator<'a>(
     child: Box<dyn PhysicalOperator + 'a>,
     keys: Vec<ScalarExpr>,
+    key_types: Vec<Option<uqa_sql::ColumnType>>,
     evaluator: SharedExpressionEvaluator<'a>,
     work_mem: usize,
 ) -> Box<dyn PhysicalOperator + 'a> {
@@ -23,8 +24,13 @@ pub(crate) fn operator<'a>(
     let width = slots.len();
     let key_count = keys.len();
     let relation = uqa_sql::ast::InternalRelationId::allocate();
-    let record_schema =
-        RowSchema::with_internal_relation_types(relation, vec![None; width + key_count + 1]);
+    let record_types = slots
+        .iter()
+        .map(|&slot| child.row_schema().physical_type(slot).cloned())
+        .chain(key_types.iter().cloned())
+        .chain(std::iter::once(Some(uqa_sql::ColumnType::Bytea)))
+        .collect();
+    let record_schema = RowSchema::with_internal_relation_types(relation, record_types);
     let child = Box::new(Decorate {
         child,
         schema: record_schema,
@@ -47,6 +53,7 @@ pub(crate) fn operator<'a>(
     let unique = Box::new(Adjacent {
         sorted,
         key_count,
+        key_types,
         evaluator,
         width,
         previous: None,
@@ -129,6 +136,7 @@ impl PhysicalOperator for Decorate<'_> {
 struct Adjacent<'a> {
     sorted: Box<dyn PhysicalOperator + 'a>,
     key_count: usize,
+    key_types: Vec<Option<uqa_sql::ColumnType>>,
     evaluator: SharedExpressionEvaluator<'a>,
     width: usize,
     previous: Option<Vec<Value>>,
@@ -151,9 +159,10 @@ impl PhysicalOperator for Adjacent<'_> {
                     .map(|position| row.value(position).unwrap_or(&Value::Null).clone())
                     .collect::<Vec<_>>();
                 if let Some(previous) = &self.previous {
-                    if crate::relational::equal_sort_key_values(
+                    if crate::relational::equal_typed_sort_key_values(
                         previous,
                         &values,
+                        &self.key_types,
                         self.evaluator.enum_labels(),
                     )? {
                         continue;
@@ -242,6 +251,7 @@ mod tests {
             let mut distinct = operator(
                 Box::new(scan),
                 vec![ScalarExpr::Position(0)],
+                vec![None],
                 DefaultExpressionEvaluator::shared(Vec::new()),
                 budget,
             );
@@ -279,6 +289,7 @@ mod tests {
                 let mut distinct = operator(
                     Box::new(scan),
                     vec![ScalarExpr::Position(0)],
+                    vec![None],
                     DefaultExpressionEvaluator::shared(Vec::new()),
                     budget,
                 );

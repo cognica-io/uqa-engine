@@ -6,7 +6,7 @@
 
 //! The same SQL key support state follows rows through every external sort run.
 
-use super::{DecoratedRow, ExecResult, Ordering, SortComparison};
+use super::{DecoratedRow, ExecResult, ExternalSort, Ordering, SortComparison};
 
 pub(super) fn compare_records(
     keys: &SortComparison<'_>,
@@ -27,4 +27,16 @@ pub(super) fn compare_records(
             )
         })?
         .then_with(|| left.sequence.cmp(&right.sequence)))
+}
+
+impl ExternalSort<'_> {
+    pub(super) fn comparison(&self) -> SortComparison<'_> {
+        SortComparison {
+            keys: &self.keys,
+            types: &self.key_types,
+            enums: self.evaluator.enum_labels(),
+            states: &self.comparison_states,
+            equality_keys: self.equality_keys,
+        }
+    }
 }

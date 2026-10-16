@@ -503,9 +503,14 @@ fn mode_value_with_catalog(
     values.for_each_ordered(enums, |record| {
         // Group with the same equality as sorting; retain the first group on ties.
         if current_count != 0
-            && !uqa_sql::expr::equal_typed_values_with_enum_catalog(
+            && !uqa_sql::expr::equal_selected_values_with_catalog(
                 &current_value,
                 &record.value,
+                values
+                    .key_types
+                    .as_deref()
+                    .and_then(|types| types.first())
+                    .and_then(Option::as_ref),
                 &uqa_core::memory::ProductionControl::uncontrolled(),
                 enums,
             )?

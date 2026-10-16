@@ -9391,7 +9391,7 @@
       ],
       "source": "crates/uqa-execution/src/join/tests/range_keys.rs",
       "capability": "Range join strategies",
-      "workload": "Record and array range/multirange keys through both smaller build sides and direct, computed and forced-spill keys.",
+      "workload": "Scalar, record and array range/multirange keys through both smaller build sides and direct, computed and forced-spill keys.",
       "invariant": "Actual strategy selection preserves the full Cartesian multiplicity of SQL-equal keys."
     },
     {
@@ -10988,6 +10988,162 @@
       "capability": "Partition B-tree class identities",
       "workload": "Compare 76 actual PostgreSQL RANGE/LIST partition class selections and corresponding domain wrappers.",
       "invariant": "Partition catalog metadata selects the SQL-owned class for every admitted key type instead of emitting zero from a duplicate table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_comparison_matches_postgresql_and_releases_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/selected.rs",
+      "capability": "Selected scalar range comparison",
+      "workload": "Compare 1,264 independent PostgreSQL range/multirange pairs through ordering, grouping and equality, with NULL, TEXT and cancellation controls.",
+      "invariant": "Selected identities preserve the PostgreSQL relation without interpreting ordinary TEXT as a range; scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_distinct_preserves_postgresql_classes_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/tests/typed_ranges.rs",
+      "capability": "Scalar range DISTINCT",
+      "workload": "All twelve native families, range domains, hash DISTINCT, DISTINCT ON and ordered mixed-record keys, with normal and forced-spill budgets.",
+      "invariant": "Each PostgreSQL equality class emits its first input representation, including one NULL; temporary files are cleaned.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "text_distinct_does_not_infer_ranges_from_spelling",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/tests/typed_ranges.rs",
+      "capability": "Declared equality domains",
+      "workload": "Unknown and TEXT columns containing equal-looking numeric range strings through hash DISTINCT, DISTINCT ON and ordered mixed-record keys in memory and spill.",
+      "invariant": "Unselected and ordinary TEXT values retain string equality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_range_keys_preserve_equality_and_controlled_allowances",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Selected range key resource ownership",
+      "workload": "Equal numeric range/multirange spellings through controlled exact output and streaming hash; insufficient allowance and both cancellation owners.",
+      "invariant": "Exact keys and streaming hashes preserve the same equality class; only output capacity survives success and failures release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_aggregate_distinct_preserves_classes_across_merge_runs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/ranges.rs",
+      "capability": "Typed aggregate DISTINCT",
+      "workload": "All twelve native range families under three budgets, including enough one-record runs to force a merge pass.",
+      "invariant": "One representative survives for each independent PostgreSQL equivalence class across memory, run creation and merging.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spilled_scalar_range_group_keys_retain_types_for_both_merge_orders",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/adaptive/merge_keys.rs",
+      "capability": "Typed partial aggregate merging",
+      "workload": "Numeric range/multirange partial groups under forced spill with selected ordering and exact-key fallback.",
+      "invariant": "Both merge strategies keep each complete SQL equality class adjacent and retain all partial multiplicities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spill_merge_keeps_equal_physical_and_admitted_keys_adjacent_without_ordering",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/adaptive/merge_keys.rs",
+      "capability": "Untyped partial aggregate schema",
+      "workload": "Physical and admitted nested keys with absent column-type metadata through forced-spill equality-key merging.",
+      "invariant": "Missing type metadata does not erase physical columns or change admitted equality classes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_set_multiplicities_match_postgresql_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/set_operation/tests/ranges.rs",
+      "capability": "Typed scalar set operations",
+      "workload": "Numeric range/multirange inputs with different equal spellings, unequal values and NULLs through all six set-operation variants under two budgets.",
+      "invariant": "UNION, INTERSECT and EXCEPT preserve PostgreSQL set and bag multiplicities without rewriting emitted spellings.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "scalar_range_relational_consumers_match_postgresql_equality",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
+      "capability": "Public scalar range equality consumers",
+      "workload": "128 independently captured PostgreSQL queries across twelve range/multirange types, including hash and mixed-record ordered DISTINCT/DISTINCT ON, grouping, aggregate DISTINCT, MODE, multi-argument JSON DISTINCT, joins and sets.",
+      "invariant": "Actual Engine SQL counts match PostgreSQL for DISTINCT, DISTINCT ON, groups, aggregate DISTINCT, MODE, joins and set operations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_key_types_are_resolved_once_per_open_and_never_during_close",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/tests/range_keys.rs",
+      "capability": "Join selected type lifecycle",
+      "workload": "One typed scalar range join with a resolver that rejects any lookup after the two keys are selected.",
+      "invariant": "Open resolves each key once; matching preserves PostgreSQL equality and close performs no new type resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_range_mode_preserves_classes_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/ranges.rs",
+      "capability": "Selected scalar range MODE classes",
+      "workload": "Numeric range and multirange spellings, domains and TEXT controls with ascending/descending order, reversed input, NULL and one-byte forced spill.",
+      "invariant": "MODE counts the same equivalence classes as sorting, matches the independent PostgreSQL winner, and preserves TEXT separation and spill bounds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "aggregate_argument_ranges_preserve_types_across_spill_and_restore",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests/argument_types.rs",
+      "capability": "Selected aggregate argument tuples",
+      "workload": "Numeric ranges/multiranges, domains and TEXT in either argument position with secondary integers/NULLs, explicit order, one-byte spill, merge runs and template restoration.",
+      "invariant": "Distinct tuple ordering and equality retain every argument type and original representation; registered transitions observe each PostgreSQL equivalence class once.",
       "case_names": [
         ""
       ]

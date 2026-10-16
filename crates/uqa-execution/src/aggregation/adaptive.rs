@@ -50,6 +50,7 @@ type CompactTextGroupIndex = HashMap<u64, usize, ahash::RandomState>;
 
 pub(super) struct AdaptiveAggregateSet {
     statement: Box<QueryBlockPlan>,
+    group_types: Vec<Option<ColumnType>>,
     group_expressions: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     aggregate_targets: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     accumulator_templates: Vec<AggregateAccumulatorTemplate>,
@@ -132,18 +133,14 @@ impl AdaptiveAggregateSet {
             &aggregate_targets,
             input_schema,
         );
-        let order_group_values = statement.group_by.iter().try_fold(true, |available, key| {
-            let ty = crate::scalar_type_with_resolver(key, input_schema, params, context)?;
-            Ok::<_, SQLError>(
-                available
-                    && ty
-                        .as_ref()
-                        .map(|ty| uqa_sql::type_resolution::type_supports_ordering(ty, context))
-                        .transpose()?
-                        .unwrap_or(true),
-            )
-        })?;
+        let group_types = statement
+            .group_by
+            .iter()
+            .map(|key| crate::scalar_type_with_resolver(key, input_schema, params, context))
+            .collect::<Result<Vec<_>, _>>()?;
+        let order_group_values = group_types_support_ordering(&group_types, context)?;
         Ok(Self {
+            group_types,
             group_expressions: crate::scalar::PreparedExpressions::scalars(
                 statement
                     .group_by
@@ -298,6 +295,7 @@ impl AdaptiveAggregateSet {
             &self.groups,
             hash,
             key,
+            &self.group_types,
             context
                 .function_hook()
                 .and_then(uqa_sql::expr::EngineHook::enum_labels),
@@ -332,9 +330,14 @@ impl AdaptiveAggregateSet {
         if let Some(key) = self.compact_text_group_key(key) {
             return Ok(key);
         }
-        crate::distinct::hash_canonical_row_with_enum_catalog(
+        crate::distinct::hash_typed_row_with_catalog(
             self.group_index.hasher(),
-            key.iter().map(Some),
+            key.iter().enumerate().map(|(index, value)| {
+                (
+                    Some(value),
+                    self.group_types.get(index).and_then(Option::as_ref),
+                )
+            }),
             enums,
         )
         .map_err(super::sort_fallback::exec_to_sql_error)
@@ -402,8 +405,15 @@ impl AdaptiveAggregateSet {
 
     fn ensure_active_group(&mut self, key: &[Value]) -> Result<u64, SQLError> {
         let hash = self.group_hash(key, None)?;
-        let exists =
-            matching_group_index(&self.group_index, &self.groups, hash, key, None)?.is_some();
+        let exists = matching_group_index(
+            &self.group_index,
+            &self.groups,
+            hash,
+            key,
+            &self.group_types,
+            None,
+        )?
+        .is_some();
         if !exists && !self.insert_group(key, hash)? {
             Err(SQLError::Internal(
                 "abandoned aggregate state cannot accept projected rows".into(),
@@ -441,10 +451,7 @@ impl AdaptiveAggregateSet {
         if self.groups.is_empty() {
             return Ok(());
         }
-        let schema = super::partial_state::partial_schema(
-            self.partial_relation,
-            self.statement.group_by.len(),
-        );
+        let schema = super::partial_state::partial_schema(self.partial_relation, &self.group_types);
         let partials = self
             .partials
             .get_or_insert_with(|| SpillBuffer::new(self.spill_budget));
@@ -480,11 +487,26 @@ impl AdaptiveAggregateSet {
     }
 }
 
+fn group_types_support_ordering(
+    types: &[Option<ColumnType>],
+    context: &dyn QueryExpressionContext,
+) -> Result<bool, SQLError> {
+    types.iter().try_fold(true, |available, ty| {
+        Ok(available
+            && ty
+                .as_ref()
+                .map(|ty| uqa_sql::type_resolution::type_supports_ordering(ty, context))
+                .transpose()?
+                .unwrap_or(true))
+    })
+}
+
 fn matching_group_index(
     index: &GroupIndex,
     groups: &[GroupEntry],
     hash: u64,
     key: &[Value],
+    types: &[Option<ColumnType>],
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> Result<Option<usize>, SQLError> {
     let Some(bucket) = index.get(&hash) else {
@@ -497,8 +519,14 @@ fn matching_group_index(
             continue;
         }
         let mut equal = true;
-        for (left, right) in candidate.iter().zip(key) {
-            if !uqa_sql::expr::equal_typed_values_with_enum_catalog(left, right, &control, enums)? {
+        for (position, (left, right)) in candidate.iter().zip(key).enumerate() {
+            if !uqa_sql::expr::equal_selected_values_with_catalog(
+                left,
+                right,
+                types.get(position).and_then(Option::as_ref),
+                &control,
+                enums,
+            )? {
                 equal = false;
                 break;
             }
@@ -775,7 +803,7 @@ mod tests {
             },
         }];
         assert_eq!(
-            matching_group_index(&index, &groups, hash, &[fresh], None).unwrap(),
+            matching_group_index(&index, &groups, hash, &[fresh], &[], None).unwrap(),
             Some(0)
         );
     }

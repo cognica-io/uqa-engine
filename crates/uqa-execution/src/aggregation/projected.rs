@@ -13,7 +13,7 @@ use uqa_core::Value;
 use uqa_sql::expr::RowLookup;
 
 pub(super) enum ProjectedGroupColumn {
-    Position(usize),
+    Position(usize, Option<uqa_sql::ColumnType>),
     Text(usize),
 }
 
@@ -32,17 +32,24 @@ impl ProjectedGroupColumn {
                     ) {
                         Self::Text(position)
                     } else {
-                        Self::Position(position)
+                        Self::Position(position, input_schema.column_type(position).cloned())
                     }
                 })
             })
             .collect()
     }
 
+    fn ty(&self) -> Option<&uqa_sql::ColumnType> {
+        match self {
+            Self::Position(_, ty) => ty.as_ref(),
+            Self::Text(_) => None,
+        }
+    }
+
     #[inline]
     pub(super) fn value<'row, Row: RowLookup>(&self, row: &'row Row) -> Option<&'row Value> {
         match self {
-            Self::Position(index) | Self::Text(index) => row.positional_column(*index),
+            Self::Position(index, _) | Self::Text(index) => row.positional_column(*index),
         }
     }
 }
@@ -56,9 +63,11 @@ pub(super) fn group_hash<S: BuildHasher, Row: RowLookup>(
     if let Some(key) = compact_text_pair(columns, row) {
         return Ok(key);
     }
-    crate::distinct::hash_canonical_row_with_enum_catalog(
+    crate::distinct::hash_typed_row_with_catalog(
         build_hasher,
-        columns.iter().map(|column| column.value(row)),
+        columns
+            .iter()
+            .map(|column| (column.value(row), column.ty())),
         enums,
     )
 }
@@ -94,9 +103,10 @@ pub(super) fn group_matches<Row: RowLookup>(
                 stored == value
             }
             (ProjectedGroupColumn::Text(_), Value::Null, None | Some(Value::Null)) => true,
-            _ => uqa_sql::expr::equal_typed_values_with_enum_catalog(
+            _ => uqa_sql::expr::equal_selected_values_with_catalog(
                 stored,
                 value.unwrap_or(&null),
+                column.ty(),
                 &uqa_core::memory::ProductionControl::uncontrolled(),
                 enums,
             )?,

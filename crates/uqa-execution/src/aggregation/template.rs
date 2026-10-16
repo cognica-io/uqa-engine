@@ -16,6 +16,8 @@ pub struct AggregateAccumulatorTemplate {
     kind: AggregateKind,
     extrema: Option<Arc<EnumComparisonState>>,
     ordering: Option<Arc<[EnumComparisonState]>>,
+    ordering_types: Option<Arc<[Option<ColumnType>]>>,
+    distinct_arguments: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -32,6 +34,8 @@ impl AggregateAccumulatorTemplate {
             )),
             extrema: enum_extrema_state(name, input_type),
             ordering: None,
+            ordering_types: None,
+            distinct_arguments: None,
         }
     }
 
@@ -40,6 +44,8 @@ impl AggregateAccumulatorTemplate {
             kind: AggregateKind::Builtin(AggregateStatePlan::Generic),
             extrema: None,
             ordering: None,
+            ordering_types: None,
+            distinct_arguments: None,
         }
     }
 
@@ -48,6 +54,8 @@ impl AggregateAccumulatorTemplate {
             kind: AggregateKind::Registered(function),
             extrema: None,
             ordering: None,
+            ordering_types: None,
+            distinct_arguments: None,
         }
     }
 
@@ -55,6 +63,18 @@ impl AggregateAccumulatorTemplate {
         if keys != 0 {
             self.ordering = Some((0..keys).map(|_| EnumComparisonState::default()).collect());
         }
+        self
+    }
+
+    pub(super) fn with_ordering_types(mut self, types: Vec<Option<ColumnType>>) -> Self {
+        if !types.is_empty() {
+            self.ordering_types = Some(types.into());
+        }
+        self
+    }
+
+    pub(super) fn with_distinct_arguments(mut self, count: usize) -> Self {
+        self.distinct_arguments = Some(count);
         self
     }
 
@@ -80,6 +100,20 @@ impl AggregateAccumulatorTemplate {
 
     pub(super) fn restore_comparison(&self, accumulator: &mut AggregateAccumulator) {
         accumulator.enum_comparison.clone_from(&self.extrema);
+        accumulator.distinct.argument_count = self.distinct_arguments;
+        accumulator
+            .values
+            .key_types
+            .clone_from(&self.ordering_types);
+        accumulator
+            .distinct
+            .values
+            .key_types
+            .clone_from(&self.ordering_types);
+        accumulator
+            .registered_ordered
+            .key_types
+            .clone_from(&self.ordering_types);
         accumulator
             .values
             .comparison_states

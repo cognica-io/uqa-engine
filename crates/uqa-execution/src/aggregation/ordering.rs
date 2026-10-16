@@ -73,7 +73,7 @@ pub(super) fn compare_sort_keys(
     left: &[AggregateSortKey],
     right: &[AggregateSortKey],
 ) -> Result<Ordering, SQLError> {
-    compare_sort_keys_with_catalog(left, right, None, &[])
+    compare_sort_keys_with_catalog(left, right, None, &[], &[])
 }
 
 pub(super) fn compare_sort_keys_with_catalog(
@@ -81,6 +81,7 @@ pub(super) fn compare_sort_keys_with_catalog(
     right: &[AggregateSortKey],
     enums: Option<&dyn EnumLabelCatalog>,
     states: &[EnumComparisonState],
+    types: &[Option<uqa_sql::ColumnType>],
 ) -> Result<Ordering, SQLError> {
     for (index, (left, right)) in left.iter().zip(right).enumerate() {
         let ordering = match (
@@ -93,9 +94,10 @@ pub(super) fn compare_sort_keys_with_catalog(
             (false, true) if left.nulls_first => Ordering::Greater,
             (false, true) => Ordering::Less,
             (false, false) => {
-                let ordering = uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                let ordering = uqa_sql::expr::compare_selected_values_with_catalog(
                     &left.value,
                     &right.value,
+                    types.get(index).and_then(Option::as_ref),
                     &ProductionControl::uncontrolled(),
                     enums,
                     states.get(index),

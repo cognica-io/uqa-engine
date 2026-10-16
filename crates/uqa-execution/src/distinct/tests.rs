@@ -17,6 +17,8 @@ use crate::physical::run_to_rows;
 use crate::scan::TableScan;
 use crate::{ExpressionEvaluator, PhysicalRow, ScalarEvalContext};
 
+mod typed_ranges;
+
 #[test]
 fn collision_verification_requires_equality_without_ordering() {
     let row = |value| {
@@ -299,7 +301,7 @@ fn binary_keys_cover_every_value_variant_without_structural_collisions() {
 #[test]
 fn physical_numeric_join_key_stays_inline_and_matches_distinct_encoding() {
     let value = Value::Int(42);
-    let key = encode_non_null_key(std::iter::once(Some(&value)), None)
+    let key = encode_typed_non_null_key(std::iter::once((Some(&value), None)), None)
         .unwrap()
         .unwrap();
     assert!(!key.spilled());
@@ -309,9 +311,11 @@ fn physical_numeric_join_key_stays_inline_and_matches_distinct_encoding() {
     );
 
     let null = Value::Null;
-    assert!(encode_non_null_key(std::iter::once(Some(&null)), None)
-        .unwrap()
-        .is_none());
+    assert!(
+        encode_typed_non_null_key(std::iter::once((Some(&null), None)), None)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

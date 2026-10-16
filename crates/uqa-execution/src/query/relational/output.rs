@@ -136,22 +136,26 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
             let mut ordered = false;
             let mut support = uqa_sql::type_resolution::ComparisonKeySupport::default();
             let mut keys = Vec::new();
+            let mut key_types = Vec::new();
             for position in 0..columns.len() {
                 if resjunk.constant_distinct_columns.contains(&position) {
                     continue;
                 }
                 keys.push(ScalarExpr::Position(position));
-                if let Some(ty) = operator.row_schema().column_type(position) {
+                let ty = operator.row_schema().column_type(position);
+                if let Some(ty) = ty {
                     crate::require_equality_operator(ty)?;
                     support.include(ty, resolver.as_ref())?;
                     ordered |= uqa_sql::expr::type_comparison_can_fail(ty);
                 }
+                key_types.push(ty.cloned());
             }
             support.require_implementation("DISTINCT")?;
             if ordered && support.ordering {
                 crate::distinct::ordered::operator(
                     operator,
                     keys,
+                    key_types,
                     context.evaluator(params, ctes),
                     work_mem_bytes,
                 )
@@ -199,18 +203,22 @@ pub(super) fn finish_query_block_operator_output<'a, S: Clone + 'static>(
             });
             let mut ordered = false;
             let mut support = uqa_sql::type_resolution::ComparisonKeySupport::default();
+            let mut key_types = Vec::new();
             for expression in &distinct_on {
-                if let Some(ty) = crate::scalar_type(expression, operator.row_schema(), params)? {
-                    crate::require_equality_operator(&ty)?;
-                    support.include(&ty, resolver.as_ref())?;
-                    ordered |= uqa_sql::expr::type_comparison_can_fail(&ty);
+                let ty = crate::scalar_type(expression, operator.row_schema(), params)?;
+                if let Some(ty) = &ty {
+                    crate::require_equality_operator(ty)?;
+                    support.include(ty, resolver.as_ref())?;
+                    ordered |= uqa_sql::expr::type_comparison_can_fail(ty);
                 }
+                key_types.push(ty);
             }
             support.require_implementation("DISTINCT")?;
             if ordered && support.ordering {
                 crate::distinct::ordered::operator(
                     operator,
                     distinct_on,
+                    key_types,
                     context.evaluator(params, ctes),
                     work_mem_bytes,
                 )

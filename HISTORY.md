@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve selected scalar range types through DISTINCT, grouping, scalar and multi-argument aggregate DISTINCT, MODE, joins and set operations, so equal numeric bounds with different decimal spellings share PostgreSQL equality in memory and spill.
+
 - Report the selected B-tree operator class for range/list partition keys, including arrays, ranges, bit strings and OID aliases, through the shared SQL class metadata.
 
 - Preserve declared range and multirange names in type metadata instead of treating them as built-in types. Retain stored type identities, catalog generations and physical value descriptors across provider refresh and rollback.

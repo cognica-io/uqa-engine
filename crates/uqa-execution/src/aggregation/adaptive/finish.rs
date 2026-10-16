@@ -64,6 +64,29 @@ impl AdaptiveAggregateSet {
         Ok(output)
     }
 
+    fn decode_partial(
+        &self,
+        row: PhysicalRow,
+    ) -> Result<(Vec<Value>, Vec<AggregateAccumulator>), SQLError> {
+        let row = if self.order_group_values {
+            row
+        } else {
+            let mut values = row.into_physical_values();
+            values.pop();
+            PhysicalRow::from_values(values)
+        };
+        let (key, mut accumulators) = super::super::partial_state::decode_partial_group(
+            row,
+            &self.aggregate_targets,
+            self.accumulator_budget,
+            self.group_types.len(),
+        )?;
+        for (accumulator, template) in accumulators.iter_mut().zip(&self.accumulator_templates) {
+            template.restore_comparison(accumulator);
+        }
+        Ok((key, accumulators))
+    }
+
     fn finish_spilled(
         self,
         context: &dyn QueryExpressionContext,
@@ -72,12 +95,11 @@ impl AdaptiveAggregateSet {
 
         partials: SpillBuffer,
     ) -> Result<SpillBuffer, SQLError> {
-        let group_count = self.statement.group_by.len();
         let enums = uqa_sql::expr::EngineHook::enum_labels(context);
         let mut sorted = super::merge_keys::sorted_partials(
             partials,
             self.partial_relation,
-            group_count,
+            &self.group_types,
             self.order_group_values,
             context.expression_evaluator(params),
             self.spill_budget,
@@ -96,29 +118,16 @@ impl AdaptiveAggregateSet {
                 .map_err(super::super::sort_fallback::exec_to_sql_error)?
             {
                 for row in batch.rows {
-                    let row = if self.order_group_values {
-                        row
-                    } else {
-                        let mut values = row.into_physical_values();
-                        values.pop();
-                        PhysicalRow::from_values(values)
-                    };
-                    let (key, mut accumulators) =
-                        super::super::partial_state::decode_partial_group(
-                            row,
-                            &self.aggregate_targets,
-                            self.accumulator_budget,
-                            group_count,
-                        )?;
-                    for (accumulator, template) in
-                        accumulators.iter_mut().zip(&self.accumulator_templates)
-                    {
-                        template.restore_comparison(accumulator);
-                    }
+                    let (key, accumulators) = self.decode_partial(row)?;
                     if current_key
                         .as_ref()
                         .map(|current| {
-                            crate::relational::equal_sort_key_values(current, &key, enums)
+                            crate::relational::equal_typed_sort_key_values(
+                                current,
+                                &key,
+                                &self.group_types,
+                                enums,
+                            )
                         })
                         .transpose()
                         .map_err(super::super::sort_fallback::exec_to_sql_error)?

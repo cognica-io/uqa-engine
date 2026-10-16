@@ -9,6 +9,30 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[test]
+fn scalar_range_relational_consumers_match_postgresql_equality() {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../uqa-execution/src/distinct/tests/typed_ranges/postgresql.json"
+    ))
+    .unwrap();
+    let engine = Engine::new();
+    let mut mismatches = Vec::new();
+    for case in reference["cases"].as_array().unwrap() {
+        match engine.sql(case["sql"].as_str().unwrap(), &[]) {
+            Ok(result) => {
+                assert_eq!(result.rows.len(), 1, "{}", case["id"]);
+                let actual = &result.rows[0][&result.columns[0]];
+                let expected = Value::Int(case["count"].as_i64().unwrap());
+                if actual != &expected {
+                    mismatches.push(format!("{}: {actual:?}, expected {expected:?}", case["id"]));
+                }
+            }
+            Err(error) => mismatches.push(format!("{}: {error}", case["id"])),
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
 #[rstest::rstest]
 #[case::memory(0)]
 #[case::sqlite(1)]

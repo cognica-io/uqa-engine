@@ -147,3 +147,69 @@ fn admitted_sql_key_catalog_interrupts_preserve_both_cancellation_scopes() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn typed_range_keys_preserve_equality_and_controlled_allowances() {
+    for (name, first, equal) in [
+        ("numrange", "[1.0,3.00)", "[1.00,3.0)"),
+        (
+            "nummultirange",
+            "{[1.0,2.00),[5,6)}",
+            "{[1.00,2.0),[5.0,6.00)}",
+        ),
+    ] {
+        let ty = uqa_sql::ColumnType::from_sql_name(name).unwrap();
+        let left = Value::Str(first.into());
+        let right = Value::Str(equal.into());
+        let budget = MemoryBudget::new(65536);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let key = canonical_typed_row_key_with_catalog_and_control(
+            std::iter::once((Some(&left), Some(&ty))),
+            None,
+            &control,
+        )
+        .unwrap();
+        assert_eq!(budget.used(), key.capacity());
+        let equal_key =
+            encode_sql_key_with_types_and_catalog(std::iter::once((Some(&right), Some(&ty))), None)
+                .unwrap();
+        assert_eq!(&*key, &equal_key);
+        let hasher = ahash::RandomState::new();
+        let expected =
+            hash_typed_row_with_catalog(&hasher, std::iter::once((Some(&left), Some(&ty))), None)
+                .unwrap();
+        assert_eq!(
+            hash_typed_row_with_catalog(&hasher, std::iter::once((Some(&right), Some(&ty))), None)
+                .unwrap(),
+            expected
+        );
+        drop(key);
+        assert_eq!(budget.used(), 0);
+        for (limit, cancel) in [(0, 0), (1, 0), (65536, 1), (65536, 2)] {
+            let budget = MemoryBudget::new(limit);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            if cancel == 1 {
+                original.cancel();
+            }
+            if cancel == 2 {
+                invoking.cancel();
+            }
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let error = canonical_typed_row_key_with_catalog_and_control(
+                std::iter::once((Some(&left), Some(&ty))),
+                None,
+                &control,
+            )
+            .map(drop)
+            .expect_err("selected range production must retain its allowance");
+            assert_eq!(
+                error.sqlstate(),
+                Some(if cancel == 0 { "53200" } else { "57014" })
+            );
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}

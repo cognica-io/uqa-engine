@@ -136,6 +136,7 @@ fn ordering_call_state_is_private_while_tie_equality_reads_raw_oids() {
     let states = [EnumComparisonState::default()];
     let compare = SortComparison {
         keys: &keys,
+        types: &[],
         enums: Some(&catalog),
         states: &states,
         equality_keys: false,
