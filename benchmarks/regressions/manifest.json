@@ -9940,8 +9940,8 @@
       "cases": 1,
       "source": "crates/uqa-core/src/types/temporal/infinite.rs",
       "capability": "Infinite temporal resource ownership",
-      "workload": "Eight typed endpoints with zero-byte output allowance, a 64-byte input/output allowance and each cancellation scope.",
-      "invariant": "Denied output allocates nothing, successful output retains its capacity charge until drop, input releases scratch and either cancellation token stops production.",
+      "workload": "Eight typed endpoints with zero-byte input/output allowance, a 64-byte output allowance and each cancellation scope.",
+      "invariant": "Endpoint input and denied output allocate nothing, successful output retains its capacity charge until drop, and either cancellation token stops production.",
       "case_names": [
         ""
       ]

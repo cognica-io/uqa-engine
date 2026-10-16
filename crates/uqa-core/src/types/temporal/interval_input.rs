@@ -25,13 +25,13 @@ pub(super) fn parse_interval_literal(
     style: TemporalIntervalStyle,
     control: &ProductionControl<'_>,
 ) -> Result<Result<TemporalValue, TemporalInputError>, ValueRetentionError> {
+    control.check()?;
+    if let Some(infinity) = input::infinite_token(input.trim()) {
+        return Ok(Ok(infinity.interval()));
+    }
     let mut text = ProductionString::new(*control);
     for character in input.trim().chars() {
         text.push(character.to_ascii_lowercase())?;
-    }
-    if let Some(infinity) = input::infinite_token(&text) {
-        control.check()?;
-        return Ok(Ok(infinity.interval()));
     }
     let value = parse_interval_tokens(&text, style, control)?;
     let value = if matches!(value, Err(TemporalInputError::InvalidSyntax)) {

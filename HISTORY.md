@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Read infinite interval endpoints without allocating a normalized input string. Preserve signs, case, whitespace, finite interval parsing and cancellation under the caller's memory allowance.
+
 - Reject B-tree key declarations whose selected SQL type has no default operator class, including domains, expressions and indexes affected by column type changes. Preserve PostgreSQL diagnostics, statement rollback, generic array/record classes and unordered included values.
 
 - Restore compact dynamic value slots after bit-string and physical enum metadata additions. Retain indirect payload headers under the existing memory allowance without changing packed values, enum identity, comparisons or persistent formats.

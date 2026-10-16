@@ -251,6 +251,12 @@ mod tests {
                 let empty = MemoryBudget::new(0);
                 let control = ProductionControl::new(&empty, &original, &invoking);
                 let allocations = allocation_counter::measure(|| {
+                    assert_eq!(
+                        value
+                            .parse_same_kind_at_with_control(sign.as_str(), 0, &control)
+                            .unwrap(),
+                        Some(value.clone())
+                    );
                     assert!(matches!(
                         value.to_sql_string_with_control(&control),
                         Err(ValueRetentionError::Memory(_))
@@ -261,13 +267,6 @@ mod tests {
 
                 let memory = MemoryBudget::new(64);
                 let control = ProductionControl::new(&memory, &original, &invoking);
-                assert_eq!(
-                    value
-                        .parse_same_kind_at_with_control(sign.as_str(), 0, &control)
-                        .unwrap(),
-                    Some(value.clone())
-                );
-                assert_eq!(memory.used(), 0);
                 let text = value.to_sql_string_with_control(&control).unwrap();
                 assert_eq!(text.as_str(), sign.as_str());
                 assert_eq!(memory.used(), text.capacity());
