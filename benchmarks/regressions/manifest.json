@@ -10137,8 +10137,34 @@
       ],
       "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
       "capability": "Native range retained consumer persistence",
-      "workload": "22 independent PostgreSQL statements covering composite fields, nested arrays, DEFAULT/CHECK catalog output, constraint rejection, prepared output, attribute rename, rollback and four reopen observations.",
-      "invariant": "Already admitted fields preserve range operations and catalog output through each state transition without changing database format."
+      "workload": "68 independent PostgreSQL statements covering composite fields, nested arrays, DEFAULT/CHECK catalog output, constraint rejection, prepared output, retained field type changes, selected comparison and grouping, rollback and ten reopen observations.",
+      "invariant": "Already admitted fields preserve physical range identity, selected comparison and catalog output through each state transition without changing database format."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_physical_comparison_retains_selected_bounds_and_original_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Physical range comparison ownership",
+      "workload": "54 independently captured native range and multirange Datums compared with admitted values directly and inside selected record fields, including quota failure and cancellation.",
+      "invariant": "Typed physical readers preserve endpoint identity without replaying input; comparison retains the original allowance and releases all reservations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_range_fields_share_sql_hash_exact_and_spill_keys_with_admitted_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Physical range equality consumers",
+      "workload": "54 physical range and multirange fields matched against admitted values through exact keys, hashes and actual disk spill under small and large budgets.",
+      "invariant": "Physical and admitted fields share SQL equality classes and keys, preserving duplicate elimination and reservation release on success and failure."
     }
   ]
 }

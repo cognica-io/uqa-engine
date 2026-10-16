@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Selected SQL identities give text-backed range fields their bound semantics.
+//! Selected SQL identities preserve admitted range fields through text and physical readers.
 
 use super::{
     parse_multirange_with_control, parse_range_with_control, CanonicalMultirange, CanonicalRange,
@@ -57,6 +57,9 @@ impl RangeComparisonValue {
             ColumnType::Domain { base, .. } => return Self::from_type(value, base, control),
             _ => return Ok(None),
         };
+        if let Value::Datum(datum) = value {
+            return super::super::datums::range_comparison(datum, ty, control).map(Some);
+        }
         let Value::Str(text) = value else {
             return Err(SQLError::Internal(
                 "selected range comparison requires an admitted range value".into(),
@@ -80,7 +83,10 @@ impl RangeComparisonValue {
             (Self::Multirange(left), Self::Multirange(right)) => {
                 left.cmp_with_control(right, control)
             }
-            _ => Err(SQLError::Internal("range types do not match".into())),
+            _ => Err(SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: "range types do not match".into(),
+            }),
         }
     }
 }

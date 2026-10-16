@@ -6,11 +6,11 @@
 
 //! `PostgreSQL` native range payloads shared by catalog constants and retained tuple fields.
 
-use super::{CanonicalRange, RangeSubtype};
+use super::{CanonicalMultirange, CanonicalRange, RangeComparisonValue, RangeSubtype};
 use crate::catalog::type_metadata::{pg_type_align, pg_type_len, pg_type_oid};
 use crate::{ColumnType, SQLError};
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
     DecimalValue, Value,
 };
 
@@ -119,25 +119,25 @@ pub(crate) fn read(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
-    if word(bytes)? != pg_type_oid(ty) as u32 {
-        return Err(corrupt("range payload type differs from its declaration"));
-    }
+    let subtype = physical_subtype(bytes, ty)?;
     let mut output = ProductionString::new(*control);
     match ty {
-        ColumnType::Range(subtype) => {
-            let flags = *bytes
-                .last()
-                .filter(|_| bytes.len() >= 5)
-                .ok_or_else(|| corrupt("truncated range payload"))?;
-            let bounds = &bytes[4..bytes.len() - 1];
-            let (range, consumed) = read_bounds(bounds, flags, *subtype, control)?;
-            if consumed != bounds.len() {
-                return Err(corrupt("invalid range bound length"));
-            }
+        ColumnType::Range(_) => {
+            let range = read_range(bytes, subtype, control)?;
             super::production::write_range(&range, &mut output, control)?;
         }
-        ColumnType::Multirange(subtype) => {
-            read_multirange(bytes, *subtype, &mut output, control)?;
+        ColumnType::Multirange(_) => {
+            let mut ranges = Members::new(bytes, subtype)?;
+            output.push('{')?;
+            let mut separator = false;
+            while let Some(range) = ranges.next(control)? {
+                if separator {
+                    output.push(',')?;
+                }
+                super::production::write_range(&range, &mut output, control)?;
+                separator = true;
+            }
+            output.push('}')?;
         }
         _ => return Err(corrupt("non-range payload type")),
     }
@@ -145,64 +145,150 @@ pub(crate) fn read(
     Ok(control.finish(Value::Str(text), memory)?)
 }
 
-fn read_multirange(
+/// Typed consumers keep the physical range identity and admitted endpoints instead of decoding to text and invoking input again.
+pub(in crate::expr) fn comparison(
+    bytes: &[u8],
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<RangeComparisonValue, SQLError> {
+    control.check()?;
+    let subtype = physical_subtype(bytes, ty)?;
+    match ty {
+        ColumnType::Range(_) => Ok(RangeComparisonValue::Range(read_range(
+            bytes, subtype, control,
+        )?)),
+        ColumnType::Multirange(_) => {
+            let mut input = Members::new(bytes, subtype)?;
+            let mut ranges = ProductionVec::new(*control);
+            while let Some(range) = input.next(control)? {
+                ranges.push_produced(range)?;
+            }
+            let (ranges, memory) = ranges.finish()?.into_parts();
+            Ok(RangeComparisonValue::Multirange(
+                control.finish(CanonicalMultirange { subtype, ranges }, memory)?,
+            ))
+        }
+        _ => Err(corrupt("non-range payload type")),
+    }
+}
+
+fn physical_subtype(bytes: &[u8], declared: &ColumnType) -> Result<RangeSubtype, SQLError> {
+    let oid = word(bytes)?;
+    let actual = crate::catalog::type_metadata::builtin_scalar_type(oid)
+        .ok_or_else(|| corrupt("unknown native range payload type"))?;
+    match (declared, actual) {
+        (ColumnType::Range(_), ColumnType::Range(subtype))
+        | (ColumnType::Multirange(_), ColumnType::Multirange(subtype)) => Ok(*subtype),
+        (ColumnType::Range(_), _) | (ColumnType::Multirange(_), _) => Err(SQLError::Routine {
+            sqlstate: "XX000".into(),
+            message: format!(
+                "type {oid} is not a {} type",
+                if matches!(declared, ColumnType::Range(_)) {
+                    "range"
+                } else {
+                    "multirange"
+                }
+            ),
+        }),
+        _ => Err(corrupt("non-range payload type")),
+    }
+}
+
+fn read_range(
     bytes: &[u8],
     subtype: RangeSubtype,
-    output: &mut ProductionString<'_>,
     control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    let count = word(bytes.get(4..).unwrap_or_default())? as usize;
-    let flags_start = count
-        .saturating_sub(1)
-        .checked_mul(4)
-        .and_then(|size| size.checked_add(8))
-        .ok_or_else(|| corrupt("invalid multirange count"))?;
-    let flags_end = flags_start
-        .checked_add(count)
-        .filter(|end| *end <= bytes.len())
-        .ok_or_else(|| corrupt("invalid multirange count"))?;
-    let start = align(flags_end + 4, subtype)? - 4;
-    let bounds = bytes
-        .get(start..)
-        .ok_or_else(|| corrupt("truncated multirange payload"))?;
-    output.push('{')?;
-    let mut offset = 0;
-    let mut previous = 0_usize;
-    for index in 0..count {
+) -> Result<Produced<CanonicalRange>, SQLError> {
+    let flags = *bytes
+        .last()
+        .filter(|_| bytes.len() >= 5)
+        .ok_or_else(|| corrupt("truncated range payload"))?;
+    let bounds = &bytes[4..bytes.len() - 1];
+    let (range, consumed) = read_bounds(bounds, flags, subtype, control)?;
+    if consumed != bounds.len() {
+        return Err(corrupt("invalid range bound length"));
+    }
+    Ok(range)
+}
+
+struct Members<'a> {
+    bytes: &'a [u8],
+    bounds: &'a [u8],
+    flags: &'a [u8],
+    subtype: RangeSubtype,
+    index: usize,
+    offset: usize,
+    previous: usize,
+}
+
+impl<'a> Members<'a> {
+    fn new(bytes: &'a [u8], subtype: RangeSubtype) -> Result<Self, SQLError> {
+        let count = word(bytes.get(4..).unwrap_or_default())? as usize;
+        let flags_start = count
+            .saturating_sub(1)
+            .checked_mul(4)
+            .and_then(|size| size.checked_add(8))
+            .ok_or_else(|| corrupt("invalid multirange count"))?;
+        let flags_end = flags_start
+            .checked_add(count)
+            .filter(|end| *end <= bytes.len())
+            .ok_or_else(|| corrupt("invalid multirange count"))?;
+        let start = align(flags_end + 4, subtype)? - 4;
+        let bounds = bytes
+            .get(start..)
+            .ok_or_else(|| corrupt("truncated multirange payload"))?;
+        Ok(Self {
+            bytes,
+            bounds,
+            flags: &bytes[flags_start..flags_end],
+            subtype,
+            index: 0,
+            offset: 0,
+            previous: 0,
+        })
+    }
+
+    fn next(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<CanonicalRange>>, SQLError> {
         control.check()?;
-        if index > 0 {
-            let item = word(&bytes[8 + (index - 1) * 4..])?;
+        if self.index == self.flags.len() {
+            if self.offset != self.bounds.len() {
+                return Err(corrupt("invalid multirange bound length"));
+            }
+            return Ok(None);
+        }
+        if self.index > 0 {
+            let item = word(&self.bytes[8 + (self.index - 1) * 4..])?;
             let recorded = if item & ABSOLUTE_OFFSET != 0 {
                 (item & !ABSOLUTE_OFFSET) as usize
             } else {
-                previous
+                self.previous
                     .checked_add(item as usize)
                     .ok_or_else(|| corrupt("invalid multirange offset"))?
             };
-            if recorded != offset {
+            if recorded != self.offset {
                 return Err(corrupt("invalid multirange offset"));
             }
-            output.push(',')?;
         }
-        previous = offset;
-        let flag = bytes[flags_start + index];
+        self.previous = self.offset;
+        let flag = self.flags[self.index];
         if flag & EMPTY != 0 {
             return Err(corrupt("empty multirange member"));
         }
-        let remaining = bounds
-            .get(offset..)
+        let remaining = self
+            .bounds
+            .get(self.offset..)
             .ok_or_else(|| corrupt("invalid multirange offset"))?;
-        let (range, consumed) = read_bounds(remaining, flag, subtype, control)?;
-        super::production::write_range(&range, output, control)?;
-        offset = offset
-            .checked_add(align(consumed, subtype)?)
+        let (range, consumed) = read_bounds(remaining, flag, self.subtype, control)?;
+        self.offset = self
+            .offset
+            .checked_add(align(consumed, self.subtype)?)
             .ok_or_else(|| corrupt("invalid multirange length"))?;
+        self.index += 1;
+        Ok(Some(range))
     }
-    if offset != bounds.len() {
-        return Err(corrupt("invalid multirange bound length"));
-    }
-    output.push('}')?;
-    Ok(())
 }
 
 fn read_bounds(

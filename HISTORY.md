@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Encode built-in range and multirange constants in PostgreSQL catalog Datums, including arrays and retained composite fields. Preserve `pg_attrdef.adbin`, `pg_get_expr`, DEFAULT values, prepared observations and persistent reopening with bounded physical reads.
+- Encode built-in range and multirange constants in PostgreSQL catalog Datums, including arrays and retained composite fields. Preserve `pg_attrdef.adbin`, `pg_get_expr`, DEFAULT values, prepared observations and persistent reopening with bounded physical reads. Retained fields keep their physical range identity and bound-based comparison, grouping, joins and spill keys after composite attribute changes.
 
 - Read infinite interval endpoints without allocating a normalized input string. Preserve signs, case, whitespace, finite interval parsing and cancellation under the caller's memory allowance.
 

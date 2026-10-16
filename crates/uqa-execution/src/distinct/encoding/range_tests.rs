@@ -240,3 +240,80 @@ fn range_key_normalization_respects_the_original_allowance_and_cancellation() {
     drop(output);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn physical_range_fields_share_sql_hash_exact_and_spill_keys_with_admitted_values() {
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uqa-sql/src/expr/range/datum/fixtures.json"
+    )))
+    .unwrap();
+    let hasher = std::collections::hash_map::RandomState::new();
+    for case in fixtures["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| !case["type"].as_str().unwrap().ends_with("[]"))
+    {
+        let oid = case["oid"].as_u64().unwrap() as u32;
+        let uqa_sql::catalog::node_tree::Field::Node(node) =
+            uqa_sql::catalog::node_tree::parse(case["node"].as_str().unwrap()).unwrap()
+        else {
+            panic!("constant")
+        };
+        let uqa_sql::catalog::node_tree::Field::Datum { bytes, .. } =
+            node.field("constvalue").unwrap()
+        else {
+            panic!("physical datum")
+        };
+        let row = |value| {
+            Value::Row(
+                uqa_core::RowValue::typed(
+                    vec![value],
+                    vec![uqa_core::RecordFieldType {
+                        oid,
+                        type_modifier: -1,
+                    }],
+                )
+                .unwrap(),
+            )
+        };
+        let physical = row(Value::Datum(uqa_core::DatumValue::new(
+            oid,
+            0,
+            bytes.clone(),
+        )));
+        let admitted = row(Value::Str(case["output"].as_str().unwrap().into()));
+        let key =
+            |value| encode_sql_key_with_enum_catalog(std::iter::once(Some(value)), None).unwrap();
+        let hash = |value| {
+            hash_canonical_row_with_enum_catalog(&hasher, std::iter::once(Some(value)), None)
+                .unwrap()
+        };
+        assert_eq!(key(&physical), key(&admitted), "{}", case["id"]);
+        assert_eq!(hash(&physical), hash(&admitted), "{}", case["id"]);
+        for budget in [1, 64 * 1024] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut seen =
+                crate::distinct::ExactRowSet::with_spill_directory(budget, directory.path());
+            assert!(seen
+                .insert_sql_values(std::slice::from_ref(&physical), None)
+                .unwrap());
+            assert!(!seen
+                .insert_sql_values(std::slice::from_ref(&admitted), None)
+                .unwrap());
+            assert_eq!(seen.has_spilled(), budget == 1);
+            drop(seen);
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        }
+        let control = StorageReadControl::with_limit(0);
+        let mut output = CatalogKeyOutput {
+            values: BudgetedOutput::new(&control),
+            enums: None,
+            sql_hash: true,
+        };
+        assert!(encode_value(&physical, &mut output).is_err());
+        drop(output);
+        assert_eq!(control.memory().used(), 0);
+    }
+}

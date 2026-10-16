@@ -108,6 +108,15 @@ pub fn read_with_control(
     read_with_catalog_and_control(datum, None, control)
 }
 
+pub(super) fn range_comparison(
+    datum: &DatumValue,
+    ty: &crate::ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<super::range::RangeComparisonValue, SQLError> {
+    let payload = payload(datum, control)?;
+    super::range::datum::comparison(payload.bytes(), ty, control)
+}
+
 /// Preserve the caller's output allowance and cancellation boundary during catalog-dependent physical reads.
 pub fn read_with_catalog_and_control(
     datum: &DatumValue,

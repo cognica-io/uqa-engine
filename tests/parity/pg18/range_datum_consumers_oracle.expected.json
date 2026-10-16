@@ -430,6 +430,830 @@
       "id": "after_rollback"
     },
     {
+      "sql": "CREATE TYPE physical_numrange_old AS (r numrange)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "numrange_old"
+    },
+    {
+      "sql": "CREATE TYPE physical_numrange_new AS (r numrange)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "numrange_new"
+    },
+    {
+      "sql": "CREATE TYPE physical_numrange_outer AS (v physical_numrange_old)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "numrange_outer"
+    },
+    {
+      "sql": "CREATE VIEW physical_numrange_hold AS SELECT '(\"(\"\"[1.00,2.000]\"\")\")'::physical_numrange_outer AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "numrange_hold"
+    },
+    {
+      "sql": "ALTER TYPE physical_numrange_outer ALTER ATTRIBUTE v TYPE physical_numrange_new",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "numrange_change"
+    },
+    {
+      "sql": "SELECT (v).v = '(\"[1,2]\")'::physical_numrange_new AS eq, (v).v <= '(\"[1,2]\")'::physical_numrange_new AS ordered FROM physical_numrange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "ordered"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "numrange_equal"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT DISTINCT v FROM (SELECT (v).v AS v FROM physical_numrange_hold UNION ALL SELECT '(\"[1,2]\")'::physical_numrange_new) AS i) AS d",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "numrange_distinct"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT (v).v AS v FROM physical_numrange_hold UNION ALL SELECT '(\"[1,2]\")'::physical_numrange_new) AS i GROUP BY v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "numrange_group"
+    },
+    {
+      "sql": "SELECT count(*) FROM physical_numrange_hold a JOIN (SELECT '(\"[1,2]\")'::physical_numrange_new AS v) b ON (a.v).v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "numrange_join"
+    },
+    {
+      "sql": "CREATE TYPE physical_nummultirange_old AS (r nummultirange)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "nummultirange_old"
+    },
+    {
+      "sql": "CREATE TYPE physical_nummultirange_new AS (r nummultirange)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "nummultirange_new"
+    },
+    {
+      "sql": "CREATE TYPE physical_nummultirange_outer AS (v physical_nummultirange_old)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "nummultirange_outer"
+    },
+    {
+      "sql": "CREATE VIEW physical_nummultirange_hold AS SELECT '(\"(\"\"{[1.00,2.000],[3,4]}\"\")\")'::physical_nummultirange_outer AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "nummultirange_hold"
+    },
+    {
+      "sql": "ALTER TYPE physical_nummultirange_outer ALTER ATTRIBUTE v TYPE physical_nummultirange_new",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "nummultirange_change"
+    },
+    {
+      "sql": "SELECT (v).v = '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new AS eq, (v).v <= '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new AS ordered FROM physical_nummultirange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "ordered"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "nummultirange_equal"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT DISTINCT v FROM (SELECT (v).v AS v FROM physical_nummultirange_hold UNION ALL SELECT '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new) AS i) AS d",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nummultirange_distinct"
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT (v).v AS v FROM physical_nummultirange_hold UNION ALL SELECT '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new) AS i GROUP BY v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "id": "nummultirange_group"
+    },
+    {
+      "sql": "SELECT count(*) FROM physical_nummultirange_hold a JOIN (SELECT '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new AS v) b ON (a.v).v=b.v",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nummultirange_join"
+    },
+    {
+      "sql": "CREATE TYPE physical_identity_numrange AS (r numrange)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_type"
+    },
+    {
+      "sql": "CREATE VIEW physical_identity_numrange_hold AS SELECT '(\"[1.00,2.000]\")'::physical_identity_numrange AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_view"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_begin"
+    },
+    {
+      "sql": "ALTER TYPE physical_identity_numrange ALTER ATTRIBUTE r TYPE int4range",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_change"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_identity_numrange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1.00,2.000]"
+            ]
+          ]
+        }
+      ],
+      "id": "physical_identity_numrange_output"
+    },
+    {
+      "sql": "SAVEPOINT before_mismatch",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_savepoint"
+    },
+    {
+      "sql": "SELECT ROW((v).r) = ROW('[1,3)'::int4range) FROM physical_identity_numrange_hold",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "range types do not match",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_identity_numrange_mismatch"
+    },
+    {
+      "sql": "ROLLBACK TO SAVEPOINT before_mismatch",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_recover"
+    },
+    {
+      "sql": "ALTER TYPE physical_identity_numrange ALTER ATTRIBUTE r TYPE nummultirange",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_kind"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_identity_numrange_hold",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 3906 is not a multirange type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_identity_numrange_kind_error"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_numrange_rollback"
+    },
+    {
+      "sql": "CREATE TYPE physical_identity_nummultirange AS (r nummultirange)",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_type"
+    },
+    {
+      "sql": "CREATE VIEW physical_identity_nummultirange_hold AS SELECT '(\"{[1.00,2.000]}\")'::physical_identity_nummultirange AS v",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_view"
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_begin"
+    },
+    {
+      "sql": "ALTER TYPE physical_identity_nummultirange ALTER ATTRIBUTE r TYPE int4multirange",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_change"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_identity_nummultirange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1.00,2.000]}"
+            ]
+          ]
+        }
+      ],
+      "id": "physical_identity_nummultirange_output"
+    },
+    {
+      "sql": "SAVEPOINT before_mismatch",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_savepoint"
+    },
+    {
+      "sql": "SELECT ROW((v).r) = ROW('{[1,3)}'::int4multirange) FROM physical_identity_nummultirange_hold",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "multirange types do not match",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_identity_nummultirange_mismatch"
+    },
+    {
+      "sql": "ROLLBACK TO SAVEPOINT before_mismatch",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_recover"
+    },
+    {
+      "sql": "ALTER TYPE physical_identity_nummultirange ALTER ATTRIBUTE r TYPE numrange",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_kind"
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_identity_nummultirange_hold",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "XX000",
+        "message": "type 4532 is not a range type",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "id": "physical_identity_nummultirange_kind_error"
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "id": "physical_identity_nummultirange_rollback"
+    },
+    {
+      "sql": "SELECT (v).v = '(\"[1,2]\")'::physical_numrange_new AS eq, (v).v <= '(\"[1,2]\")'::physical_numrange_new AS ordered FROM physical_numrange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "ordered"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "numrange_reopen_equal",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT DISTINCT v FROM (SELECT (v).v AS v FROM physical_numrange_hold UNION ALL SELECT '(\"[1,2]\")'::physical_numrange_new) AS i) AS d",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "numrange_reopen_distinct",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).v = '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new AS eq, (v).v <= '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new AS ordered FROM physical_nummultirange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "ordered"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "id": "nummultirange_reopen_equal",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT count(*) FROM (SELECT DISTINCT v FROM (SELECT (v).v AS v FROM physical_nummultirange_hold UNION ALL SELECT '(\"{[1,2],[3.0,4.00]}\")'::physical_nummultirange_new) AS i) AS d",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "id": "nummultirange_reopen_distinct",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_identity_numrange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1.00,2.000]"
+            ]
+          ]
+        }
+      ],
+      "id": "physical_identity_numrange_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT (v).r::text FROM physical_identity_nummultirange_hold",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "r"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1.00,2.000]}"
+            ]
+          ]
+        }
+      ],
+      "id": "physical_identity_nummultirange_reopen",
+      "reopen": true
+    },
+    {
       "sql": "SELECT a.attname::text, pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='retained_range_defaults'::regclass AND a.attname<>'c' ORDER BY a.attnum",
       "command_tags": [
         "SELECT 3"

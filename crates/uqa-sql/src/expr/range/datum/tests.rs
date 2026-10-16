@@ -190,3 +190,76 @@ fn native_range_datums_reject_truncated_payloads_flags_offsets_and_type_mismatch
         }
     }
 }
+
+#[test]
+fn native_range_physical_comparison_retains_selected_bounds_and_original_allowance() {
+    let memory = MemoryBudget::new(256 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    for case in fixtures()
+        .into_iter()
+        .filter(|case| !case["type"].as_str().unwrap().ends_with("[]"))
+    {
+        let datum = physical(&case);
+        let oid = datum.type_oid();
+        let physical = Value::Datum(datum);
+        let admitted = Value::Str(case["output"].as_str().unwrap().into());
+        let left = RangeComparisonValue::from_declared_with_control(&physical, oid, None, &control)
+            .unwrap()
+            .unwrap();
+        let right =
+            RangeComparisonValue::from_declared_with_control(&admitted, oid, None, &control)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            left.cmp_with_control(&right, &control).unwrap(),
+            std::cmp::Ordering::Equal
+        );
+        drop((left, right));
+        assert_eq!(memory.used(), 0);
+        let row = |value| {
+            Value::Row(
+                uqa_core::RowValue::typed(
+                    vec![value],
+                    vec![uqa_core::RecordFieldType {
+                        oid,
+                        type_modifier: -1,
+                    }],
+                )
+                .unwrap(),
+            )
+        };
+        assert!(crate::expr::equal_typed_values_with_enum_catalog(
+            &row(physical),
+            &row(admitted),
+            &control,
+            None
+        )
+        .unwrap());
+        assert_eq!(memory.used(), 0);
+    }
+    let case = fixtures()
+        .into_iter()
+        .find(|case| case["id"] == "nummultirange_packed_alignment")
+        .unwrap();
+    let datum = Value::Datum(physical(&case));
+    let small = MemoryBudget::new(0);
+    let limited = ProductionControl::new(&small, &token, &token);
+    assert_eq!(
+        RangeComparisonValue::from_declared_with_control(&datum, 4532, None, &limited)
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(small.used(), 0);
+    token.cancel();
+    assert_eq!(
+        RangeComparisonValue::from_declared_with_control(&datum, 4532, None, &control)
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(memory.used(), 0);
+}

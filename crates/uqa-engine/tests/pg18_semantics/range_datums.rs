@@ -129,6 +129,6 @@ fn native_range_retained_consumers_match_postgresql_after_reopen(#[case] provide
         .as_array_mut()
         .unwrap()
         .retain(|case| case["reopen"] == true);
-    assert_eq!(durable["cases"].as_array().unwrap().len(), 4);
+    assert_eq!(durable["cases"].as_array().unwrap().len(), 10);
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
