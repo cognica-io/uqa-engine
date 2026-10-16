@@ -14,6 +14,7 @@ use uqa_core::{
 };
 
 mod comparison;
+mod input;
 mod production;
 mod relationships;
 mod typed;
@@ -250,33 +251,6 @@ fn is_discrete(subtype: RangeSubtype) -> bool {
         subtype,
         RangeSubtype::Integer | RangeSubtype::BigInteger | RangeSubtype::Date
     )
-}
-
-fn invalid_range(text: &str, subtype: RangeSubtype) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22P02".into(),
-        message: format!(
-            "malformed range literal: \"{text}\" for type {}",
-            subtype.range_name()
-        ),
-    }
-}
-
-fn invalid_multirange(text: &str, subtype: RangeSubtype) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22P02".into(),
-        message: format!(
-            "malformed multirange literal: \"{text}\" for type {}",
-            subtype.multirange_name()
-        ),
-    }
-}
-
-fn range_subtype_error(text: &str, type_name: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22P02".into(),
-        message: format!("invalid input syntax for type {type_name}: \"{text}\""),
-    }
 }
 
 fn range_overflow(type_name: &str) -> SQLError {

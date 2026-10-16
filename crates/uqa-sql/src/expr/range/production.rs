@@ -7,14 +7,12 @@
 //! Range parsing, normalization and text production share admitted constructors.
 
 use super::{
-    increment_discrete, invalid_multirange, invalid_range, is_discrete, range_subtype_error,
-    CanonicalMultirange, CanonicalRange, Ordering, ProductionControl, RangeSubtype, Result,
-    SQLError, TemporalValue, Value,
+    increment_discrete, is_discrete, CanonicalMultirange, CanonicalRange, Ordering,
+    ProductionControl, RangeSubtype, Result, SQLError, Value,
 };
 use uqa_core::{
     memory::{MemoryReservation, Produced, ProductionString, ProductionVec},
     ordering::sort_by_with_control,
-    DecimalValue,
 };
 
 // The complete live value precedes its lease, including while endpoints move between work buffers.
@@ -70,32 +68,13 @@ pub(in crate::expr) fn parse_range_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CanonicalRange>> {
     control.check()?;
-    let original = text;
-    let text = text.trim();
-    if text.eq_ignore_ascii_case("empty") {
+    let Some(input) = super::input::range(text, control)? else {
         return Ok(control.finish(CanonicalRange::empty(subtype), control.empty_reservation())?);
-    }
-    if !text.starts_with(['[', '(']) {
-        return Err(missing_opening_delimiter(original, false));
-    }
-    let opening = text
-        .chars()
-        .next()
-        .ok_or_else(|| invalid_range(text, subtype))?;
-    let closing = text
-        .chars()
-        .next_back()
-        .ok_or_else(|| invalid_range(text, subtype))?;
-    if !matches!(opening, '[' | '(') || !matches!(closing, ']' | ')') || text.len() < 2 {
-        return Err(invalid_range(text, subtype));
-    }
-    let body = &text[opening.len_utf8()..text.len() - closing.len_utf8()];
-    let (lower_text, upper_text) =
-        split_range_bounds(body, control)?.ok_or_else(|| invalid_range(text, subtype))?;
-    let lower = parse_bound(lower_text, subtype, text, control)?;
-    let upper = parse_bound(upper_text, subtype, text, control)?;
-    let lower_inclusive = opening == '[' && lower.is_some();
-    let upper_inclusive = closing == ']' && upper.is_some();
+    };
+    let lower = parse_bound(input.lower, subtype, control)?;
+    let upper = parse_bound(input.upper, subtype, control)?;
+    let lower_inclusive = input.lower_inclusive && lower.is_some();
+    let upper_inclusive = input.upper_inclusive && upper.is_some();
     let (lower, lower_memory) = lower.into_parts();
     let (upper, upper_memory) = upper.into_parts();
     let mut owned = RangeWorkspace {
@@ -169,36 +148,16 @@ pub(in crate::expr) fn parse_multirange_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CanonicalMultirange>> {
     control.check()?;
-    let original = text;
-    let text = text.trim();
-    if !text.starts_with('{') {
-        return Err(missing_opening_delimiter(original, true));
-    }
-    if !text.ends_with('}') {
-        return Err(invalid_multirange(text, subtype));
-    }
-    let items = split_multirange_items(&text[1..text.len() - 1], control)?
-        .ok_or_else(|| invalid_multirange(text, subtype))?;
+    let mut input = super::input::MultirangeInput::new(text, control)?;
     let mut ranges = ProductionVec::new(*control);
-    for item in items.iter() {
-        ranges.push_produced(parse_range_with_control(item, subtype, control)?)?;
+    while let Some(item) = input.next_range(control)? {
+        let range = parse_range_with_control(item, subtype, control)?;
+        if !range.empty {
+            ranges.push_produced(range)?;
+        }
     }
     let (ranges, memory) = ranges.finish()?.into_parts();
     normalize_ranges(ranges, subtype, control, memory)
-}
-
-fn missing_opening_delimiter(text: &str, multirange: bool) -> SQLError {
-    let (kind, detail) = if multirange {
-        ("multirange", "Missing left brace.")
-    } else {
-        ("range", "Missing left parenthesis or bracket.")
-    };
-    SQLError::Diagnostic {
-        sqlstate: "22P02".into(),
-        message: format!("malformed {kind} literal: \"{text}\""),
-        detail: Some(detail.into()),
-        hint: None,
-    }
 }
 
 pub(in crate::expr) fn multirange_from_produced_ranges(
@@ -277,165 +236,24 @@ pub(super) fn normalize_ranges(
     )?)
 }
 
-fn split_range_bounds<'a>(
-    body: &'a str,
-    control: &ProductionControl<'_>,
-) -> Result<Option<(&'a str, &'a str)>> {
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, character) in body.char_indices() {
-        control.check()?;
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' {
-            escaped = true;
-            continue;
-        }
-        if character == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if character == ',' && !quoted {
-            return Ok(Some((&body[..index], &body[index + 1..])));
-        }
-    }
-    Ok(None)
-}
-
-fn split_multirange_items<'a>(
-    body: &'a str,
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<Vec<&'a str>>>> {
-    let mut items = ProductionVec::new(*control);
-    if body.trim().is_empty() {
-        return Ok(Some(items.finish()?));
-    }
-    let mut start = None;
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, character) in body.char_indices() {
-        control.check()?;
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' {
-            escaped = true;
-            continue;
-        }
-        if character == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted {
-            continue;
-        }
-        match character {
-            '[' | '(' if start.is_none() => start = Some(index),
-            ']' | ')' => {
-                let Some(item_start) = start.take() else {
-                    return Ok(None);
-                };
-                items.push_copy(body[item_start..=index].trim())?;
-            }
-            _ => {}
-        }
-    }
-    if quoted || escaped || start.is_some() || items.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(items.finish()?))
-    }
-}
-
 fn parse_bound(
-    raw: &str,
+    input: Option<super::input::BoundInput<'_>>,
     subtype: RangeSubtype,
-    whole: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Option<Value>>> {
-    let raw = raw.trim();
-    if raw.is_empty() {
+    let Some(input) = input else {
         return Ok(control.finish(None, control.empty_reservation())?);
-    }
-    let text = unquote_bound(raw, control)?.ok_or_else(|| invalid_range(whole, subtype))?;
-    let mut memory = control.empty_reservation();
-    let value = match subtype {
-        RangeSubtype::Integer => text
-            .parse::<i32>()
-            .map(|value| Value::Int(i64::from(value)))
-            .map_err(|_| range_subtype_error(&text, "integer"))?,
-        RangeSubtype::BigInteger => text
-            .parse::<i64>()
-            .map(Value::Int)
-            .map_err(|_| range_subtype_error(&text, "bigint"))?,
-        RangeSubtype::Numeric => {
-            let parsed = DecimalValue::parse_with_control(&text, control)?
-                .ok_or_else(|| range_subtype_error(&text, "numeric"))?;
-            let (value, owned) = parsed.into_parts();
-            memory = owned;
-            Value::Decimal(value)
-        }
-        RangeSubtype::Date => Value::Temporal(
-            TemporalValue::date_input_in_order_with_control(
-                &text,
-                crate::expr::transaction_timestamp_or_clock(),
-                crate::expr::temporal_date_order(),
-                control,
-            )?
-            .ok()
-            .ok_or_else(|| range_subtype_error(&text, "date"))?,
-        ),
-        RangeSubtype::Timestamp => Value::Temporal(
-            TemporalValue::timestamp_input_in_order_with_control(
-                &text,
-                crate::expr::transaction_timestamp_or_clock(),
-                crate::expr::temporal_date_order(),
-                control,
-            )?
-            .ok()
-            .ok_or_else(|| range_subtype_error(&text, "timestamp without time zone"))?,
-        ),
-        RangeSubtype::TimestampTz => Value::Temporal(
-            TemporalValue::timestamp_tz_input_in_order_with_control(
-                &text,
-                crate::expr::transaction_timestamp_or_clock(),
-                crate::expr::temporal_date_order(),
-                control,
-            )?
-            .ok()
-            .ok_or_else(|| range_subtype_error(&text, "timestamp with time zone"))?,
-        ),
     };
+    let (text, memory) = input.decode(control)?.into_parts();
+    let source = RangeWorkspace {
+        value: Value::Str(text),
+        memory,
+    };
+    let target = subtype.scalar_type().sql_name_with_control(control)?;
+    let parsed =
+        crate::expr::casting::cast_value_from_with_control(&source.value, &target, None, control)?;
+    let (value, memory) = parsed.into_parts();
     Ok(control.finish(Some(value), memory)?)
-}
-
-fn unquote_bound(raw: &str, control: &ProductionControl<'_>) -> Result<Option<Produced<String>>> {
-    if !raw.starts_with('"') {
-        return Ok(if raw.contains('"') {
-            None
-        } else {
-            Some(control.copy_text(raw)?)
-        });
-    }
-    if raw.len() < 2 || !raw.ends_with('"') {
-        return Ok(None);
-    }
-    let mut value = ProductionString::new(*control);
-    let mut chars = raw[1..raw.len() - 1].chars();
-    while let Some(character) = chars.next() {
-        if character == '\\' {
-            let Some(character) = chars.next() else {
-                return Ok(None);
-            };
-            value.push(character)?;
-        } else {
-            value.push(character)?;
-        }
-    }
-    Ok(Some(value.finish()?))
 }
 
 pub(super) fn compare_values(

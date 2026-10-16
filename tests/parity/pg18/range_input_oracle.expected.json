@@ -1,0 +1,2522 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "input_sha256": "d67c16d31e2cacb72b3ce842589feeb11bf3c869cc05e339163b573457c722cf",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec"
+  },
+  "cases": [
+    {
+      "id": "int4range_valid",
+      "kind": "int4range",
+      "input": "[0x10,0x20)",
+      "sql": "SELECT '[0x10,0x20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[16,32)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int4range_empty",
+      "kind": "int4range",
+      "input": " empty ",
+      "sql": "SELECT ' empty '::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int4range_unbounded",
+      "kind": "int4range",
+      "input": "(,)",
+      "sql": "SELECT '(,)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int4range_bad_bound",
+      "kind": "int4range",
+      "input": "[bad,)",
+      "sql": "SELECT '[bad,)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int4multirange_valid",
+      "kind": "int4multirange",
+      "input": "{empty,[0x10,0x20)}",
+      "sql": "SELECT '{empty,[0x10,0x20)}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[16,32)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int4multirange_bad_bound",
+      "kind": "int4multirange",
+      "input": "{[bad,)}",
+      "sql": "SELECT '{[bad,)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int8range_valid",
+      "kind": "int8range",
+      "input": "[-0x100,0x100)",
+      "sql": "SELECT '[-0x100,0x100)'::int8range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[-256,256)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int8range_empty",
+      "kind": "int8range",
+      "input": " empty ",
+      "sql": "SELECT ' empty '::int8range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int8range_unbounded",
+      "kind": "int8range",
+      "input": "(,)",
+      "sql": "SELECT '(,)'::int8range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int8range_bad_bound",
+      "kind": "int8range",
+      "input": "[bad,)",
+      "sql": "SELECT '[bad,)'::int8range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type bigint: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int8multirange_valid",
+      "kind": "int8multirange",
+      "input": "{empty,[-0x100,0x100)}",
+      "sql": "SELECT '{empty,[-0x100,0x100)}'::int8multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[-256,256)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int8multirange_bad_bound",
+      "kind": "int8multirange",
+      "input": "{[bad,)}",
+      "sql": "SELECT '{[bad,)}'::int8multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type bigint: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "numrange_valid",
+      "kind": "numrange",
+      "input": "[1.00,3.50)",
+      "sql": "SELECT '[1.00,3.50)'::numrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1.00,3.50)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "numrange_empty",
+      "kind": "numrange",
+      "input": " empty ",
+      "sql": "SELECT ' empty '::numrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "numrange_unbounded",
+      "kind": "numrange",
+      "input": "(,)",
+      "sql": "SELECT '(,)'::numrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "numrange_bad_bound",
+      "kind": "numrange",
+      "input": "[bad,)",
+      "sql": "SELECT '[bad,)'::numrange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type numeric: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "nummultirange_valid",
+      "kind": "nummultirange",
+      "input": "{empty,[1.00,3.50)}",
+      "sql": "SELECT '{empty,[1.00,3.50)}'::nummultirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1.00,3.50)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "nummultirange_bad_bound",
+      "kind": "nummultirange",
+      "input": "{[bad,)}",
+      "sql": "SELECT '{[bad,)}'::nummultirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type numeric: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "daterange_valid",
+      "kind": "daterange",
+      "input": "[2024-01-01,2024-01-03]",
+      "sql": "SELECT '[2024-01-01,2024-01-03]'::daterange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[2024-01-01,2024-01-04)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "daterange_empty",
+      "kind": "daterange",
+      "input": " empty ",
+      "sql": "SELECT ' empty '::daterange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "daterange_unbounded",
+      "kind": "daterange",
+      "input": "(,)",
+      "sql": "SELECT '(,)'::daterange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "daterange_bad_bound",
+      "kind": "daterange",
+      "input": "[bad,)",
+      "sql": "SELECT '[bad,)'::daterange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "datemultirange_valid",
+      "kind": "datemultirange",
+      "input": "{empty,[2024-01-01,2024-01-03]}",
+      "sql": "SELECT '{empty,[2024-01-01,2024-01-03]}'::datemultirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[2024-01-01,2024-01-04)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "datemultirange_bad_bound",
+      "kind": "datemultirange",
+      "input": "{[bad,)}",
+      "sql": "SELECT '{[bad,)}'::datemultirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "tsrange_valid",
+      "kind": "tsrange",
+      "input": "[2024-01-01 00:00:00,2024-01-02 00:00:00)",
+      "sql": "SELECT '[2024-01-01 00:00:00,2024-01-02 00:00:00)'::tsrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[\"2024-01-01 00:00:00\",\"2024-01-02 00:00:00\")"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tsrange_empty",
+      "kind": "tsrange",
+      "input": " empty ",
+      "sql": "SELECT ' empty '::tsrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tsrange_unbounded",
+      "kind": "tsrange",
+      "input": "(,)",
+      "sql": "SELECT '(,)'::tsrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tsrange_bad_bound",
+      "kind": "tsrange",
+      "input": "[bad,)",
+      "sql": "SELECT '[bad,)'::tsrange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "tsmultirange_valid",
+      "kind": "tsmultirange",
+      "input": "{empty,[2024-01-01 00:00:00,2024-01-02 00:00:00)}",
+      "sql": "SELECT '{empty,[2024-01-01 00:00:00,2024-01-02 00:00:00)}'::tsmultirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[\"2024-01-01 00:00:00\",\"2024-01-02 00:00:00\")}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tsmultirange_bad_bound",
+      "kind": "tsmultirange",
+      "input": "{[bad,)}",
+      "sql": "SELECT '{[bad,)}'::tsmultirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "tstzrange_valid",
+      "kind": "tstzrange",
+      "input": "[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)",
+      "sql": "SELECT '[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)'::tstzrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[\"2023-12-31 21:00:00+00\",\"2024-01-01 21:00:00+00\")"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tstzrange_empty",
+      "kind": "tstzrange",
+      "input": " empty ",
+      "sql": "SELECT ' empty '::tstzrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "empty"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tstzrange_unbounded",
+      "kind": "tstzrange",
+      "input": "(,)",
+      "sql": "SELECT '(,)'::tstzrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tstzrange_bad_bound",
+      "kind": "tstzrange",
+      "input": "[bad,)",
+      "sql": "SELECT '[bad,)'::tstzrange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp with time zone: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "tstzmultirange_valid",
+      "kind": "tstzmultirange",
+      "input": "{empty,[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)}",
+      "sql": "SELECT '{empty,[2024-01-01 00:00:00+03,2024-01-02 00:00:00+03)}'::tstzmultirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[\"2023-12-31 21:00:00+00\",\"2024-01-01 21:00:00+00\")}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "tstzmultirange_bad_bound",
+      "kind": "tstzmultirange",
+      "input": "{[bad,)}",
+      "sql": "SELECT '{[bad,)}'::tstzmultirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type timestamp with time zone: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int4_high",
+      "kind": "int4range",
+      "input": "[2147483648,)",
+      "sql": "SELECT '[2147483648,)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"2147483648\" is out of range for type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int4_low",
+      "kind": "int4range",
+      "input": "[-2147483649,)",
+      "sql": "SELECT '[-2147483649,)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"-2147483649\" is out of range for type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int8_high",
+      "kind": "int8range",
+      "input": "[9223372036854775808,)",
+      "sql": "SELECT '[9223372036854775808,)'::int8range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"9223372036854775808\" is out of range for type bigint",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "int8_low",
+      "kind": "int8range",
+      "input": "[-9223372036854775809,)",
+      "sql": "SELECT '[-9223372036854775809,)'::int8range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"-9223372036854775809\" is out of range for type bigint",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "underscore",
+      "kind": "int4range",
+      "input": "[1_000,1_010)",
+      "sql": "SELECT '[1_000,1_010)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1000,1010)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "binary",
+      "kind": "int4range",
+      "input": "[0b10,0b101)",
+      "sql": "SELECT '[0b10,0b101)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[2,5)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "octal",
+      "kind": "int4range",
+      "input": "[0o10,0o20)",
+      "sql": "SELECT '[0o10,0o20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[8,16)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "signed_hex",
+      "kind": "int4range",
+      "input": "[-0x10,+0x10)",
+      "sql": "SELECT '[-0x10,+0x10)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[-16,16)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "bad_underscore",
+      "kind": "int4range",
+      "input": "[1__0,20)",
+      "sql": "SELECT '[1__0,20)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"1__0\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "date_month",
+      "kind": "daterange",
+      "input": "[2024-13-01,)",
+      "sql": "SELECT '[2024-13-01,)'::daterange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-13-01\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "date_day",
+      "kind": "daterange",
+      "input": "[2024-02-30,)",
+      "sql": "SELECT '[2024-02-30,)'::daterange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-02-30\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "timestamp_month",
+      "kind": "tsrange",
+      "input": "[2024-13-01,)",
+      "sql": "SELECT '[2024-13-01,)'::tsrange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date/time field value out of range: \"2024-13-01\"",
+        "detail": null,
+        "hint": "Perhaps you need a different \"DateStyle\" setting."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "timezone_offset",
+      "kind": "tstzrange",
+      "input": "[2024-01-01 00:00:00+16,)",
+      "sql": "SELECT '[2024-01-01 00:00:00+16,)'::tstzrange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22009",
+        "message": "time zone displacement out of range: \"2024-01-01 00:00:00+16\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "numeric_scale",
+      "kind": "numrange",
+      "input": "[1.00,1.000]",
+      "sql": "SELECT '[1.00,1.000]'::numrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1.00,1.000]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "numeric_nan",
+      "kind": "numrange",
+      "input": "[NaN,NaN]",
+      "sql": "SELECT '[NaN,NaN]'::numrange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[NaN,NaN]"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "int4_canonical_overflow",
+      "kind": "int4range",
+      "input": "[2147483647,2147483647]",
+      "sql": "SELECT '[2147483647,2147483647]'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "integer out of range",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_0",
+      "kind": "int4range",
+      "input": "",
+      "sql": "SELECT ''::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"\"",
+        "detail": "Missing left parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_1",
+      "kind": "int4range",
+      "input": " ",
+      "sql": "SELECT ' '::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \" \"",
+        "detail": "Missing left parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_2",
+      "kind": "int4range",
+      "input": "empty junk",
+      "sql": "SELECT 'empty junk'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"empty junk\"",
+        "detail": "Junk after \"empty\" key word.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_3",
+      "kind": "int4range",
+      "input": "EMPTYX",
+      "sql": "SELECT 'EMPTYX'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"EMPTYX\"",
+        "detail": "Junk after \"empty\" key word.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_4",
+      "kind": "int4range",
+      "input": "1,2",
+      "sql": "SELECT '1,2'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"1,2\"",
+        "detail": "Missing left parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_5",
+      "kind": "int4range",
+      "input": "[1,2x",
+      "sql": "SELECT '[1,2x'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2x\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_6",
+      "kind": "int4range",
+      "input": "[1,2",
+      "sql": "SELECT '[1,2'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_7",
+      "kind": "int4range",
+      "input": "[1)",
+      "sql": "SELECT '[1)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1)\"",
+        "detail": "Missing comma after lower bound.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_8",
+      "kind": "int4range",
+      "input": "[1,2,3)",
+      "sql": "SELECT '[1,2,3)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2,3)\"",
+        "detail": "Too many commas.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_9",
+      "kind": "int4range",
+      "input": "[1,2)junk",
+      "sql": "SELECT '[1,2)junk'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2)junk\"",
+        "detail": "Junk after right parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_10",
+      "kind": "int4range",
+      "input": "[bad,2x",
+      "sql": "SELECT '[bad,2x'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[bad,2x\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_11",
+      "kind": "int4range",
+      "input": "[bad,2,3)",
+      "sql": "SELECT '[bad,2,3)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[bad,2,3)\"",
+        "detail": "Too many commas.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_12",
+      "kind": "int4range",
+      "input": "[bad,2)junk",
+      "sql": "SELECT '[bad,2)junk'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[bad,2)junk\"",
+        "detail": "Junk after right parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_13",
+      "kind": "int4range",
+      "input": "[,)",
+      "sql": "SELECT '[,)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_14",
+      "kind": "int4range",
+      "input": "[,]",
+      "sql": "SELECT '[,]'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_15",
+      "kind": "int4range",
+      "input": "(,]",
+      "sql": "SELECT '(,]'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(,)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_16",
+      "kind": "int4range",
+      "input": "[ ,)",
+      "sql": "SELECT '[ ,)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \" \"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_17",
+      "kind": "int4range",
+      "input": "[\"\",)",
+      "sql": "SELECT '[\"\",)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_18",
+      "kind": "int4range",
+      "input": "[1 , 2)",
+      "sql": "SELECT '[1 , 2)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1,2)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_19",
+      "kind": "int4range",
+      "input": "[1\"0\",20)",
+      "sql": "SELECT '[1\"0\",20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[10,20)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_20",
+      "kind": "int4range",
+      "input": "[\"1\"0,20)",
+      "sql": "SELECT '[\"1\"0,20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[10,20)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_21",
+      "kind": "int4range",
+      "input": "[\"1\"\"2\",20)",
+      "sql": "SELECT '[\"1\"\"2\",20)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"1\"2\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_22",
+      "kind": "int4range",
+      "input": "[1\\0,20)",
+      "sql": "SELECT '[1\\0,20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[10,20)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_23",
+      "kind": "int4range",
+      "input": "[\"10\",20)",
+      "sql": "SELECT '[\"10\",20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[10,20)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_24",
+      "kind": "int4range",
+      "input": "[\"1\\0\",20)",
+      "sql": "SELECT '[\"1\\0\",20)'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[10,20)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_25",
+      "kind": "int4range",
+      "input": "[\"unterminated,20)",
+      "sql": "SELECT '[\"unterminated,20)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[\"unterminated,20)\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_26",
+      "kind": "int4range",
+      "input": "[1,2\\",
+      "sql": "SELECT '[1,2\\'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2\\\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_27",
+      "kind": "int4range",
+      "input": "[2,1)",
+      "sql": "SELECT '[2,1)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22000",
+        "message": "range lower bound must be less than or equal to range upper bound",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_28",
+      "kind": "int4range",
+      "input": "\u000b[1,2)\f",
+      "sql": "SELECT '\u000b[1,2)\f'::int4range::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "[1,2)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_29",
+      "kind": "int4range",
+      "input": " [1,2)",
+      "sql": "SELECT ' [1,2)'::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \" [1,2)\"",
+        "detail": "Missing left parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "range_syntax_30",
+      "kind": "int4range",
+      "input": "[1,2) ",
+      "sql": "SELECT '[1,2) '::int4range::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2) \"",
+        "detail": "Junk after right parenthesis or bracket.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_0",
+      "kind": "int4multirange",
+      "input": "",
+      "sql": "SELECT ''::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"\"",
+        "detail": "Missing left brace.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_1",
+      "kind": "int4multirange",
+      "input": " ",
+      "sql": "SELECT ' '::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \" \"",
+        "detail": "Missing left brace.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_2",
+      "kind": "int4multirange",
+      "input": "{}",
+      "sql": "SELECT '{}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_3",
+      "kind": "int4multirange",
+      "input": "{ }",
+      "sql": "SELECT '{ }'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_4",
+      "kind": "int4multirange",
+      "input": "{empty}",
+      "sql": "SELECT '{empty}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_5",
+      "kind": "int4multirange",
+      "input": "{EMPTY, empty}",
+      "sql": "SELECT '{EMPTY, empty}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_6",
+      "kind": "int4multirange",
+      "input": "{empty,[1,3),empty}",
+      "sql": "SELECT '{empty,[1,3),empty}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1,3)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_7",
+      "kind": "int4multirange",
+      "input": "{",
+      "sql": "SELECT '{'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_8",
+      "kind": "int4multirange",
+      "input": "{[1,2)",
+      "sql": "SELECT '{[1,2)'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2)\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_9",
+      "kind": "int4multirange",
+      "input": "{[1,2)}junk",
+      "sql": "SELECT '{[1,2)}junk'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2)}junk\"",
+        "detail": "Junk after closing right brace.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_10",
+      "kind": "int4multirange",
+      "input": "{,}",
+      "sql": "SELECT '{,}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{,}\"",
+        "detail": "Expected range start.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_11",
+      "kind": "int4multirange",
+      "input": "{[1,2),}",
+      "sql": "SELECT '{[1,2),}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2),}\"",
+        "detail": "Expected range start.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_12",
+      "kind": "int4multirange",
+      "input": "{[1,2) [3,4)}",
+      "sql": "SELECT '{[1,2) [3,4)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2) [3,4)}\"",
+        "detail": "Expected comma or end of multirange.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_13",
+      "kind": "int4multirange",
+      "input": "{junk}",
+      "sql": "SELECT '{junk}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{junk}\"",
+        "detail": "Expected range start.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_14",
+      "kind": "int4multirange",
+      "input": "{empty junk}",
+      "sql": "SELECT '{empty junk}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{empty junk}\"",
+        "detail": "Expected comma or end of multirange.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_15",
+      "kind": "int4multirange",
+      "input": "{[1,2),junk}",
+      "sql": "SELECT '{[1,2),junk}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2),junk}\"",
+        "detail": "Expected range start.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_16",
+      "kind": "int4multirange",
+      "input": "{[bad,2),junk}",
+      "sql": "SELECT '{[bad,2),junk}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_17",
+      "kind": "int4multirange",
+      "input": "{[bad,2),}",
+      "sql": "SELECT '{[bad,2),}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_18",
+      "kind": "int4multirange",
+      "input": "{[bad,2)",
+      "sql": "SELECT '{[bad,2)'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_19",
+      "kind": "int4multirange",
+      "input": "{[1,2,3)}",
+      "sql": "SELECT '{[1,2,3)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1,2,3)\"",
+        "detail": "Too many commas.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_20",
+      "kind": "int4multirange",
+      "input": "{[1,2)} }",
+      "sql": "SELECT '{[1,2)} }'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2)} }\"",
+        "detail": "Junk after closing right brace.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_21",
+      "kind": "int4multirange",
+      "input": "{[1,2)} ",
+      "sql": "SELECT '{[1,2)} '::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2)} \"",
+        "detail": "Junk after closing right brace.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_22",
+      "kind": "int4multirange",
+      "input": "{[1,2)[3,4)}",
+      "sql": "SELECT '{[1,2)[3,4)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2)[3,4)}\"",
+        "detail": "Expected comma or end of multirange.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_23",
+      "kind": "int4multirange",
+      "input": "{[1,2),[3,4)}",
+      "sql": "SELECT '{[1,2),[3,4)}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1,2),[3,4)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_24",
+      "kind": "int4multirange",
+      "input": "{[\"1\"0,20)}",
+      "sql": "SELECT '{[\"1\"0,20)}'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[10,20)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_25",
+      "kind": "int4multirange",
+      "input": "{[\"1\"\"2\",20)}",
+      "sql": "SELECT '{[\"1\"\"2\",20)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"1\"2\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_26",
+      "kind": "int4multirange",
+      "input": "{[1\\ 0,20)}",
+      "sql": "SELECT '{[1\\ 0,20)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"1 0\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_27",
+      "kind": "int4multirange",
+      "input": "{[1\\ )2,20)}",
+      "sql": "SELECT '{[1\\ )2,20)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed range literal: \"[1\\ )2,20)\"",
+        "detail": "Missing comma after lower bound.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_28",
+      "kind": "int4multirange",
+      "input": "{[\"unterminated,20)}",
+      "sql": "SELECT '{[\"unterminated,20)}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[\"unterminated,20)}\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_29",
+      "kind": "int4multirange",
+      "input": "{[1,2\\}",
+      "sql": "SELECT '{[1,2\\}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{[1,2\\}\"",
+        "detail": "Unexpected end of input.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_30",
+      "kind": "int4multirange",
+      "input": "{empty,}",
+      "sql": "SELECT '{empty,}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{empty,}\"",
+        "detail": "Expected range start.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_31",
+      "kind": "int4multirange",
+      "input": "{empty empty}",
+      "sql": "SELECT '{empty empty}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{empty empty}\"",
+        "detail": "Expected comma or end of multirange.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_32",
+      "kind": "int4multirange",
+      "input": "{emptyx}",
+      "sql": "SELECT '{emptyx}'::int4multirange::text AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "malformed multirange literal: \"{emptyx}\"",
+        "detail": "Expected comma or end of multirange.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "multi_syntax_33",
+      "kind": "int4multirange",
+      "input": "\u000b{[1,2)}\f",
+      "sql": "SELECT '\u000b{[1,2)}\f'::int4multirange::text AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{[1,2)}"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "schema",
+      "sql": "CREATE SCHEMA range_input",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "table",
+      "sql": "CREATE TABLE range_input.held (id integer PRIMARY KEY, r int4range, m int4multirange, d daterange, n numrange)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "insert",
+      "sql": "INSERT INTO range_input.held VALUES (1,'[0x10,0x20)','{empty,[1_000,1_010)}','[2024-01-01,2024-01-03]','[1.00,3.50)')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "begin",
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "savepoint",
+      "sql": "SAVEPOINT bounds",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "failed_assignment",
+      "sql": "UPDATE range_input.held SET r='[2147483648,)' WHERE id=1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value \"2147483648\" is out of range for type integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "id": "recover",
+      "sql": "ROLLBACK TO SAVEPOINT bounds",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "commit",
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "retained_values",
+      "sql": "SELECT id,r::text,m::text,d::text,n::text FROM range_input.held ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r",
+            "m",
+            "d",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "[16,32)",
+              "{[1000,1010)}",
+              "[2024-01-01,2024-01-04)",
+              "[1.00,3.50)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "reopen_values",
+      "reopen": true,
+      "sql": "SELECT id,r::text,m::text,d::text,n::text FROM range_input.held ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r",
+            "m",
+            "d",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "[16,32)",
+              "{[1000,1010)}",
+              "[2024-01-01,2024-01-04)",
+              "[1.00,3.50)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "id": "reopen_operators",
+      "reopen": true,
+      "sql": "SELECT r @> 16 AS inside, r @> 32 AS outside, m @> 1005 AS member FROM range_input.held",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "inside",
+            "outside",
+            "member"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

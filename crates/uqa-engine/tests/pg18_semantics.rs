@@ -118,6 +118,8 @@ mod pattern_operators;
 mod pg18_additions;
 #[path = "pg18_semantics/range_elements.rs"]
 mod range_elements;
+#[path = "pg18_semantics/range_input.rs"]
+mod range_input;
 #[path = "pg18_semantics/reverse_overloads.rs"]
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
