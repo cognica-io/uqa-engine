@@ -7,8 +7,8 @@
 //! Range relationships compare admitted numeric bounds; covers copy only their selected endpoints.
 
 use super::{
-    production::compare_values, CanonicalMultirange, CanonicalRange, Ordering, Produced,
-    ProductionControl, RangeSubtype, Result, Value,
+    CanonicalMultirange, CanonicalRange, Ordering, Produced, ProductionControl, RangeSemantics,
+    RangeSubtype, Result, Value,
 };
 
 impl CanonicalRange {
@@ -22,14 +22,14 @@ impl CanonicalRange {
             return Ok(false);
         }
         if let Some(lower) = self.lower() {
-            match compare_values(value, lower, control)? {
+            match self.semantics().compare(value, lower, control)? {
                 Ordering::Less => return Ok(false),
                 Ordering::Equal if !self.lower_inclusive => return Ok(false),
                 _ => {}
             }
         }
         Ok(match self.upper() {
-            Some(upper) => match compare_values(value, upper, control)? {
+            Some(upper) => match self.semantics().compare(value, upper, control)? {
                 Ordering::Less => true,
                 Ordering::Equal => self.upper_inclusive,
                 Ordering::Greater => false,
@@ -64,13 +64,16 @@ impl CanonicalRange {
         {
             return Ok(false);
         }
+        let semantics = self.semantics();
         Ok(touching(
+            semantics,
             self.upper(),
             self.upper_inclusive,
             other.lower(),
             other.lower_inclusive,
             control,
         )? || touching(
+            semantics,
             other.upper(),
             other.upper_inclusive,
             self.lower(),
@@ -97,7 +100,7 @@ impl CanonicalRange {
         let lower = match (self.lower(), other.lower()) {
             (None, _) => true,
             (Some(_), None) => false,
-            (Some(left), Some(right)) => match compare_values(left, right, control)? {
+            (Some(left), Some(right)) => match self.semantics().compare(left, right, control)? {
                 Ordering::Less => true,
                 Ordering::Greater => false,
                 Ordering::Equal => self.lower_inclusive || !other.lower_inclusive,
@@ -109,7 +112,7 @@ impl CanonicalRange {
         Ok(match (self.upper(), other.upper()) {
             (None, _) => true,
             (Some(_), None) => false,
-            (Some(left), Some(right)) => match compare_values(left, right, control)? {
+            (Some(left), Some(right)) => match self.semantics().compare(left, right, control)? {
                 Ordering::Greater => true,
                 Ordering::Less => false,
                 Ordering::Equal => self.upper_inclusive || !other.upper_inclusive,
@@ -150,7 +153,7 @@ fn upper_before_lower(
 ) -> Result<bool> {
     Ok(match (left.upper(), right.lower()) {
         (None, _) | (_, None) => false,
-        (Some(upper), Some(lower)) => match compare_values(upper, lower, control)? {
+        (Some(upper), Some(lower)) => match left.semantics().compare(upper, lower, control)? {
             Ordering::Less => true,
             Ordering::Greater => false,
             Ordering::Equal => !(left.upper_inclusive && right.lower_inclusive),
@@ -159,6 +162,7 @@ fn upper_before_lower(
 }
 
 fn touching(
+    semantics: &RangeSemantics,
     upper: Option<&Value>,
     upper_inclusive: bool,
     lower: Option<&Value>,
@@ -167,7 +171,7 @@ fn touching(
 ) -> Result<bool> {
     Ok(match (upper, lower) {
         (Some(upper), Some(lower)) => {
-            compare_values(upper, lower, control)?.is_eq() && upper_inclusive != lower_inclusive
+            semantics.compare(upper, lower, control)?.is_eq() && upper_inclusive != lower_inclusive
         }
         _ => false,
     })
@@ -230,13 +234,14 @@ impl<'a> BorrowedCover<'a> {
         range: &'a CanonicalRange,
         control: &ProductionControl<'_>,
     ) -> Result<()> {
+        let semantics = RangeSemantics::native(self.subtype);
         match (self.lower, range.lower()) {
             (None, _) => {}
             (_, None) => {
                 self.lower = None;
                 self.lower_inclusive = false;
             }
-            (Some(left), Some(right)) => match compare_values(left, right, control)? {
+            (Some(left), Some(right)) => match semantics.compare(left, right, control)? {
                 Ordering::Greater => {
                     self.lower = Some(right);
                     self.lower_inclusive = range.lower_inclusive;
@@ -251,7 +256,7 @@ impl<'a> BorrowedCover<'a> {
                 self.upper = None;
                 self.upper_inclusive = false;
             }
-            (Some(left), Some(right)) => match compare_values(left, right, control)? {
+            (Some(left), Some(right)) => match semantics.compare(left, right, control)? {
                 Ordering::Less => {
                     self.upper = Some(right);
                     self.upper_inclusive = range.upper_inclusive;

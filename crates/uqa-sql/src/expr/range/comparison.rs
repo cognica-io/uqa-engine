@@ -7,8 +7,8 @@
 //! Range order uses the selected subtype's bounds, independently of text spelling.
 
 use super::{
-    production::{compare_lower_bounds, compare_values},
-    CanonicalMultirange, CanonicalRange, Ordering, ProductionControl, Result, SQLError,
+    production::compare_lower_bounds, CanonicalMultirange, CanonicalRange, Ordering,
+    ProductionControl, Result, SQLError,
 };
 
 impl CanonicalRange {
@@ -36,7 +36,9 @@ impl CanonicalRange {
             (None, None) => Ordering::Equal,
             (None, Some(_)) => Ordering::Greater,
             (Some(_), None) => Ordering::Less,
-            (Some(left), Some(right)) => compare_values(left, right, control)?
+            (Some(left), Some(right)) => self
+                .semantics()
+                .compare(left, right, control)?
                 .then_with(|| self.upper_inclusive.cmp(&other.upper_inclusive)),
         })
     }

@@ -7,8 +7,8 @@
 //! Range parsing, normalization and text production share admitted constructors.
 
 use super::{
-    increment_discrete, is_discrete, CanonicalMultirange, CanonicalRange, Ordering,
-    ProductionControl, RangeSubtype, Result, SQLError, Value,
+    CanonicalMultirange, CanonicalRange, Ordering, ProductionControl, RangeSemantics, RangeSubtype,
+    Result, SQLError, Value,
 };
 use uqa_core::{
     memory::{MemoryReservation, Produced, ProductionString, ProductionVec},
@@ -71,15 +71,16 @@ pub(in crate::expr) fn parse_range_with_control(
     let Some(input) = super::input::range(text, control)? else {
         return Ok(control.finish(CanonicalRange::empty(subtype), control.empty_reservation())?);
     };
-    let lower = parse_bound(input.lower, subtype, control)?;
-    let upper = parse_bound(input.upper, subtype, control)?;
+    let semantics = RangeSemantics::native(subtype);
+    let lower = parse_bound(input.lower, semantics, control)?;
+    let upper = parse_bound(input.upper, semantics, control)?;
     let lower_inclusive = input.lower_inclusive && lower.is_some();
     let upper_inclusive = input.upper_inclusive && upper.is_some();
     let (lower, lower_memory) = lower.into_parts();
     let (upper, upper_memory) = upper.into_parts();
     let mut owned = RangeWorkspace {
         value: CanonicalRange {
-            subtype,
+            subtype: semantics.identity(),
             lower,
             upper,
             lower_inclusive,
@@ -93,41 +94,16 @@ pub(in crate::expr) fn parse_range_with_control(
         owned.value = CanonicalRange::empty(subtype);
         return Ok(control.finish(owned.value, owned.memory)?);
     }
-    if is_discrete(subtype) {
-        if !range.lower_inclusive {
-            if let Some(value) = range
-                .lower
-                .as_ref()
-                .filter(|value| finite_discrete_bound(value))
-            {
-                range.lower = Some(increment_discrete(value, subtype)?);
-                range.lower_inclusive = true;
-            }
-        }
-        if range.upper_inclusive {
-            if let Some(value) = range
-                .upper
-                .as_ref()
-                .filter(|value| finite_discrete_bound(value))
-            {
-                range.upper = Some(increment_discrete(value, subtype)?);
-                range.upper_inclusive = false;
-            }
-        }
-    }
+    semantics.canonicalize(range)?;
     if bounds_are_empty(range, control)? {
         owned.value = CanonicalRange::empty(subtype);
     }
     Ok(control.finish(owned.value, owned.memory)?)
 }
 
-fn finite_discrete_bound(value: &Value) -> bool {
-    !matches!(value, Value::Temporal(temporal) if !temporal.is_finite())
-}
-
 fn bounds_are_empty(range: &CanonicalRange, control: &ProductionControl<'_>) -> Result<bool> {
     Ok(match (&range.lower, &range.upper) {
-        (Some(lower), Some(upper)) => match compare_values(lower, upper, control)? {
+        (Some(lower), Some(upper)) => match range.semantics().compare(lower, upper, control)? {
             Ordering::Greater => {
                 return Err(SQLError::Routine {
                     sqlstate: "22000".into(),
@@ -238,7 +214,7 @@ pub(super) fn normalize_ranges(
 
 fn parse_bound(
     input: Option<super::input::BoundInput<'_>>,
-    subtype: RangeSubtype,
+    semantics: &RangeSemantics,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Option<Value>>> {
     let Some(input) = input else {
@@ -249,24 +225,9 @@ fn parse_bound(
         value: Value::Str(text),
         memory,
     };
-    let target = subtype.scalar_type().sql_name_with_control(control)?;
-    let parsed =
-        crate::expr::casting::cast_value_from_with_control(&source.value, &target, None, control)?;
+    let parsed = semantics.input(&source.value, control)?;
     let (value, memory) = parsed.into_parts();
     Ok(control.finish(Some(value), memory)?)
-}
-
-pub(super) fn compare_values(
-    left: &Value,
-    right: &Value,
-    control: &ProductionControl<'_>,
-) -> Result<Ordering> {
-    control.check()?;
-    match (left, right) {
-        (Value::Decimal(left), Value::Decimal(right)) => Ok(left.cmp_with_control(right, control)?),
-        // All other range subtypes have inline integer or temporal carriers.
-        _ => Ok(left.cmp(right)),
-    }
 }
 
 pub(super) fn compare_lower_bounds(
@@ -278,7 +239,9 @@ pub(super) fn compare_lower_bounds(
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Less,
         (Some(_), None) => Ordering::Greater,
-        (Some(left_value), Some(right_value)) => compare_values(left_value, right_value, control)?
+        (Some(left_value), Some(right_value)) => left
+            .semantics()
+            .compare(left_value, right_value, control)?
             .then_with(|| right.lower_inclusive.cmp(&left.lower_inclusive)),
     })
 }
@@ -294,7 +257,7 @@ fn joins(
     // Members are ordered by lower bound, so overlap or adjacency is decided at this one boundary.
     Ok(match (left.upper(), right.lower()) {
         (None, _) | (_, None) => true,
-        (Some(upper), Some(lower)) => match compare_values(upper, lower, control)? {
+        (Some(upper), Some(lower)) => match left.semantics().compare(upper, lower, control)? {
             Ordering::Less => false,
             Ordering::Greater => true,
             Ordering::Equal => left.upper_inclusive || right.lower_inclusive,
@@ -309,7 +272,7 @@ fn merge_owned(
 ) -> Result<CanonicalRange> {
     // The lower sort keeps the left bound; equal values retain its lexical numeric scale, as before.
     if let (Some(a), Some(b)) = (left.lower(), right.lower()) {
-        if compare_values(a, b, control)? == Ordering::Equal {
+        if left.semantics().compare(a, b, control)? == Ordering::Equal {
             left.lower_inclusive |= right.lower_inclusive;
         }
     }
@@ -319,7 +282,7 @@ fn merge_owned(
             left.upper = None;
             left.upper_inclusive = false;
         }
-        (Some(a), Some(b)) => match compare_values(a, b, control)? {
+        (Some(a), Some(b)) => match left.semantics().compare(a, b, control)? {
             Ordering::Less => {
                 left.upper = right.upper.take();
                 left.upper_inclusive = right.upper_inclusive;
@@ -366,12 +329,13 @@ fn write_range(
         return Ok(());
     }
     output.push(if range.lower_inclusive { '[' } else { '(' })?;
+    let semantics = range.semantics();
     if let Some(lower) = range.lower() {
-        write_bound(lower, output, control)?;
+        write_bound(lower, semantics, output, control)?;
     }
     output.push(',')?;
     if let Some(upper) = range.upper() {
-        write_bound(upper, output, control)?;
+        write_bound(upper, semantics, output, control)?;
     }
     output.push(if range.upper_inclusive { ']' } else { ')' })?;
     Ok(())
@@ -379,19 +343,11 @@ fn write_range(
 
 fn write_bound(
     value: &Value,
+    semantics: &RangeSemantics,
     output: &mut ProductionString<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
-    let raw = match value {
-        Value::Int(value) => control.format(format_args!("{value}"))?,
-        Value::Decimal(value) => value.to_sql_string_with_control(control)?,
-        Value::Temporal(value) => value.to_sql_string_with_control(control)?,
-        _ => {
-            return Err(SQLError::Internal(
-                "incompatible canonical range bound".into(),
-            ))
-        }
-    };
+    let raw = semantics.output(value, control)?;
     let mut quoted = raw.is_empty();
     for character in raw.chars() {
         control.check()?;
