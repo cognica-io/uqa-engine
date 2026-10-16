@@ -20,6 +20,7 @@ use crate::result::ResultRow;
 mod array_access;
 pub use array_access::eval_array_access_with_control;
 mod array_transform;
+pub mod bit_string;
 pub mod datums;
 mod encoding;
 mod floating;

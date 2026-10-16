@@ -9471,6 +9471,45 @@
       "capability": "Bounded packed bit-string ownership",
       "workload": "Packed copies at exact and insufficient byte allowances, malformed admitted input and either cancellation owner.",
       "invariant": "Copies reserve packed bytes before allocation; errors release reservations and cancellation remains owned by both callers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_input_lengths_casts_and_integers_match_postgresql",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
+      "capability": "Bit-string scalar input and conversion",
+      "workload": "466 independent PostgreSQL 18.4 scalar observations for binary/hex input, assignment and explicit coercion, modifiers and int4/int8 conversions.",
+      "invariant": "Values, SQLSTATE, messages and validation order match independently captured PostgreSQL; all temporary reservations are released."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_input_and_length_changes_keep_packed_allowances",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
+      "capability": "Packed bit-string conversion allowances",
+      "workload": "Parse 32,776 bits with 4,097 admitted bytes, exercise exact and insufficient allowances, truncate and pad across byte boundaries, and reject oversized integer expansion.",
+      "invariant": "Packed input and conversions admit bytes before allocation, preserve canonical tail padding and the borrowed source, and keep output under its original allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_failures_release_partial_input_and_preserve_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
+      "capability": "Bit-string cancellation and error cleanup",
+      "workload": "Reject an invalid final digit after more than 4 KiB of packed production, then invoke input, conversion, integer expansion and output under each cancelled owner.",
+      "invariant": "Failure releases partial buffers; original and invoking cancellation remain 57014 without retained reservations."
     }
   ]
 }
