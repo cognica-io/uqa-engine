@@ -47,17 +47,23 @@ pub fn hash_canonical_row_with_enum_catalog<'a, S: BuildHasher>(
     values: impl ExactSizeIterator<Item = Option<&'a Value>>,
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<u64> {
+    hash_typed_row_with_catalog(build_hasher, values.map(|value| (value, None)), enums)
+}
+
+/// Hash admitted values using the same selected scalar identities as exact SQL keys.
+pub(crate) fn hash_typed_row_with_catalog<'a, S: BuildHasher>(
+    build_hasher: &S,
+    values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+) -> ExecResult<u64> {
     let count = values.len();
     let mut hasher = build_hasher.build_hasher();
     {
-        let mut output = HasherOutput(&mut hasher, enums);
+        let mut output = HasherOutput(&mut hasher, catalog);
         encode_len(count, &mut output)?;
-        for value in values {
-            if let Some(value) = value {
-                encode_value(value, &mut output)?;
-            } else {
-                output.push_byte(0)?;
-            }
+        let control = ProductionControl::uncontrolled();
+        for (value, ty) in values {
+            encode_selected_value(value.unwrap_or(&Value::Null), ty, &mut output, &control)?;
         }
     }
     Ok(hasher.finish())
@@ -115,6 +121,19 @@ pub fn canonical_row_key_with_catalog_and_control<'a>(
     catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<u8>>, uqa_sql::SQLError> {
+    canonical_typed_row_key_with_catalog_and_control(
+        values.map(|value| (value, None)),
+        catalog,
+        control,
+    )
+}
+
+/// Retain selected scalar type identities at the same equality boundary as nested record fields and array elements. Declared physical values use input-free observation; native text carriers use the same selected comparison reader as nested fields.
+pub fn canonical_typed_row_key_with_catalog_and_control<'a>(
+    values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, uqa_sql::SQLError> {
     control.check()?;
     let mut output = CatalogKeyOutput {
         values: ProductionVec::new(*control),
@@ -123,8 +142,8 @@ pub fn canonical_row_key_with_catalog_and_control<'a>(
     };
     let result = (|| {
         encode_len(values.len(), &mut output)?;
-        for value in values {
-            encode_value_with_control(value.unwrap_or(&Value::Null), &mut output, control)?;
+        for (value, ty) in values {
+            encode_selected_value(value.unwrap_or(&Value::Null), ty, &mut output, control)?;
         }
         Ok(())
     })();
@@ -169,6 +188,21 @@ fn encode_catalog_key<'a>(
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     sql_hash: bool,
 ) -> ExecResult<Vec<u8>> {
+    encode_typed_catalog_key(values.map(|value| (value, None)), enums, sql_hash)
+}
+
+pub(crate) fn encode_sql_key_with_types_and_catalog<'a>(
+    values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+) -> ExecResult<Vec<u8>> {
+    encode_typed_catalog_key(values, catalog, true)
+}
+
+fn encode_typed_catalog_key<'a>(
+    values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+    sql_hash: bool,
+) -> ExecResult<Vec<u8>> {
     let estimated_capacity = encoded_key_capacity(values.len())?;
     let mut output = CatalogKeyOutput {
         values: Vec::with_capacity(estimated_capacity),
@@ -176,11 +210,9 @@ fn encode_catalog_key<'a>(
         sql_hash,
     };
     encode_len(values.len(), &mut output)?;
-    for value in values {
-        match value {
-            Some(value) => encode_value(value, &mut output)?,
-            None => encode_value(&Value::Null, &mut output)?,
-        }
+    let control = ProductionControl::uncontrolled();
+    for (value, ty) in values {
+        encode_selected_value(value.unwrap_or(&Value::Null), ty, &mut output, &control)?;
     }
     Ok(output.values)
 }
@@ -214,9 +246,9 @@ impl<O: KeyOutput> KeyOutput for CatalogKeyOutput<'_, O> {
 /// Encode a join probe key directly from physical slots. Single- and
 /// two-column numeric keys stay inline, and a NULL/missing component rejects
 /// the SQL equality key without allocating or cloning a `Value`.
-pub(crate) fn encode_non_null_key<'a>(
-    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
-    enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
+pub(crate) fn encode_typed_non_null_key<'a>(
+    values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    enums: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> ExecResult<Option<EncodedKey>> {
     let count = values.len();
     let mut output = CatalogKeyOutput {
@@ -225,14 +257,15 @@ pub(crate) fn encode_non_null_key<'a>(
         sql_hash: true,
     };
     encode_len(count, &mut output)?;
-    for value in values {
+    let control = ProductionControl::uncontrolled();
+    for (value, ty) in values {
         let Some(value) = value else {
             return Ok(None);
         };
         if matches!(value, Value::Null) {
             return Ok(None);
         }
-        encode_value(value, &mut output)?;
+        encode_selected_value(value, ty, &mut output, &control)?;
     }
     Ok(Some(output.values))
 }
@@ -404,6 +437,20 @@ fn encode_value_with_control(
             return control.check().map_err(output::resource_error);
         }
     }
+}
+
+fn encode_selected_value(
+    value: &Value,
+    ty: Option<&uqa_sql::ColumnType>,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
+    if let Some(ty) = ty {
+        if ranges::encode_selected_range(value, ty, output, control)? {
+            return Ok(());
+        }
+    }
+    encode_value_with_control(value, output, control)
 }
 
 /// Encode a value without nested values; containers are framed by [`encode_value`].

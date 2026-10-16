@@ -216,8 +216,14 @@ impl AdaptiveAggregateSet {
         params: &[SQLParam],
         enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     ) -> Result<bool, SQLError> {
-        let Some(index) =
-            super::matching_group_index(&self.group_index, &self.groups, hash, key, enums)?
+        let Some(index) = super::matching_group_index(
+            &self.group_index,
+            &self.groups,
+            hash,
+            key,
+            &self.group_types,
+            enums,
+        )?
         else {
             return Ok(false);
         };
@@ -325,6 +331,7 @@ impl AdaptiveAggregateSet {
             &self.groups,
             hash,
             key,
+            &self.group_types,
             context
                 .function_hook()
                 .and_then(uqa_sql::expr::EngineHook::enum_labels),

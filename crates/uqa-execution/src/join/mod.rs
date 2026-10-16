@@ -18,7 +18,7 @@ use uqa_sql::ast::JoinKind;
 use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
 
-use crate::distinct::{encode_non_null_key, EncodedKey};
+use crate::distinct::{encode_typed_non_null_key, EncodedKey};
 use crate::{
     Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow, ProjectedPredicate, RowSchema,
     ScalarExpr, SharedExpressionEvaluator, SpillBuffer,
@@ -92,6 +92,8 @@ pub struct HashJoin<'a> {
     kind: JoinKind,
     left_keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     right_keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+    left_key_types: Vec<Option<uqa_sql::ColumnType>>,
+    right_key_types: Vec<Option<uqa_sql::ColumnType>>,
     left_key_positions: Option<Vec<usize>>,
     right_key_positions: Option<Vec<usize>>,
     predicate: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
@@ -259,6 +261,8 @@ impl<'a> HashJoin<'a> {
             kind,
             left_keys: crate::scalar::PreparedExpressions::scalars(left_keys),
             right_keys: crate::scalar::PreparedExpressions::scalars(right_keys),
+            left_key_types: Vec::new(),
+            right_key_types: Vec::new(),
             left_key_positions,
             right_key_positions,
             predicate: predicate.map(crate::scalar::PreparedExpressions::scalar),
@@ -341,6 +345,7 @@ impl<'a> HashJoin<'a> {
         &self,
         rows: &mut HybridRowStore,
         expressions: &crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+        types: &[Option<uqa_sql::ColumnType>],
         positions: &[usize],
         budget_bytes: usize,
     ) -> ExecResult<HybridHashIndex> {
@@ -348,7 +353,7 @@ impl<'a> HashJoin<'a> {
         let mut index = HybridHashIndex::new(budget_bytes);
         for row_index in 0..rows.len() {
             let key = rows.with_row(row_index, |row| {
-                self.key(expressions, Some(positions), row, &schema)
+                self.key(expressions, types, Some(positions), row, &schema)
             })?;
             if let Some(key) = key {
                 index.insert(key, row_index)?;
@@ -395,6 +400,7 @@ impl<'a> HashJoin<'a> {
                     }
                 } else if let Some(key) = self.key(
                     &self.left_keys,
+                    &self.left_key_types,
                     self.left_key_positions.as_deref(),
                     &row,
                     &batch.schema,
@@ -447,7 +453,13 @@ impl<'a> HashJoin<'a> {
             None => {
                 let (positions, _) = direct_positions
                     .ok_or_else(|| ExecError::Other("direct join positions are missing".into()))?;
-                self.rebuild_encoded_index(&mut left, &self.left_keys, positions, hash_budget)?
+                self.rebuild_encoded_index(
+                    &mut left,
+                    &self.left_keys,
+                    &self.left_key_types,
+                    positions,
+                    hash_budget,
+                )?
             }
         };
         self.hash_index_spilled = left_by_key.has_spilled().into();
@@ -467,6 +479,7 @@ impl<'a> HashJoin<'a> {
             for right_row in batch.rows {
                 let Some(key) = self.key(
                     &self.right_keys,
+                    &self.right_key_types,
                     self.right_key_positions.as_deref(),
                     &right_row,
                     &batch.schema,
@@ -509,14 +522,20 @@ impl<'a> HashJoin<'a> {
     fn key(
         &self,
         expressions: &crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+        types: &[Option<uqa_sql::ColumnType>],
         positions: Option<&[usize]>,
         row: &PhysicalRow,
         schema: &RowSchema,
     ) -> ExecResult<Option<EncodedKey>> {
         if let Some(positions) = positions {
             let view = schema.view(row);
-            return encode_non_null_key(
-                positions.iter().map(|position| view.value_at(*position)),
+            return encode_typed_non_null_key(
+                positions.iter().enumerate().map(|(index, position)| {
+                    (
+                        view.value_at(*position),
+                        types.get(index).and_then(Option::as_ref),
+                    )
+                }),
                 self.evaluator.enum_labels(),
             );
         }
@@ -533,7 +552,13 @@ impl<'a> HashJoin<'a> {
             }
             values.push(value);
         }
-        encode_non_null_key(values.iter().map(Some), self.evaluator.enum_labels())
+        encode_typed_non_null_key(
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (Some(value), types.get(index).and_then(Option::as_ref))),
+            self.evaluator.enum_labels(),
+        )
     }
 
     fn matches(&self, row: &PhysicalRow) -> ExecResult<bool> {
@@ -603,13 +628,18 @@ impl<'a> HashJoin<'a> {
                         } else {
                             &self.left_keys
                         };
+                        let types = if state.build_left {
+                            &self.right_key_types
+                        } else {
+                            &self.left_key_types
+                        };
                         let positions = if state.build_left {
                             self.right_key_positions.as_deref()
                         } else {
                             self.left_key_positions.as_deref()
                         };
                         let Some(key) =
-                            self.key(expressions, positions, &probe_row, &batch.schema)?
+                            self.key(expressions, types, positions, &probe_row, &batch.schema)?
                         else {
                             continue;
                         };
@@ -653,6 +683,16 @@ impl PhysicalOperator for HashJoin<'_> {
     )]
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
+        self.left_key_types = self
+            .left_keys
+            .iter()
+            .map(|key| self.evaluator.expression_type(key, self.left.row_schema()))
+            .collect::<Result<_, _>>()?;
+        self.right_key_types = self
+            .right_keys
+            .iter()
+            .map(|key| self.evaluator.expression_type(key, self.right.row_schema()))
+            .collect::<Result<_, _>>()?;
         self.streaming_unique = None;
         self.output_spilled = SpillState::InMemory;
         self.right_input_spilled = SpillState::InMemory;
@@ -693,6 +733,7 @@ impl PhysicalOperator for HashJoin<'_> {
                     }
                 } else if let Some(key) = self.key(
                     &self.right_keys,
+                    &self.right_key_types,
                     self.right_key_positions.as_deref(),
                     &row,
                     &batch.schema,
@@ -745,7 +786,13 @@ impl PhysicalOperator for HashJoin<'_> {
             None => {
                 let (positions, _) = direct_positions
                     .ok_or_else(|| ExecError::Other("direct join positions are missing".into()))?;
-                self.rebuild_encoded_index(&mut right, &self.right_keys, positions, hash_budget)?
+                self.rebuild_encoded_index(
+                    &mut right,
+                    &self.right_keys,
+                    &self.right_key_types,
+                    positions,
+                    hash_budget,
+                )?
             }
         };
         self.hash_index_spilled = right_by_key.has_spilled().into();
@@ -775,6 +822,7 @@ impl PhysicalOperator for HashJoin<'_> {
                 let mut matched_left = false;
                 if let Some(key) = self.key(
                     &self.left_keys,
+                    &self.left_key_types,
                     self.left_key_positions.as_deref(),
                     &left_row,
                     &batch.schema,
@@ -868,6 +916,8 @@ impl PhysicalOperator for HashJoin<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.output = None;
+        self.left_key_types.clear();
+        self.right_key_types.clear();
         self.streaming_unique = None;
         let left = self.left.close();
         let right = self.right.close();

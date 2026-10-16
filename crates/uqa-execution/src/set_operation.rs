@@ -349,9 +349,10 @@ fn compare_rows(
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Null, _) => Ordering::Less,
             (_, Value::Null) => Ordering::Greater,
-            _ => uqa_sql::expr::compare_grouping_values_with_enum_catalog(
+            _ => uqa_sql::expr::compare_selected_grouping_values_with_catalog(
                 left,
                 right,
+                schema.column_type(position),
                 &uqa_core::memory::ProductionControl::uncontrolled(),
                 enums,
             )?,
@@ -799,6 +800,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
 #[cfg(test)]
 mod tests {
     mod enums;
+    mod ranges;
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;

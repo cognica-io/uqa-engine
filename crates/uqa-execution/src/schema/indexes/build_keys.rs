@@ -81,6 +81,7 @@ impl IndexBuildKeys {
                 if let Some(previous) = &previous {
                     let ordering = crate::relational::SortComparison {
                         keys: &keys,
+                        types: &[],
                         enums: catalog
                             .map(|catalog| catalog as &dyn uqa_sql::expr::SQLValueCatalog),
                         states: &[],

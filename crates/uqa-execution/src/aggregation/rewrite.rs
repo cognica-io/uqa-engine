@@ -124,10 +124,19 @@ pub fn aggregate_accumulator_templates(
                 } else {
                     0
                 };
+                let mut ordering_types = order_by
+                    .iter()
+                    .map(|key| {
+                        crate::scalar_type_with_resolver(&key.expr, input_schema, params, context)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 if let Some(function) = context.registered_aggregate_function(name) {
-                    return Ok(
-                        AggregateAccumulatorTemplate::registered(function).with_ordering(key_count)
-                    );
+                    if *distinct {
+                        ordering_types.push(None);
+                    }
+                    return Ok(AggregateAccumulatorTemplate::registered(function)
+                        .with_ordering(key_count)
+                        .with_ordering_types(ordering_types));
                 }
                 let input_type = args
                     .first()
@@ -136,9 +145,22 @@ pub fn aggregate_accumulator_templates(
                     })
                     .transpose()?
                     .flatten();
+                if *distinct {
+                    ordering_types.push(
+                        if is_json_object_aggregate(name) || name.eq_ignore_ascii_case("string_agg")
+                        {
+                            None
+                        } else if is_ordered_set_aggregate(name) {
+                            ordering_types.first().cloned().flatten()
+                        } else {
+                            input_type.clone()
+                        },
+                    );
+                }
                 Ok(
                     AggregateAccumulatorTemplate::builtin(name, input_type.as_ref())
-                        .with_ordering(key_count),
+                        .with_ordering(key_count)
+                        .with_ordering_types(ordering_types),
                 )
             }
             _ => Ok(AggregateAccumulatorTemplate::generic()),

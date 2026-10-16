@@ -132,6 +132,7 @@ pub(crate) fn compare_sort_key_values_by<'a>(
 ) -> ExecResult<std::cmp::Ordering> {
     SortComparison {
         keys,
+        types: &[],
         enums: None,
         states: &[],
         equality_keys: false,
@@ -143,6 +144,7 @@ pub(crate) fn compare_sort_key_values_by<'a>(
 #[derive(Clone, Copy)]
 pub(crate) struct SortComparison<'a> {
     pub(crate) keys: &'a [SortKey],
+    pub(crate) types: &'a [Option<uqa_sql::ColumnType>],
     pub(crate) enums: Option<&'a dyn uqa_sql::expr::enums::EnumLabelCatalog>,
     pub(crate) states: &'a [uqa_sql::expr::enums::EnumComparisonState],
     pub(crate) equality_keys: bool,
@@ -179,16 +181,18 @@ impl SortComparison<'_> {
                 continue;
             }
             let ord = if self.equality_keys {
-                uqa_sql::expr::compare_grouping_values_with_enum_catalog(
+                uqa_sql::expr::compare_selected_grouping_values_with_catalog(
                     a,
                     b,
+                    self.types.get(i).and_then(Option::as_ref),
                     &uqa_core::memory::ProductionControl::uncontrolled(),
                     self.enums,
                 )?
             } else {
-                uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                uqa_sql::expr::compare_selected_values_with_catalog(
                     a,
                     b,
+                    self.types.get(i).and_then(Option::as_ref),
                     &uqa_core::memory::ProductionControl::uncontrolled(),
                     self.enums,
                     self.states.get(i),
@@ -209,13 +213,23 @@ pub(crate) fn equal_sort_key_values(
     right: &[Value],
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<bool> {
+    equal_typed_sort_key_values(left, right, &[], enums)
+}
+
+pub(crate) fn equal_typed_sort_key_values(
+    left: &[Value],
+    right: &[Value],
+    types: &[Option<uqa_sql::ColumnType>],
+    enums: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+) -> ExecResult<bool> {
     if left.len() != right.len() {
         return Ok(false);
     }
-    for (left, right) in left.iter().zip(right) {
-        if !uqa_sql::expr::equal_typed_values_with_enum_catalog(
+    for (index, (left, right)) in left.iter().zip(right).enumerate() {
+        if !uqa_sql::expr::equal_selected_values_with_catalog(
             left,
             right,
+            types.get(index).and_then(Option::as_ref),
             &uqa_core::memory::ProductionControl::uncontrolled(),
             enums,
         )? {

@@ -33,6 +33,31 @@ pub(super) fn encode_declared_range(
     else {
         return Ok(false);
     };
+    encode_range_value(value, output, control)
+}
+
+pub(super) fn encode_selected_range(
+    value: &Value,
+    ty: &uqa_sql::ColumnType,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<bool> {
+    if !output.uses_declared_field_types() || !matches!(value, Value::Str(_) | Value::Datum(_)) {
+        return Ok(false);
+    }
+    let Some(value) =
+        RangeComparisonValue::from_type_with_control(value, ty, output.enum_catalog(), control)?
+    else {
+        return Ok(false);
+    };
+    encode_range_value(value, output, control)
+}
+
+fn encode_range_value(
+    value: RangeComparisonValue,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<bool> {
     output.encoded_range_field();
     match value {
         RangeComparisonValue::Range(value) => {

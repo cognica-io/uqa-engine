@@ -11,9 +11,11 @@ use uqa_sql::expr::IntervalFields;
 
 pub(super) fn partial_schema(
     relation: uqa_sql::ast::InternalRelationId,
-    group_count: usize,
+    group_types: &[Option<uqa_sql::ColumnType>],
 ) -> crate::RowSchema {
-    crate::RowSchema::with_internal_relation_types(relation, vec![None; group_count + 1])
+    let mut types = group_types.to_vec();
+    types.push(None);
+    crate::RowSchema::with_internal_relation_types(relation, types)
 }
 
 pub(super) fn encode_partial_group(

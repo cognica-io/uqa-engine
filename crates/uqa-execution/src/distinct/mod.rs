@@ -25,13 +25,15 @@ use crate::{
 };
 
 pub(crate) use encoding::canonical_row_lock_keys_with_catalog;
-use encoding::encode_sql_key_with_enum_catalog;
-pub(crate) use encoding::encode_sql_key_with_enum_catalog as canonical_sql_key;
 pub use encoding::{
     canonical_row_key, canonical_row_key_budgeted, canonical_row_key_with_catalog_and_control,
-    hash_canonical_row, hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
+    canonical_typed_row_key_with_catalog_and_control, hash_canonical_row,
+    hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
 };
-pub(crate) use encoding::{encode_key, encode_non_null_key, EncodedKey};
+pub(crate) use encoding::{encode_key, EncodedKey};
+pub(crate) use encoding::{
+    encode_sql_key_with_types_and_catalog, encode_typed_non_null_key, hash_typed_row_with_catalog,
+};
 pub use memory::{CanonicalRowHashSet, ExactRowSet};
 pub(crate) use spill::SeenKeySet;
 #[cfg(test)]
@@ -50,6 +52,7 @@ pub const DEFAULT_DISTINCT_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 pub struct Distinct<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     keys: Option<crate::scalar::PreparedExpressions<Vec<ScalarExpr>>>,
+    key_types: Vec<Option<uqa_sql::ColumnType>>,
     evaluator: Option<SharedExpressionEvaluator<'a>>,
     schema: RowSchema,
     work_mem_bytes: usize,
@@ -70,6 +73,7 @@ impl<'a> Distinct<'a> {
         Self {
             child,
             keys: None,
+            key_types: Vec::new(),
             evaluator: None,
             schema,
             work_mem_bytes,
@@ -105,6 +109,7 @@ impl<'a> Distinct<'a> {
         Self {
             child,
             keys: Some(crate::scalar::PreparedExpressions::scalars(keys)),
+            key_types: Vec::new(),
             evaluator: Some(evaluator),
             schema,
             work_mem_bytes,
@@ -157,14 +162,18 @@ impl<'a> Distinct<'a> {
                     )
                 })
                 .collect::<ExecResult<Vec<_>>>()?;
-            return encode_sql_key_with_enum_catalog(
-                values.iter().map(Some),
+            return encode_sql_key_with_types_and_catalog(
+                values
+                    .iter()
+                    .zip(&self.key_types)
+                    .map(|(value, ty)| (Some(value), ty.as_ref())),
                 evaluator.enum_labels(),
             );
         }
         let row = schema.view(row);
-        encode_sql_key_with_enum_catalog(
-            (0..self.schema.len()).map(|index| row.value_at(index)),
+        encode_sql_key_with_types_and_catalog(
+            (0..self.schema.len())
+                .map(|index| (row.value_at(index), self.schema.column_type(index))),
             self.evaluator
                 .as_ref()
                 .and_then(|evaluator| evaluator.enum_labels()),
@@ -179,6 +188,15 @@ impl PhysicalOperator for Distinct<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.reset_seen();
+        if let Some(keys) = &self.keys {
+            let evaluator = self.evaluator.as_ref().ok_or_else(|| {
+                ExecError::Other("DISTINCT ON evaluator is not configured".into())
+            })?;
+            self.key_types = keys
+                .iter()
+                .map(|key| evaluator.expression_type(key, &self.schema))
+                .collect::<Result<_, _>>()?;
+        }
         self.child.open()
     }
 

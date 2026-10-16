@@ -52,9 +52,14 @@ impl DistinctTracker {
         let mut previous: Option<Value> = None;
         self.values.for_each_ordered(enums, |record| {
             if let Some(previous) = &previous {
-                if uqa_sql::expr::equal_typed_values_with_enum_catalog(
+                if uqa_sql::expr::equal_selected_values_with_catalog(
                     previous,
                     &record.value,
+                    self.values
+                        .key_types
+                        .as_deref()
+                        .and_then(|types| types.last())
+                        .and_then(Option::as_ref),
                     &ProductionControl::uncontrolled(),
                     enums,
                 )? {

@@ -16,12 +16,13 @@ use uqa_sql::{ast::InternalRelationId, ScalarExpr};
 pub(super) fn sorted_partials<'a>(
     partials: SpillBuffer,
     relation: InternalRelationId,
-    group_count: usize,
+    group_types: &[Option<uqa_sql::ColumnType>],
     order_group_values: bool,
     evaluator: SharedExpressionEvaluator<'a>,
     budget: usize,
 ) -> ExternalSort<'a> {
-    let schema = super::super::partial_state::partial_schema(relation, group_count);
+    let group_count = group_types.len();
+    let schema = super::super::partial_state::partial_schema(relation, group_types);
     let mut scan: Box<dyn PhysicalOperator + 'a> = Box::new(SpillScan::new(schema, partials));
     let positions = if order_group_values {
         0..group_count
@@ -59,7 +60,9 @@ impl<'a> KeyedPartials<'a> {
         group_count: usize,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
-        let mut types = vec![None; group_count + 1];
+        let mut types = (0..child.row_schema().physical_width())
+            .map(|position| child.row_schema().physical_type(position).cloned())
+            .collect::<Vec<_>>();
         types.push(Some(uqa_sql::ColumnType::Bytea));
         Self {
             child,
@@ -92,8 +95,9 @@ impl PhysicalOperator for KeyedPartials<'_> {
             self.pending = batch.rows.into_iter();
         };
         // Admit each derived key into the external sort before producing another; do not retain a second key batch outside its allowance.
-        let key = crate::distinct::canonical_sql_key(
-            (0..self.group_count).map(|position| row.value(position)),
+        let key = crate::distinct::encode_sql_key_with_types_and_catalog(
+            (0..self.group_count)
+                .map(|position| (row.value(position), self.schema.physical_type(position))),
             self.evaluator.enum_labels(),
         )?;
         Ok(Some(Batch::from_physical_rows(
@@ -118,9 +122,66 @@ mod tests {
     use uqa_sql::ScalarExpr;
 
     #[test]
+    fn spilled_scalar_range_group_keys_retain_types_for_both_merge_orders() {
+        for (name, first, equal, other) in [
+            ("numrange", "[1.0,3.00)", "[1.00,3.0)", "[4,5)"),
+            ("nummultirange", "{[1.0,3.00)}", "{[1.00,3.0)}", "{[4,5)}"),
+        ] {
+            let ty = uqa_sql::ColumnType::from_sql_name(name).unwrap();
+            for ordered in [false, true] {
+                let relation = uqa_sql::ast::InternalRelationId::allocate();
+                let types = [Some(ty.clone())];
+                let schema = super::super::super::partial_state::partial_schema(relation, &types);
+                let mut partials = SpillBuffer::new(1);
+                for value in [first, other, equal, other, first, equal] {
+                    partials
+                        .push(Batch::from_physical_rows(
+                            schema.clone(),
+                            vec![PhysicalRow::from_values(vec![
+                                Value::Str(value.into()),
+                                Value::List(Vec::new()),
+                            ])],
+                        ))
+                        .unwrap();
+                }
+                assert!(partials.has_spilled());
+                let evaluator = crate::relational::DefaultExpressionEvaluator::shared(Vec::new());
+                let mut sort = sorted_partials(partials, relation, &types, ordered, evaluator, 1);
+                let rows = run_to_batches(&mut sort)
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(|batch| batch.rows)
+                    .collect::<Vec<_>>();
+                let mut groups = Vec::<usize>::new();
+                let mut previous = None;
+                for row in rows {
+                    let value = row.value(0).unwrap();
+                    if previous.as_ref().is_some_and(|previous| {
+                        uqa_sql::expr::equal_selected_values_with_catalog(
+                            previous,
+                            value,
+                            Some(&ty),
+                            &uqa_core::memory::ProductionControl::uncontrolled(),
+                            None,
+                        )
+                        .unwrap()
+                    }) {
+                        *groups.last_mut().unwrap() += 1;
+                    } else {
+                        groups.push(1);
+                    }
+                    previous = Some(value.clone());
+                }
+                groups.sort_unstable();
+                assert_eq!(groups, [2, 4], "{name}, ordered={ordered}");
+            }
+        }
+    }
+
+    #[test]
     fn spill_merge_keeps_equal_physical_and_admitted_keys_adjacent_without_ordering() {
         let relation = uqa_sql::ast::InternalRelationId::allocate();
-        let schema = super::super::super::partial_state::partial_schema(relation, 1);
+        let schema = super::super::super::partial_state::partial_schema(relation, &[None]);
         let input = [2_u32, 1, 3, 1, 2, 3]
             .into_iter()
             .enumerate()
