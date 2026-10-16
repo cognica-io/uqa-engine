@@ -6,7 +6,8 @@
 
 //! Borrowed value traversal keeps its explicit stack in the selected allowance.
 
-use super::{output::resource_error, BudgetedVec, ExecResult, StorageReadControl, Value};
+use super::{output::resource_error, BudgetedVec, ExecResult, Value};
+use uqa_core::memory::MemoryBudget;
 
 pub(super) enum Children<'a> {
     Values(std::slice::Iter<'a, Value>),
@@ -41,9 +42,9 @@ pub(super) enum Frames<'a> {
 }
 
 impl<'a> Frames<'a> {
-    pub(super) fn new(control: Option<&StorageReadControl>) -> Self {
-        match control {
-            Some(control) => Self::Budgeted(BudgetedVec::new(control.memory())),
+    pub(super) fn new(budget: Option<&MemoryBudget>) -> Self {
+        match budget {
+            Some(budget) => Self::Budgeted(BudgetedVec::new(budget)),
             None => Self::Owned(Vec::new()),
         }
     }

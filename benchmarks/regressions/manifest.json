@@ -10898,6 +10898,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_sql_keys_preserve_native_bytes_and_observe_physical_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Admitted SQL equality output",
+      "workload": "Encode the same native and physical values, including large text, numeric and JSONB bounds.",
+      "invariant": "The bytes equal the existing SQL key and only output capacity remains charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_sql_key_failures_release_decoding_and_normalization_scratch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Admitted SQL equality memory",
+      "workload": "Reject four insufficient budgets and either pre-cancelled owner while encoding nested physical and JSONB values.",
+      "invariant": "Quota and cancellation retain SQLSTATE and leave no output, decoder or normalization charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_sql_key_catalog_interrupts_preserve_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Admitted SQL equality cancellation",
+      "workload": "Cancel the original or invoking scope while looking up a declared physical type.",
+      "invariant": "Both callbacks stop encoding with 57014 and release all acquired memory.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -258,3 +258,5 @@ Responsibility roots remain facades over semantic children rather than line-coun
 The longer [system architecture design](../../design/architecture.md) records detailed performance paths and design rationale.
 
 Declared range definitions are owned by SQL's `catalog/range_type.rs`; Execution's `catalog/range_type` persists claims, reconciles private records and derives pinned value descriptors. Engine retains registry generations and adapts the existing definition transaction. [The catalog integration proof](../../plans/0018-declared-range-catalog.md) records ownership and preservation obligations. SQL range declarations and generated constructor routines remain required work.
+
+Execution owns admitted SQL equality-key production in `distinct/encoding`; it shares the existing exact encoder and forwards one caller control through physical decoding, numeric/JSONB normalization, range-key support and traversal. Core owns bounded copy-only buffer extension. The [key preservation argument](../../plans/0018-declared-range-support.md) records byte equality, resource ownership and remaining selected-operation obligations.

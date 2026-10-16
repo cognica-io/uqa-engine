@@ -28,8 +28,8 @@ pub(crate) use encoding::canonical_row_lock_keys_with_catalog;
 use encoding::encode_sql_key_with_enum_catalog;
 pub(crate) use encoding::encode_sql_key_with_enum_catalog as canonical_sql_key;
 pub use encoding::{
-    canonical_row_key, canonical_row_key_budgeted, hash_canonical_row,
-    hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
+    canonical_row_key, canonical_row_key_budgeted, canonical_row_key_with_catalog_and_control,
+    hash_canonical_row, hash_canonical_row_with_enum_catalog, try_pack_compact_text_pair,
 };
 pub(crate) use encoding::{encode_key, encode_non_null_key, EncodedKey};
 pub use memory::{CanonicalRowHashSet, ExactRowSet};

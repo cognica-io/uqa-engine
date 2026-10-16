@@ -9,7 +9,10 @@
 use std::hash::{BuildHasher, Hasher};
 
 use smallvec::{Array, SmallVec};
-use uqa_core::{memory::BudgetedVec, DecimalValue, TemporalValue, Value};
+use uqa_core::{
+    memory::{BudgetedVec, Produced, ProductionControl, ProductionVec},
+    DecimalValue, TemporalValue, Value,
+};
 use uqa_storage::read_control::StorageReadControl;
 
 mod output;
@@ -104,6 +107,32 @@ pub fn canonical_row_key_budgeted<'a>(
     }
     output.check()?;
     Ok(output.into_values())
+}
+
+/// Produce exact SQL equality keys without repeating input or losing either cancellation owner. Physical decoding, numeric/JSONB normalization, traversal and returned bytes share the invoking allowance.
+pub fn canonical_row_key_with_catalog_and_control<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, uqa_sql::SQLError> {
+    control.check()?;
+    let mut output = CatalogKeyOutput {
+        values: ProductionVec::new(*control),
+        enums: catalog,
+        sql_hash: true,
+    };
+    let result = (|| {
+        encode_len(values.len(), &mut output)?;
+        for value in values {
+            encode_value_with_control(value.unwrap_or(&Value::Null), &mut output, control)?;
+        }
+        Ok(())
+    })();
+    result.map_err(|error| match error {
+        ExecError::SQL(error) => error,
+        ExecError::Other(message) => uqa_sql::SQLError::Internal(message),
+    })?;
+    Ok(output.values.finish()?)
 }
 
 /// Collision-free binary key encoding. Numeric values deliberately share one
@@ -268,13 +297,26 @@ impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
 }
 
 fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
-    let control = output.control().cloned();
-    let mut stack = Frames::new(control.as_ref());
+    let read = output.control().cloned();
+    let control = read
+        .as_ref()
+        .map_or_else(ProductionControl::uncontrolled, |read| {
+            ProductionControl::new(read.memory(), read.cancellation(), read.cancellation())
+        });
+    encode_value_with_control(value, output, &control)
+}
+
+fn encode_value_with_control(
+    value: &Value,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
+    let mut stack = Frames::new(control.budget());
     let mut current = Some((value, None));
     loop {
-        output.check()?;
+        control.check().map_err(output::resource_error)?;
         if let Some((value, oid)) = current.take() {
-            if !ranges::encode_declared_range(value, oid, output)? {
+            if !ranges::encode_declared_range(value, oid, output, control)? {
                 match value {
                     Value::Array(array) => {
                         output.push_byte(12)?;
@@ -338,12 +380,12 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                             stack.push(Children::Map(fields.iter()))?;
                         }
                     }
-                    leaf => encode_leaf(leaf, output)?,
+                    leaf => encode_leaf(leaf, output, control)?,
                 }
             }
         }
         while let Some(children) = stack.last_mut() {
-            output.check()?;
+            control.check().map_err(output::resource_error)?;
             current = match children.next() {
                 Some((name, value, oid)) => {
                     if let Some(name) = name {
@@ -359,13 +401,17 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             stack.pop();
         }
         if current.is_none() {
-            return output.check();
+            return control.check().map_err(output::resource_error);
         }
     }
 }
 
 /// Encode a value without nested values; containers are framed by [`encode_value`].
-fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
+fn encode_leaf(
+    value: &Value,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
     if let Some(catalog) = output
         .enum_catalog()
         .filter(|_| output.invokes_sql_hash_operator())
@@ -381,9 +427,9 @@ fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                 let value = uqa_sql::expr::datums::read_with_value_catalog_and_control(
                     datum,
                     output.enum_catalog(),
-                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                    control,
                 )?;
-                return encode_value(&value, output);
+                return encode_value_with_control(&value, output, control);
             }
             output.push_byte(16)?;
             output.extend_bytes(&datum.type_oid().to_be_bytes())?;
@@ -401,8 +447,8 @@ fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             let text = output::NumberText::new(*value)?;
             encode_bytes(text.as_bytes(), output)
         }
-        Value::Float(value) => encode_float_numeric(*value, output),
-        Value::Decimal(value) => encode_decimal_numeric(value, output),
+        Value::Float(value) => encode_float_numeric(*value, output, control),
+        Value::Decimal(value) => encode_decimal_numeric(value, output, control),
         Value::Str(value) => {
             output.push_byte(2)?;
             encode_bytes(value.as_bytes(), output)
@@ -425,7 +471,7 @@ fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             output.push_byte(8)?;
             encode_bytes(value.as_bytes(), output)
         }
-        Value::JsonB(value) => output::encode_jsonb(value, output),
+        Value::JsonB(value) => output::encode_jsonb(value, output, control),
         Value::LegacyVector(vector) => encode_legacy_vector(vector, output),
         // Equal enum values share their type OID and immutable label key; both components are framed, so distinct values never share an encoding.
         Value::Enum(value) => {
@@ -450,7 +496,11 @@ fn encode_legacy_vector(
     vector.write_comparison_key(|bytes| output.extend_bytes(bytes))
 }
 
-fn encode_decimal_numeric(value: &DecimalValue, output: &mut impl KeyOutput) -> ExecResult<()> {
+fn encode_decimal_numeric(
+    value: &DecimalValue,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
     if value.is_nan() {
         output.extend_bytes(&[1, 1])?;
     } else if value.is_negative_infinity() {
@@ -459,19 +509,19 @@ fn encode_decimal_numeric(value: &DecimalValue, output: &mut impl KeyOutput) -> 
         output.extend_bytes(&[1, 3])?;
     } else {
         output.extend_bytes(&[1, 0])?;
-        if let Some(control) = output.control() {
-            let text = value
-                .to_canonical_string_budgeted(control.memory(), control.cancellation())
-                .map_err(output::resource_error)?;
-            encode_bytes(text.as_bytes(), output)?;
-        } else {
-            encode_bytes(value.to_canonical_string().as_bytes(), output)?;
-        }
+        let text = value
+            .to_canonical_string_with_control(control)
+            .map_err(output::resource_error)?;
+        encode_bytes(text.as_bytes(), output)?;
     }
     Ok(())
 }
 
-fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<()> {
+fn encode_float_numeric(
+    value: f64,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
     if value.is_nan() {
         // PostgreSQL groups all NaN values together for DISTINCT.
         output.extend_bytes(&[1, 1])?;
@@ -482,22 +532,15 @@ fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<(
     } else if output.legacy_numeric_reservation() {
         // Keep the predecessor's opaque lock address alongside the exact key while older and newer processes share a database. This alias is never used for equality or ordering.
         if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
-            encode_decimal_numeric(&decimal, output)?;
+            encode_decimal_numeric(&decimal, output, control)?;
         } else {
             output.extend_bytes(&[1, 4])?;
             output.extend_bytes(&value.to_bits().to_be_bytes())?;
         }
-    } else if let Some(control) = output.control() {
-        let production = uqa_core::memory::ProductionControl::new(
-            control.memory(),
-            control.cancellation(),
-            control.cancellation(),
-        );
-        let decimal = DecimalValue::from_f64_exact_with_control(value, &production)
-            .map_err(output::resource_error)?;
-        encode_decimal_numeric(&decimal, output)?;
     } else {
-        encode_decimal_numeric(&DecimalValue::from_f64_exact(value), output)?;
+        let decimal = DecimalValue::from_f64_exact_with_control(value, control)
+            .map_err(output::resource_error)?;
+        encode_decimal_numeric(&decimal, output, control)?;
     }
     Ok(())
 }
@@ -539,3 +582,6 @@ mod declared_ranges;
 
 #[cfg(test)]
 mod temporal_tests;
+
+#[cfg(test)]
+mod production_tests;
