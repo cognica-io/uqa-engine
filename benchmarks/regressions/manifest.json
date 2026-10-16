@@ -9469,8 +9469,8 @@
       ],
       "source": "crates/uqa-core/src/types/bit_string/tests.rs",
       "capability": "Bounded packed bit-string ownership",
-      "workload": "Packed copies at exact and insufficient byte allowances, malformed admitted input and either cancellation owner.",
-      "invariant": "Copies reserve packed bytes before allocation; errors release reservations and cancellation remains owned by both callers."
+      "workload": "Packed copies at exact and insufficient payload-plus-header allowances, malformed admitted input and either cancellation owner.",
+      "invariant": "Copies reserve packed bytes and their indirect header before allocation; errors release reservations and cancellation remains owned by both callers."
     },
     {
       "package": "uqa-sql",
@@ -9495,7 +9495,7 @@
       ],
       "source": "crates/uqa-sql/src/expr/bit_string/tests.rs",
       "capability": "Packed bit-string conversion allowances",
-      "workload": "Parse 32,776 bits with 4,097 admitted bytes, exercise exact and insufficient allowances, truncate and pad across byte boundaries, and reject oversized integer expansion.",
+      "workload": "Parse 32,776 bits with 4,097 packed bytes plus their owned header, exercise exact and insufficient allowances, truncate and pad across byte boundaries, and reject oversized integer expansion.",
       "invariant": "Packed input and conversions admit bytes before allocation, preserve canonical tail padding and the borrowed source, and keep output under its original allowance."
     },
     {
@@ -9573,8 +9573,8 @@
       ],
       "source": "crates/uqa-sql/src/expr/datums/tests/bit_string.rs",
       "capability": "Physical bit retention",
-      "workload": "Both physical OIDs, exact two-byte allowance, short allowance and truncated/malformed owners.",
-      "invariant": "Reads retain only packed bytes, reject out-of-bounds values with XX001 and release failed allocations."
+      "workload": "Both physical OIDs, an exact two-byte payload plus its owned header, a short allowance and truncated/malformed owners.",
+      "invariant": "Reads retain packed bytes and their indirect header, reject out-of-bounds values with XX001 and release failed allocations."
     },
     {
       "package": "uqa-execution",
@@ -9724,6 +9724,84 @@
       "capability": "Default B-tree declaration and retention",
       "workload": "58 independent PostgreSQL cases for constraints, column/expression indexes, included values, type changes, diagnostic ordering, savepoints and three fresh-connection observations on four providers.",
       "invariant": "Invalid keys publish no index or partial schema change; admitted generic and included values retain their catalog definitions and rows after actual persistent reopen."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "dynamic_value_keeps_variable_width_payloads_indirect",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/tests.rs",
+      "capability": "Compact dynamic value layout",
+      "workload": "All variable-width carrier headers and the dynamic Value on the current target.",
+      "invariant": "Value remains at most four machine words; bit and enum metadata do not enlarge every value slot."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_adoption_transfers_capacity_and_admits_header_before_allocation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/bit_string/tests.rs",
+      "capability": "Packed payload transfer and metadata admission",
+      "workload": "Adopt a one-byte payload with spare capacity and reject an empty value when its header cannot be admitted.",
+      "invariant": "Packed bytes retain their original allocation; the complete owned payload is charged and rejected header construction allocates nothing."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "enum_copies_admit_indirect_metadata_before_allocation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/enum_value/tests.rs",
+      "capability": "Bounded enum metadata ownership",
+      "workload": "Copy enum values with absent, zero and maximum physical label OIDs at exact and insufficient allowances.",
+      "invariant": "Copies preserve physical identity, charge the label key and metadata and allocate nothing when admission fails."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_enum_production_retains_key_and_indirect_metadata",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/enums/tests.rs",
+      "capability": "Selected enum production ownership",
+      "workload": "Produce a selected catalog label at exact and short allowances and with either cancellation owner.",
+      "invariant": "Production admits and retains the full key and metadata, preserving values and typed memory/cancellation failures."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "typed_compact_carriers_retain_indirect_metadata_and_release_failed_reads",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/document_store/controlled/tests.rs",
+      "capability": "Typed compact carrier read ownership",
+      "workload": "Decode empty and partial-bit values and enum values with and without physical OIDs, including insufficient allowance.",
+      "invariant": "Persisted representation and physical identity survive; the complete output allocation remains charged and failed reads release all reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_casts_admit_selected_payloads_and_preserve_lazy_physical_inputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/enums/tests.rs",
+      "capability": "Enum cast payload admission",
+      "workload": "Text input, native enum identity, unread invalid physical addresses and NULL at exact and insufficient allowances.",
+      "invariant": "Selected enum input admits its key and header before construction; identity casts preserve unread physical state and every failed cast releases its allowance."
     }
   ]
 }

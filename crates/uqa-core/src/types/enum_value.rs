@@ -176,8 +176,14 @@ pub enum EnumLabelKeyParseError {
 /// different enum types; the order sorts them by type OID only so that
 /// internal ordered containers remain total.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(transparent)]
 pub struct EnumValue {
+    storage: Box<EnumStorage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename = "EnumValue", deny_unknown_fields)]
+struct EnumStorage {
     type_oid: u32,
     key: EnumLabelKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -187,39 +193,46 @@ pub struct EnumValue {
 impl EnumValue {
     pub fn new(type_oid: u32, key: EnumLabelKey) -> Self {
         Self {
-            type_oid,
-            key,
-            label_oid: None,
+            storage: Box::new(EnumStorage {
+                type_oid,
+                key,
+                label_oid: None,
+            }),
         }
     }
 
     pub fn type_oid(&self) -> u32 {
-        self.type_oid
+        self.storage.type_oid
     }
 
     pub fn key(&self) -> &EnumLabelKey {
-        &self.key
+        &self.storage.key
     }
 
     /// Opaque physical label identity supplied by SQL, independent of the native order key.
     pub fn label_oid(&self) -> Option<u32> {
-        self.label_oid
+        self.storage.label_oid
     }
 
     pub fn with_label_oid(mut self, oid: Option<u32>) -> Self {
-        self.label_oid = oid;
+        self.storage.label_oid = oid;
         self
     }
 
-    /// Heap bytes owned by this value beyond its inline layout.
+    /// Reserve this boxed header before constructing a value from a separately admitted label key.
+    pub const fn retained_header_bytes() -> usize {
+        size_of::<EnumStorage>()
+    }
+
+    /// Heap bytes owned by this value, including its indirect metadata.
     pub fn retained_bytes(&self) -> usize {
-        self.key.0.len()
+        Self::retained_header_bytes() + self.key().0.len()
     }
 }
 
 impl PartialEq for EnumValue {
     fn eq(&self, other: &Self) -> bool {
-        self.type_oid == other.type_oid && self.key == other.key
+        self.type_oid() == other.type_oid() && self.key() == other.key()
     }
 }
 
@@ -233,16 +246,16 @@ impl PartialOrd for EnumValue {
 
 impl Ord for EnumValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.type_oid
-            .cmp(&other.type_oid)
-            .then_with(|| self.key.cmp(&other.key))
+        self.type_oid()
+            .cmp(&other.type_oid())
+            .then_with(|| self.key().cmp(other.key()))
     }
 }
 
 impl Hash for EnumValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.type_oid.hash(state);
-        self.key.hash(state);
+        self.type_oid().hash(state);
+        self.key().hash(state);
     }
 }
 

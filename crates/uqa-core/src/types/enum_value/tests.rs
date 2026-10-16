@@ -11,6 +11,7 @@ fn physical_label_identity_keeps_native_equality_order_and_hash() {
     let base = EnumValue::new(16_500, EnumLabelKey::from_bytes(vec![64]).unwrap());
     let labels = [
         base.clone(),
+        base.clone().with_label_oid(Some(0)),
         base.clone().with_label_oid(Some(16_502)),
         base.clone().with_label_oid(Some(u32::MAX)),
     ];
@@ -28,11 +29,44 @@ fn physical_label_identity_keeps_native_equality_order_and_hash() {
         assert_eq!(restored.label_oid(), label.label_oid());
     }
     let plain = crate::Value::Enum(base);
-    let physical = crate::Value::Enum(labels[1].clone());
+    let physical = crate::Value::Enum(labels[2].clone());
     assert_eq!(plain, physical);
     assert!(!plain.has_same_representation(&physical));
-    assert!(!physical.has_same_representation(&crate::Value::Enum(labels[2].clone())));
+    assert!(!physical.has_same_representation(&crate::Value::Enum(labels[3].clone())));
     assert!(physical.has_same_representation(&physical.clone()));
+}
+
+#[test]
+fn enum_copies_admit_indirect_metadata_before_allocation() {
+    use crate::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken, Value,
+    };
+
+    let token = CancellationToken::new();
+    for label_oid in [None, Some(0), Some(u32::MAX)] {
+        let label = EnumValue::new(16_500, EnumLabelKey::from_bytes(vec![64]).unwrap())
+            .with_label_oid(label_oid);
+        let retained = EnumValue::retained_header_bytes() + label.key().as_bytes().len();
+        assert_eq!(label.retained_bytes(), retained);
+        let value = Value::Enum(label);
+        let budget = MemoryBudget::new(retained);
+        let control = ProductionControl::new(&budget, &token, &token);
+        let copy = control.copy_value(&value).unwrap();
+        assert!(copy.has_same_representation(&value));
+        assert_eq!(copy.reserved_bytes(), retained);
+        assert_eq!(budget.used(), retained);
+        drop(copy);
+        assert_eq!(budget.used(), 0);
+
+        let small = MemoryBudget::new(retained - 1);
+        let control = ProductionControl::new(&small, &token, &token);
+        let allocations = allocation_counter::measure(|| {
+            assert!(control.copy_value(&value).is_err());
+        });
+        assert_eq!(allocations.count_total, 0);
+        assert_eq!(small.used(), 0);
+    }
 }
 
 fn assert_strictly_increasing(keys: &[EnumLabelKey]) {
@@ -211,5 +245,5 @@ fn enum_values_order_by_type_then_label_key() {
     assert!(low < high);
     assert!(high < other);
     assert_eq!(low, EnumValue::new(10, keys[0].clone()));
-    assert_eq!(low.retained_bytes(), 1);
+    assert_eq!(low.retained_bytes(), EnumValue::retained_header_bytes() + 1);
 }

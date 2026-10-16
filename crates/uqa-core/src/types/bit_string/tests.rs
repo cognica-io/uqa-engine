@@ -86,15 +86,16 @@ fn bit_string_copy_and_adoption_preserve_allowance_and_cancellation_owners() {
     let value = packed(&"10101010".repeat(4097));
     let original = CancellationToken::new();
     let invoking = CancellationToken::new();
-    let budget = MemoryBudget::new(value.as_bytes().len());
+    let retained = BitStringValue::retained_header_bytes() + value.as_bytes().len();
+    let budget = MemoryBudget::new(retained);
     let control = ProductionControl::new(&budget, &original, &invoking);
     let copy = value.clone_with_control(&control).unwrap();
     assert_eq!(*copy, value);
-    assert_eq!(copy.reserved_bytes(), value.as_bytes().len());
+    assert_eq!(copy.reserved_bytes(), retained);
     drop(copy);
     assert_eq!(budget.used(), 0);
 
-    let tiny = MemoryBudget::new(value.as_bytes().len() - 1);
+    let tiny = MemoryBudget::new(retained - 1);
     let limited = ProductionControl::new(&tiny, &original, &invoking);
     assert!(value.clone_with_control(&limited).is_err());
     assert_eq!(tiny.used(), 0);
@@ -121,4 +122,36 @@ fn bit_string_copy_and_adoption_preserve_allowance_and_cancellation_owners() {
         assert!(value.cmp_with_control(&value, &control).is_err());
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn bit_string_adoption_transfers_capacity_and_admits_header_before_allocation() {
+    let token = CancellationToken::new();
+    let header = BitStringValue::retained_header_bytes();
+    let budget = MemoryBudget::new(header + 64);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut bytes = ProductionVec::new(control);
+    bytes.reserve(64).unwrap();
+    bytes.push_copy(0x80).unwrap();
+    let bytes = bytes.finish().unwrap();
+    let pointer = bytes.as_ptr();
+    let capacity = bytes.capacity();
+    let value = BitStringValue::try_from_packed_with_control(bytes, 1, &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(value.as_bytes().as_ptr(), pointer);
+    assert_eq!(value.retained_bytes(), header + capacity);
+    assert_eq!(value.reserved_bytes(), value.retained_bytes());
+    assert_eq!(budget.used(), value.retained_bytes());
+    drop(value);
+    assert_eq!(budget.used(), 0);
+
+    let small = MemoryBudget::new(header - 1);
+    let control = ProductionControl::new(&small, &token, &token);
+    let empty = ProductionVec::new(control).finish().unwrap();
+    let allocations = allocation_counter::measure(|| {
+        assert!(BitStringValue::try_from_packed_with_control(empty, 0, &control).is_err());
+    });
+    assert_eq!(allocations.count_total, 0);
+    assert_eq!(small.used(), 0);
 }

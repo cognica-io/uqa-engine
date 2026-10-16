@@ -15,8 +15,14 @@ use std::cmp::Ordering;
 
 /// Most-significant-bit-first bytes and their exact logical length. Unused low bits of the last byte are zero; no excess bytes are retained. SQL type identity and declared length constraints belong to SQL's type owner.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "SerializedBitString")]
+#[serde(transparent)]
 pub struct BitStringValue {
+    storage: Box<BitStringStorage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename = "BitStringValue", try_from = "SerializedBitString")]
+struct BitStringStorage {
     bytes: Vec<u8>,
     bit_len: u32,
 }
@@ -27,12 +33,17 @@ struct SerializedBitString {
     bit_len: u32,
 }
 
-impl TryFrom<SerializedBitString> for BitStringValue {
+impl TryFrom<SerializedBitString> for BitStringStorage {
     type Error = &'static str;
 
     fn try_from(value: SerializedBitString) -> Result<Self, Self::Error> {
-        Self::try_from_packed(value.bytes, value.bit_len)
-            .ok_or("invalid packed bit-string length or padding")
+        if !valid_packed(&value.bytes, value.bit_len) {
+            return Err("invalid packed bit-string length or padding");
+        }
+        Ok(Self {
+            bytes: value.bytes,
+            bit_len: value.bit_len,
+        })
     }
 }
 
@@ -42,7 +53,7 @@ impl BitStringValue {
         if !valid_packed(&bytes, bit_len) {
             return None;
         }
-        Some(Self { bytes, bit_len })
+        Some(Self::from_validated_parts(bytes, bit_len))
     }
 
     /// Transfer already-admitted packed bytes without copying; malformed representations release their original reservation.
@@ -55,30 +66,47 @@ impl BitStringValue {
         if !valid_packed(&bytes, bit_len) {
             return Ok(None);
         }
+        let header = control.reserve(Self::retained_header_bytes())?;
         let (bytes, memory) = bytes.into_parts();
-        control.finish(Self { bytes, bit_len }, memory).map(Some)
+        control
+            .finish(
+                Self::from_validated_parts(bytes, bit_len),
+                control.combine(memory, header),
+            )
+            .map(Some)
+    }
+
+    fn from_validated_parts(bytes: Vec<u8>, bit_len: u32) -> Self {
+        Self {
+            storage: Box::new(BitStringStorage { bytes, bit_len }),
+        }
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
+        &self.storage.bytes
     }
 
-    /// Heap bytes owned by the canonical packed payload, excluding its inline header.
+    /// Reserve this boxed header before transferring separately admitted packed bytes.
+    pub const fn retained_header_bytes() -> usize {
+        size_of::<BitStringStorage>()
+    }
+
+    /// Heap bytes owned by the packed payload and its indirect header.
     pub fn retained_bytes(&self) -> usize {
-        self.bytes.capacity()
+        Self::retained_header_bytes() + self.storage.bytes.capacity()
     }
 
     pub fn bit_len(&self) -> u32 {
-        self.bit_len
+        self.storage.bit_len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.bit_len == 0
+        self.bit_len() == 0
     }
 
     pub fn bit(&self, position: u32) -> Option<bool> {
-        (position < self.bit_len)
-            .then(|| self.bytes[position as usize / 8] & (0x80 >> (position % 8)) != 0)
+        (position < self.bit_len())
+            .then(|| self.as_bytes()[position as usize / 8] & (0x80 >> (position % 8)) != 0)
     }
 
     /// Copy packed bytes under the original allowance, checking both cancellation owners between bounded chunks.
@@ -88,20 +116,16 @@ impl BitStringValue {
     ) -> Result<Produced<Self>, ValueRetentionError> {
         control.check()?;
         let mut bytes = ProductionVec::new(*control);
-        bytes.reserve(self.bytes.len())?;
-        for chunk in self.bytes.chunks(4096) {
+        bytes.reserve(self.as_bytes().len())?;
+        for chunk in self.as_bytes().chunks(4096) {
             control.check()?;
             for byte in chunk {
                 bytes.push_copy(*byte)?;
             }
         }
-        let (bytes, memory) = bytes.finish()?.into_parts();
-        control.finish(
-            Self {
-                bytes,
-                bit_len: self.bit_len,
-            },
-            memory,
+        Ok(
+            Self::try_from_packed_with_control(bytes.finish()?, self.bit_len(), control)?
+                .expect("copy preserves canonical packed bits"),
         )
     }
 
@@ -112,14 +136,18 @@ impl BitStringValue {
         control: &ProductionControl<'_>,
     ) -> Result<Ordering, ValueRetentionError> {
         control.check()?;
-        for (left, right) in self.bytes.chunks(4096).zip(other.bytes.chunks(4096)) {
+        for (left, right) in self
+            .as_bytes()
+            .chunks(4096)
+            .zip(other.as_bytes().chunks(4096))
+        {
             control.check()?;
             let order = left.cmp(right);
             if !order.is_eq() {
                 return Ok(order);
             }
         }
-        Ok(self.bit_len.cmp(&other.bit_len))
+        Ok(self.bit_len().cmp(&other.bit_len()))
     }
 }
 
@@ -133,9 +161,9 @@ fn valid_packed(bytes: &[u8], bit_len: u32) -> bool {
 
 impl Ord for BitStringValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.bytes
-            .cmp(&other.bytes)
-            .then_with(|| self.bit_len.cmp(&other.bit_len))
+        self.as_bytes()
+            .cmp(other.as_bytes())
+            .then_with(|| self.bit_len().cmp(&other.bit_len()))
     }
 }
 

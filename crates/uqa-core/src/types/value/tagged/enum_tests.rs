@@ -17,9 +17,14 @@ fn label(type_oid: u32, key: &[u8]) -> Value {
 fn decode_controlled(text: &str) -> Result<Value, JsonReadError> {
     let memory = MemoryBudget::new(1 << 20);
     let cancellation = CancellationToken::new();
-    JsonValueDecoder::new(&memory, &cancellation)
-        .value(text)
-        .map(|value| value.into_parts().0)
+    let value = JsonValueDecoder::new(&memory, &cancellation).value(text)?;
+    assert_eq!(
+        memory.used(),
+        value
+            .retained_payload_bytes(&memory, &cancellation)
+            .unwrap()
+    );
+    Ok(value.into_parts().0)
 }
 
 fn physical_label(type_oid: u32, key: &[u8], oid: u32) -> Value {

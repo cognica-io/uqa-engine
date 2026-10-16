@@ -330,6 +330,7 @@ impl Copier<'_> {
                 Value::Bytes(bytes)
             }
             Value::BitString(value) => {
+                memory.grow(crate::BitStringValue::retained_header_bytes())?;
                 let (bytes, charge) = self.slice(value.as_bytes())?.into_parts();
                 memory.absorb(charge);
                 Value::BitString(
