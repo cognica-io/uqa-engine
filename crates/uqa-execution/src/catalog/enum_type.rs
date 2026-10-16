@@ -43,26 +43,10 @@ pub fn restore(
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &Arc<EnumRegistry>,
-    mut committed: Arc<EnumRegistry>,
+    committed: Arc<EnumRegistry>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> StorageBackendResult<Arc<EnumRegistry>> {
-    let names = current
-        .keys()
-        .chain(committed.keys())
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    for name in names {
-        let private = catalog.map_or(Ok(false), |catalog| {
-            catalog.metadata_has_private_changes(&records::FORMAT.key(&name))
-        })?;
-        if private {
-            if let Some(definition) = current.get(&name) {
-                Arc::make_mut(&mut committed).insert(name, definition.clone());
-            } else {
-                Arc::make_mut(&mut committed).remove(&name);
-            }
-        }
-    }
+    let committed = records::FORMAT.merge_private(catalog, current, committed)?;
     validate_enum_registry(&committed, roles).map_err(StorageBackendError::Other)?;
     Ok(committed)
 }

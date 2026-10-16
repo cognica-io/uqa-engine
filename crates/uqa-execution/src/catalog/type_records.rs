@@ -8,6 +8,7 @@
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 /// The metadata keys and format marker of one type form's catalog.
@@ -32,6 +33,32 @@ pub(crate) trait TypeRecord: Serialize + DeserializeOwned + Clone {
 }
 
 impl TypeRecordFormat {
+    /// Keep this transaction's changed definitions while incorporating independently committed names. The type owner validates the complete resulting registry before publication.
+    pub(crate) fn merge_private<T: TypeRecord>(
+        &self,
+        catalog: Option<&dyn CatalogFacade>,
+        current: &BTreeMap<String, T>,
+        mut committed: Arc<BTreeMap<String, T>>,
+    ) -> StorageBackendResult<Arc<BTreeMap<String, T>>> {
+        let names = current
+            .keys()
+            .chain(committed.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for name in names {
+            if catalog.map_or(Ok(false), |catalog| {
+                catalog.metadata_has_private_changes(&self.key(&name))
+            })? {
+                if let Some(definition) = current.get(&name) {
+                    Arc::make_mut(&mut committed).insert(name, definition.clone());
+                } else {
+                    Arc::make_mut(&mut committed).remove(&name);
+                }
+            }
+        }
+        Ok(committed)
+    }
+
     pub(crate) fn key(&self, name: &str) -> String {
         format!("{}{name}", self.prefix)
     }
