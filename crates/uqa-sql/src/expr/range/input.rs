@@ -58,7 +58,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn whitespace(&mut self, control: &ProductionControl<'_>) -> Result<()> {
-        while self.peek().is_some_and(input_whitespace) {
+        while self.peek().is_some_and(syntax_whitespace) {
             control.check()?;
             self.take();
         }
@@ -101,7 +101,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
-fn input_whitespace(character: char) -> bool {
+pub(super) fn syntax_whitespace(character: char) -> bool {
     matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{b}' | '\u{c}')
 }
 
@@ -274,7 +274,7 @@ impl<'a> MultirangeInput<'a> {
                 .cursor
                 .take()
                 .ok_or_else(|| malformed(self.cursor.text, true, "Unexpected end of input."))?;
-            if input_whitespace(character) {
+            if syntax_whitespace(character) {
                 continue;
             }
             quoting = match (quoting, character) {

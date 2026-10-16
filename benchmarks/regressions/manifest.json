@@ -10586,6 +10586,84 @@
       "capability": "Selected declared range comparison and equality keys",
       "workload": "Encode nested composite-bound multiranges with zero, exhausted and sufficient output budgets, then cancel the invoking owner.",
       "invariant": "Bound decoding, selected key support and output share the original allowance; failures retain 53200/57014 and release all reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_construction_matches_postgresql_input_effects_canonical_calls_and_output",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/construction/tests.rs",
+      "capability": "Selected range construction and canonical invocation",
+      "workload": "Construct fifty-three PostgreSQL range and multirange observations through selected forward/reverse, domain, text, numeric and canonical operations.",
+      "invariant": "Input order, canonical invocation counts, bound spelling and error fields match the independent reference; output holds only its admitted owner."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_range_constructors_skip_input_and_match_postgresql_null_bounds_and_flag_diagnostics",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/construction/tests.rs",
+      "capability": "Selected range construction and canonical invocation",
+      "workload": "Construct admitted typed endpoints and exercise explicit NULL/invalid flags through the real native scalar entry point.",
+      "invariant": "Typed construction does not repeat domain input; unbounded flags and SQLSTATE/message/detail/hint match PostgreSQL."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_canonical_replacement_preserves_quota_and_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/construction/tests/resources.rs",
+      "capability": "Selected range construction and canonical invocation",
+      "workload": "Replace allocated text endpoints under nine allowances; fail or cancel each producer during canonical invocation.",
+      "invariant": "Output is admitted before construction, input stays owned through the callback, and failure releases all temporary reservations without changing an earlier owner."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_range_empty_and_typed_members_do_not_repeat_input_or_canonical_calls",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/construction/tests/resources.rs",
+      "capability": "Selected range construction and canonical invocation",
+      "workload": "Normalize admitted adjacent members, then observe completed bounds and empty inputs.",
+      "invariant": "Empty input skips canonicalization; typed members invoke it only for their union, and later observation never repeats it."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_multirange_ordering_bounds_work_and_releases_comparison_failures",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/construction/tests/resources.rs",
+      "capability": "Selected range construction and canonical invocation",
+      "workload": "Sort and normalize 512 permuted adjacent ranges, injecting comparison failures after 1, 70 and 500 selected calls.",
+      "invariant": "The fixed workload stays within 32768 bound comparisons; failures propagate and release all owned sorting and member buffers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "repeated_range_union_releases_superseded_canonical_replacements",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/construction/tests/resources.rs",
+      "capability": "Selected range construction and canonical invocation",
+      "workload": "Normalize 64 equal ranges whose canonical callback allocates replacement text endpoints on every union.",
+      "invariant": "The output retains admitted input/member workspace and only the live canonical replacement; superseded replacement reservations do not accumulate."
     }
   ]
 }

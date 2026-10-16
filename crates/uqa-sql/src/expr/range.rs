@@ -14,6 +14,12 @@ use uqa_core::{
 };
 
 mod comparison;
+mod construction;
+pub use construction::{
+    multirange_from_ranges_with_operations, parse_multirange_with_operations,
+    parse_range_with_operations, range_bound_flags, range_from_bounds_with_operations,
+    RangeConstruction,
+};
 mod descriptor;
 pub use descriptor::RangeValueDescriptor;
 pub(crate) mod datum;
@@ -25,7 +31,7 @@ mod typed;
 pub(super) use production::{
     canonical_multirange_text_with_control, canonical_range_as_multirange_text_with_control,
     canonical_range_text_with_control, multirange_from_produced_ranges,
-    parse_multirange_with_control, parse_range_with_control,
+    parse_multirange_with_control, parse_range_with_control, range_from_values_with_control,
 };
 pub use typed::RangeComparisonValue;
 

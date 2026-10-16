@@ -89,7 +89,7 @@ fn controlled_range_constructors_preserve_null_bounds_flags_variadic_arrays_and_
     )
     .unwrap()
     .unwrap_err();
-    assert_eq!(invalid.sqlstate(), Some("22000"));
+    assert_eq!(invalid.sqlstate(), Some("42601"));
     assert_eq!(memory.used(), 0);
 }
 
