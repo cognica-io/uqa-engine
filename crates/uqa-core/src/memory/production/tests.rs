@@ -179,6 +179,13 @@ fn produced_copy_slots_can_change_without_changing_container_ownership() {
     let mut values = ProductionVec::new(control);
     values.push_copy(1_usize).unwrap();
     values.push_copy(2_usize).unwrap();
+    let builder_memory = budget.used();
+    let builder_pointer = values.as_ptr();
+    values.as_mut_slice().swap(0, 1);
+    assert_eq!(&*values, &[2, 1]);
+    assert_eq!(values.as_ptr(), builder_pointer);
+    assert_eq!(budget.used(), builder_memory);
+    values.as_mut_slice().swap(0, 1);
     let mut values = values.finish().unwrap();
     let memory = values.reserved_bytes();
     let pointer = values.as_ptr();

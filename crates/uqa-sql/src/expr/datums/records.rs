@@ -50,8 +50,7 @@ pub(super) fn read(
     for byte in header.to_le_bytes().iter().chain(bytes) {
         backing.push_copy(*byte)?;
     }
-    let (backing, backing_memory) = backing.finish()?.into_parts();
-    let backing = DatumValue::new(type_oid, 0, backing);
+    let backing = DatumValue::with_control(type_oid, 0, backing.finish()?, control)?;
     let mut fields = ProductionVec::new(*control);
     fields.reserve(descriptor.attributes.len())?;
     let mut live = descriptor.attributes.iter().peekable();
@@ -80,7 +79,7 @@ pub(super) fn read(
                 return Err(corrupt("record descriptor is missing a physical attribute"));
             };
             if length != -1 || backing.bytes().get(offset) == Some(&0) {
-                offset = super::arrays::align(offset, alignment)?;
+                offset = super::inline::align(offset, alignment)?;
             }
             if let Some(attribute) = attribute {
                 let mut ty = &attribute.ty;
@@ -117,7 +116,7 @@ pub(super) fn read(
     let (fields, memory) =
         uqa_core::RecordValue::with_control(fields.finish()?, Some(type_oid), control)?
             .into_parts();
-    drop(backing_memory);
+    drop(backing);
     Ok(control.finish(Value::Record(fields), memory)?)
 }
 

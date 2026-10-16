@@ -18,6 +18,7 @@ mod values;
 pub use values::constant_with_source as constant;
 pub(crate) use values::numeric::{
     decode_with_control as decode_numeric_datum_with_control, encode as encode_numeric_datum,
+    encode_with_control as encode_numeric_datum_with_control,
 };
 pub(crate) use values::temporal::{
     decode as decode_temporal_datum, encode as encode_temporal_datum,

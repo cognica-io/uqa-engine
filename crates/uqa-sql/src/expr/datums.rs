@@ -16,6 +16,7 @@ mod arrays;
 mod bit_string;
 mod compression;
 mod fixed;
+pub(in crate::expr) mod inline;
 mod malformed;
 mod records;
 

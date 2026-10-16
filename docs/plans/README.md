@@ -1,5 +1,7 @@
 # Implementation plans
 
+[PR #931](https://github.com/cognica-io/uqa-engine/pull/931) merged as `e337ac6de`, closing #929/#930/#932. Corrected source `039f5844d` passed [automatic run 38892329266](https://github.com/cognica-io/uqa-engine/actions/runs/38892329266): actual Linux and macOS reports each select 752 checks / 1,141 cases with no failures, errors or skips and eight successful independent-process histories. Their tested merge and delivered source share tree `c10e668a78d9de2a0f7e2db704d5f05a6eae59d5`; all manifest and selected-source hashes match. This verifies bounded work, memory, output and process correctness without a timing claim. The focused typed-endpoint successor passes 145 local checks; its automatic acceptance and the remaining record-65 boundaries are still open.
+
 Files in this directory record staged implementation work. A living plan must describe the current repository boundary and remaining work, while a completed plan remains historical evidence unless its contract itself changes. Update this index in the same change whenever a plan's lifecycle or remaining acceptance gates change; link completed work to its merged implementation and preserve any unverified qualification boundary.
 
 | Plan | Lifecycle | Update rule |

@@ -10165,6 +10165,149 @@
       "capability": "Physical range equality consumers",
       "workload": "54 physical range and multirange fields matched against admitted values through exact keys, hashes and actual disk spill under small and large budgets.",
       "invariant": "Physical and admitted fields share SQL equality classes and keys, preserving duplicate elimination and reservation release on success and failure."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "produced_copy_slots_can_change_without_changing_container_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/memory/production/tests.rs",
+      "capability": "Admitted mutable scratch slots",
+      "workload": "Edit Copy slots before and after producer finalization under one existing allowance.",
+      "invariant": "Mutation retains allocation identity, capacity and reservation; the returned slice cannot grow or introduce owned payloads."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "numeric_datum_production_releases_scratch_and_checks_both_cancellations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/values/numeric/tests.rs",
+      "capability": "Numeric physical production ownership",
+      "workload": "Encode finite, scaled, zero and special decimals, including an 8,192-digit coefficient and long fractional scale.",
+      "invariant": "Scratch and output share the caller allowance; completed bytes retain only output capacity and quota or either cancellation releases all leases."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datum_producers_admit_scratch_and_preserve_postgresql_bytes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Range physical production ownership",
+      "workload": "Encode 54 independent PostgreSQL range and multirange payloads under adequate, exhausted and cancelled producer allowances.",
+      "invariant": "Exact native payload bytes are unchanged; parsing, numeric scratch, output growth and handoff retain their original owner without leaking failed reservations."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_datum_production_transfers_bytes_and_reserves_its_shared_header",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/datum.rs",
+      "capability": "Typed physical value ownership",
+      "workload": "Transfer physical bytes with valid and unread offsets under sufficient and exhausted allowances.",
+      "invariant": "The shared header is admitted before allocation; handoff preserves byte pointer, physical identity and the exact retained reservation."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_datum_failure_releases_owned_bytes_and_honors_both_cancellations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/datum.rs",
+      "capability": "Typed physical value ownership",
+      "workload": "Fail the retained-header reservation and cancel each original/invoking producer.",
+      "invariant": "Every failure drops the owned byte allocation and releases all charged memory without publishing a value."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_range_endpoints_preserve_postgresql_typed_values_without_repeating_input",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests.rs",
+      "capability": "Typed range endpoint observation",
+      "workload": "Read ten endpoints from independent PostgreSQL enum, domain, text, array and composite range constants; rename an enum label before observing the retained value.",
+      "invariant": "Physical identity, current output and nested fields match PostgreSQL; deformation does not call enum input or label observation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_endpoint_failures_release_memory_and_observe_both_cancellation_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/inline/tests.rs",
+      "capability": "Typed range endpoint observation",
+      "workload": "Truncate every first endpoint at each byte; test zero allowances and both cancellation owners.",
+      "invariant": "Bounded reads reject truncated storage, allocating endpoints require admission, inline scalar endpoints require no heap, and failures release all reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_array_layouts_keep_identity_nulls_and_deferred_fields",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/catalog_arrays.rs",
+      "capability": "Physical array observation",
+      "workload": "Decode independent PostgreSQL enum, domain and composite array payloads.",
+      "invariant": "Preserve element identity, dimensions, nulls, deferred tuple fields and exact retained memory ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_array_properties_do_not_resolve_or_materialize_elements",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/catalog_arrays.rs",
+      "capability": "Physical array observation",
+      "workload": "Observe shape and null short-circuits without a resolving enum catalog or memory allowance.",
+      "invariant": "Shape observations never decode or materialize elements."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_array_failures_release_memory_and_honor_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/catalog_arrays.rs",
+      "capability": "Physical array observation",
+      "workload": "Exercise truncated enum/domain/composite arrays, limited memory and cancellation.",
+      "invariant": "Invalid or cancelled reads return no value and release their original allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_domain_arrays_use_type_metadata_without_enum_capability",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/catalog_arrays.rs",
+      "capability": "Physical array observation",
+      "workload": "Decode a domain array through an ordinary type-metadata adapter.",
+      "invariant": "Domain base layout is observed without requiring unrelated enum input capability."
     }
   ]
 }
