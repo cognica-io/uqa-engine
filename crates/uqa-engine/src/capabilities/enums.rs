@@ -79,6 +79,10 @@ impl EnumLabelCatalog for Engine {
         uqa_sql::expr::EngineHook::resolve_type_oid(self, oid).map_err(SQLError::Internal)
     }
 
+    fn value_type_exists(&self, oid: u32) -> Result<bool, SQLError> {
+        uqa_execution::catalog::projection::type_oid_exists(&self.catalog_execution(), oid)
+    }
+
     fn value_composite_type(
         &self,
         oid: u32,

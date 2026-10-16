@@ -160,6 +160,9 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
             | ColumnType::RefCursor,
         ) => varlena(value.as_bytes())?,
         (Value::Bytes(value), ColumnType::Bytea) => varlena(value)?,
+        (Value::Str(text), ColumnType::Range(_) | ColumnType::Multirange(_)) => {
+            varlena(&crate::expr::range_datum::encode(text, representation)?)?
+        }
         (Value::Str(value), ColumnType::Uuid) => crate::expr::parse_uuid_bytes(value)?.to_vec(),
         (Value::Json(value), ColumnType::Json) => varlena(value.as_bytes())?,
         (Value::JsonB(value), ColumnType::JsonB) => {
@@ -180,14 +183,13 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
             crate::expr::composites::retained::record_bytes(fields, reference.oid, descriptors)
                 .ok_or_else(|| invalid("composite constant has no retained tuple layout"))?
         }
-        (Value::Datum(_), ColumnType::Array(_) | ColumnType::Composite(_)) => {
-            let Value::Datum(owned) = crate::expr::datums::copy_constant_field(value, ty)? else {
-                return Err(SQLError::Internal(
-                    "physical catalog constant changed carrier".into(),
-                ));
-            };
-            owned.bytes().to_vec()
-        }
+        (
+            Value::Datum(_),
+            ColumnType::Array(_)
+            | ColumnType::Composite(_)
+            | ColumnType::Range(_)
+            | ColumnType::Multirange(_),
+        ) => retained_constant_bytes(value, ty)?,
         (Value::Decimal(value), ColumnType::Numeric { .. }) => varlena(&numeric::encode(value)?)?,
         (Value::Temporal(value), _) => temporal::encode(value, pg_type_oid(representation))?,
         _ => {
@@ -205,6 +207,15 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
         bytes.len()
     };
     Ok(Field::Datum { length, bytes })
+}
+
+fn retained_constant_bytes(value: &Value, ty: &ColumnType) -> Result<Vec<u8>, SQLError> {
+    let Value::Datum(owned) = crate::expr::datums::copy_constant_field(value, ty)? else {
+        return Err(SQLError::Internal(
+            "physical catalog constant changed carrier".into(),
+        ));
+    };
+    Ok(owned.bytes().to_vec())
 }
 
 pub(super) fn scalar_text(node: &Node) -> Result<String, SQLError> {
@@ -263,6 +274,10 @@ pub(super) fn catalog_text(
         .map_err(|_| invalid("invalid catalog constant type"))?;
     let ty = if let Some(element) = crate::catalog::type_metadata::builtin_array_element(oid) {
         ColumnType::Array(Box::new(element.clone()))
+    } else if let Some(ty @ (ColumnType::Range(_) | ColumnType::Multirange(_))) =
+        crate::catalog::type_metadata::builtin_scalar_type(oid)
+    {
+        ty.clone()
     } else if let Some(ty) = catalog
         .map(|catalog| catalog.value_type_by_oid(oid))
         .transpose()?

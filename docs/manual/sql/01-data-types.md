@@ -207,7 +207,9 @@ Discrete integer and date ranges canonicalize inclusive upper bounds and exclusi
 
 Record fields and array elements use the declared range subtype's comparison rather than the text spelling. Empty ranges precede nonempty ranges; nonempty ranges compare their lower bound and then their upper bound, including inclusivity. Multiranges compare their normalized members in order. Equal numeric bounds with different decimal scales remain equal in record/array comparisons, grouping, joins, recursive UNION/CYCLE, IN membership, UNIQUE reservations and foreign-key actions. SQL spill keys preserve those equality classes. Concurrent writers must all use the corrected reservation implementation; predecessor reservation addresses preserve existing physical-key coordination but cannot supply missing semantics to an older writer.
 
-This implemented surface is limited to PostgreSQL's six built-in range families and text-form values. User-defined range types, binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
+Built-in range and multirange DEFAULT values, including array and composite fields, retain PostgreSQL catalog Datum representation and `pg_get_expr` output through persistent reopening. Reading an admitted physical field preserves its original bounds and payload type identity without rerunning type input or canonicalization. Selected comparison, grouping, joins and spill keys continue to observe those bounds after a composite attribute type changes. A missing payload type OID reports `42704`; an existing type of the wrong range/multirange kind or incompatible physical range families report PostgreSQL's `XX000` diagnostic. Quota failure (`53200`), cancellation (`57014`) and malformed owned bytes (`XX001`) retain the existing physical-read contract.
+
+This implemented surface is limited to PostgreSQL's six built-in range families. User-defined range types, wire-protocol binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
 
 ## Enum types
 

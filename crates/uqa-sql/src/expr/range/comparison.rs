@@ -20,7 +20,10 @@ impl CanonicalRange {
     ) -> Result<Ordering> {
         control.check()?;
         if self.subtype != other.subtype {
-            return Err(SQLError::Internal("range types do not match".into()));
+            return Err(SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: "range types do not match".into(),
+            });
         }
         match (self.empty, other.empty) {
             (true, true) => return Ok(Ordering::Equal),
@@ -53,7 +56,10 @@ impl CanonicalMultirange {
     ) -> Result<Ordering> {
         control.check()?;
         if self.subtype != other.subtype {
-            return Err(SQLError::Internal("multirange types do not match".into()));
+            return Err(SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: "multirange types do not match".into(),
+            });
         }
         for (left, right) in self.ranges.iter().zip(&other.ranges) {
             let order = left.cmp_with_control(right, control)?;

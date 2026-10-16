@@ -30,6 +30,7 @@ mod json;
 mod json_strip;
 mod random;
 mod range;
+pub(crate) use range::datum as range_datum;
 mod regex;
 mod time;
 mod uuid;

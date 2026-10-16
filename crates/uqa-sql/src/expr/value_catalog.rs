@@ -21,6 +21,11 @@ pub trait SQLValueCatalog {
         Ok(None)
     }
 
+    /// Whether an admitted physical OID names any current catalog type, including pseudo-types without a value carrier. This lookup does not check input privileges or execute type input.
+    fn value_type_exists(&self, oid: u32) -> Result<bool> {
+        Ok(self.value_type_by_oid(oid)?.is_some())
+    }
+
     /// Current SQL spelling of an admitted catalog OID alias; `None` retains numeric output.
     fn value_regtype_output(&self, _ty: &crate::ColumnType, _oid: i64) -> Result<Option<String>> {
         Ok(None)
@@ -75,6 +80,12 @@ impl SQLValueCatalog for EngineValueCatalog<'_> {
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<crate::ColumnType>> {
         self.0
             .resolve_type_oid(oid)
+            .map_err(crate::SQLError::Internal)
+    }
+
+    fn value_type_exists(&self, oid: u32) -> Result<bool> {
+        self.0
+            .type_oid_exists(oid)
             .map_err(crate::SQLError::Internal)
     }
 

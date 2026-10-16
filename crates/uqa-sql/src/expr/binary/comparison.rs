@@ -774,7 +774,13 @@ fn compare_declared_range(
         return Ok(None);
     };
     // Ordinary text retains text order. A range identity comes from the selected record field or array element, never from the spelling of its value.
-    if !matches!((left, right), (Value::Str(_), Value::Str(_))) {
+    if !matches!(
+        (left, right),
+        (
+            Value::Str(_) | Value::Datum(_),
+            Value::Str(_) | Value::Datum(_)
+        )
+    ) {
         return Ok(None);
     }
     use crate::expr::range::RangeComparisonValue;

@@ -10068,6 +10068,103 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datums_match_postgresql_bytes_output_and_catalog_deparse",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Native range catalog Datum agreement",
+      "workload": "66 independent PostgreSQL range, multirange and array constants, including numeric packing, offsets, infinity and empty values.",
+      "invariant": "Encoded bytes, physical reads, copied constants and both catalog deparse modes preserve the independently captured PostgreSQL output."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datum_reads_preserve_the_original_allowance_and_both_cancellations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Native range Datum ownership",
+      "workload": "Read all 66 physical constants with sufficient and zero-byte allowances and each cancellation scope.",
+      "invariant": "Output retains its complete reservation; partial reads, quota failures and cancellation release every allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datums_reject_truncated_payloads_flags_offsets_and_type_mismatches",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Native range physical bounds",
+      "workload": "Truncate each standalone native constant and corrupt its type, flags, multirange count or offset.",
+      "invariant": "Owned bounds are checked before observation; invalid lengths and offsets cannot be used as allocation or traversal sizes."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_range_catalog_defaults_match_postgresql_after_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
+      "capability": "Native range default catalog persistence",
+      "workload": "24 independent range, multirange and nullable-array defaults on all four providers and actual persistent close/reopen.",
+      "invariant": "Catalog node bytes, pg_get_expr and stored DEFAULT values match PostgreSQL before and after reopening."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "native_range_retained_consumers_match_postgresql_after_reopen",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_datums.rs",
+      "capability": "Native range retained consumer persistence",
+      "workload": "97 independent PostgreSQL statements covering composite fields, nested arrays, DEFAULT/CHECK catalog output, constraint rejection, prepared output, retained field type changes, selected comparison and grouping, rollback and twelve reopen observations; absent payload OIDs retain 42704 while existing wrong-kind types retain XX000 through output and comparison.",
+      "invariant": "Already admitted fields preserve physical range identity, selected comparison and catalog output through each state transition without changing database format."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_physical_comparison_retains_selected_bounds_and_original_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Physical range comparison ownership",
+      "workload": "54 independently captured native range and multirange Datums compared with admitted values directly and inside selected record fields, including quota failure and cancellation.",
+      "invariant": "Typed physical readers preserve endpoint identity without replaying input; comparison retains the original allowance and releases all reservations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_range_fields_share_sql_hash_exact_and_spill_keys_with_admitted_values",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
+      "capability": "Physical range equality consumers",
+      "workload": "54 physical range and multirange fields matched against admitted values through exact keys, hashes and actual disk spill under small and large budgets.",
+      "invariant": "Physical and admitted fields share SQL equality classes and keys, preserving duplicate elimination and reservation release on success and failure."
     }
   ]
 }

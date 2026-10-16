@@ -1,0 +1,671 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "source": "Docker PostgreSQL 18.4, fresh disposable database, pg_attrdef.adbin and pg_get_expr; little-endian 64-bit host",
+    "image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "raw_sha256": "aed032a601e561ccaafd00b717bd3879543f237304d9413796aa5009fa7d4e2e"
+  },
+  "cases": [
+    {
+      "id": "int4range_bounded",
+      "type": "int4range",
+      "input": "[1,3)",
+      "oid": 3904,
+      "node": "{CONST :consttype 3904 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 17 [ 68 0 0 0 64 15 0 0 1 0 0 0 3 0 0 0 2 ]}",
+      "sql": "'[1,3)'::int4range",
+      "pretty": "'[1,3)'::int4range",
+      "output": "[1,3)"
+    },
+    {
+      "id": "int4range_empty",
+      "type": "int4range",
+      "input": "empty",
+      "oid": 3904,
+      "node": "{CONST :consttype 3904 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 64 15 0 0 1 ]}",
+      "sql": "'empty'::int4range",
+      "pretty": "'empty'::int4range",
+      "output": "empty"
+    },
+    {
+      "id": "int4range_unbounded",
+      "type": "int4range",
+      "input": "(,)",
+      "oid": 3904,
+      "node": "{CONST :consttype 3904 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 64 15 0 0 24 ]}",
+      "sql": "'(,)'::int4range",
+      "pretty": "'(,)'::int4range",
+      "output": "(,)"
+    },
+    {
+      "id": "int4range_edge",
+      "type": "int4range",
+      "input": "[2147483646,2147483647)",
+      "oid": 3904,
+      "node": "{CONST :consttype 3904 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 17 [ 68 0 0 0 64 15 0 0 254 255 255 127 255 255 255 127 2 ]}",
+      "sql": "'[2147483646,2147483647)'::int4range",
+      "pretty": "'[2147483646,2147483647)'::int4range",
+      "output": "[2147483646,2147483647)"
+    },
+    {
+      "id": "int4multirange_bounded",
+      "type": "int4multirange",
+      "input": "{[5,8),[1,3)}",
+      "oid": 4451,
+      "node": "{CONST :consttype 4451 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 36 [ 144 0 0 0 99 17 0 0 2 0 0 0 8 0 0 0 2 2 0 0 1 0 0 0 3 0 0 0 5 0 0 0 8 0 0 0 ]}",
+      "sql": "'{[1,3),[5,8)}'::int4multirange",
+      "pretty": "'{[1,3),[5,8)}'::int4multirange",
+      "output": "{[1,3),[5,8)}"
+    },
+    {
+      "id": "int4multirange_empty",
+      "type": "int4multirange",
+      "input": "{}",
+      "oid": 4451,
+      "node": "{CONST :consttype 4451 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 99 17 0 0 0 0 0 0 ]}",
+      "sql": "'{}'::int4multirange",
+      "pretty": "'{}'::int4multirange",
+      "output": "{}"
+    },
+    {
+      "id": "int4multirange_unbounded",
+      "type": "int4multirange",
+      "input": "{(,)}",
+      "oid": 4451,
+      "node": "{CONST :consttype 4451 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 99 17 0 0 1 0 0 0 24 0 0 0 ]}",
+      "sql": "'{(,)}'::int4multirange",
+      "pretty": "'{(,)}'::int4multirange",
+      "output": "{(,)}"
+    },
+    {
+      "id": "int4multirange_edge",
+      "type": "int4multirange",
+      "input": "{[2147483646,2147483647)}",
+      "oid": 4451,
+      "node": "{CONST :consttype 4451 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 24 [ 96 0 0 0 99 17 0 0 1 0 0 0 2 0 0 0 254 255 255 127 255 255 255 127 ]}",
+      "sql": "'{[2147483646,2147483647)}'::int4multirange",
+      "pretty": "'{[2147483646,2147483647)}'::int4multirange",
+      "output": "{[2147483646,2147483647)}"
+    },
+    {
+      "id": "int4range_array_nullable",
+      "type": "int4range[]",
+      "input": "{\"[1,3)\",NULL,\"empty\"}",
+      "oid": 3905,
+      "node": "{CONST :consttype 3905 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 64 [ 0 1 0 0 1 0 0 0 32 0 0 0 64 15 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 68 0 0 0 64 15 0 0 1 0 0 0 3 0 0 0 2 0 0 0 36 0 0 0 64 15 0 0 1 0 0 0 ]}",
+      "sql": "'{\"[1,3)\",NULL,empty}'::int4range[]",
+      "pretty": "'{\"[1,3)\",NULL,empty}'::int4range[]",
+      "output": "{\"[1,3)\",NULL,empty}"
+    },
+    {
+      "id": "int4multirange_array_nullable",
+      "type": "int4multirange[]",
+      "input": "{\"{[1,3),[5,8)}\",NULL,\"{}\"}",
+      "oid": 6150,
+      "node": "{CONST :consttype 6150 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 80 [ 64 1 0 0 1 0 0 0 32 0 0 0 99 17 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 144 0 0 0 99 17 0 0 2 0 0 0 8 0 0 0 2 2 0 0 1 0 0 0 3 0 0 0 5 0 0 0 8 0 0 0 48 0 0 0 99 17 0 0 0 0 0 0 ]}",
+      "sql": "'{\"{[1,3),[5,8)}\",NULL,\"{}\"}'::int4multirange[]",
+      "pretty": "'{\"{[1,3),[5,8)}\",NULL,\"{}\"}'::int4multirange[]",
+      "output": "{\"{[1,3),[5,8)}\",NULL,\"{}\"}"
+    },
+    {
+      "id": "int8range_bounded",
+      "type": "int8range",
+      "input": "[1,3)",
+      "oid": 3926,
+      "node": "{CONST :consttype 3926 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 25 [ 100 0 0 0 86 15 0 0 1 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 2 ]}",
+      "sql": "'[1,3)'::int8range",
+      "pretty": "'[1,3)'::int8range",
+      "output": "[1,3)"
+    },
+    {
+      "id": "int8range_empty",
+      "type": "int8range",
+      "input": "empty",
+      "oid": 3926,
+      "node": "{CONST :consttype 3926 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 86 15 0 0 1 ]}",
+      "sql": "'empty'::int8range",
+      "pretty": "'empty'::int8range",
+      "output": "empty"
+    },
+    {
+      "id": "int8range_unbounded",
+      "type": "int8range",
+      "input": "(,)",
+      "oid": 3926,
+      "node": "{CONST :consttype 3926 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 86 15 0 0 24 ]}",
+      "sql": "'(,)'::int8range",
+      "pretty": "'(,)'::int8range",
+      "output": "(,)"
+    },
+    {
+      "id": "int8range_edge",
+      "type": "int8range",
+      "input": "[9223372036854775806,9223372036854775807)",
+      "oid": 3926,
+      "node": "{CONST :consttype 3926 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 25 [ 100 0 0 0 86 15 0 0 254 255 255 255 255 255 255 127 255 255 255 255 255 255 255 127 2 ]}",
+      "sql": "'[9223372036854775806,9223372036854775807)'::int8range",
+      "pretty": "'[9223372036854775806,9223372036854775807)'::int8range",
+      "output": "[9223372036854775806,9223372036854775807)"
+    },
+    {
+      "id": "int8multirange_bounded",
+      "type": "int8multirange",
+      "input": "{[5,8),[1,3)}",
+      "oid": 4536,
+      "node": "{CONST :consttype 4536 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 56 [ 224 0 0 0 184 17 0 0 2 0 0 0 16 0 0 0 2 2 0 0 0 0 0 0 1 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 8 0 0 0 0 0 0 0 ]}",
+      "sql": "'{[1,3),[5,8)}'::int8multirange",
+      "pretty": "'{[1,3),[5,8)}'::int8multirange",
+      "output": "{[1,3),[5,8)}"
+    },
+    {
+      "id": "int8multirange_empty",
+      "type": "int8multirange",
+      "input": "{}",
+      "oid": 4536,
+      "node": "{CONST :consttype 4536 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 184 17 0 0 0 0 0 0 0 0 0 0 ]}",
+      "sql": "'{}'::int8multirange",
+      "pretty": "'{}'::int8multirange",
+      "output": "{}"
+    },
+    {
+      "id": "int8multirange_unbounded",
+      "type": "int8multirange",
+      "input": "{(,)}",
+      "oid": 4536,
+      "node": "{CONST :consttype 4536 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 184 17 0 0 1 0 0 0 24 0 0 0 ]}",
+      "sql": "'{(,)}'::int8multirange",
+      "pretty": "'{(,)}'::int8multirange",
+      "output": "{(,)}"
+    },
+    {
+      "id": "int8multirange_edge",
+      "type": "int8multirange",
+      "input": "{[9223372036854775806,9223372036854775807)}",
+      "oid": 4536,
+      "node": "{CONST :consttype 4536 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 184 17 0 0 1 0 0 0 2 0 0 0 254 255 255 255 255 255 255 127 255 255 255 255 255 255 255 127 ]}",
+      "sql": "'{[9223372036854775806,9223372036854775807)}'::int8multirange",
+      "pretty": "'{[9223372036854775806,9223372036854775807)}'::int8multirange",
+      "output": "{[9223372036854775806,9223372036854775807)}"
+    },
+    {
+      "id": "int8range_array_nullable",
+      "type": "int8range[]",
+      "input": "{\"[1,3)\",NULL,\"empty\"}",
+      "oid": 3927,
+      "node": "{CONST :consttype 3927 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 80 [ 64 1 0 0 1 0 0 0 32 0 0 0 86 15 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 100 0 0 0 86 15 0 0 1 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 2 0 0 0 0 0 0 0 36 0 0 0 86 15 0 0 1 0 0 0 0 0 0 0 ]}",
+      "sql": "'{\"[1,3)\",NULL,empty}'::int8range[]",
+      "pretty": "'{\"[1,3)\",NULL,empty}'::int8range[]",
+      "output": "{\"[1,3)\",NULL,empty}"
+    },
+    {
+      "id": "int8multirange_array_nullable",
+      "type": "int8multirange[]",
+      "input": "{\"{[1,3),[5,8)}\",NULL,\"{}\"}",
+      "oid": 6157,
+      "node": "{CONST :consttype 6157 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 104 [ 160 1 0 0 1 0 0 0 32 0 0 0 184 17 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 224 0 0 0 184 17 0 0 2 0 0 0 16 0 0 0 2 2 0 0 0 0 0 0 1 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 8 0 0 0 0 0 0 0 64 0 0 0 184 17 0 0 0 0 0 0 0 0 0 0 ]}",
+      "sql": "'{\"{[1,3),[5,8)}\",NULL,\"{}\"}'::int8multirange[]",
+      "pretty": "'{\"{[1,3),[5,8)}\",NULL,\"{}\"}'::int8multirange[]",
+      "output": "{\"{[1,3),[5,8)}\",NULL,\"{}\"}"
+    },
+    {
+      "id": "numrange_bounded",
+      "type": "numrange",
+      "input": "[1.00,3.500]",
+      "oid": 3906,
+      "node": "{CONST :consttype 3906 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 21 [ 84 0 0 0 66 15 0 0 11 0 129 1 0 15 128 129 3 0 136 19 6 ]}",
+      "sql": "'[1.00,3.500]'::numrange",
+      "pretty": "'[1.00,3.500]'::numrange",
+      "output": "[1.00,3.500]"
+    },
+    {
+      "id": "numrange_empty",
+      "type": "numrange",
+      "input": "empty",
+      "oid": 3906,
+      "node": "{CONST :consttype 3906 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 66 15 0 0 1 ]}",
+      "sql": "'empty'::numrange",
+      "pretty": "'empty'::numrange",
+      "output": "empty"
+    },
+    {
+      "id": "numrange_unbounded",
+      "type": "numrange",
+      "input": "(,)",
+      "oid": 3906,
+      "node": "{CONST :consttype 3906 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 66 15 0 0 24 ]}",
+      "sql": "'(,)'::numrange",
+      "pretty": "'(,)'::numrange",
+      "output": "(,)"
+    },
+    {
+      "id": "numrange_edge",
+      "type": "numrange",
+      "input": "[-Infinity,NaN]",
+      "oid": 3906,
+      "node": "{CONST :consttype 3906 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 15 [ 60 0 0 0 66 15 0 0 7 0 240 7 0 192 6 ]}",
+      "sql": "'[-Infinity,NaN]'::numrange",
+      "pretty": "'[-Infinity,NaN]'::numrange",
+      "output": "[-Infinity,NaN]"
+    },
+    {
+      "id": "nummultirange_bounded",
+      "type": "nummultirange",
+      "input": "{(5.25,8.000),[1.00,3.500]}",
+      "oid": 4532,
+      "node": "{CONST :consttype 4532 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 44 [ 176 0 0 0 180 17 0 0 2 0 0 0 12 0 0 0 6 0 0 0 11 0 129 1 0 15 128 129 3 0 136 19 15 0 129 5 0 196 9 11 128 129 8 0 ]}",
+      "sql": "'{[1.00,3.500],(5.25,8.000)}'::nummultirange",
+      "pretty": "'{[1.00,3.500],(5.25,8.000)}'::nummultirange",
+      "output": "{[1.00,3.500],(5.25,8.000)}"
+    },
+    {
+      "id": "nummultirange_empty",
+      "type": "nummultirange",
+      "input": "{}",
+      "oid": 4532,
+      "node": "{CONST :consttype 4532 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 180 17 0 0 0 0 0 0 ]}",
+      "sql": "'{}'::nummultirange",
+      "pretty": "'{}'::nummultirange",
+      "output": "{}"
+    },
+    {
+      "id": "nummultirange_unbounded",
+      "type": "nummultirange",
+      "input": "{(,)}",
+      "oid": 4532,
+      "node": "{CONST :consttype 4532 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 180 17 0 0 1 0 0 0 24 0 0 0 ]}",
+      "sql": "'{(,)}'::nummultirange",
+      "pretty": "'{(,)}'::nummultirange",
+      "output": "{(,)}"
+    },
+    {
+      "id": "nummultirange_edge",
+      "type": "nummultirange",
+      "input": "{[-Infinity,NaN]}",
+      "oid": 4532,
+      "node": "{CONST :consttype 4532 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 24 [ 96 0 0 0 180 17 0 0 1 0 0 0 6 0 0 0 7 0 240 7 0 192 0 0 ]}",
+      "sql": "'{[-Infinity,NaN]}'::nummultirange",
+      "pretty": "'{[-Infinity,NaN]}'::nummultirange",
+      "output": "{[-Infinity,NaN]}"
+    },
+    {
+      "id": "numrange_array_nullable",
+      "type": "numrange[]",
+      "input": "{\"[1.00,3.500]\",NULL,\"empty\"}",
+      "oid": 3907,
+      "node": "{CONST :consttype 3907 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 68 [ 16 1 0 0 1 0 0 0 32 0 0 0 66 15 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 84 0 0 0 66 15 0 0 11 0 129 1 0 15 128 129 3 0 136 19 6 0 0 0 36 0 0 0 66 15 0 0 1 0 0 0 ]}",
+      "sql": "'{\"[1.00,3.500]\",NULL,empty}'::numrange[]",
+      "pretty": "'{\"[1.00,3.500]\",NULL,empty}'::numrange[]",
+      "output": "{\"[1.00,3.500]\",NULL,empty}"
+    },
+    {
+      "id": "nummultirange_array_nullable",
+      "type": "nummultirange[]",
+      "input": "{\"{[1.00,3.500],(5.25,8.000)}\",NULL,\"{}\"}",
+      "oid": 6151,
+      "node": "{CONST :consttype 6151 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 88 [ 96 1 0 0 1 0 0 0 32 0 0 0 180 17 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 176 0 0 0 180 17 0 0 2 0 0 0 12 0 0 0 6 0 0 0 11 0 129 1 0 15 128 129 3 0 136 19 15 0 129 5 0 196 9 11 128 129 8 0 48 0 0 0 180 17 0 0 0 0 0 0 ]}",
+      "sql": "'{\"{[1.00,3.500],(5.25,8.000)}\",NULL,\"{}\"}'::nummultirange[]",
+      "pretty": "'{\"{[1.00,3.500],(5.25,8.000)}\",NULL,\"{}\"}'::nummultirange[]",
+      "output": "{\"{[1.00,3.500],(5.25,8.000)}\",NULL,\"{}\"}"
+    },
+    {
+      "id": "daterange_bounded",
+      "type": "daterange",
+      "input": "[2000-01-01,2000-01-03)",
+      "oid": 3912,
+      "node": "{CONST :consttype 3912 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 17 [ 68 0 0 0 72 15 0 0 0 0 0 0 2 0 0 0 2 ]}",
+      "sql": "'[2000-01-01,2000-01-03)'::daterange",
+      "pretty": "'[2000-01-01,2000-01-03)'::daterange",
+      "output": "[2000-01-01,2000-01-03)"
+    },
+    {
+      "id": "daterange_empty",
+      "type": "daterange",
+      "input": "empty",
+      "oid": 3912,
+      "node": "{CONST :consttype 3912 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 72 15 0 0 1 ]}",
+      "sql": "'empty'::daterange",
+      "pretty": "'empty'::daterange",
+      "output": "empty"
+    },
+    {
+      "id": "daterange_unbounded",
+      "type": "daterange",
+      "input": "(,)",
+      "oid": 3912,
+      "node": "{CONST :consttype 3912 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 72 15 0 0 24 ]}",
+      "sql": "'(,)'::daterange",
+      "pretty": "'(,)'::daterange",
+      "output": "(,)"
+    },
+    {
+      "id": "daterange_edge",
+      "type": "daterange",
+      "input": "[-infinity,infinity]",
+      "oid": 3912,
+      "node": "{CONST :consttype 3912 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 17 [ 68 0 0 0 72 15 0 0 0 0 0 128 255 255 255 127 6 ]}",
+      "sql": "'[-infinity,infinity]'::daterange",
+      "pretty": "'[-infinity,infinity]'::daterange",
+      "output": "[-infinity,infinity]"
+    },
+    {
+      "id": "datemultirange_bounded",
+      "type": "datemultirange",
+      "input": "{[2000-01-05,2000-01-08),[2000-01-01,2000-01-03)}",
+      "oid": 4535,
+      "node": "{CONST :consttype 4535 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 36 [ 144 0 0 0 183 17 0 0 2 0 0 0 8 0 0 0 2 2 0 0 0 0 0 0 2 0 0 0 4 0 0 0 7 0 0 0 ]}",
+      "sql": "'{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}'::datemultirange",
+      "pretty": "'{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}'::datemultirange",
+      "output": "{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}"
+    },
+    {
+      "id": "datemultirange_empty",
+      "type": "datemultirange",
+      "input": "{}",
+      "oid": 4535,
+      "node": "{CONST :consttype 4535 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 183 17 0 0 0 0 0 0 ]}",
+      "sql": "'{}'::datemultirange",
+      "pretty": "'{}'::datemultirange",
+      "output": "{}"
+    },
+    {
+      "id": "datemultirange_unbounded",
+      "type": "datemultirange",
+      "input": "{(,)}",
+      "oid": 4535,
+      "node": "{CONST :consttype 4535 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 183 17 0 0 1 0 0 0 24 0 0 0 ]}",
+      "sql": "'{(,)}'::datemultirange",
+      "pretty": "'{(,)}'::datemultirange",
+      "output": "{(,)}"
+    },
+    {
+      "id": "datemultirange_edge",
+      "type": "datemultirange",
+      "input": "{[-infinity,infinity]}",
+      "oid": 4535,
+      "node": "{CONST :consttype 4535 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 24 [ 96 0 0 0 183 17 0 0 1 0 0 0 6 0 0 0 0 0 0 128 255 255 255 127 ]}",
+      "sql": "'{[-infinity,infinity]}'::datemultirange",
+      "pretty": "'{[-infinity,infinity]}'::datemultirange",
+      "output": "{[-infinity,infinity]}"
+    },
+    {
+      "id": "daterange_array_nullable",
+      "type": "daterange[]",
+      "input": "{\"[2000-01-01,2000-01-03)\",NULL,\"empty\"}",
+      "oid": 3913,
+      "node": "{CONST :consttype 3913 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 64 [ 0 1 0 0 1 0 0 0 32 0 0 0 72 15 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 68 0 0 0 72 15 0 0 0 0 0 0 2 0 0 0 2 0 0 0 36 0 0 0 72 15 0 0 1 0 0 0 ]}",
+      "sql": "'{\"[2000-01-01,2000-01-03)\",NULL,empty}'::daterange[]",
+      "pretty": "'{\"[2000-01-01,2000-01-03)\",NULL,empty}'::daterange[]",
+      "output": "{\"[2000-01-01,2000-01-03)\",NULL,empty}"
+    },
+    {
+      "id": "datemultirange_array_nullable",
+      "type": "datemultirange[]",
+      "input": "{\"{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}\",NULL,\"{}\"}",
+      "oid": 6155,
+      "node": "{CONST :consttype 6155 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 80 [ 64 1 0 0 1 0 0 0 32 0 0 0 183 17 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 144 0 0 0 183 17 0 0 2 0 0 0 8 0 0 0 2 2 0 0 0 0 0 0 2 0 0 0 4 0 0 0 7 0 0 0 48 0 0 0 183 17 0 0 0 0 0 0 ]}",
+      "sql": "'{\"{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}\",NULL,\"{}\"}'::datemultirange[]",
+      "pretty": "'{\"{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}\",NULL,\"{}\"}'::datemultirange[]",
+      "output": "{\"{[2000-01-01,2000-01-03),[2000-01-05,2000-01-08)}\",NULL,\"{}\"}"
+    },
+    {
+      "id": "tsrange_bounded",
+      "type": "tsrange",
+      "input": "[2000-01-01 01:02:03.123456,2000-01-03)",
+      "oid": 3908,
+      "node": "{CONST :consttype 3908 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 25 [ 100 0 0 0 68 15 0 0 0 91 234 221 0 0 0 0 0 192 174 59 40 0 0 0 2 ]}",
+      "sql": "'[\"2000-01-01 01:02:03.123456\",\"2000-01-03 00:00:00\")'::tsrange",
+      "pretty": "'[\"2000-01-01 01:02:03.123456\",\"2000-01-03 00:00:00\")'::tsrange",
+      "output": "[\"2000-01-01 01:02:03.123456\",\"2000-01-03 00:00:00\")"
+    },
+    {
+      "id": "tsrange_empty",
+      "type": "tsrange",
+      "input": "empty",
+      "oid": 3908,
+      "node": "{CONST :consttype 3908 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 68 15 0 0 1 ]}",
+      "sql": "'empty'::tsrange",
+      "pretty": "'empty'::tsrange",
+      "output": "empty"
+    },
+    {
+      "id": "tsrange_unbounded",
+      "type": "tsrange",
+      "input": "(,)",
+      "oid": 3908,
+      "node": "{CONST :consttype 3908 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 68 15 0 0 24 ]}",
+      "sql": "'(,)'::tsrange",
+      "pretty": "'(,)'::tsrange",
+      "output": "(,)"
+    },
+    {
+      "id": "tsrange_edge",
+      "type": "tsrange",
+      "input": "[-infinity,infinity]",
+      "oid": 3908,
+      "node": "{CONST :consttype 3908 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 25 [ 100 0 0 0 68 15 0 0 0 0 0 0 0 0 0 128 255 255 255 255 255 255 255 127 6 ]}",
+      "sql": "'[-infinity,infinity]'::tsrange",
+      "pretty": "'[-infinity,infinity]'::tsrange",
+      "output": "[-infinity,infinity]"
+    },
+    {
+      "id": "tsmultirange_bounded",
+      "type": "tsmultirange",
+      "input": "{(2000-01-05,2000-01-08],[2000-01-01 01:02:03.123456,2000-01-03)}",
+      "oid": 4533,
+      "node": "{CONST :consttype 4533 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 56 [ 224 0 0 0 181 17 0 0 2 0 0 0 16 0 0 0 2 4 0 0 0 0 0 0 0 91 234 221 0 0 0 0 0 192 174 59 40 0 0 0 0 128 93 119 80 0 0 0 0 160 227 208 140 0 0 0 ]}",
+      "sql": "'{[\"2000-01-01 01:02:03.123456\",\"2000-01-03 00:00:00\"),(\"2000-01-05 00:00:00\",\"2000-01-08 00:00:00\"]}'::tsmultirange",
+      "pretty": "'{[\"2000-01-01 01:02:03.123456\",\"2000-01-03 00:00:00\"),(\"2000-01-05 00:00:00\",\"2000-01-08 00:00:00\"]}'::tsmultirange",
+      "output": "{[\"2000-01-01 01:02:03.123456\",\"2000-01-03 00:00:00\"),(\"2000-01-05 00:00:00\",\"2000-01-08 00:00:00\"]}"
+    },
+    {
+      "id": "tsmultirange_empty",
+      "type": "tsmultirange",
+      "input": "{}",
+      "oid": 4533,
+      "node": "{CONST :consttype 4533 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 181 17 0 0 0 0 0 0 0 0 0 0 ]}",
+      "sql": "'{}'::tsmultirange",
+      "pretty": "'{}'::tsmultirange",
+      "output": "{}"
+    },
+    {
+      "id": "tsmultirange_unbounded",
+      "type": "tsmultirange",
+      "input": "{(,)}",
+      "oid": 4533,
+      "node": "{CONST :consttype 4533 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 181 17 0 0 1 0 0 0 24 0 0 0 ]}",
+      "sql": "'{(,)}'::tsmultirange",
+      "pretty": "'{(,)}'::tsmultirange",
+      "output": "{(,)}"
+    },
+    {
+      "id": "tsmultirange_edge",
+      "type": "tsmultirange",
+      "input": "{[-infinity,infinity]}",
+      "oid": 4533,
+      "node": "{CONST :consttype 4533 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 181 17 0 0 1 0 0 0 6 0 0 0 0 0 0 0 0 0 0 128 255 255 255 255 255 255 255 127 ]}",
+      "sql": "'{[-infinity,infinity]}'::tsmultirange",
+      "pretty": "'{[-infinity,infinity]}'::tsmultirange",
+      "output": "{[-infinity,infinity]}"
+    },
+    {
+      "id": "tsrange_array_nullable",
+      "type": "tsrange[]",
+      "input": "{\"[2000-01-01 01:02:03.123456,2000-01-03)\",NULL,\"empty\"}",
+      "oid": 3909,
+      "node": "{CONST :consttype 3909 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 80 [ 64 1 0 0 1 0 0 0 32 0 0 0 68 15 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 100 0 0 0 68 15 0 0 0 91 234 221 0 0 0 0 0 192 174 59 40 0 0 0 2 0 0 0 0 0 0 0 36 0 0 0 68 15 0 0 1 0 0 0 0 0 0 0 ]}",
+      "sql": "'{\"[\\\"2000-01-01 01:02:03.123456\\\",\\\"2000-01-03 00:00:00\\\")\",NULL,empty}'::tsrange[]",
+      "pretty": "'{\"[\\\"2000-01-01 01:02:03.123456\\\",\\\"2000-01-03 00:00:00\\\")\",NULL,empty}'::tsrange[]",
+      "output": "{\"[\\\"2000-01-01 01:02:03.123456\\\",\\\"2000-01-03 00:00:00\\\")\",NULL,empty}"
+    },
+    {
+      "id": "tsmultirange_array_nullable",
+      "type": "tsmultirange[]",
+      "input": "{\"{[2000-01-01 01:02:03.123456,2000-01-03),(2000-01-05,2000-01-08]}\",NULL,\"{}\"}",
+      "oid": 6152,
+      "node": "{CONST :consttype 6152 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 104 [ 160 1 0 0 1 0 0 0 32 0 0 0 181 17 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 224 0 0 0 181 17 0 0 2 0 0 0 16 0 0 0 2 4 0 0 0 0 0 0 0 91 234 221 0 0 0 0 0 192 174 59 40 0 0 0 0 128 93 119 80 0 0 0 0 160 227 208 140 0 0 0 64 0 0 0 181 17 0 0 0 0 0 0 0 0 0 0 ]}",
+      "sql": "'{\"{[\\\"2000-01-01 01:02:03.123456\\\",\\\"2000-01-03 00:00:00\\\"),(\\\"2000-01-05 00:00:00\\\",\\\"2000-01-08 00:00:00\\\"]}\",NULL,\"{}\"}'::tsmultirange[]",
+      "pretty": "'{\"{[\\\"2000-01-01 01:02:03.123456\\\",\\\"2000-01-03 00:00:00\\\"),(\\\"2000-01-05 00:00:00\\\",\\\"2000-01-08 00:00:00\\\"]}\",NULL,\"{}\"}'::tsmultirange[]",
+      "output": "{\"{[\\\"2000-01-01 01:02:03.123456\\\",\\\"2000-01-03 00:00:00\\\"),(\\\"2000-01-05 00:00:00\\\",\\\"2000-01-08 00:00:00\\\"]}\",NULL,\"{}\"}"
+    },
+    {
+      "id": "tstzrange_bounded",
+      "type": "tstzrange",
+      "input": "[2000-01-01 01:02:03.123456+03,2000-01-03+03)",
+      "oid": 3910,
+      "node": "{CONST :consttype 3910 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 25 [ 100 0 0 0 70 15 0 0 0 111 47 90 254 255 255 255 0 212 243 183 37 0 0 0 2 ]}",
+      "sql": "'[\"1999-12-31 22:02:03.123456+00\",\"2000-01-02 21:00:00+00\")'::tstzrange",
+      "pretty": "'[\"1999-12-31 22:02:03.123456+00\",\"2000-01-02 21:00:00+00\")'::tstzrange",
+      "output": "[\"1999-12-31 22:02:03.123456+00\",\"2000-01-02 21:00:00+00\")"
+    },
+    {
+      "id": "tstzrange_empty",
+      "type": "tstzrange",
+      "input": "empty",
+      "oid": 3910,
+      "node": "{CONST :consttype 3910 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 70 15 0 0 1 ]}",
+      "sql": "'empty'::tstzrange",
+      "pretty": "'empty'::tstzrange",
+      "output": "empty"
+    },
+    {
+      "id": "tstzrange_unbounded",
+      "type": "tstzrange",
+      "input": "(,)",
+      "oid": 3910,
+      "node": "{CONST :consttype 3910 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 9 [ 36 0 0 0 70 15 0 0 24 ]}",
+      "sql": "'(,)'::tstzrange",
+      "pretty": "'(,)'::tstzrange",
+      "output": "(,)"
+    },
+    {
+      "id": "tstzrange_edge",
+      "type": "tstzrange",
+      "input": "[-infinity,infinity]",
+      "oid": 3910,
+      "node": "{CONST :consttype 3910 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 25 [ 100 0 0 0 70 15 0 0 0 0 0 0 0 0 0 128 255 255 255 255 255 255 255 127 6 ]}",
+      "sql": "'[-infinity,infinity]'::tstzrange",
+      "pretty": "'[-infinity,infinity]'::tstzrange",
+      "output": "[-infinity,infinity]"
+    },
+    {
+      "id": "tstzmultirange_bounded",
+      "type": "tstzmultirange",
+      "input": "{(2000-01-05+03,2000-01-08+03],[2000-01-01 01:02:03.123456+03,2000-01-03+03)}",
+      "oid": 4534,
+      "node": "{CONST :consttype 4534 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 56 [ 224 0 0 0 182 17 0 0 2 0 0 0 16 0 0 0 2 4 0 0 0 0 0 0 0 111 47 90 254 255 255 255 0 212 243 183 37 0 0 0 0 148 162 243 77 0 0 0 0 180 40 77 138 0 0 0 ]}",
+      "sql": "'{[\"1999-12-31 22:02:03.123456+00\",\"2000-01-02 21:00:00+00\"),(\"2000-01-04 21:00:00+00\",\"2000-01-07 21:00:00+00\"]}'::tstzmultirange",
+      "pretty": "'{[\"1999-12-31 22:02:03.123456+00\",\"2000-01-02 21:00:00+00\"),(\"2000-01-04 21:00:00+00\",\"2000-01-07 21:00:00+00\"]}'::tstzmultirange",
+      "output": "{[\"1999-12-31 22:02:03.123456+00\",\"2000-01-02 21:00:00+00\"),(\"2000-01-04 21:00:00+00\",\"2000-01-07 21:00:00+00\"]}"
+    },
+    {
+      "id": "tstzmultirange_empty",
+      "type": "tstzmultirange",
+      "input": "{}",
+      "oid": 4534,
+      "node": "{CONST :consttype 4534 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 182 17 0 0 0 0 0 0 0 0 0 0 ]}",
+      "sql": "'{}'::tstzmultirange",
+      "pretty": "'{}'::tstzmultirange",
+      "output": "{}"
+    },
+    {
+      "id": "tstzmultirange_unbounded",
+      "type": "tstzmultirange",
+      "input": "{(,)}",
+      "oid": 4534,
+      "node": "{CONST :consttype 4534 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 182 17 0 0 1 0 0 0 24 0 0 0 ]}",
+      "sql": "'{(,)}'::tstzmultirange",
+      "pretty": "'{(,)}'::tstzmultirange",
+      "output": "{(,)}"
+    },
+    {
+      "id": "tstzmultirange_edge",
+      "type": "tstzmultirange",
+      "input": "{[-infinity,infinity]}",
+      "oid": 4534,
+      "node": "{CONST :consttype 4534 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 32 [ 128 0 0 0 182 17 0 0 1 0 0 0 6 0 0 0 0 0 0 0 0 0 0 128 255 255 255 255 255 255 255 127 ]}",
+      "sql": "'{[-infinity,infinity]}'::tstzmultirange",
+      "pretty": "'{[-infinity,infinity]}'::tstzmultirange",
+      "output": "{[-infinity,infinity]}"
+    },
+    {
+      "id": "tstzrange_array_nullable",
+      "type": "tstzrange[]",
+      "input": "{\"[2000-01-01 01:02:03.123456+03,2000-01-03+03)\",NULL,\"empty\"}",
+      "oid": 3911,
+      "node": "{CONST :consttype 3911 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 80 [ 64 1 0 0 1 0 0 0 32 0 0 0 70 15 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 100 0 0 0 70 15 0 0 0 111 47 90 254 255 255 255 0 212 243 183 37 0 0 0 2 0 0 0 0 0 0 0 36 0 0 0 70 15 0 0 1 0 0 0 0 0 0 0 ]}",
+      "sql": "'{\"[\\\"1999-12-31 22:02:03.123456+00\\\",\\\"2000-01-02 21:00:00+00\\\")\",NULL,empty}'::tstzrange[]",
+      "pretty": "'{\"[\\\"1999-12-31 22:02:03.123456+00\\\",\\\"2000-01-02 21:00:00+00\\\")\",NULL,empty}'::tstzrange[]",
+      "output": "{\"[\\\"1999-12-31 22:02:03.123456+00\\\",\\\"2000-01-02 21:00:00+00\\\")\",NULL,empty}"
+    },
+    {
+      "id": "tstzmultirange_array_nullable",
+      "type": "tstzmultirange[]",
+      "input": "{\"{[2000-01-01 01:02:03.123456+03,2000-01-03+03),(2000-01-05+03,2000-01-08+03]}\",NULL,\"{}\"}",
+      "oid": 6153,
+      "node": "{CONST :consttype 6153 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 104 [ 160 1 0 0 1 0 0 0 32 0 0 0 182 17 0 0 3 0 0 0 1 0 0 0 5 0 0 0 0 0 0 0 224 0 0 0 182 17 0 0 2 0 0 0 16 0 0 0 2 4 0 0 0 0 0 0 0 111 47 90 254 255 255 255 0 212 243 183 37 0 0 0 0 148 162 243 77 0 0 0 0 180 40 77 138 0 0 0 64 0 0 0 182 17 0 0 0 0 0 0 0 0 0 0 ]}",
+      "sql": "'{\"{[\\\"1999-12-31 22:02:03.123456+00\\\",\\\"2000-01-02 21:00:00+00\\\"),(\\\"2000-01-04 21:00:00+00\\\",\\\"2000-01-07 21:00:00+00\\\"]}\",NULL,\"{}\"}'::tstzmultirange[]",
+      "pretty": "'{\"{[\\\"1999-12-31 22:02:03.123456+00\\\",\\\"2000-01-02 21:00:00+00\\\"),(\\\"2000-01-04 21:00:00+00\\\",\\\"2000-01-07 21:00:00+00\\\"]}\",NULL,\"{}\"}'::tstzmultirange[]",
+      "output": "{\"{[\\\"1999-12-31 22:02:03.123456+00\\\",\\\"2000-01-02 21:00:00+00\\\"),(\\\"2000-01-04 21:00:00+00\\\",\\\"2000-01-07 21:00:00+00\\\"]}\",NULL,\"{}\"}"
+    },
+    {
+      "id": "int4multirange_offsets",
+      "type": "int4multirange",
+      "input": "{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}",
+      "oid": 4451,
+      "node": "{CONST :consttype 4451 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 140 [ 48 2 0 0 99 17 0 0 10 0 0 0 8 0 0 0 8 0 0 0 8 0 0 0 32 0 0 128 8 0 0 0 8 0 0 0 8 0 0 0 64 0 0 128 8 0 0 0 2 2 2 2 2 2 2 2 2 2 0 0 0 0 0 0 1 0 0 0 3 0 0 0 4 0 0 0 6 0 0 0 7 0 0 0 9 0 0 0 10 0 0 0 12 0 0 0 13 0 0 0 15 0 0 0 16 0 0 0 18 0 0 0 19 0 0 0 21 0 0 0 22 0 0 0 24 0 0 0 25 0 0 0 27 0 0 0 28 0 0 0 ]}",
+      "sql": "'{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}'::int4multirange",
+      "pretty": "'{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}'::int4multirange",
+      "output": "{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}"
+    },
+    {
+      "id": "int8multirange_offsets",
+      "type": "int8multirange",
+      "input": "{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}",
+      "oid": 4536,
+      "node": "{CONST :consttype 4536 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 224 [ 128 3 0 0 184 17 0 0 10 0 0 0 16 0 0 0 16 0 0 0 16 0 0 0 64 0 0 128 16 0 0 0 16 0 0 0 16 0 0 0 128 0 0 128 16 0 0 0 2 2 2 2 2 2 2 2 2 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 6 0 0 0 0 0 0 0 7 0 0 0 0 0 0 0 9 0 0 0 0 0 0 0 10 0 0 0 0 0 0 0 12 0 0 0 0 0 0 0 13 0 0 0 0 0 0 0 15 0 0 0 0 0 0 0 16 0 0 0 0 0 0 0 18 0 0 0 0 0 0 0 19 0 0 0 0 0 0 0 21 0 0 0 0 0 0 0 22 0 0 0 0 0 0 0 24 0 0 0 0 0 0 0 25 0 0 0 0 0 0 0 27 0 0 0 0 0 0 0 28 0 0 0 0 0 0 0 ]}",
+      "sql": "'{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}'::int8multirange",
+      "pretty": "'{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}'::int8multirange",
+      "output": "{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}"
+    },
+    {
+      "id": "nummultirange_offsets",
+      "type": "nummultirange",
+      "input": "{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}",
+      "oid": 4532,
+      "node": "{CONST :consttype 4532 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 176 [ 192 2 0 0 180 17 0 0 10 0 0 0 8 0 0 0 12 0 0 0 12 0 0 0 44 0 0 128 12 0 0 0 12 0 0 0 12 0 0 0 92 0 0 128 12 0 0 0 2 2 2 2 2 2 2 2 2 2 0 0 7 0 128 11 0 128 1 0 11 0 128 3 0 11 0 128 4 0 0 0 11 0 128 6 0 11 0 128 7 0 0 0 11 0 128 9 0 11 0 128 10 0 0 0 11 0 128 12 0 11 0 128 13 0 0 0 11 0 128 15 0 11 0 128 16 0 0 0 11 0 128 18 0 11 0 128 19 0 0 0 11 0 128 21 0 11 0 128 22 0 0 0 11 0 128 24 0 11 0 128 25 0 0 0 11 0 128 27 0 11 0 128 28 0 0 0 ]}",
+      "sql": "'{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}'::nummultirange",
+      "pretty": "'{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}'::nummultirange",
+      "output": "{[0,1),[3,4),[6,7),[9,10),[12,13),[15,16),[18,19),[21,22),[24,25),[27,28)}"
+    },
+    {
+      "id": "numrange_large_upper",
+      "type": "numrange",
+      "input": "[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890]",
+      "oid": 3906,
+      "node": "{CONST :consttype 3906 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 177 [ 196 2 0 0 66 15 0 0 11 0 129 1 0 0 0 0 128 2 0 0 44 1 0 0 1 0 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 6 ]}",
+      "sql": "'[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890]'::numrange",
+      "pretty": "'[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890]'::numrange",
+      "output": "[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890]"
+    },
+    {
+      "id": "numrange_large_lower",
+      "type": "numrange",
+      "input": "[1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890,9.00]",
+      "oid": 3906,
+      "node": "{CONST :consttype 3906 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 174 [ 184 2 0 0 66 15 0 0 128 2 0 0 44 1 0 0 1 0 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 11 0 129 9 0 6 ]}",
+      "sql": "'[1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890,9.00]'::numrange",
+      "pretty": "'[1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890,9.00]'::numrange",
+      "output": "[1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890,9.00]"
+    },
+    {
+      "id": "nummultirange_packed_alignment",
+      "type": "nummultirange",
+      "input": "{[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890],[2.00,3.500],[4.00,5.0],[6.00,7.0],[8.00,9.0]}",
+      "oid": 4532,
+      "node": "{CONST :consttype 4532 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 252 [ 240 3 0 0 180 17 0 0 5 0 0 0 168 0 0 0 12 0 0 0 12 0 0 0 204 0 0 128 6 6 6 6 6 0 0 0 11 0 129 1 0 0 0 0 128 2 0 0 44 1 0 0 1 0 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 210 4 46 22 52 35 128 13 210 30 11 0 129 2 0 15 128 129 3 0 136 19 11 0 129 4 0 11 128 128 5 0 0 0 11 0 129 6 0 11 128 128 7 0 0 0 11 0 129 8 0 11 128 128 9 0 0 0 ]}",
+      "sql": "'{[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890],[2.00,3.500],[4.00,5.0],[6.00,7.0],[8.00,9.0]}'::nummultirange",
+      "pretty": "'{[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890],[2.00,3.500],[4.00,5.0],[6.00,7.0],[8.00,9.0]}'::nummultirange",
+      "output": "{[1.00,1.123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890],[2.00,3.500],[4.00,5.0],[6.00,7.0],[8.00,9.0]}"
+    }
+  ]
+}

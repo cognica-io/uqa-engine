@@ -67,6 +67,11 @@ impl uqa_sql::expr::EngineHook for Engine {
         )
     }
 
+    fn type_oid_exists(&self, oid: u32) -> Result<bool, String> {
+        uqa_execution::catalog::projection::type_oid_exists(&self.catalog_execution(), oid)
+            .map_err(|error| error.to_string())
+    }
+
     fn resolve_regclass_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
         uqa_execution::catalog::projection::resolve_regclass_oid(&self.catalog_execution(), name)
     }

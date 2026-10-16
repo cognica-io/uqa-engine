@@ -97,6 +97,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Observe whether a physical type OID remains in the current catalog, including types without a scalar value carrier.
+    fn type_oid_exists(&self, oid: u32) -> std::result::Result<bool, String> {
+        self.resolve_type_oid(oid).map(|ty| ty.is_some())
+    }
+
     /// Apply catalog-owned domain conversion and constraints. A missing implementation leaves built-in catalog domains on their base-type conversion path.
     fn cast_domain(
         &self,

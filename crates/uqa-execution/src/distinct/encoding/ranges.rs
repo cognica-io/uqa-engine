@@ -16,7 +16,7 @@ pub(super) fn encode_declared_range(
     output: &mut impl KeyOutput,
 ) -> ExecResult<bool> {
     let Some(oid) = oid else { return Ok(false) };
-    if !output.uses_declared_field_types() || !matches!(value, Value::Str(_)) {
+    if !output.uses_declared_field_types() || !matches!(value, Value::Str(_) | Value::Datum(_)) {
         return Ok(false);
     }
     let read = output.control().cloned();
