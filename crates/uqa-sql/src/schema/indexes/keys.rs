@@ -7,6 +7,7 @@
 //! Typed index-key preparation and column names assigned at index creation.
 
 use crate::ast::{Expr, GeneratedColumnKind, IndexKey};
+use crate::catalog::index::operator_classes::require_default_btree_operator_class;
 use crate::schema::SchemaBindingContext;
 use crate::{ast::CreateIndex, ColumnType, SQLError};
 
@@ -137,6 +138,10 @@ fn finish_index_keys(
         .schema_expression_columns(&statement.table)?
         .ok_or_else(|| SQLError::UnknownTable(statement.table.clone()))?;
     let mut types = Vec::with_capacity(statement.columns.len());
+    let btree = matches!(
+        super::options::index_access_method(statement)?.as_str(),
+        "" | "btree"
+    );
     for (key, analyzed) in statement.columns.iter_mut().zip(expressions) {
         match key {
             IndexKey::Column(name) => {
@@ -147,26 +152,12 @@ fn finish_index_keys(
                     }
                     return Err(SQLError::UnknownColumn(name.clone()));
                 };
-                reject_virtual_generated_column(column)?;
+                if btree {
+                    require_default_btree_operator_class(&column.ty)?;
+                }
                 types.push(column.ty.clone());
             }
             IndexKey::Expression(expression) => {
-                for column in &definitions {
-                    if column
-                        .generated
-                        .as_ref()
-                        .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual)
-                        && crate::schema::dependencies::schema_expr_references_column(
-                            expression,
-                            &column.name,
-                        )
-                    {
-                        return Err(SQLError::Unsupported(format!(
-                            "index expressions cannot use virtual generated column `{}`",
-                            column.name
-                        )));
-                    }
-                }
                 super::validate_index_expression_immutability(
                     context.catalog,
                     &statement.table,
@@ -177,6 +168,9 @@ fn finish_index_keys(
                     .as_ref()
                     .expect("analyzed index expression")
                     .clone();
+                if btree {
+                    require_default_btree_operator_class(&ty)?;
+                }
                 let column = match expression.as_ref() {
                     crate::ast::Expr::Column(name) => Some(name.clone()),
                     crate::ast::Expr::Cast { expr, .. } => {
@@ -201,12 +195,44 @@ fn finish_index_keys(
     // As in `PostgreSQL`, an included column may repeat and may also be a key column.
     for name in &statement.included_columns {
         match definitions.iter().find(|column| column.name == *name) {
-            Some(column) => reject_virtual_generated_column(column)?,
+            Some(_) => {}
             None if definitions.is_empty() => {}
             None => return Err(SQLError::UnknownColumn(name.clone())),
         }
     }
     reject_unsupported_included_columns(statement)?;
+    for key in &statement.columns {
+        match key {
+            IndexKey::Column(name) => {
+                if let Some(column) = definitions.iter().find(|column| column.name == *name) {
+                    reject_virtual_generated_column(column)?;
+                }
+            }
+            IndexKey::Expression(expression) => {
+                for column in &definitions {
+                    if column
+                        .generated
+                        .as_ref()
+                        .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual)
+                        && crate::schema::dependencies::schema_expr_references_column(
+                            expression,
+                            &column.name,
+                        )
+                    {
+                        return Err(SQLError::Unsupported(format!(
+                            "index expressions cannot use virtual generated column `{}`",
+                            column.name
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    for name in &statement.included_columns {
+        if let Some(column) = definitions.iter().find(|column| column.name == *name) {
+            reject_virtual_generated_column(column)?;
+        }
+    }
     Ok(types)
 }
 

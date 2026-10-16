@@ -1,0 +1,239 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "schema",
+      "sql": "CREATE SCHEMA opclass299"
+    },
+    {
+      "id": "path",
+      "sql": "SET search_path=opclass299,pg_catalog"
+    },
+    {
+      "id": "json_unique",
+      "sql": "CREATE TABLE json_unique(v json UNIQUE)"
+    },
+    {
+      "id": "json_primary",
+      "sql": "CREATE TABLE json_primary(v json PRIMARY KEY)"
+    },
+    {
+      "id": "json_domain",
+      "sql": "CREATE DOMAIN json_domain AS json"
+    },
+    {
+      "id": "domain_unique",
+      "sql": "CREATE TABLE domain_unique(v json_domain UNIQUE)"
+    },
+    {
+      "id": "json_table",
+      "sql": "CREATE TABLE source_rows(id integer,v json,b jsonb)"
+    },
+    {
+      "id": "json_index",
+      "sql": "CREATE INDEX json_idx ON source_rows(v)"
+    },
+    {
+      "id": "json_unique_index",
+      "sql": "CREATE UNIQUE INDEX json_unique_idx ON source_rows(v)"
+    },
+    {
+      "id": "json_expression",
+      "sql": "CREATE INDEX json_expr ON source_rows((v))"
+    },
+    {
+      "id": "json_function",
+      "sql": "CREATE INDEX json_func ON source_rows((json_build_array(id)))"
+    },
+    {
+      "id": "json_cast",
+      "sql": "CREATE INDEX json_cast ON source_rows((v::text))"
+    },
+    {
+      "id": "jsonb_index",
+      "sql": "CREATE INDEX jsonb_idx ON source_rows(b)"
+    },
+    {
+      "id": "json_included",
+      "sql": "CREATE UNIQUE INDEX include_json ON source_rows(id) INCLUDE(v)"
+    },
+    {
+      "id": "json_alter_unique",
+      "sql": "ALTER TABLE source_rows ADD CONSTRAINT alter_json UNIQUE(v)"
+    },
+    {
+      "id": "json_alter_primary",
+      "sql": "ALTER TABLE source_rows ADD CONSTRAINT pk_json PRIMARY KEY(v)"
+    },
+    {
+      "id": "json_add_column",
+      "sql": "ALTER TABLE source_rows ADD COLUMN other json UNIQUE"
+    },
+    {
+      "id": "domain_alter_type",
+      "sql": "ALTER TABLE source_rows ALTER COLUMN b TYPE json USING b::json"
+    },
+    {
+      "id": "retained_jsonb_type",
+      "sql": "SELECT format_type(atttypid,atttypmod) FROM pg_attribute WHERE attrelid='source_rows'::regclass AND attname='b'"
+    },
+    {
+      "id": "missing_then_json",
+      "sql": "CREATE INDEX missing_then_json ON source_rows(absent,v)"
+    },
+    {
+      "id": "json_then_missing",
+      "sql": "CREATE INDEX json_then_missing ON source_rows(v,absent)"
+    },
+    {
+      "id": "json_then_system",
+      "sql": "CREATE INDEX json_then_system ON source_rows(v,ctid)"
+    },
+    {
+      "id": "system_then_json",
+      "sql": "CREATE INDEX system_then_json ON source_rows(ctid,v)"
+    },
+    {
+      "id": "json_virtual",
+      "sql": "CREATE TABLE virtual_json(id integer,v json GENERATED ALWAYS AS (id::text::json) VIRTUAL,UNIQUE(v))"
+    },
+    {
+      "id": "included_constraint",
+      "sql": "CREATE TABLE included_constraint(id integer UNIQUE INCLUDE(v),v json)"
+    },
+    {
+      "id": "included_constraint_table",
+      "sql": "CREATE TABLE included_constraint_table(id integer,v json,UNIQUE(id) INCLUDE(v))"
+    },
+    {
+      "id": "array_table",
+      "sql": "CREATE TABLE json_array(v json[])"
+    },
+    {
+      "id": "array_index",
+      "sql": "CREATE INDEX array_idx ON json_array(v)"
+    },
+    {
+      "id": "composite",
+      "sql": "CREATE TYPE json_record AS (v json)"
+    },
+    {
+      "id": "composite_table",
+      "sql": "CREATE TABLE composite_rows(v json_record)"
+    },
+    {
+      "id": "composite_index",
+      "sql": "CREATE INDEX record_idx ON composite_rows(v)"
+    },
+    {
+      "id": "int2vector_table",
+      "sql": "CREATE TABLE int2vector_rows(v int2vector UNIQUE)"
+    },
+    {
+      "id": "xid_table",
+      "sql": "CREATE TABLE xid_rows(v xid UNIQUE)"
+    },
+    {
+      "id": "refcursor_table",
+      "sql": "CREATE TABLE refcursor_rows(v refcursor UNIQUE)"
+    },
+    {
+      "id": "aclitem_table",
+      "sql": "CREATE TABLE aclitem_rows(v aclitem UNIQUE)"
+    },
+    {
+      "id": "oidvector_table",
+      "sql": "CREATE TABLE oidvector_rows(v oidvector UNIQUE)"
+    },
+    {
+      "id": "alias_table",
+      "sql": "CREATE TABLE alias_rows(v regclass UNIQUE)"
+    },
+    {
+      "id": "character_table",
+      "sql": "CREATE TABLE character_rows(v pg_catalog.\"char\" UNIQUE)"
+    },
+    {
+      "id": "owned_jsonb_key",
+      "sql": "CREATE TABLE owned_jsonb(v jsonb UNIQUE)"
+    },
+    {
+      "id": "owned_jsonb_retype",
+      "sql": "ALTER TABLE owned_jsonb ALTER COLUMN v TYPE json USING v::json"
+    },
+    {
+      "id": "owned_jsonb_retained",
+      "sql": "SELECT format_type(atttypid,atttypmod) FROM pg_attribute WHERE attrelid='owned_jsonb'::regclass AND attname='v'"
+    },
+    {
+      "id": "included_retype_table",
+      "sql": "CREATE TABLE included_retype(k integer,v jsonb)"
+    },
+    {
+      "id": "included_retype_index",
+      "sql": "CREATE INDEX included_retype_idx ON included_retype(k) INCLUDE(v)"
+    },
+    {
+      "id": "included_retype",
+      "sql": "ALTER TABLE included_retype ALTER COLUMN v TYPE json USING v::json"
+    },
+    {
+      "id": "included_retype_value",
+      "sql": "INSERT INTO included_retype VALUES (1,'{}')"
+    },
+    {
+      "id": "system_then_json_expression",
+      "sql": "CREATE INDEX system_then_json_expression ON source_rows(ctid,(v::json))"
+    },
+    {
+      "id": "json_expression_then_system",
+      "sql": "CREATE INDEX json_expression_then_system ON source_rows((v::json),ctid)"
+    },
+    {
+      "id": "transaction",
+      "sql": "BEGIN"
+    },
+    {
+      "id": "savepoint",
+      "sql": "SAVEPOINT before_bad_index"
+    },
+    {
+      "id": "transaction_error",
+      "sql": "CREATE INDEX bad_in_transaction ON source_rows(v)"
+    },
+    {
+      "id": "rollback_savepoint",
+      "sql": "ROLLBACK TO before_bad_index"
+    },
+    {
+      "id": "transaction_insert",
+      "sql": "INSERT INTO source_rows VALUES(1,'{}','{}')"
+    },
+    {
+      "id": "commit",
+      "sql": "COMMIT"
+    },
+    {
+      "id": "names",
+      "sql": "SELECT c.relname::text,c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='opclass299' ORDER BY 1"
+    },
+    {
+      "id": "reopen_path",
+      "sql": "SET search_path=opclass299,pg_catalog",
+      "reopen": true
+    },
+    {
+      "id": "reopen_values",
+      "sql": "SELECT id,v::text,b::text FROM source_rows ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "reopen_indexes",
+      "sql": "SELECT indexname::text,indexdef FROM pg_indexes WHERE schemaname='opclass299' ORDER BY indexname",
+      "reopen": true
+    }
+  ]
+}

@@ -172,6 +172,16 @@ impl TypeRewrites {
                 &relation.table,
                 &relation.qualifier,
             )?;
+            crate::schema::indexes::type_changes::validate(
+                &context.schema_moves.indexes,
+                &context.columns.analysis.bindings,
+                &relation.table,
+                &relation
+                    .transforms
+                    .iter()
+                    .map(|transform| transform.name.as_str())
+                    .collect::<Vec<_>>(),
+            )?;
             // The key sorter receives the statement allowance after all retained input buffers have released it.
             relation.original.rows.spill()?;
         }

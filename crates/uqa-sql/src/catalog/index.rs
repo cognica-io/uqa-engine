@@ -44,6 +44,7 @@ pub use relationships::{can_attach_index, IndexAttachmentShape, IndexRelationshi
 mod enforced_key;
 pub use enforced_key::{referenceable_keys, EnforcedKey};
 
+pub mod operator_classes;
 mod output;
 pub mod stored;
 pub use output::format_key_value;

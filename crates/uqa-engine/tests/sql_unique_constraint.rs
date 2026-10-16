@@ -537,3 +537,6 @@ mod partitioned;
 
 #[path = "sql_unique_constraint/work.rs"]
 mod work;
+
+#[path = "sql_unique_constraint/operator_classes.rs"]
+mod operator_classes;

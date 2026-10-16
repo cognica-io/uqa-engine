@@ -10,6 +10,9 @@ use crate::ast::{
     ColumnDef, ColumnType, GeneratedColumnKind, PartitionSpec, TableKeyConstraint,
     TableKeyConstraintKind,
 };
+use crate::catalog::index::operator_classes::{
+    missing_operator_class, require_default_btree_operator_class,
+};
 use crate::schema::columns::POSTGRES_SYSTEM_COLUMNS;
 use crate::SQLError;
 
@@ -75,21 +78,6 @@ pub enum IndexOwner {
 /// Whether `name` is a system column, which every table has beside its own columns.
 pub fn is_system_column(name: &str) -> bool {
     POSTGRES_SYSTEM_COLUMNS.contains(&name)
-}
-
-/// `data type xid has no default operator class for access method "btree"`, which `ComputeIndexAttrs` reports for a key attribute whose type the access method cannot order.
-fn missing_operator_class(type_name: &str, access_method: &str) -> SQLError {
-    SQLError::Diagnostic {
-        sqlstate: "42704".into(),
-        message: format!(
-            "data type {type_name} has no default operator class for access method \"{access_method}\""
-        ),
-        detail: None,
-        hint: Some(
-            "You must specify an operator class for the index or define a default operator class for the data type."
-                .into(),
-        ),
-    }
 }
 
 /// A system column that is a key attribute needs an operator class of the index's access method for its type. The transaction and command identifiers of `xmin`, `xmax`, `cmin` and `cmax` have one only for a hash index, and the tuple identifier of `ctid` has one for a btree and a hash index; the object identifier of `tableoid` is ordered wherever integers are.
@@ -186,7 +174,10 @@ pub fn validate_key_definition(
         "btree"
     };
     for name in &key.columns {
-        if declared(name) {
+        if let Some(column) = relation.columns.iter().find(|column| column.name == *name) {
+            if access_method == "btree" {
+                require_default_btree_operator_class(&column.ty)?;
+            }
             continue;
         }
         if !is_system_column(name) {
