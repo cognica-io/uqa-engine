@@ -265,3 +265,50 @@ fn native_range_physical_comparison_retains_selected_bounds_and_original_allowan
     );
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn native_range_datum_producers_admit_scratch_and_preserve_postgresql_bytes() {
+    for case in fixtures()
+        .into_iter()
+        .filter(|case| !case["type"].as_str().unwrap().ends_with("[]"))
+    {
+        let datum = physical(&case);
+        let expected = &datum.bytes()[4..];
+        let ty = column_type(datum.type_oid());
+        let text = case["output"].as_str().unwrap();
+        let budget = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let encoded = encoding::encode_with_control(text, &ty, &control).unwrap();
+        assert_eq!(&**encoded, expected, "{}", case["id"]);
+        assert_eq!(budget.used(), encoded.capacity());
+        assert_eq!(encoded.reserved_bytes(), encoded.capacity());
+        drop(encoded);
+        assert_eq!(budget.used(), 0);
+        for limit in [0, 4, expected.len() - 1] {
+            let budget = MemoryBudget::new(limit);
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            assert_eq!(
+                encoding::encode_with_control(text, &ty, &control)
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("53200"),
+                "{} at {limit}",
+                case["id"]
+            );
+            assert_eq!(budget.used(), 0);
+        }
+        for token in [&original, &invoking] {
+            token.cancel();
+            assert_eq!(
+                encoding::encode_with_control(text, &ty, &control)
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("57014")
+            );
+            token.reset();
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}

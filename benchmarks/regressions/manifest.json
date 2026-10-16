@@ -10165,6 +10165,45 @@
       "capability": "Physical range equality consumers",
       "workload": "54 physical range and multirange fields matched against admitted values through exact keys, hashes and actual disk spill under small and large budgets.",
       "invariant": "Physical and admitted fields share SQL equality classes and keys, preserving duplicate elimination and reservation release on success and failure."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "produced_copy_slots_can_change_without_changing_container_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/memory/production/tests.rs",
+      "capability": "Admitted mutable scratch slots",
+      "workload": "Edit Copy slots before and after producer finalization under one existing allowance.",
+      "invariant": "Mutation retains allocation identity, capacity and reservation; the returned slice cannot grow or introduce owned payloads."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "numeric_datum_production_releases_scratch_and_checks_both_cancellations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/node_tree/values/numeric/tests.rs",
+      "capability": "Numeric physical production ownership",
+      "workload": "Encode finite, scaled, zero and special decimals, including an 8,192-digit coefficient and long fractional scale.",
+      "invariant": "Scratch and output share the caller allowance; completed bytes retain only output capacity and quota or either cancellation releases all leases."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_datum_producers_admit_scratch_and_preserve_postgresql_bytes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/range/datum/tests.rs",
+      "capability": "Range physical production ownership",
+      "workload": "Encode 54 independent PostgreSQL range and multirange payloads under adequate, exhausted and cancelled producer allowances.",
+      "invariant": "Exact native payload bytes are unchanged; parsing, numeric scratch, output growth and handoff retain their original owner without leaking failed reservations."
     }
   ]
 }

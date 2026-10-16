@@ -9,11 +9,25 @@
 use crate::catalog::node_tree::invalid;
 use crate::SQLError;
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
     DecimalValue,
 };
 
 pub(crate) fn encode(value: &DecimalValue) -> Result<Vec<u8>, SQLError> {
+    encode_with_control(value, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary numeric Datum encoding")
+    })
+}
+
+/// Preserve the original producer allowance while encoding the selected numeric representation.
+pub(crate) fn encode_with_control(
+    value: &DecimalValue,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, SQLError> {
+    control.check()?;
+    let mut bytes = ProductionVec::new(*control);
     let special = if value.is_nan() {
         Some(0xc000_u16)
     } else if value.is_positive_infinity() {
@@ -24,68 +38,94 @@ pub(crate) fn encode(value: &DecimalValue) -> Result<Vec<u8>, SQLError> {
         None
     };
     if let Some(header) = special {
-        return Ok(header.to_le_bytes().to_vec());
+        push_word(&mut bytes, header)?;
+        return Ok(bytes.finish()?);
     }
-    let text = value.to_sql_string();
+    let text = value.to_sql_string_with_control(control)?;
     let text = text.strip_prefix('-').unwrap_or(&text);
     let (integer, fraction) = text.split_once('.').unwrap_or((text, ""));
     let scale = u16::try_from(fraction.len()).map_err(|_| invalid("numeric scale overflow"))?;
-    let integer_groups = integer.len().div_ceil(4);
-    let padded = format!(
-        "{}{}{}{}",
-        "0".repeat(integer_groups * 4 - integer.len()),
-        integer,
-        fraction,
-        "0".repeat((4 - fraction.len() % 4) % 4),
-    );
-    let digits = padded
-        .as_bytes()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|group| {
-            group
-                .iter()
-                .fold(0_u16, |value, digit| value * 10 + u16::from(digit - b'0'))
-        })
-        .collect::<Vec<_>>();
-    let first = digits
-        .iter()
-        .position(|digit| *digit != 0)
-        .unwrap_or(digits.len());
-    let end = digits
-        .iter()
-        .rposition(|digit| *digit != 0)
-        .map_or(first, |index| index + 1);
+    let groups = DecimalGroups::new(integer, fraction);
+    let (first, end) = groups.nonzero_bounds(control)?;
     let weight = if first == end {
         0
     } else {
-        i32::try_from(integer_groups).unwrap_or(i32::MAX)
+        i32::try_from(groups.integer_groups).unwrap_or(i32::MAX)
             - i32::try_from(first).unwrap_or(i32::MAX)
             - 1
     };
     let weight = i16::try_from(weight).map_err(|_| invalid("numeric weight overflow"))?;
-    let mut bytes = Vec::new();
     if (-64..=63).contains(&weight) && scale <= 63 {
         let header = 0x8000
             | if value.is_negative() { 0x2000 } else { 0 }
             | (scale << 7)
             | (u16::from_le_bytes(weight.to_le_bytes()) & 0x7f);
-        bytes.extend(header.to_le_bytes());
+        push_word(&mut bytes, header)?;
     } else {
         if scale > 0x3fff {
             return Err(invalid("numeric scale overflow"));
         }
         let header = scale | if value.is_negative() { 0x4000 } else { 0 };
-        bytes.extend(header.to_le_bytes());
-        bytes.extend(weight.to_le_bytes());
+        push_word(&mut bytes, header)?;
+        push_word(&mut bytes, u16::from_le_bytes(weight.to_le_bytes()))?;
     }
-    bytes.extend(
-        digits[first..end]
-            .iter()
-            .flat_map(|digit| digit.to_le_bytes()),
-    );
-    Ok(bytes)
+    bytes.reserve((end - first).saturating_mul(2))?;
+    for index in first..end {
+        control.check()?;
+        push_word(&mut bytes, groups.at(index))?;
+    }
+    Ok(bytes.finish()?)
+}
+
+fn push_word(bytes: &mut ProductionVec<'_, u8>, value: u16) -> Result<(), SQLError> {
+    for byte in value.to_le_bytes() {
+        bytes.push_copy(byte)?;
+    }
+    Ok(())
+}
+
+/// Borrow virtual zero-padded groups instead of allocating a second decimal string and a digit vector.
+struct DecimalGroups<'a> {
+    integer: &'a [u8],
+    fraction: &'a [u8],
+    integer_groups: usize,
+}
+
+impl<'a> DecimalGroups<'a> {
+    fn new(integer: &'a str, fraction: &'a str) -> Self {
+        Self {
+            integer: integer.as_bytes(),
+            fraction: fraction.as_bytes(),
+            integer_groups: integer.len().div_ceil(4),
+        }
+    }
+
+    fn at(&self, index: usize) -> u16 {
+        let leading = self.integer_groups * 4 - self.integer.len();
+        (index * 4..index * 4 + 4).fold(0, |group, position| {
+            let digit = position.checked_sub(leading).map_or(0, |position| {
+                self.integer
+                    .get(position)
+                    .or_else(|| self.fraction.get(position - self.integer.len()))
+                    .map_or(0, |digit| digit - b'0')
+            });
+            group * 10 + u16::from(digit)
+        })
+    }
+
+    fn nonzero_bounds(&self, control: &ProductionControl<'_>) -> Result<(usize, usize), SQLError> {
+        let count = self.integer_groups + self.fraction.len().div_ceil(4);
+        let mut first = count;
+        let mut end = count;
+        for index in 0..count {
+            control.check()?;
+            if self.at(index) != 0 {
+                first = first.min(index);
+                end = index + 1;
+            }
+        }
+        Ok((first, end))
+    }
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<String, SQLError> {
@@ -169,3 +209,6 @@ pub(crate) fn decode_with_control(
     }
     Ok(text.finish()?)
 }
+
+#[cfg(test)]
+mod tests;

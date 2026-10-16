@@ -72,6 +72,14 @@ impl<'a, T> ProductionVec<'a, T> {
 }
 
 impl<T: Copy> ProductionVec<'_, T> {
+    /// Edit admitted scratch slots without growing the buffer or introducing allocation-owning elements.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        match &mut self.buffer {
+            Buffer::Ordinary(values) => values,
+            Buffer::Controlled(values) => values,
+        }
+    }
+
     pub fn push_copy(&mut self, value: T) -> Result<(), ValueRetentionError> {
         self.reserve(1)?;
         match &mut self.buffer {

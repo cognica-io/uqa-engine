@@ -7,7 +7,7 @@
 //! `PostgreSQL` native range payloads shared by catalog constants and retained tuple fields.
 
 use super::{CanonicalMultirange, CanonicalRange, RangeComparisonValue, RangeSubtype};
-use crate::catalog::type_metadata::{pg_type_align, pg_type_len, pg_type_oid};
+use crate::catalog::type_metadata::{pg_type_align, pg_type_len};
 use crate::{ColumnType, SQLError};
 use uqa_core::{
     memory::{Produced, ProductionControl, ProductionString, ProductionVec},
@@ -21,96 +21,8 @@ const LOWER_INFINITE: u8 = 8;
 const UPPER_INFINITE: u8 = 16;
 const ABSOLUTE_OFFSET: u32 = 1 << 31;
 
-/// Encode an admitted native text carrier; the surrounding tuple or constant owns the varlena header.
-pub(crate) fn encode(text: &str, ty: &ColumnType) -> Result<Vec<u8>, SQLError> {
-    let mut bytes = (pg_type_oid(ty) as u32).to_le_bytes().to_vec();
-    match ty {
-        ColumnType::Range(subtype) => {
-            let range = super::parse_range(text, *subtype)?;
-            write_bounds(&range, &mut bytes)?;
-            bytes.push(flags(&range));
-        }
-        ColumnType::Multirange(subtype) => {
-            let ranges = super::parse_multirange(text, *subtype)?;
-            let count = ranges.ranges.len();
-            let count_word = u32::try_from(count).map_err(|_| corrupt("too many ranges"))?;
-            bytes.extend_from_slice(&count_word.to_le_bytes());
-            let flags_start = 8 + count.saturating_sub(1) * 4;
-            let start = align(flags_start + count + 4, *subtype)? - 4;
-            bytes.resize(start, 0);
-            let mut previous = 0;
-            for (index, range) in ranges.ranges.iter().enumerate() {
-                let offset = u32::try_from(bytes.len() - start)
-                    .ok()
-                    .filter(|offset| *offset < ABSOLUTE_OFFSET)
-                    .ok_or_else(|| corrupt("range payload too large"))?;
-                if index > 0 {
-                    let item = if index % 4 == 0 {
-                        offset | ABSOLUTE_OFFSET
-                    } else {
-                        offset - previous
-                    };
-                    bytes[8 + (index - 1) * 4..8 + index * 4].copy_from_slice(&item.to_le_bytes());
-                }
-                previous = offset;
-                bytes[flags_start + index] = flags(range);
-                write_bounds(range, &mut bytes)?;
-                bytes.resize(align(bytes.len() + 4, *subtype)? - 4, 0);
-            }
-        }
-        _ => return Err(corrupt("non-range payload type")),
-    }
-    Ok(bytes)
-}
-
-fn flags(range: &CanonicalRange) -> u8 {
-    if range.empty {
-        return EMPTY;
-    }
-    let lower = if range.lower.is_none() {
-        LOWER_INFINITE
-    } else if range.lower_inclusive {
-        LOWER_INCLUSIVE
-    } else {
-        0
-    };
-    let upper = if range.upper.is_none() {
-        UPPER_INFINITE
-    } else if range.upper_inclusive {
-        UPPER_INCLUSIVE
-    } else {
-        0
-    };
-    lower | upper
-}
-
-fn write_bounds(range: &CanonicalRange, bytes: &mut Vec<u8>) -> Result<(), SQLError> {
-    let ty = range.subtype.scalar_type();
-    for value in [range.lower.as_ref(), range.upper.as_ref()]
-        .into_iter()
-        .flatten()
-    {
-        if let Value::Decimal(number) = value {
-            let payload = crate::catalog::node_tree::encode_numeric_datum(number)?;
-            if payload.len() < 127 {
-                bytes.push(((payload.len() as u8 + 1) << 1) | 1);
-            } else {
-                bytes.resize(align(bytes.len() + 4, range.subtype)? - 4, 0);
-                let size = u32::try_from(payload.len() + 4)
-                    .ok()
-                    .and_then(|size| size.checked_mul(4))
-                    .ok_or_else(|| corrupt("numeric bound too large"))?;
-                bytes.extend_from_slice(&size.to_le_bytes());
-            }
-            bytes.extend_from_slice(&payload);
-        } else {
-            let bits = crate::expr::composites::datum::encode_bits(value, &ty)
-                .ok_or_else(|| corrupt("invalid native range bound"))?;
-            bytes.extend_from_slice(&bits.to_le_bytes()[..pg_type_len(&ty) as usize]);
-        }
-    }
-    Ok(())
-}
+mod encoding;
+pub(crate) use encoding::encode;
 
 /// Observe already admitted bytes without rerunning input, canonicalization, or domain checks. Multirange members stream into the original output allowance.
 pub(crate) fn read(
