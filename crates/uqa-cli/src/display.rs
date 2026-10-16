@@ -156,6 +156,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "interval".into(),
         ColumnType::Range(subtype) => subtype.range_name().into(),
         ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
+        ColumnType::DeclaredRange(_) | ColumnType::DeclaredMultirange(_) => ty.display_name(),
         ColumnType::Vector(dim) => format!("vector({dim})"),
         ColumnType::Tensor(dim) => format!("tensor({dim})"),
         ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),

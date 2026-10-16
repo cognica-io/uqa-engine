@@ -44,7 +44,7 @@ pub use json::{validate_json_object_key_type, value_to_json_text};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
-    RangeComparisonValue,
+    RangeComparisonValue, RangeValueDescriptor,
 };
 pub use time::IntervalFields;
 use time::{
