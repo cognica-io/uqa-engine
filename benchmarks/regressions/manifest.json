@@ -11147,6 +11147,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_ties_preserve_selected_types_in_forward_and_backward_scans",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/tests/range_peers.rs",
+      "capability": "Selected WITH TIES boundaries",
+      "workload": "Numeric ranges and multiranges, domains, TEXT and NULLs through batched forward and directional forward/backward/rewind scans.",
+      "invariant": "Every boundary peer survives with its input representation; changing scan direction retains the same selected equality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_peers_preserve_selected_types_in_memory_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/window/tests/range_peers.rs",
+      "capability": "Selected window peers",
+      "workload": "Two-column numeric range/multirange peers, domains, TEXT and NULLs under one-byte and in-memory partition budgets.",
+      "invariant": "Forced spill preserves selected range equality, independent secondary keys and NULL equality without interpreting ordinary TEXT.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "scalar_range_window_peers_match_postgresql",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/pg18_semantics/range_peers.rs",
+      "capability": "Public range peer semantics",
+      "workload": "Ten independent PostgreSQL queries for WITH TIES, PARTITION BY, dense_rank, rank and GROUPS frames over numeric ranges and multiranges.",
+      "invariant": "Actual Engine SQL counts match PostgreSQL for every boundary and preserve complete peer multiplicities.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

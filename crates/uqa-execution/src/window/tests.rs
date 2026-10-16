@@ -9,6 +9,7 @@ use crate::aggregation::AggregateAccumulatorTemplate;
 use uqa_sql::expr::RowLookup as _;
 
 mod enums;
+mod range_peers;
 mod source_layout;
 
 struct NoSequences;
@@ -117,6 +118,7 @@ fn evaluate_slots(
     let mut offsets_evaluated = false;
     emit_partition(
         &pass,
+        &[],
         &mut slots,
         &mut partition,
         (&schema, &mut output),

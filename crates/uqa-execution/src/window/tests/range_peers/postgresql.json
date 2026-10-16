@@ -1,0 +1,16 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "docker_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "cases": [
+    {"id": "numrange:with_ties", "sql": "WITH v(r) AS (VALUES ('[1.0,3.00)'::numrange), ('[1.00,3.0)'::numrange), ('[4,5)'::numrange)) SELECT count(*) FROM (SELECT r FROM v ORDER BY r FETCH FIRST 1 ROW WITH TIES) q", "count": 2},
+    {"id": "numrange:partition", "sql": "WITH v(r) AS (VALUES ('[1.0,3.00)'::numrange), ('[1.00,3.0)'::numrange), ('[4,5)'::numrange)) SELECT sum(n)::bigint FROM (SELECT count(*) OVER (PARTITION BY r) n FROM v) q", "count": 5},
+    {"id": "numrange:dense_rank", "sql": "WITH v(r) AS (VALUES ('[1.0,3.00)'::numrange), ('[1.00,3.0)'::numrange), ('[4,5)'::numrange)) SELECT sum(n)::bigint FROM (SELECT dense_rank() OVER (ORDER BY r) n FROM v) q", "count": 4},
+    {"id": "numrange:rank", "sql": "WITH v(r) AS (VALUES ('[1.0,3.00)'::numrange), ('[1.00,3.0)'::numrange), ('[4,5)'::numrange)) SELECT sum(n)::bigint FROM (SELECT rank() OVER (ORDER BY r) n FROM v) q", "count": 5},
+    {"id": "numrange:groups_frame", "sql": "WITH v(r) AS (VALUES ('[1.0,3.00)'::numrange), ('[1.00,3.0)'::numrange), ('[4,5)'::numrange)) SELECT sum(n)::bigint FROM (SELECT count(*) OVER (ORDER BY r GROUPS BETWEEN CURRENT ROW AND CURRENT ROW) n FROM v) q", "count": 5},
+    {"id": "nummultirange:with_ties", "sql": "WITH v(r) AS (VALUES ('{[1.0,3.00)}'::nummultirange), ('{[1.00,3.0)}'::nummultirange), ('{[4,5)}'::nummultirange)) SELECT count(*) FROM (SELECT r FROM v ORDER BY r FETCH FIRST 1 ROW WITH TIES) q", "count": 2},
+    {"id": "nummultirange:partition", "sql": "WITH v(r) AS (VALUES ('{[1.0,3.00)}'::nummultirange), ('{[1.00,3.0)}'::nummultirange), ('{[4,5)}'::nummultirange)) SELECT sum(n)::bigint FROM (SELECT count(*) OVER (PARTITION BY r) n FROM v) q", "count": 5},
+    {"id": "nummultirange:dense_rank", "sql": "WITH v(r) AS (VALUES ('{[1.0,3.00)}'::nummultirange), ('{[1.00,3.0)}'::nummultirange), ('{[4,5)}'::nummultirange)) SELECT sum(n)::bigint FROM (SELECT dense_rank() OVER (ORDER BY r) n FROM v) q", "count": 4},
+    {"id": "nummultirange:rank", "sql": "WITH v(r) AS (VALUES ('{[1.0,3.00)}'::nummultirange), ('{[1.00,3.0)}'::nummultirange), ('{[4,5)}'::nummultirange)) SELECT sum(n)::bigint FROM (SELECT rank() OVER (ORDER BY r) n FROM v) q", "count": 5},
+    {"id": "nummultirange:groups_frame", "sql": "WITH v(r) AS (VALUES ('{[1.0,3.00)}'::nummultirange), ('{[1.00,3.0)}'::nummultirange), ('{[4,5)}'::nummultirange)) SELECT sum(n)::bigint FROM (SELECT count(*) OVER (ORDER BY r GROUPS BETWEEN CURRENT ROW AND CURRENT ROW) n FROM v) q", "count": 5}
+  ]
+}

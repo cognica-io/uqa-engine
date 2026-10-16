@@ -81,7 +81,7 @@ fn spilled_window_peers_use_enum_identity_without_reading_labels() {
             }];
             let arena = PlanSubqueryArena::new(&[], None);
             let mut rows =
-                PartitionRows::new(&mut partition, &order, &[], &Catalog, &arena).unwrap();
+                PartitionRows::new(&mut partition, &order, &[], &[], &Catalog, &arena).unwrap();
             assert!(rows.are_peers(0, 1).unwrap());
             assert!(!rows.are_peers(1, 2).unwrap());
             assert!(rows.are_peers(3, 4).unwrap());
