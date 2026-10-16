@@ -318,6 +318,11 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
                 "enum values need catalog label output before binding to DuckDB parameters".into(),
             ));
         }
+        Value::BitString(_) => {
+            return Err(FDWError::UnsupportedValue(
+                "bit strings have no typed DuckDB parameter carrier".into(),
+            ));
+        }
         Value::Bool(v) => DuckValue::Boolean(*v),
         Value::Int(v) => DuckValue::BigInt(*v),
         Value::Float(v) => DuckValue::Double(*v),
@@ -672,6 +677,24 @@ mod tests {
         ))
         .expect_err("sub-microsecond timestamps must not be truncated");
         assert!(nanos_error.to_string().contains("sub-microsecond"));
+    }
+
+    #[test]
+    fn bit_parameters_preserve_the_typed_transport_boundary() {
+        for (bytes, length) in [(vec![], 0), (vec![0x80], 1), (vec![0x80], 8)] {
+            let bit =
+                Value::BitString(uqa_core::BitStringValue::try_from_packed(bytes, length).unwrap());
+            let array = Value::Array(uqa_core::ArrayValue::try_new(vec![bit.clone()]).unwrap());
+            for value in [bit, array] {
+                for value in [value.clone(), Value::List(vec![Value::Null, value])] {
+                    assert!(matches!(
+                        uqa_value_to_duck_value(&value),
+                        Err(FDWError::UnsupportedValue(message))
+                            if message == "bit strings have no typed DuckDB parameter carrier"
+                    ));
+                }
+            }
+        }
     }
 
     #[test]

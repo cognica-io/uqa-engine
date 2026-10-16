@@ -58,6 +58,11 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
                 "enum values have no catalog-independent Flight SQL literal".into(),
             ));
         }
+        Value::BitString(_) => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                "bit strings have no portable Flight SQL literal".into(),
+            ));
+        }
         Value::Bool(b) => {
             if *b {
                 "TRUE".into()
@@ -336,6 +341,27 @@ mod tests {
     fn quote_literal_renders_int_and_bool() {
         assert_eq!(quote_literal(&Value::Int(42)).unwrap(), "42");
         assert_eq!(quote_literal(&Value::Bool(true)).unwrap(), "TRUE");
+    }
+
+    #[test]
+    fn bit_literals_and_nested_predicates_require_a_typed_transport() {
+        for (bytes, length) in [(vec![], 0), (vec![0x80], 1), (vec![0x80], 8)] {
+            let bit =
+                Value::BitString(uqa_core::BitStringValue::try_from_packed(bytes, length).unwrap());
+            let array = Value::Array(uqa_core::ArrayValue::try_new(vec![bit.clone()]).unwrap());
+            for value in [bit, array] {
+                let predicate = FDWPredicate {
+                    column: "bits".into(),
+                    operator: PredicateOp::In,
+                    value: Value::List(vec![Value::Null, value]),
+                };
+                assert!(matches!(
+                    build_where_clause(&[predicate]),
+                    Err(ArrowFlightPrepareError::UnsupportedLiteral(message))
+                        if message == "bit strings have no portable Flight SQL literal"
+                ));
+            }
+        }
     }
 
     #[test]
