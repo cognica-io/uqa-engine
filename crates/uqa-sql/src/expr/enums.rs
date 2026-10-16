@@ -20,6 +20,8 @@ use crate::ast::ColumnType;
 
 mod functions;
 mod physical;
+#[cfg(test)]
+mod tests;
 pub use functions::{
     enum_function_value, enum_function_value_with_control, enum_function_value_with_state,
 };
@@ -66,7 +68,8 @@ impl EnumTypeLabels {
         label: &EnumTypeLabel,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Value>> {
-        let memory = control.reserve(label.key.as_bytes().len())?;
+        let memory =
+            control.reserve(EnumValue::retained_header_bytes() + label.key.as_bytes().len())?;
         Ok(control.finish(self.value(label), memory)?)
     }
 }
@@ -170,7 +173,20 @@ pub fn enum_value_from_text(
     type_oid: u32,
     text: &str,
 ) -> Result<Value> {
+    enum_value_from_text_with_control(catalog, type_oid, text, &ProductionControl::uncontrolled())
+        .map(|value| value.into_uncontrolled().expect("ordinary enum input"))
+}
+
+/// Resolve the selected label, then admit its key and metadata before constructing the value.
+pub fn enum_value_from_text_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let labels = labels(catalog, type_oid)?;
+    control.check()?;
     let Some(label) = labels.by_text(text) else {
         return Err(SQLError::Routine {
             sqlstate: "22P02".into(),
@@ -181,7 +197,7 @@ pub fn enum_value_from_text(
         });
     };
     check_safe(catalog, &labels, label)?;
-    Ok(labels.value(label))
+    labels.value_with_control(label, control)
 }
 
 /// `enum_first` and `enum_last` read only the argument's type; the returned label must be usable.
@@ -525,6 +541,25 @@ pub fn cast_to_enum(
     source: Option<&ColumnType>,
     target: &ColumnType,
 ) -> Result<Option<Value>> {
+    Ok(cast_to_enum_with_control(
+        catalog,
+        value,
+        source,
+        target,
+        &ProductionControl::uncontrolled(),
+    )?
+    .map(|value| value.into_uncontrolled().expect("ordinary enum cast")))
+}
+
+/// Apply enum input or retain an identity cast under the original allowance and both cancellation owners.
+pub fn cast_to_enum_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+    source: Option<&ColumnType>,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    control.check()?;
     let ColumnType::Enum(reference) = target else {
         return Ok(None);
     };
@@ -537,11 +572,17 @@ pub fn cast_to_enum(
         })
     };
     match value {
-        Value::Null => Ok(Some(Value::Null)),
-        Value::Enum(label) if label.type_oid() == reference.oid => Ok(Some(value.clone())),
-        Value::Datum(datum) if datum.type_oid() == reference.oid => Ok(Some(value.clone())),
+        Value::Null => Ok(Some(
+            control.finish(Value::Null, control.empty_reservation())?,
+        )),
+        Value::Enum(label) if label.type_oid() == reference.oid => {
+            Ok(Some(control.copy_value(value)?))
+        }
+        Value::Datum(datum) if datum.type_oid() == reference.oid => {
+            Ok(Some(control.copy_value(value)?))
+        }
         Value::Str(text) | Value::FixedChar(text) if source.is_none_or(string_category) => {
-            enum_value_from_text(catalog, reference.oid, text).map(Some)
+            enum_value_from_text_with_control(catalog, reference.oid, text, control).map(Some)
         }
         _ => Err(cannot_cast(
             &source_name(source)?,

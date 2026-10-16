@@ -18,7 +18,13 @@ fn dynamic_value_keeps_variable_width_payloads_indirect() {
     assert_eq!(std::mem::size_of::<ArrayValue>(), pointer_bytes);
     assert_eq!(std::mem::size_of::<RowValue>(), pointer_bytes);
     assert_eq!(std::mem::size_of::<DecimalValue>(), pointer_bytes);
-    assert!(std::mem::size_of::<Value>() <= 4 * pointer_bytes);
+    assert_eq!(std::mem::size_of::<BitStringValue>(), pointer_bytes);
+    assert_eq!(std::mem::size_of::<EnumValue>(), pointer_bytes);
+    assert!(
+        std::mem::size_of::<Value>() <= 4 * pointer_bytes,
+        "dynamic values occupy {} bytes on a {pointer_bytes}-byte pointer target",
+        std::mem::size_of::<Value>()
+    );
 }
 
 struct HostileEmptySequence;

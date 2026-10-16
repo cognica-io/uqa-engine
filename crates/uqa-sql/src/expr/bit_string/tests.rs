@@ -104,22 +104,23 @@ fn bit_string_input_lengths_casts_and_integers_match_postgresql() {
 fn bit_string_input_and_length_changes_keep_packed_allowances() {
     let text = "10101010".repeat(4097);
     let cancellation = CancellationToken::new();
-    let budget = MemoryBudget::new(4097);
+    let header = BitStringValue::retained_header_bytes();
+    let budget = MemoryBudget::new(header + 4097);
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
     let value = input_with_control(&text, BitStringKind::Varying, -1, &control).unwrap();
     assert_eq!(value.as_bytes(), vec![0xaa; 4097]);
-    assert_eq!(value.reserved_bytes(), 4097);
+    assert_eq!(value.reserved_bytes(), header + 4097);
     assert_eq!(
         output_with_control(&value, &control)
             .unwrap_err()
             .sqlstate(),
         Some("53200")
     );
-    assert_eq!(budget.used(), 4097);
+    assert_eq!(budget.used(), header + 4097);
     drop(value);
     assert_eq!(budget.used(), 0);
 
-    let too_small = MemoryBudget::new(4096);
+    let too_small = MemoryBudget::new(header + 4096);
     let limited = ProductionControl::new(&too_small, &cancellation, &cancellation);
     assert_eq!(
         input_with_control(&text, BitStringKind::Fixed, -1, &limited)
@@ -142,11 +143,11 @@ fn bit_string_input_and_length_changes_keep_packed_allowances() {
         (BitStringKind::Fixed, 17, vec![0xaa, 0x80, 0]),
         (BitStringKind::Varying, 17, vec![0xaa, 0x80]),
     ] {
-        let allowance = MemoryBudget::new(expected.len());
+        let allowance = MemoryBudget::new(header + expected.len());
         let control = ProductionControl::new(&allowance, &cancellation, &cancellation);
         let converted = coerce_with_control(&original, kind, length, true, &control).unwrap();
         assert_eq!(converted.as_bytes(), expected);
-        assert_eq!(converted.reserved_bytes(), expected.len());
+        assert_eq!(converted.reserved_bytes(), header + expected.len());
         assert_eq!(original.as_bytes(), &[0xaa, 0x80]);
         drop(converted);
         assert_eq!(allowance.used(), 0);

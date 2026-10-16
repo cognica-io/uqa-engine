@@ -317,13 +317,14 @@ pub fn cast_value_with_type_resolution_with_control(
         if let Some(value) = engine.cast_domain(value, source_ty, target)? {
             return Ok(control.retain_external_value(value)?);
         }
-        if let Some(value) = super::super::enums::cast_to_enum(
+        if let Some(value) = super::super::enums::cast_to_enum_with_control(
             engine.enum_labels(),
             value,
             resolved_source_type.as_deref(),
             target,
+            control,
         )? {
-            return Ok(control.retain_external_value(value)?);
+            return Ok(value);
         }
         if let Some(value) = super::super::composites::cast_to_composite(
             engine,

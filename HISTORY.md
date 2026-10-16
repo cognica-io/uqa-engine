@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reject B-tree key declarations whose selected SQL type has no default operator class, including domains, expressions and indexes affected by column type changes. Preserve PostgreSQL diagnostics, statement rollback, generic array/record classes and unordered included values.
 
+- Restore compact dynamic value slots after bit-string and physical enum metadata additions. Retain indirect payload headers under the existing memory allowance without changing packed values, enum identity, comparisons or persistent formats.
+
 - Restore ordinary debug WASM initialization and array/row SQL decoding by bounding catalog construction and parser message construction frames. Preserve catalog layouts, protobuf wire behavior, partial decoding errors and recursion limits.
 
 - Preserve unmodified `bpchar` declarations without an implicit one-character limit and retain trailing `CHARACTER`/`bpchar` spaces in array and composite text output, including unique-constraint detail; scalar casts to `TEXT` still trim trailing spaces as PostgreSQL does.

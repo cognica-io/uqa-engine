@@ -205,7 +205,7 @@ fn decoded_enum(
     if hex.len() / 2 > crate::MAX_ENUM_LABEL_KEY_BYTES {
         return Err(malformed("label key exceeds its length limit"));
     }
-    workspace.reserve(hex.len() / 2)?;
+    workspace.reserve(EnumValue::retained_header_bytes() + hex.len() / 2)?;
     let key = EnumLabelKey::from_hex(hex).map_err(|error| malformed(&error.to_string()))?;
     Ok(EnumValue::new(type_oid, key).with_label_oid(label_oid))
 }

@@ -305,7 +305,9 @@ pub(super) fn enum_value(
                 .map_err(|_| malformed("label OID out of range".into()))
         })
         .transpose()?;
-    let (key, memory) = key.into_parts();
+    let (key, mut memory) = key.into_parts();
+    control.cancellation().check()?;
+    memory.grow(uqa_core::EnumValue::retained_header_bytes())?;
     let key =
         uqa_core::EnumLabelKey::from_hex(&key).map_err(|error| malformed(error.to_string()))?;
     super::finish(

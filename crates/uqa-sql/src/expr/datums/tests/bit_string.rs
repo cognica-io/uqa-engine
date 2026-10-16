@@ -13,14 +13,15 @@ fn bit_string_datums_keep_logical_length_owned_bounds_and_read_allowance() {
         // Short varlena: one header byte, four length bytes, two packed bytes.
         let bytes = vec![15, 9, 0, 0, 0, 0x80, 0x80];
         let datum = DatumValue::new(oid, 0, bytes.clone());
-        let memory = MemoryBudget::new(2);
+        let retained = uqa_core::BitStringValue::retained_header_bytes() + 2;
+        let memory = MemoryBudget::new(retained);
         let control = ProductionControl::new(&memory, &token, &token);
         let value = read_with_control(&datum, &control).unwrap();
         assert_eq!(crate::expr::value_to_string(&value).unwrap(), "100000001");
-        assert_eq!(memory.used(), 2);
+        assert_eq!(memory.used(), retained);
         drop(value);
         assert_eq!(memory.used(), 0);
-        let small = MemoryBudget::new(1);
+        let small = MemoryBudget::new(retained - 1);
         assert_eq!(
             read_with_control(&datum, &ProductionControl::new(&small, &token, &token))
                 .unwrap_err()

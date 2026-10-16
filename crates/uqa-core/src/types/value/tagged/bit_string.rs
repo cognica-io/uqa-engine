@@ -28,6 +28,7 @@ pub(super) fn decode(
         return Err(malformed());
     }
     let bytes = decode_hex_bytes(hex, workspace)?.ok_or_else(malformed)?;
+    workspace.reserve(BitStringValue::retained_header_bytes())?;
     BitStringValue::try_from_packed(bytes, length).ok_or_else(malformed)
 }
 

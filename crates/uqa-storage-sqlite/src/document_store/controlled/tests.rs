@@ -145,6 +145,37 @@ fn typed_blob_round_trips_every_persisted_variant() {
 }
 
 #[test]
+fn typed_compact_carriers_retain_indirect_metadata_and_release_failed_reads() {
+    for value in [
+        Value::BitString(uqa_core::BitStringValue::try_from_packed(Vec::new(), 0).unwrap()),
+        Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap()),
+        Value::Enum(EnumValue::new(
+            16_390,
+            EnumLabelKey::from_bytes(vec![64]).unwrap(),
+        )),
+        Value::Enum(
+            EnumValue::new(16_390, EnumLabelKey::from_bytes(vec![64]).unwrap())
+                .with_label_oid(Some(u32::MAX)),
+        ),
+    ] {
+        let input = encoded(value.clone());
+        let control = StorageReadControl::with_limit(4096);
+        let decoded = typed::decode(&input, &control, 127, false).unwrap();
+        assert!(decoded.has_same_representation(&value));
+        let retained = decoded
+            .retained_payload_bytes(control.memory(), control.cancellation())
+            .unwrap();
+        assert_eq!(control.memory().used(), retained);
+        drop(decoded);
+        assert_eq!(control.memory().used(), 0);
+
+        let limited = StorageReadControl::with_limit(retained - 1);
+        assert!(typed::decode(&input, &limited, 127, false).is_err());
+        assert_eq!(limited.memory().used(), 0);
+    }
+}
+
+#[test]
 fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
     for input in [
         r#"{"kind":"null"}"#,

@@ -51,7 +51,9 @@ pub(super) fn decode(
             .map_err(|_| JsonReadError::InvalidJson)?;
         packed.push(byte)?;
     }
-    let (packed, memory) = packed.into_parts();
+    let (packed, mut memory) = packed.into_parts();
+    control.cancellation().check()?;
+    memory.grow(uqa_core::BitStringValue::retained_header_bytes())?;
     let bits = uqa_core::BitStringValue::try_from_packed(packed, length)
         .ok_or(JsonReadError::InvalidJson)?;
     Ok(Budgeted::new(Value::BitString(bits), memory))
