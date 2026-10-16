@@ -535,4 +535,7 @@ mod tests;
 mod range_tests;
 
 #[cfg(test)]
+mod declared_ranges;
+
+#[cfg(test)]
 mod temporal_tests;

@@ -89,38 +89,56 @@ pub(in crate::expr) fn comparison(
     control: &ProductionControl<'_>,
 ) -> Result<RangeComparisonValue, SQLError> {
     control.check()?;
-    let subtype = physical_subtype(bytes, ty, catalog)?;
-    let endpoint = subtype.scalar_type();
-    match ty {
-        ColumnType::Range(_) => Ok(RangeComparisonValue::Range(read_range(
-            bytes, subtype, &endpoint, catalog, control,
-        )?)),
-        ColumnType::Multirange(_) => {
-            let mut input = Members::new(bytes, subtype, &endpoint, catalog)?;
-            let mut ranges = ProductionVec::new(*control);
-            while let Some(range) = input.next(control)? {
-                ranges.push_produced(range)?;
+    let multirange = catalog::is_multirange(ty)?;
+    match catalog::resolve(bytes, ty, catalog)? {
+        PhysicalRangeType::Native(subtype) => {
+            let endpoint = subtype.scalar_type();
+            if multirange {
+                Ok(RangeComparisonValue::Multirange(read_members(
+                    bytes, subtype, &endpoint, catalog, control,
+                )?))
+            } else {
+                Ok(RangeComparisonValue::Range(read_range(
+                    bytes, subtype, &endpoint, catalog, control,
+                )?))
             }
-            let (ranges, memory) = ranges.finish()?.into_parts();
-            Ok(RangeComparisonValue::Multirange(
-                control.finish(CanonicalMultirange { subtype, ranges }, memory)?,
-            ))
         }
-        _ => Err(corrupt("non-range payload type")),
+        PhysicalRangeType::Declared(descriptor) => {
+            if multirange {
+                Ok(RangeComparisonValue::DeclaredMultirange(read_members(
+                    bytes,
+                    descriptor.range_oid,
+                    &descriptor.endpoint,
+                    catalog,
+                    control,
+                )?))
+            } else {
+                Ok(RangeComparisonValue::DeclaredRange(read_range(
+                    bytes,
+                    descriptor.range_oid,
+                    &descriptor.endpoint,
+                    catalog,
+                    control,
+                )?))
+            }
+        }
     }
 }
 
-fn physical_subtype(
+fn read_members<I: Copy>(
     bytes: &[u8],
-    declared: &ColumnType,
+    subtype: I,
+    endpoint: &ColumnType,
     catalog: Option<&dyn crate::expr::SQLValueCatalog>,
-) -> Result<RangeSubtype, SQLError> {
-    match catalog::resolve(bytes, declared, catalog)? {
-        PhysicalRangeType::Native(subtype) => Ok(subtype),
-        PhysicalRangeType::Declared(_) => Err(SQLError::Internal(
-            "declared range comparison requires selected endpoint operations".into(),
-        )),
+    control: &ProductionControl<'_>,
+) -> Result<Produced<CanonicalMultirange<I>>, SQLError> {
+    let mut input = Members::new(bytes, subtype, endpoint, catalog)?;
+    let mut ranges = ProductionVec::new(*control);
+    while let Some(range) = input.next(control)? {
+        ranges.push_produced(range)?;
     }
+    let (ranges, memory) = ranges.finish()?.into_parts();
+    Ok(control.finish(CanonicalMultirange { subtype, ranges }, memory)?)
 }
 
 fn read_range<I: Copy>(

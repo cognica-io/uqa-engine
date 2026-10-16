@@ -235,14 +235,8 @@ pub(super) fn compare_lower_bounds(
     right: &CanonicalRange,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering> {
-    Ok(match (left.lower(), right.lower()) {
-        (None, None) => Ordering::Equal,
-        (None, Some(_)) => Ordering::Less,
-        (Some(_), None) => Ordering::Greater,
-        (Some(left_value), Some(right_value)) => left
-            .semantics()
-            .compare(left_value, right_value, control)?
-            .then_with(|| right.lower_inclusive.cmp(&left.lower_inclusive)),
+    super::comparison::compare_lower_bounds_by(left, right, control, |a, b, control| {
+        left.semantics().compare(a, b, control)
     })
 }
 
