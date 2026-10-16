@@ -315,11 +315,14 @@ pub(super) fn value_to_display(v: Option<&Value>) -> Result<String, SQLError> {
             out
         }
         Some(Value::Temporal(t)) => t.to_sql_string(),
-        Some(value @ Value::BitString(_)) => uqa_sql::expr::value_to_string(value)?,
         Some(Value::Json(text) | Value::JsonB(text)) => text.clone(),
         Some(Value::List(items)) => pg_array_display(items)?,
         Some(
-            value @ (Value::Array(_) | Value::Row(_) | Value::Record(_) | Value::LegacyVector(_)),
+            value @ (Value::BitString(_)
+            | Value::Array(_)
+            | Value::Row(_)
+            | Value::Record(_)
+            | Value::LegacyVector(_)),
         ) => uqa_sql::expr::value_to_string(value)?,
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
