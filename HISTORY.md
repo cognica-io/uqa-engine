@@ -22,7 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve range and multirange equality in `FETCH WITH TIES`, window partitions, ranking and peer frames, including equal numeric bounds with different decimal spellings.
+- Preserve range and multirange equality in `FETCH WITH TIES`, window partitions, ranking and peer frames, including equal numeric bounds with different decimal spellings. Release retained LIMIT scan state on close, including child cleanup errors.
 
 - Preserve selected scalar range types through DISTINCT, grouping, scalar and multi-argument aggregate DISTINCT, MODE, joins and set operations, so equal numeric bounds with different decimal spellings share PostgreSQL equality in memory and spill.
 

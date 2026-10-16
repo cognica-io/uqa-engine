@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::{PhysicalScanDirection, ScrollMaterialize};
-use uqa_sql::ColumnType;
+use uqa_sql::{ColumnType, SQLError};
 
 #[test]
 fn range_ties_preserve_selected_types_in_forward_and_backward_scans() {
@@ -88,4 +88,129 @@ fn drain(limit: &mut Limit<'_>, direction: PhysicalScanDirection) -> Vec<Value> 
         output.extend(batch.rows.iter().map(|row| row.value(0).unwrap().clone()));
     }
     output
+}
+
+#[test]
+fn with_ties_close_releases_boundary_and_types_even_when_child_close_fails() {
+    use std::sync::{atomic::AtomicUsize, Arc};
+
+    const PAYLOAD_BYTES: usize = 64 * 1024;
+    let ty = ColumnType::Domain {
+        schema: "public".into(),
+        name: "retained_text_domain".into(),
+        oid: 50_001,
+        array_oid: Some(50_002),
+        collation_oid: None,
+        base: Box::new(ColumnType::Text),
+    };
+    for (populated, directional) in [(false, false), (true, false), (true, true)] {
+        for fail_close in [false, true] {
+            let rows = if directional {
+                vec![row([("r", Value::Str("a".repeat(PAYLOAD_BYTES)))])]
+            } else if populated {
+                vec![
+                    row([("r", Value::Str("a".repeat(PAYLOAD_BYTES)))]),
+                    row([("r", Value::Str("a".repeat(PAYLOAD_BYTES)))]),
+                    row([("r", Value::Str("z".into()))]),
+                ]
+            } else {
+                vec![]
+            };
+            let calls = Arc::new(AtomicUsize::new(0));
+            let scan = ClosingScan {
+                child: TableScan::from_typed_rows(vec!["r".into()], vec![Some(ty.clone())], rows),
+                fail_close,
+            };
+            let evaluator = CountingTypes {
+                inner: DefaultExpressionEvaluator::shared(vec![]),
+                calls: Arc::clone(&calls),
+            };
+            let mut limit = Limit::with_ties(
+                Box::new(scan),
+                0,
+                1,
+                vec![SortKey {
+                    expr: col("r"),
+                    descending: false,
+                    nulls_first: None,
+                }],
+                Arc::new(evaluator),
+            );
+            for opened in 1..=2 {
+                limit.open().unwrap();
+                let has_boundary = populated && opened == 1;
+                let next = |limit: &mut Limit<'_>| {
+                    if directional {
+                        limit.next_direction(PhysicalScanDirection::Forward)
+                    } else {
+                        limit.next()
+                    }
+                };
+                if has_boundary {
+                    assert_eq!(
+                        next(&mut limit).unwrap().unwrap().rows.len(),
+                        if directional { 1 } else { 2 }
+                    );
+                }
+                assert!(next(&mut limit).unwrap().is_none());
+                assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), opened);
+                let allocations = allocation_counter::measure(|| {
+                    assert_eq!(limit.close().is_err(), fail_close);
+                });
+                let retained = "public".len()
+                    + "retained_text_domain".len()
+                    + usize::from(has_boundary) * (1 + usize::from(directional)) * PAYLOAD_BYTES;
+                assert!(
+                    allocations.bytes_current <= -(retained as i64),
+                    "populated={populated}, directional={directional}, fail_close={fail_close}, open={opened}: {allocations:?}"
+                );
+                assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), opened);
+            }
+        }
+    }
+}
+
+struct ClosingScan {
+    child: TableScan,
+    fail_close: bool,
+}
+
+impl PhysicalOperator for ClosingScan {
+    fn row_schema(&self) -> &RowSchema {
+        self.child.row_schema()
+    }
+    fn open(&mut self) -> ExecResult<()> {
+        self.child.open()
+    }
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.child.next()
+    }
+    fn close(&mut self) -> ExecResult<()> {
+        // Retain the child fixture so this check isolates the LIMIT owner's release.
+        if self.fail_close {
+            Err(ExecError::Other("child close failed".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct CountingTypes {
+    inner: SharedExpressionEvaluator<'static>,
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ExpressionEvaluator for CountingTypes {
+    fn evaluate(&self, expr: &ScalarExpr, row: &dyn uqa_sql::expr::RowLookup) -> ExecResult<Value> {
+        self.inner.evaluate(expr, row)
+    }
+    fn expression_type(
+        &self,
+        expr: &ScalarExpr,
+        schema: &RowSchema,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner.expression_type(expr, schema)
+    }
 }

@@ -367,6 +367,7 @@ impl PhysicalOperator for Limit<'_> {
         self.emitted = 0;
         if let Some(with_ties) = self.with_ties.as_mut() {
             with_ties.boundary = None;
+            with_ties.types = Vec::new();
             with_ties.finished = false;
         }
         self.directional_state = DirectionalLimitState::Initial;
@@ -481,6 +482,11 @@ impl PhysicalOperator for Limit<'_> {
     }
 
     fn close(&mut self) -> ExecResult<()> {
+        self.directional_current = None;
+        if let Some(with_ties) = self.with_ties.as_mut() {
+            with_ties.boundary = None;
+            with_ties.types = Vec::new();
+        }
         self.child.close()
     }
 }

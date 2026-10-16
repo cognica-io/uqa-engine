@@ -11186,6 +11186,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "with_ties_close_releases_boundary_and_types_even_when_child_close_fails",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/tests/range_peers.rs",
+      "capability": "LIMIT retained state lifecycle",
+      "workload": "Empty, batched and directional WITH TIES scans over domain TEXT, including 64 KiB boundary values, child-close errors and repeated open/close.",
+      "invariant": "Closing releases the boundary, directional row and selected type metadata before propagating a child error; types resolve once per open and never during close.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
