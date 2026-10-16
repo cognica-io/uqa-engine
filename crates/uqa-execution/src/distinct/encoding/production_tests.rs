@@ -5,6 +5,48 @@
 //
 
 use super::*;
+
+#[test]
+fn fixed_character_key_normalization_observes_cancellation_before_padding_work() {
+    struct CancelAtTag<'a> {
+        cancellation: &'a uqa_core::CancellationToken,
+        writes: usize,
+    }
+    impl KeyOutput for CancelAtTag<'_> {
+        fn push_byte(&mut self, tag: u8) -> ExecResult<()> {
+            assert_eq!(tag, 7);
+            self.writes += 1;
+            self.cancellation.cancel();
+            Ok(())
+        }
+        fn extend_bytes(&mut self, _: &[u8]) -> ExecResult<()> {
+            self.writes += 1;
+            Ok(())
+        }
+    }
+    let value = Value::FixedChar(" ".repeat(16384));
+    for cancel_original in [false, true] {
+        let original = uqa_core::CancellationToken::new();
+        let invoking = uqa_core::CancellationToken::new();
+        let memory = uqa_core::memory::MemoryBudget::new(0);
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let mut output = CancelAtTag {
+            cancellation: if cancel_original {
+                &original
+            } else {
+                &invoking
+            },
+            writes: 0,
+        };
+        let error = encode_value_with_control(&value, &mut output, &control).unwrap_err();
+        assert_eq!(sql_error(error).sqlstate(), Some("57014"));
+        assert_eq!(
+            output.writes, 1,
+            "cancelled normalization wrote a length or payload"
+        );
+        assert_eq!(memory.used(), 0);
+    }
+}
 use uqa_core::{memory::MemoryBudget, CancellationToken, DatumValue};
 
 fn text_datum(text: &str) -> Value {

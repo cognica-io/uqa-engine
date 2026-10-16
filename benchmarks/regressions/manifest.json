@@ -11462,6 +11462,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "fixed_character_comparison_text_borrows_only_the_unpadded_prefix",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/comparison_control/tests.rs",
+      "capability": "Controlled character comparison text",
+      "workload": "ASCII padding, empty values, multibyte text and non-space whitespace under zero scratch allowance; either original or invoking cancellation.",
+      "invariant": "Only trailing U+0020 is removed, the result borrows the input, no workspace is allocated and either cancellation is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fixed_character_key_normalization_observes_cancellation_before_padding_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Bounded fixed-character equality-key normalization",
+      "workload": "An output sink cancels either owner at the character tag before a 16 KiB trailing-space scan.",
+      "invariant": "Cancellation returns 57014 before any subsequent length or payload write, without scratch allocation; successful key bytes are unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

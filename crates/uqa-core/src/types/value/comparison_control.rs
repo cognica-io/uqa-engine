@@ -49,8 +49,8 @@ impl Value {
                 compare_bytes(left.as_bytes(), right.as_bytes(), control)?
             }
             (Self::FixedChar(left), Self::FixedChar(right)) => compare_bytes(
-                trim_spaces(left, control)?.as_bytes(),
-                trim_spaces(right, control)?.as_bytes(),
+                fixed_char_comparison_text_with_control(left, control)?.as_bytes(),
+                fixed_char_comparison_text_with_control(right, control)?.as_bytes(),
                 control,
             )?,
             (Self::Bytes(left), Self::Bytes(right)) => compare_bytes(left, right, control)?,
@@ -166,10 +166,12 @@ pub(crate) fn compare_bytes(
     Ok(left.len().cmp(&right.len()))
 }
 
-fn trim_spaces<'a>(
+/// Borrow the comparison text of a blank-padded character value, checking cancellation before and during trailing ASCII-space removal.
+pub fn fixed_char_comparison_text_with_control<'a>(
     text: &'a str,
     control: &ProductionControl<'_>,
 ) -> Result<&'a str, ValueRetentionError> {
+    control.check()?;
     let mut end = text.len();
     while end != 0 && text.as_bytes()[end - 1] == b' ' {
         if end.is_multiple_of(4096) {
@@ -177,6 +179,7 @@ fn trim_spaces<'a>(
         }
         end -= 1;
     }
+    control.check()?;
     Ok(&text[..end])
 }
 

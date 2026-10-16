@@ -509,7 +509,9 @@ fn encode_leaf(
         }
         Value::FixedChar(value) => {
             output.push_byte(7)?;
-            encode_bytes(value.trim_end_matches(' ').as_bytes(), output)
+            let value = uqa_core::fixed_char_comparison_text_with_control(value, control)
+                .map_err(output::resource_error)?;
+            encode_bytes(value.as_bytes(), output)
         }
         Value::Bytes(value) => {
             output.push_byte(3)?;
