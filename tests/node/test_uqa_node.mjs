@@ -18,12 +18,23 @@ import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/v
 import { registerNativeNotificationTests } from "./notifications/native.mjs";
 import { runCLIFixture } from "./http_cli.mjs";
 import { temporalOracle } from "../parity/http_temporal.mjs";
+import { runBitStringBinding } from "../parity/bit_strings.core.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
 const uqa = require(packagePath);
 registerNativeNotificationTests(uqa, packagePath);
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
+
+test("packed bit values survive Node conversion and reopen", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../parity/bit_strings.json", import.meta.url), "utf8"));
+  const directory = mkdtempSync(join(tmpdir(), "uqa-node-bits-"));
+  try {
+    await runBitStringBinding((path) => uqa.open(path), join(directory, "bits.db"), fixture, assert.deepEqual);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 async function readRequestJSON(request) {
   const chunks = [];

@@ -65,10 +65,14 @@ impl VirtualRelation {
         reason = "preserves catalog column and OID order"
     )]
     pub fn schema(self) -> Vec<(String, ColumnType)> {
+        // Each relation owns its construction frame, keeping unoptimized WASM locals bounded.
         macro_rules! columns {
-            ($($name:literal => $ty:expr),* $(,)?) => {
-                vec![$(($name.to_string(), $ty)),*]
-            };
+            ($($name:literal => $ty:expr),* $(,)?) => {{
+                fn relation_columns() -> Vec<(String, ColumnType)> {
+                    vec![$(($name.to_string(), $ty)),*]
+                }
+                relation_columns()
+            }};
         }
 
         match self {

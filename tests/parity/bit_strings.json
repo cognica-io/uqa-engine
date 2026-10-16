@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "capture_sha256": "08637bcb22f95482f2b4121d409638acf262cf0ed129f0708e9712e244859d1e",
+    "collector": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "reference_cases": [
+      {
+        "id": "version",
+        "sql": "SELECT version()"
+      },
+      {
+        "id": "isolate",
+        "sql": "BEGIN; CREATE SCHEMA binding_bit_oracle_20261016; SET LOCAL search_path TO binding_bit_oracle_20261016,pg_catalog"
+      },
+      {
+        "id": "setup",
+        "sql": "CREATE TYPE cb_bit_row AS (a bit(3), b varbit); CREATE TABLE cb_bits(id integer PRIMARY KEY,a bit(3), b varbit(9), c pg_catalog.bit, d bit(3)[], e cb_bit_row); INSERT INTO cb_bits VALUES (1,B'101',B'1',B'100000000',ARRAY[B'101',B'010'],ROW(B'101',B'1')),(2,B'000',B'100000000',B'',ARRAY[B'000',NULL],ROW(B'000',B'')),(3,NULL,NULL,NULL,NULL,NULL)"
+      },
+      {
+        "id": "initial",
+        "sql": "SELECT json_agg(row_to_json(r)) FROM (SELECT id,a AS fixed,b AS varying,c AS packed,d AS bits,ROW((e).a,(e).b) AS fields FROM cb_bits ORDER BY id) r"
+      },
+      {
+        "id": "parameter_values",
+        "sql": "INSERT INTO cb_bits(id,a,b,c,d,e) VALUES(4,'111'::bit(3),'101010101'::varbit(9),'1010'::pg_catalog.bit,ARRAY['111'::varbit],ROW('111'::bit(3),'101010101'::varbit))"
+      },
+      {
+        "id": "after_parameters",
+        "sql": "SELECT json_agg(row_to_json(r)) FROM (SELECT id,a AS fixed,b AS varying,c AS packed,d AS bits,ROW((e).a,(e).b) AS fields FROM cb_bits ORDER BY id) r"
+      },
+      {
+        "id": "unique_index",
+        "sql": "CREATE UNIQUE INDEX cb_bits_c_idx ON cb_bits(c)"
+      },
+      {
+        "id": "probe",
+        "sql": "SELECT json_agg(row_to_json(r)) FROM (SELECT id,c AS packed FROM cb_bits WHERE c=B'100000000' ORDER BY id) r"
+      },
+      {
+        "id": "savepoint",
+        "sql": "SAVEPOINT preserve; UPDATE cb_bits SET b=B'0' WHERE id=1; ROLLBACK TO preserve"
+      },
+      {
+        "id": "after_rollback",
+        "sql": "SELECT json_agg(row_to_json(r)) FROM (SELECT id,a AS fixed,b AS varying,c AS packed,d AS bits,ROW((e).a,(e).b) AS fields FROM cb_bits ORDER BY id) r"
+      },
+      {
+        "id": "error_savepoint",
+        "sql": "SAVEPOINT invalid_assignment"
+      },
+      {
+        "id": "assignment_error",
+        "sql": "INSERT INTO cb_bits(id,a) VALUES(5,B'10')"
+      },
+      {
+        "id": "rollback_error",
+        "sql": "ROLLBACK TO invalid_assignment"
+      },
+      {
+        "id": "rollback",
+        "sql": "ROLLBACK"
+      }
+    ],
+    "record_mapping": "Anonymous SQL row fields f1/f2 map to the existing JavaScript array / Python tuple boundary; scalar bit text and bit-array elements retain the independent PostgreSQL JSON values.",
+    "literal_reference_sql": "SELECT row_to_json(r) FROM (SELECT B'' AS empty,B'1' AS one,B'10000000' AS eight,B'100000000' AS nine,ARRAY[B'1',B'10000000',NULL] AS bits,ROW(B'1',B'10000000') AS fields) r",
+    "literal_capture_sha256": "a02226e5920538447044643a6fdccbc49a178f63fd055a889377ce352280bb75"
+  },
+  "setup": [
+    "CREATE TYPE cb_bit_row AS (a bit(3), b varbit); CREATE TABLE cb_bits(id integer PRIMARY KEY,a bit(3), b varbit(9), c pg_catalog.bit, d bit(3)[], e cb_bit_row)",
+    "INSERT INTO cb_bits VALUES (1,B'101',B'1',B'100000000',ARRAY[B'101',B'010'],ROW(B'101',B'1')),(2,B'000',B'100000000',B'',ARRAY[B'000',NULL],ROW(B'000',B'')),(3,NULL,NULL,NULL,NULL,NULL)"
+  ],
+  "query": "SELECT id,a AS fixed,b AS varying,c AS packed,d AS bits,ROW((e).a,(e).b) AS fields FROM cb_bits ORDER BY id",
+  "initial_rows": [
+    {
+      "id": 1,
+      "fixed": "101",
+      "varying": "1",
+      "packed": "100000000",
+      "bits": [
+        "101",
+        "010"
+      ],
+      "fields": [
+        "101",
+        "1"
+      ]
+    },
+    {
+      "id": 2,
+      "fixed": "000",
+      "varying": "100000000",
+      "packed": "",
+      "bits": [
+        "000",
+        null
+      ],
+      "fields": [
+        "000",
+        ""
+      ]
+    },
+    {
+      "id": 3,
+      "fixed": null,
+      "varying": null,
+      "packed": null,
+      "bits": null,
+      "fields": [
+        null,
+        null
+      ]
+    }
+  ],
+  "parameter_sql": "INSERT INTO cb_bits(id,a,b,c,d,e) VALUES(4,$1::bit(3),$2::varbit(9),$3::pg_catalog.bit,ARRAY[$1::varbit],ROW($1::bit(3),$2::varbit))",
+  "params": [
+    "111",
+    "101010101",
+    "1010"
+  ],
+  "rows": [
+    {
+      "id": 1,
+      "fixed": "101",
+      "varying": "1",
+      "packed": "100000000",
+      "bits": [
+        "101",
+        "010"
+      ],
+      "fields": [
+        "101",
+        "1"
+      ]
+    },
+    {
+      "id": 2,
+      "fixed": "000",
+      "varying": "100000000",
+      "packed": "",
+      "bits": [
+        "000",
+        null
+      ],
+      "fields": [
+        "000",
+        ""
+      ]
+    },
+    {
+      "id": 3,
+      "fixed": null,
+      "varying": null,
+      "packed": null,
+      "bits": null,
+      "fields": [
+        null,
+        null
+      ]
+    },
+    {
+      "id": 4,
+      "fixed": "111",
+      "varying": "101010101",
+      "packed": "1010",
+      "bits": [
+        "111"
+      ],
+      "fields": [
+        "111",
+        "101010101"
+      ]
+    }
+  ],
+  "index_sql": "CREATE UNIQUE INDEX cb_bits_c_idx ON cb_bits(c)",
+  "probe_sql": "SELECT id,c AS packed FROM cb_bits WHERE c=B'100000000' ORDER BY id",
+  "probe_rows": [
+    {
+      "id": 1,
+      "packed": "100000000"
+    }
+  ],
+  "rollback_sql": "BEGIN; UPDATE cb_bits SET b=B'0' WHERE id=1; ROLLBACK",
+  "invalid_sql": "INSERT INTO cb_bits(id,a) VALUES(5,B'10')",
+  "error_contains": "bit string length 2 does not match type bit(3)",
+  "literal_query": "SELECT B'' AS empty,B'1' AS one,B'10000000' AS eight,B'100000000' AS nine,ARRAY[B'1',B'10000000',NULL] AS bits,ROW(B'1',B'10000000') AS fields",
+  "literal_rows": [
+    {
+      "empty": "",
+      "one": "1",
+      "eight": "10000000",
+      "nine": "100000000",
+      "bits": [
+        "1",
+        "10000000",
+        null
+      ],
+      "fields": [
+        "1",
+        "10000000"
+      ]
+    }
+  ]
+}
