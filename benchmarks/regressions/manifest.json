@@ -1100,11 +1100,26 @@
       "cases": 2,
       "source": "crates/uqa-engine/src/capabilities/tests.rs",
       "capability": "Catalog type resolution",
-      "workload": "Memory and native SQLite catalogs with one or 32 three-column tables; parameterized information-schema filter.",
+      "workload": "Memory and native SQLite catalogs with one or 32 three-column tables and explicitly paused automatic maintenance; parameterized information-schema filter.",
       "invariant": "The same three correct column/type rows are returned without increasing full catalog captures as unrelated rows grow.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_capture_work_stays_bounded_after_intervening_statistics",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Catalog snapshot refresh",
+      "workload": "Native SQLite, SQLite Key/Value and redb catalogs with one or 32 tables; explicitly interleave a statistics commit before adoption of a completed DDL commit.",
+      "invariant": "The refresh observes statistics and replaces stale table handles once; ordinary, refreshed and subsequent query captures do not grow with unrelated tables, and every query returns the same three correct columns.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     },
     {
@@ -10895,6 +10910,84 @@
       "capability": "Declared range catalog validation memory",
       "workload": "Validate one declared range against zero and 512 unrelated row and array type identities.",
       "invariant": "Validation borrows catalog identities, projects no complete catalog rows and retains less than 16KB of temporary allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_sql_keys_preserve_native_bytes_and_observe_physical_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Admitted SQL equality output",
+      "workload": "Encode the same native and physical values, including large text, numeric and JSONB bounds.",
+      "invariant": "The bytes equal the existing SQL key and only output capacity remains charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_sql_key_failures_release_decoding_and_normalization_scratch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Admitted SQL equality memory",
+      "workload": "Reject four insufficient budgets and either pre-cancelled owner while encoding nested physical and JSONB values.",
+      "invariant": "Quota and cancellation retain SQLSTATE and leave no output, decoder or normalization charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_sql_key_catalog_interrupts_preserve_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/production_tests.rs",
+      "capability": "Admitted SQL equality cancellation",
+      "workload": "Cancel the original or invoking scope while looking up a declared physical type.",
+      "invariant": "Both callbacks stop encoding with 57014 and release all acquired memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_btree_class_identities_match_postgresql_catalog_support",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/tests.rs",
+      "capability": "B-tree support identities",
+      "workload": "Verify every built-in B-tree class, family, input and comparison function against an independent PostgreSQL catalog query.",
+      "invariant": "All 44 identities match PostgreSQL; class OIDs are unique and missing identities are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "default_btree_class_selection_matches_actual_postgresql_indexes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes/btree/tests.rs",
+      "capability": "B-tree default class selection",
+      "workload": "Compile 38 independent PostgreSQL CREATE INDEX input declarations and select classes for those types and their domains.",
+      "invariant": "Default, alias and generic class selection preserves PostgreSQL identities and existing UQA vector/tensor capability.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_btree_class_identities_match_postgresql_catalog",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/partitioning/tests.rs",
+      "capability": "Partition B-tree class identities",
+      "workload": "Compare 76 actual PostgreSQL RANGE/LIST partition class selections and corresponding domain wrappers.",
+      "invariant": "Partition catalog metadata selects the SQL-owned class for every admitted key type instead of emitting zero from a duplicate table.",
       "case_names": [
         ""
       ]

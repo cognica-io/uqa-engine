@@ -80,6 +80,20 @@ impl<T: Copy> ProductionVec<'_, T> {
         }
     }
 
+    /// Append copy-only elements in bounded chunks, admitting capacity before copying and checking both cancellation scopes between chunks.
+    pub fn extend_from_slice(&mut self, values: &[T]) -> Result<(), ValueRetentionError> {
+        self.control.check()?;
+        for chunk in values.chunks((4096 / std::mem::size_of::<T>().max(1)).max(1)) {
+            self.reserve(chunk.len())?;
+            match &mut self.buffer {
+                Buffer::Ordinary(values) => values.extend_from_slice(chunk),
+                Buffer::Controlled(values) => values.extend_from_slice(chunk)?,
+            }
+        }
+        self.control.check()?;
+        Ok(())
+    }
+
     pub fn push_copy(&mut self, value: T) -> Result<(), ValueRetentionError> {
         self.reserve(1)?;
         match &mut self.buffer {

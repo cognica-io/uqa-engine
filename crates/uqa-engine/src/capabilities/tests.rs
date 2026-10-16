@@ -16,6 +16,7 @@ thread_local! {
 
 mod builtin_authority;
 mod catalog_allocation;
+mod catalog_capture;
 mod catalog_indexes;
 mod constraint_names;
 mod generated_rewrite;
@@ -339,6 +340,7 @@ fn information_schema_filter_catalog_captures_do_not_scale_with_rows(#[case] per
         } else {
             Engine::new()
         };
+        catalog_capture::pause_automatic_statistics(&engine);
         for index in 0..table_count {
             engine
                 .sql(

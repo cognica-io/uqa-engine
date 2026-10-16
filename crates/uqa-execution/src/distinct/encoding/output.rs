@@ -84,18 +84,25 @@ impl KeyOutput for BudgetedOutput<'_> {
     }
 }
 
-pub(super) fn encode_jsonb(value: &str, output: &mut impl KeyOutput) -> ExecResult<()> {
-    output.push_byte(9)?;
-    if let Some(control) = output.control() {
-        let mut canonical = BudgetedVec::new(control.memory());
-        uqa_core::write_jsonb_equality_key(value, &mut canonical, control.cancellation())
-            .map_err(resource_error)?;
-        encode_bytes(&canonical, output)
-    } else {
-        let canonical = uqa_core::jsonb_equality_key(value)
-            .ok_or_else(|| ExecError::Other("stored JSONB value is not valid JSON".into()))?;
-        encode_bytes(&canonical, output)
+impl KeyOutput for uqa_core::memory::ProductionVec<'_, u8> {
+    fn push_byte(&mut self, value: u8) -> ExecResult<()> {
+        self.push_copy(value).map_err(resource_error)
     }
+    fn extend_bytes(&mut self, values: &[u8]) -> ExecResult<()> {
+        self.extend_from_slice(values).map_err(resource_error)
+    }
+}
+
+pub(super) fn encode_jsonb(
+    value: &str,
+    output: &mut impl KeyOutput,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> ExecResult<()> {
+    output.push_byte(9)?;
+    let canonical = uqa_core::jsonb_equality_key_with_control(value, control)
+        .map_err(resource_error)?
+        .ok_or_else(|| ExecError::Other("stored JSONB value is not valid JSON".into()))?;
+    encode_bytes(&canonical, output)
 }
 
 pub(super) fn resource_error(error: impl std::error::Error + Send + Sync + 'static) -> ExecError {

@@ -98,6 +98,7 @@ fn scalar_catalog_captures_do_not_grow_with_rows(#[case] persistent: bool) {
     } else {
         Engine::new()
     };
+    super::catalog_capture::pause_automatic_statistics(&engine);
     engine.sql("CREATE TABLE items (id integer, note text); INSERT INTO items SELECT i, 'PAYLOAD' FROM generate_series(1, 9) AS g(i)", &[]).unwrap();
     for expression in [
         "lower(note)",
@@ -146,6 +147,7 @@ fn view_catalog_captures_do_not_grow_with_unrelated_views(#[case] persistent: bo
         } else {
             Engine::new()
         };
+        super::catalog_capture::pause_automatic_statistics(&engine);
         engine.sql("CREATE TABLE items (id integer, note text, active boolean)", &[]).unwrap();
         for view in 0..views {
             engine.sql(&format!("CREATE VIEW item_view_{view} AS SELECT * FROM items"), &[]).unwrap();
