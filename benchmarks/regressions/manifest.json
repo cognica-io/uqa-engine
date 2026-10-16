@@ -10308,6 +10308,128 @@
       "capability": "Physical array observation",
       "workload": "Decode a domain array through an ordinary type-metadata adapter.",
       "invariant": "Domain base layout is observed without requiring unrelated enum input capability."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_shells_reject_aliasing_corrupt_names_and_retired_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/shell_type.rs",
+      "capability": "Shell catalog authority",
+      "workload": "Restore names, OID/object identities and current role ownership, then exercise corrupt and duplicate records.",
+      "invariant": "Undefined types have exactly one consistent name/OID and never retain a retired owner incarnation."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shell_records_require_one_exact_oid_claim_and_a_known_format",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/shell_type/tests.rs",
+      "capability": "Shell record integrity",
+      "workload": "Restore the single shell claim, then remove, redirect or duplicate it and change or remove the format marker.",
+      "invariant": "No array claim or format fallback can silently change an undefined type identity."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "object_descriptions_restore_replace_and_drop_by_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/comments.rs",
+      "capability": "Transactional type descriptions",
+      "workload": "Replace and remove two independently described type objects and restore their physical catalog records.",
+      "invariant": "Replacement and deletion affect only the addressed identity; an empty description removes its record."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "malformed_description_addresses_cannot_alias_a_catalog_object",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/comments.rs",
+      "capability": "Transactional type descriptions",
+      "workload": "Read zero, negative, noncanonical and excess address parts, plus empty or invalid persisted descriptions.",
+      "invariant": "Restoration rejects malformed records without allowing two encodings to alias an object."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "published_definitions_restore_with_every_oid_claim",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/enum_type/tests.rs",
+      "capability": "Shared type record ownership",
+      "workload": "Exercise the existing enum record publication, independent updates and corrupt claims through the shared record owner.",
+      "invariant": "Sharing shell/enum/composite private overlay handling preserves prior enum OID claims, conflict rejection and restoration."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "concurrent_changes_and_claimed_oids_are_rejected",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/enum_type/tests.rs",
+      "capability": "Shared type record ownership",
+      "workload": "Exercise the existing enum record publication, independent updates and corrupt claims through the shared record owner.",
+      "invariant": "Sharing shell/enum/composite private overlay handling preserves prior enum OID claims, conflict rejection and restoration."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "corrupt_records_fail_restoration",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/enum_type/tests.rs",
+      "capability": "Shared type record ownership",
+      "workload": "Exercise the existing enum record publication, independent updates and corrupt claims through the shared record owner.",
+      "invariant": "Sharing shell/enum/composite private overlay handling preserves prior enum OID claims, conflict rejection and restoration."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "shell_type_catalog_matches_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/shell_types.rs",
+      "capability": "Undefined type lifecycle and descriptions",
+      "workload": "181 independent PostgreSQL statements cover completion, OID/owner/ACL identity, notices, SQL and PL/pgSQL declarations, defaults/OUT arguments, comments, implicit-array and row-type deletion, rollback and four actual reopen observations.",
+      "invariant": "All rows, type OIDs, command tags, notices and SQLSTATEs match PostgreSQL on memory, native SQLite, SQLite K/V and redb."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "shell_type_sessions_match_postgresql",
+      "cases": 3,
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/shell_types.rs",
+      "capability": "Private type catalog refresh",
+      "workload": "Replay 28 PostgreSQL writer/peer steps, including independent changes, completion, savepoints, rollback, commit and final persistent reopen.",
+      "invariant": "Private names and descriptions survive committed peer refresh while other sessions observe only committed catalog generations."
     }
   ]
 }

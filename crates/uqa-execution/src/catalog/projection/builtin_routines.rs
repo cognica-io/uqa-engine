@@ -6,6 +6,7 @@
 
 //! `PostgreSQL` 18 built-in routine metadata exposed through the virtual catalogs.
 
+mod comments;
 mod identities;
 pub use identities::{
     builtin_routine_identities, builtin_routine_identity, BuiltinRoutineIdentity,
@@ -57,13 +58,15 @@ pub fn native_foreign_handlers() -> impl Iterator<Item = BuiltinRoutineCatalogEn
 impl BuiltinRoutineCatalogEntry {
     pub const fn language(self) -> i64 {
         match self.oid {
-            1384 | 1810 | 1811 | 3935 | 3936 => SQL_LANGUAGE as i64,
+            1215 | 1348 | 1384 | 1810 | 1811 | 3935 | 3936 => SQL_LANGUAGE as i64,
             _ => INTERNAL_LANGUAGE as i64,
         }
     }
 
     pub fn sql_body(self) -> Option<String> {
         let (function_oid, parameter_type, collation_oid) = match self.oid {
+            1215 => return Some(comments::BODY_1215.into()),
+            1348 => return Some(comments::BODY_1348.into()),
             1384 => return Some(temporal::DATE_PART_DATE_SQL_BODY.into()),
             1810 => (720, 17, 0),
             1811 => (1374, 25, 100),
@@ -224,6 +227,7 @@ mod records;
 mod scalar;
 mod sequences;
 mod series;
+mod shells;
 mod sleep_bodies;
 mod support;
 mod temporal;
@@ -286,6 +290,8 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     definitions::ROUTINES,
     namespaces::ROUTINES,
     records::ROUTINES,
+    shells::ROUTINES,
+    comments::ROUTINES,
     notifications::ROUTINES,
     privileges::ROUTINES,
     ranges::ROUTINES,

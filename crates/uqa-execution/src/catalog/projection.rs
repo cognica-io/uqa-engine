@@ -142,7 +142,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
         VirtualRelation::PgCursors => cursors::rows(session),
-        VirtualRelation::PgDescription => Vec::new(),
+        VirtualRelation::PgDescription => crate::catalog::comments::rows(catalog),
         VirtualRelation::PgDepend => {
             dependencies::retained_dependencies(context, catalog, resolution)?.depend_rows()
         }
@@ -414,7 +414,8 @@ pub use regtypes::{
     resolve_regclass_kind_by_oid, resolve_regclass_oid, resolve_regcollation_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regproc_input_oid,
     resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid, resolve_regtype_output,
-    resolve_type_object_oid, row_type_relation, type_privilege_oid, RegtypeOutputCatalog,
+    resolve_type_object_oid, row_type_relation, shell_type_oid, type_privilege_oid,
+    RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(
@@ -449,7 +450,11 @@ pub fn resolve_catalog_column_type_name(
             }
         }
     }
-    resolve_catalog_column_type(context, type_name).ok_or_else(|| SQLError::Routine {
+    if let Some(ty) = resolve_catalog_column_type(context, type_name) {
+        return Ok(ty);
+    }
+    resolve_regtype_oid(context, type_name)?;
+    Err(SQLError::Routine {
         sqlstate: "42704".into(),
         message: format!(
             "type \"{}\" does not exist",

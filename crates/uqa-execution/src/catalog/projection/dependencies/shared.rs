@@ -167,39 +167,7 @@ impl DependencyBuilder<'_> {
                     .map(|entry| (entry.role, entry.grantor)),
             );
         }
-        for definition in catalog.enums() {
-            self.record_owned(
-                (database, ObjectAddress::whole(TYPE_CLASS, definition.oid)),
-                definition.owner,
-                definition
-                    .usage_acl
-                    .iter()
-                    .flatten()
-                    .map(|entry| (entry.role, entry.grantor)),
-            );
-        }
-        for domain in catalog.domains() {
-            self.record_owned(
-                (database, ObjectAddress::whole(TYPE_CLASS, domain.oid)),
-                domain.owner,
-                domain
-                    .usage_acl
-                    .iter()
-                    .flatten()
-                    .map(|entry| (entry.role, entry.grantor)),
-            );
-        }
-        for composite in catalog.composites() {
-            self.record_owned(
-                (database, ObjectAddress::whole(TYPE_CLASS, composite.oid)),
-                composite.owner,
-                composite
-                    .usage_acl
-                    .iter()
-                    .flatten()
-                    .map(|entry| (entry.role, entry.grantor)),
-            );
-        }
+        self.record_shared_types(database);
         for (oid, security) in snapshot.definitions.builtin_routine_security.iter() {
             self.record_owned(
                 (database, ObjectAddress::whole(PROCEDURE_CLASS, *oid)),
@@ -244,6 +212,55 @@ impl DependencyBuilder<'_> {
             );
         }
         Ok(())
+    }
+
+    /// Types own their generated arrays; shells have no array identity.
+    fn record_shared_types(&mut self, database: u32) {
+        let catalog = self.catalog;
+        for definition in catalog.shells() {
+            self.record_owned(
+                (database, ObjectAddress::whole(TYPE_CLASS, definition.oid)),
+                definition.owner,
+                definition
+                    .usage_acl
+                    .iter()
+                    .flatten()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
+        for definition in catalog.enums() {
+            self.record_owned(
+                (database, ObjectAddress::whole(TYPE_CLASS, definition.oid)),
+                definition.owner,
+                definition
+                    .usage_acl
+                    .iter()
+                    .flatten()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
+        for domain in catalog.domains() {
+            self.record_owned(
+                (database, ObjectAddress::whole(TYPE_CLASS, domain.oid)),
+                domain.owner,
+                domain
+                    .usage_acl
+                    .iter()
+                    .flatten()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
+        for composite in catalog.composites() {
+            self.record_owned(
+                (database, ObjectAddress::whole(TYPE_CLASS, composite.oid)),
+                composite.owner,
+                composite
+                    .usage_acl
+                    .iter()
+                    .flatten()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
     }
 
     /// A role membership, which every database shares, has no owner; its grantor is recorded as privileges are.

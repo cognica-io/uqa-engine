@@ -19,6 +19,7 @@ pub trait DomainDeclarationBinding {
     fn bind_domain_declaration(&self, definition: &mut CreateDomain) -> Result<(), SQLError>;
 }
 pub struct DomainCreationContext<'a> {
+    pub shells: super::shell_types::ShellCompletionContext<'a>,
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
@@ -38,6 +39,7 @@ pub fn create_domain(
     let owner = context.creation.bind_owner()?;
     context.writer.prepare_writer()?;
     definition.name = context.creation.persistent_name(&definition.name)?;
+    let shell = context.shells.retain(&definition.name, owner.identity())?;
     // DefineDomain: a generated array holding the name moves aside; any other type is a conflict.
     super::types::arrays::displace_array_type(
         &context.creation,
@@ -49,7 +51,11 @@ pub fn create_domain(
         &uqa_core::RelationIdentity::from_legacy_name(&definition.name)
             .map_err(SQLError::Internal)?,
     )?;
-    let identity = context.creation.reserve_type_name(&definition.name)?;
+    let identity = if let Some(shell) = &shell {
+        shell.identity.clone()
+    } else {
+        context.creation.reserve_type_name(&definition.name)?
+    };
     let array_name = super::types::arrays::reserve_array_name(
         &context.creation,
         &identity.schema,
@@ -57,7 +63,10 @@ pub fn create_domain(
     )?;
     context.bindings.bind_domain_declaration(&mut definition)?;
     // `DefineDomain` assigns the array type's OID, creates the domain, and then its constraints.
-    let object_id = (context.allocate_identity)()?;
+    let object_id = shell.as_ref().map_or_else(
+        || (context.allocate_identity)(),
+        |shell| Ok(shell.object_id),
+    )?;
     let mut allocator = context
         .identities
         .allocator(crate::catalog::identity::allocate_catalog_object_id);
@@ -73,7 +82,9 @@ pub fn create_domain(
             })
     };
     let array_oid = type_oid()?;
-    let oid = type_oid()?;
+    let oid = shell
+        .as_ref()
+        .map_or_else(&mut type_oid, |shell| Ok(shell.oid))?;
     uqa_sql::schema::domains::constraints::materialize(&mut definition, &mut allocator).map_err(
         |error| uqa_sql::catalog::errors::storage_error("domain constraint identity", &error),
     )?;
@@ -94,6 +105,7 @@ pub fn create_domain(
         },
     );
     domain::publish(context.publication, &before, registry)?;
+    context.shells.complete(shell.as_ref())?;
     context.changes.catalog_registry_changed();
     Ok(())
 }

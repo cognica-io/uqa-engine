@@ -19,6 +19,7 @@ pub struct DomainDependencyContext<'a> {
     pub publication: &'a dyn DomainRegistryPublication,
     pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
     pub composites: &'a dyn crate::catalog::composite_type::CompositeRegistryPublication,
+    pub shells: &'a dyn crate::catalog::shell_type::ShellRegistryPublication,
     pub changes: &'a dyn NamespaceCatalogChanges,
 }
 
@@ -63,6 +64,15 @@ pub fn remove_types(
         let mut registry = before.clone();
         registry.retain(|_, domain| !targets.contains(&domain.oid));
         crate::catalog::domain::publish(context.publication, &before, registry)?;
+    }
+    let shells_before = context.shells.shell_registry().clone();
+    if shells_before
+        .values()
+        .any(|definition| targets.contains(&definition.oid))
+    {
+        let mut shells = shells_before.clone();
+        shells.retain(|_, definition| !targets.contains(&definition.oid));
+        crate::catalog::shell_type::publish(context.shells, &shells_before, shells)?;
     }
     let enums_before = context.enums.enum_registry().clone();
     if enums_before

@@ -244,6 +244,17 @@ impl Engine {
             snapshot.enums,
             &snapshot.roles,
         )?;
+        snapshot.shells = uqa_execution::catalog::shell_type::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.shells,
+            snapshot.shells,
+            &snapshot.roles,
+        )?;
+        snapshot.comments = uqa_execution::catalog::comments::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.comments,
+            snapshot.comments,
+        )?;
         snapshot.composites = uqa_execution::catalog::composite_type::merge_private(
             self.storage.catalog.as_deref(),
             &current.composites,

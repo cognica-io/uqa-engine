@@ -157,6 +157,15 @@ impl SchemaMembers for Engine {
         let mut types = Vec::new();
         for key in self
             .durable
+            .shells
+            .read()
+            .keys()
+            .filter(|key| in_schema(key))
+        {
+            types.push((key.clone(), TypeObjectKind::Type));
+        }
+        for key in self
+            .durable
             .enums
             .read()
             .keys()

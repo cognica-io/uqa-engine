@@ -238,6 +238,10 @@ declarations! { fn lookup_local(local);
                 ColumnType::Text,
             ),
         ],
+        "obj_description" => &[
+            Signature::new(&[ColumnType::Oid], ColumnType::Text),
+            Signature::new(&[ColumnType::Oid, ColumnType::Name], ColumnType::Text),
+        ],
         "pg_describe_object" => &[Signature::new(&[ColumnType::Oid, ColumnType::Oid, ColumnType::Integer],
             ColumnType::Text,
         )],

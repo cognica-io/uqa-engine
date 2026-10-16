@@ -124,6 +124,7 @@ impl CreationRelationGuards for Engine {
             self.durable.domains.read().values(),
             self.durable.enums.read().values(),
             self.durable.composites.read().values(),
+            self.durable.shells.read().values(),
             identity,
         );
         if user_type {

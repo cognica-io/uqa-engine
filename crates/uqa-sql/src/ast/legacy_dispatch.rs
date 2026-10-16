@@ -285,7 +285,9 @@ impl Statement {
                 }
                 changed
             }
-            Self::CreateTable(_)
+            Self::CommentType(_)
+            | Self::CreateShellType(_)
+            | Self::CreateTable(_)
             | Self::CreateTableIfNotExists(_)
             | Self::CreateIndex(_)
             | Self::RenameIndex(_)

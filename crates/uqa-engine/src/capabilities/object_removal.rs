@@ -12,6 +12,7 @@ use uqa_execution::schema::deletion::{CatalogRemovalContext, CatalogRemovalInput
 impl CatalogRemovalInputs for Engine {
     fn catalog_removal_context(&self) -> CatalogRemovalContext<'_> {
         CatalogRemovalContext {
+            comments: self,
             catalog: self.catalog_execution(),
             locks: self,
             shared_locks: self,

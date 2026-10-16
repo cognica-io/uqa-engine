@@ -335,6 +335,9 @@ impl CatalogObjects {
 
     fn collect_types(&mut self, catalog: &CatalogReadView) {
         use super::addresses::TypeObject;
+        for definition in catalog.shells() {
+            self.add_type(definition.oid, TypeObject::Defined);
+        }
         for definition in catalog.enums() {
             self.add_type(definition.oid, TypeObject::Defined);
             self.add_type(

@@ -11,6 +11,9 @@ use uqa_engine::Engine;
 #[path = "sql_composites/addition.rs"]
 mod addition;
 
+#[path = "sql_composites/shell_types.rs"]
+mod shell_types;
+
 #[path = "sql_composites/array_comparisons.rs"]
 mod array_comparisons;
 

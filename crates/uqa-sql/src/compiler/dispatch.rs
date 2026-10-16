@@ -244,20 +244,13 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::CreateForeignTableStmt(stmt) => compile_create_foreign_table_statement(stmt),
         NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),
-        NodeEnum::CreateDomainStmt(stmt) => {
-            super::domains::compile_create_domain(stmt).map(Statement::CreateDomain)
-        }
-        NodeEnum::AlterDomainStmt(stmt) => {
-            super::domains::compile_alter_domain(stmt).map(Statement::AlterDomain)
-        }
-        NodeEnum::CreateEnumStmt(stmt) => {
-            super::enums::compile_create_enum(stmt).map(Statement::CreateEnum)
-        }
-        NodeEnum::CompositeTypeStmt(stmt) => super::composites::compile_create_composite_type(stmt)
-            .map(Statement::CreateCompositeType),
-        NodeEnum::AlterEnumStmt(stmt) => {
-            super::enums::compile_alter_enum(stmt).map(Statement::AlterEnum)
-        }
+        NodeEnum::CreateDomainStmt(_)
+        | NodeEnum::AlterDomainStmt(_)
+        | NodeEnum::DefineStmt(_)
+        | NodeEnum::CommentStmt(_)
+        | NodeEnum::CreateEnumStmt(_)
+        | NodeEnum::CompositeTypeStmt(_)
+        | NodeEnum::AlterEnumStmt(_) => type_lifecycle::compile_type_statement(inner),
         NodeEnum::CreateFunctionStmt(stmt) => {
             compile_create_function(stmt).map(|f| Statement::CreateFunction(Box::new(f)))
         }

@@ -217,14 +217,14 @@ fn validate_routine_creation(
     analysis::validate_routine_security_attributes(def, current_user_is_superuser)?;
     let types = context.definition.compilation.analysis.types;
     attributes::validate_transforms(types, def, &clauses)?;
-    resolve_routine_type_references(&context.definition.compilation.analysis, def)?;
+    let shells = resolve_routine_type_references(&context.definition.compilation.analysis, def)?;
     attributes::validate_body_form(def, &clauses)?;
     attributes::validate_rows_applicability(def.rows, def.returns_set())?;
     attributes::reject_window_function(def, &clauses)?;
     if def.language == "plpgsql" {
         context.configuration.load_language_library(&def.language);
     }
-    Ok(())
+    shells.reject_unsupported(&context.definition.compilation.analysis, def)
 }
 
 pub fn register_sql_function(

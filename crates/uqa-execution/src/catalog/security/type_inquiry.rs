@@ -40,6 +40,16 @@ impl TypePrivilegeCatalog for TypeCatalog<'_, '_> {
         let governing = u32::try_from(governing).ok()?;
         if let Some(definition) = self
             .catalog
+            .shells()
+            .find(|definition| definition.oid == governing)
+        {
+            return Some(TypePrivileges {
+                owner: definition.owner,
+                usage_acl: definition.usage_acl.as_deref(),
+            });
+        }
+        if let Some(definition) = self
+            .catalog
             .enums()
             .find(|definition| definition.oid == governing)
         {
@@ -102,6 +112,11 @@ pub fn require_type_usage(context: &CatalogContext<'_>, ty: &ColumnType) -> Resu
     let Some((oid, _)) = usage_governing_type(ty) else {
         return Ok(());
     };
+    require_type_oid_usage(context, oid)
+}
+
+/// Check a type identity even before it has a SQL value layout.
+pub fn require_type_oid_usage(context: &CatalogContext<'_>, oid: u32) -> Result<(), SQLError> {
     let catalog = TypeCatalog {
         context,
         catalog: context.catalog_read_view(),

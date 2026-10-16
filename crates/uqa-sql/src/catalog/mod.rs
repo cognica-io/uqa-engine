@@ -916,6 +916,7 @@ pub mod foreign_server;
 pub mod foreign_wrapper;
 pub mod index;
 pub mod roles;
+pub mod shell_type;
 
 /// Namespaces the engine implements without a durable schema row: the
 /// `PostgreSQL` system schemas and the Apache AGE catalog schema.

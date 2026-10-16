@@ -139,6 +139,7 @@ pub fn largest_catalog_oid(
                 .map(i64::from),
         );
     }
+    oids.extend(catalog.shells().map(|definition| i64::from(definition.oid)));
     for domain in catalog.domains() {
         let ty = domain.column_type();
         oids.push(uqa_sql::catalog::type_metadata::pg_type_oid(&ty));
@@ -220,6 +221,9 @@ fn rewrite_oid_in_use(catalog: &CatalogReadView, oid: i64) -> Result<bool, SQLEr
 /// Every projected `pg_type` row and every relation row type occupies the type OID space.
 fn type_oid_in_use(catalog: &CatalogReadView, oid: i64) -> bool {
     if super::pg_catalog::builtin_type_oid_in_use(oid)
+        || catalog
+            .shells()
+            .any(|definition| i64::from(definition.oid) == oid)
         || catalog.domains().any(|domain| {
             i64::from(domain.oid) == oid
                 || uqa_sql::catalog::type_metadata::pg_domain_array_oid(

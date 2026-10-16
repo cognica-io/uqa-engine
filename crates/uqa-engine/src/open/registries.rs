@@ -22,6 +22,8 @@ impl Engine {
         *self.durable.graph_catalog_oids.write() =
             uqa_execution::catalog::graph_oids::load(catalog)?;
         self.restore_enums_from_catalog(catalog)?;
+        self.restore_shells_from_catalog(catalog)?;
+        *self.durable.comments.write() = uqa_execution::catalog::comments::restore(catalog)?;
         self.restore_composites_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =

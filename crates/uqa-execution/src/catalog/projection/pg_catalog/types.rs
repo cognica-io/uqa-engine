@@ -8,6 +8,7 @@
 
 mod builtins;
 mod polymorphic;
+mod shells;
 mod special;
 pub(in crate::catalog::projection) use builtins::builtin_type_oid_in_use;
 mod routine_internal;
@@ -248,6 +249,7 @@ fn build_pg_type_rows(
         types.push(array);
     }
     types.extend(super::composites::composite_type_rows(catalog)?);
+    types.extend(shells::rows(catalog)?);
     types.extend(super::row_types::relation_type_rows(catalog));
     types.extend(super::languages::language_type_rows(catalog));
     types.extend(super::foreign::type_rows(catalog));

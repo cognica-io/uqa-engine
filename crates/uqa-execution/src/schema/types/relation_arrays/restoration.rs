@@ -132,6 +132,7 @@ fn recorded_names(
                 snapshot.domains(),
                 snapshot.enums(),
                 snapshot.composites(),
+                snapshot.shells(),
                 &identity,
             )
         {
@@ -172,6 +173,7 @@ fn prepare(
                         snapshot.domains(),
                         snapshot.enums(),
                         snapshot.composites(),
+                        snapshot.shells(),
                         &identity,
                     )
             })

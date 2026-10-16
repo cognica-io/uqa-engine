@@ -511,7 +511,7 @@ fn closed_record_format_files_upgrade_in_every_sqlite_mode(
 #[rstest::rstest]
 fn latest_record_format_files_upgrade_in_every_sqlite_mode(
     #[values(0, 1, 2, 3)] mode: usize,
-    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62)] format: i64,
+    #[values(46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63)] format: i64,
 ) {
     closed_record_formats_upgrade(mode, format);
 }

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `ALTER TYPE | DOMAIN ... RENAME TO | SET SCHEMA | OWNER TO` and `GRANT | REVOKE ... ON TYPE | DOMAIN`.
+//! Type declarations, descriptions, ownership, names and privileges share their object-kind lowering.
 
 use pg_query::protobuf::{
     AlterObjectSchemaStmt, AlterOwnerStmt, DropBehavior, GrantStmt, GrantTargetType, Node,
@@ -25,6 +25,53 @@ pub(super) fn type_object_kind(object_type: ObjectType) -> Option<TypeObjectKind
         ObjectType::ObjectDomain => Some(TypeObjectKind::Domain),
         _ => None,
     }
+}
+
+pub(super) fn compile_type_statement(node: &NodeEnum) -> Result<Statement> {
+    match node {
+        NodeEnum::CreateDomainStmt(stmt) => {
+            super::domains::compile_create_domain(stmt).map(Statement::CreateDomain)
+        }
+        NodeEnum::AlterDomainStmt(stmt) => {
+            super::domains::compile_alter_domain(stmt).map(Statement::AlterDomain)
+        }
+        NodeEnum::DefineStmt(stmt)
+            if stmt.kind == ObjectType::ObjectType as i32
+                && stmt.definition.is_empty()
+                && stmt.args.is_empty() =>
+        {
+            qualified_name(&stmt.defnames).map(Statement::CreateShellType)
+        }
+        NodeEnum::CommentStmt(stmt) if type_object_kind(stmt.objtype()).is_some() => {
+            compile_type_comment(stmt)
+        }
+        NodeEnum::CreateEnumStmt(stmt) => {
+            super::enums::compile_create_enum(stmt).map(Statement::CreateEnum)
+        }
+        NodeEnum::CompositeTypeStmt(stmt) => super::composites::compile_create_composite_type(stmt)
+            .map(Statement::CreateCompositeType),
+        NodeEnum::AlterEnumStmt(stmt) => {
+            super::enums::compile_alter_enum(stmt).map(Statement::AlterEnum)
+        }
+        other => Err(SQLError::Unsupported(
+            super::dispatch::other_node_label(other).into(),
+        )),
+    }
+}
+
+fn compile_type_comment(stmt: &pg_query::protobuf::CommentStmt) -> Result<Statement> {
+    let kind = type_object_kind(stmt.objtype())
+        .ok_or_else(|| SQLError::Internal("type comment has another object kind".into()))?;
+    let Some(NodeEnum::TypeName(name)) = stmt.object.as_deref().and_then(|node| node.node.as_ref())
+    else {
+        return Err(SQLError::Internal("type comment has no type name".into()));
+    };
+    let name = super::types::compile_pg_type_reference(name, "COMMENT ON TYPE")?.sql_name();
+    Ok(Statement::CommentType(crate::ast::CommentType {
+        kind,
+        name,
+        description: (!stmt.comment.is_empty()).then(|| stmt.comment.clone()),
+    }))
 }
 
 fn type_name(object: Option<&Node>, context: &str) -> Result<String> {

@@ -83,7 +83,14 @@ pub fn resolve_type_object_oid(
     context: &CatalogContext<'_>,
     name: &str,
 ) -> Result<Option<i64>, SQLError> {
-    super::resolve_regobject_oid(context, &ColumnType::Regtype, name)
+    let Some(parsed) = uqa_sql::parse_regtype_name(name)? else {
+        return Ok(None);
+    };
+    super::parsed_regtype_oid(
+        context,
+        super::regtype_output_catalog(context)?.as_ref(),
+        &parsed,
+    )
 }
 
 /// `format_type_be` for any type object, including relation row types, which print as their relation's name.

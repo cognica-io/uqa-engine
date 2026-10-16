@@ -48,6 +48,16 @@ impl ReservedCatalogIdentityAllocator<'_> {
         kind: uqa_sql::catalog::relation_oids::RelationOidKind,
         relation: &uqa_core::RelationIdentity,
     ) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, uqa_sql::SQLError> {
+        self.allocate_relation_oids_with_row_type(kind, relation, None)
+    }
+
+    /// Complete a relation's preexisting shell with its retained type OID. The caller holds the shell's type-object lock and has checked the completing owner.
+    pub(crate) fn allocate_relation_oids_with_row_type(
+        &mut self,
+        kind: uqa_sql::catalog::relation_oids::RelationOidKind,
+        relation: &uqa_core::RelationIdentity,
+        existing_row_type: Option<u32>,
+    ) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, uqa_sql::SQLError> {
         use uqa_sql::catalog::relation_oids::{RelationCatalogOids, RelationOidKind};
         let temporary_schema = self
             .context
@@ -72,7 +82,11 @@ impl ReservedCatalogIdentityAllocator<'_> {
             (None, None)
         } else {
             let array_type = allocate(CatalogOidClass::Type)?;
-            (Some(array_type), Some(allocate(CatalogOidClass::Type)?))
+            let row_type = match existing_row_type {
+                Some(oid) => oid,
+                None => allocate(CatalogOidClass::Type)?,
+            };
+            (Some(array_type), Some(row_type))
         };
         let rule = if kind == RelationOidKind::View {
             Some(allocate(CatalogOidClass::Rewrite)?)

@@ -17,6 +17,7 @@ use uqa_sql::{
 };
 
 pub mod arrays;
+pub mod comments;
 mod lifecycle;
 mod privileges;
 pub mod relation_arrays;
@@ -35,12 +36,14 @@ pub trait TypeReferenceDependents {
 }
 
 pub struct TypeLifecycleContext<'a> {
+    pub comments: &'a dyn crate::catalog::comments::CommentPublication,
     pub composite_attributes: super::composites::alteration::CompositeAlterationContext<'a>,
     pub creation: RelationCreationContext<'a>,
     pub identities: CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
     pub binding: TypeObjectBinding<'a>,
     pub registries: arrays::UserTypeRegistries<'a>,
+    pub shells: &'a dyn crate::catalog::shell_type::ShellRegistryPublication,
     pub owner_schemas: &'a dyn RelationOwnerSchemas,
     pub changes: &'a dyn NamespaceCatalogChanges,
     pub notices: &'a dyn CatalogNotices,

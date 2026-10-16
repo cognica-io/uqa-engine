@@ -15,6 +15,12 @@ use uqa_sql::SQLError;
 impl DependencyBuilder<'_> {
     pub(super) fn record_types(&mut self) -> Result<(), SQLError> {
         let catalog = self.catalog;
+        for definition in catalog.shells() {
+            self.record_namespace(
+                ObjectAddress::whole(TYPE_CLASS, definition.oid),
+                &definition.identity.schema,
+            );
+        }
         for definition in catalog.enums() {
             // `EnumValuesCreate`: the array type, then the enum.
             self.record_array_type(definition.array_oid, definition.oid);

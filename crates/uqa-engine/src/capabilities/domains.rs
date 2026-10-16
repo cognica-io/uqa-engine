@@ -47,6 +47,7 @@ impl Engine {
 
     pub(crate) fn domain_creation_context(&self) -> DomainCreationContext<'_> {
         DomainCreationContext {
+            shells: self.shell_completion_context(),
             creation: self.relation_creation_context(),
             identities: self.catalog_identity_reservation_context(),
             writer: self,
@@ -127,6 +128,7 @@ impl Engine {
             publication: self,
             enums: self,
             composites: self,
+            shells: self,
             changes: self,
         }
     }
@@ -173,6 +175,15 @@ impl Engine {
     }
 }
 impl TypeObjectCatalog for Engine {
+    fn shell_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::shell_type::StoredShellType> {
+        self.durable
+            .shells
+            .read()
+            .values()
+            .find(|definition| definition.oid == oid)
+            .cloned()
+    }
+
     fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
