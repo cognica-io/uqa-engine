@@ -49,6 +49,42 @@ pub(super) fn read(
     catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let (array, memory) = read_array(bytes, catalog, control)?.into_parts();
+    Ok(control.finish(Value::Array(array), memory)?)
+}
+
+pub(super) fn read_legacy_vector(
+    bytes: &[u8],
+    kind: uqa_core::LegacyVectorKind,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let element = match kind {
+        uqa_core::LegacyVectorKind::SmallInteger => &crate::ColumnType::SmallInteger,
+        uqa_core::LegacyVectorKind::Oid => &crate::ColumnType::Oid,
+    };
+    let oid = crate::catalog::type_metadata::pg_type_oid(element) as u32;
+    let invalid = || SQLError::Routine {
+        sqlstate: "42804".into(),
+        message: format!("array is not a valid {}", kind.type_name()),
+    };
+    if ArrayShape::read(bytes)?.dimensions().len() > 1
+        || integer(bytes, 4)? != 0
+        || integer(bytes, 8)? as u32 != oid
+    {
+        return Err(invalid());
+    }
+    let array = read_array(bytes, None, control)?;
+    let vector = uqa_core::LegacyVectorValue::try_from_array_with_control(kind, array, control)?
+        .ok_or_else(invalid)?;
+    let (vector, memory) = vector.into_parts();
+    Ok(control.finish(Value::LegacyVector(vector), memory)?)
+}
+
+fn read_array(
+    bytes: &[u8],
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ArrayValue>, SQLError> {
     let shape = ArrayShape::read(bytes)?;
     let dimensions = shape.dimensions();
     let ndim = dimensions.len();
@@ -113,7 +149,7 @@ pub(super) fn read(
     let array = ArrayValue::with_lower_bounds_with_control(values, bounds.finish()?, control)?
         .ok_or_else(|| corrupt("invalid array dimensions"))?;
     let (array, memory) = array.into_parts();
-    Ok(control.finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?)
+    Ok(control.finish(array.with_element_type_oid(Some(oid)), memory)?)
 }
 
 struct Elements<'a, 'c> {

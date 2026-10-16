@@ -11394,6 +11394,48 @@
       "capability": "Selected record image comparison",
       "workload": "Encode empty, one-element and 256-element int2vector/oidvector images through the shared array codec; reject a mismatched selected type and an exhausted caller allowance.",
       "invariant": "Preserve vector element width, dimensions and lower bounds, retain each output reservation and release all temporary allocations on success or error."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_legacy_vector_reads_preserve_postgresql_values_and_output_leases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/legacy_vectors.rs",
+      "capability": "Retained SQL vector fields",
+      "workload": "Read all sixteen independently captured PostgreSQL int2vector/oidvector payloads at a retained offset, including empty and boundary values.",
+      "invariant": "Preserve native vector kinds, dimensions, lower bounds and exact SQL output; charge the decoded owner until release."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_legacy_vector_read_errors_release_memory_and_preserve_cancellation",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/legacy_vectors.rs",
+      "capability": "Retained SQL vector fields",
+      "workload": "Read both wrong-element headers, every truncated prefix, exhausted allowances and both cancelled scopes for int2vector and oidvector.",
+      "invariant": "Match PostgreSQL header diagnostics, reject out-of-bounds bytes with XX001 and release every allocation on errors, quota exhaustion and cancellation."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "retained_vector_fields_match_postgresql_after_domain_rebinding",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/type_changes.rs",
+      "capability": "Retained SQL vector fields",
+      "workload": "Observe stored and prepared composite vectors before and after domain rebinding on four providers, then reopen each persistent provider.",
+      "invariant": "Match eight independently captured PostgreSQL observations and retain the same stored vector fields after persistent reopening."
     }
   ]
 }

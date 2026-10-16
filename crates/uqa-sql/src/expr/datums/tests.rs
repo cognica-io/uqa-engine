@@ -9,6 +9,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod bit_string;
 mod catalog_arrays;
+mod legacy_vectors;
 
 #[test]
 fn constant_field_copy_observes_compression_before_scalar_consumers() {
