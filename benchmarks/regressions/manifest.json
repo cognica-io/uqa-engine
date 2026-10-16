@@ -9682,6 +9682,48 @@
       "capability": "PostgreSQL protobuf decoding",
       "workload": "The complete generated PostgreSQL Node schema and malformed/already-transformed generator output.",
       "invariant": "Deterministic frame isolation preserves every generated tag, payload type and unrelated message and rejects an unexpected generator shape."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "default_btree_classes_match_independent_pg18_key_declarations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes.rs",
+      "capability": "Default B-tree type admission",
+      "workload": "Independent PostgreSQL declarations over unordered scalar types, domains, generic arrays/records, catalog vectors and OID aliases.",
+      "invariant": "Declaration admission follows SQL type classes and preserves SQLSTATE, message, detail and hint; scalar carrier order does not grant an index class."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "missing_base_class_keeps_the_visible_domain_identity",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/catalog/index/operator_classes.rs",
+      "capability": "Default B-tree type identity",
+      "workload": "Nested domains with an unordered base under a non-visible schema, and existing UQA vector/tensor keys.",
+      "invariant": "Diagnostics retain the selected declared identity and native key admission remains unchanged."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "default_btree_operator_classes_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/sql_unique_constraint/operator_classes.rs",
+      "capability": "Default B-tree declaration and retention",
+      "workload": "58 independent PostgreSQL cases for constraints, column/expression indexes, included values, type changes, diagnostic ordering, savepoints and three fresh-connection observations on four providers.",
+      "invariant": "Invalid keys publish no index or partial schema change; admitted generic and included values retain their catalog definitions and rows after actual persistent reopen."
     }
   ]
 }

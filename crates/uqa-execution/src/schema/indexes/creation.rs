@@ -106,6 +106,15 @@ pub fn run_create_index(
             .table_hierarchy(&c.table)?
             .partition_spec
             .as_ref(),
+        |expression| {
+            let binding = context.bindings.binding_scope()?;
+            uqa_sql::schema::indexes::prepare_index_expression(
+                context.schema,
+                &binding.context(),
+                &c.table,
+                &mut expression.clone(),
+            )
+        },
     )?;
     let definition = uqa_sql::schema::indexes::keys::prepare_index_definition(
         context.schema,

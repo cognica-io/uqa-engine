@@ -181,6 +181,7 @@ pub mod creation;
 mod declaration_tests;
 pub mod relocation;
 pub mod renaming;
+pub(crate) mod type_changes;
 
 pub mod registration;
 pub mod registry;

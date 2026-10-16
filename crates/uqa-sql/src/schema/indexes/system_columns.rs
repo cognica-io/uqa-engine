@@ -6,7 +6,8 @@
 
 //! CREATE INDEX over a system column, which `PostgreSQL` resolves like any attribute and then refuses to index.
 
-use crate::ast::{ColumnDef, CreateIndex, Expr, IndexKey, PartitionSpec};
+use crate::ast::{ColumnDef, ColumnType, CreateIndex, Expr, IndexKey, PartitionSpec};
+use crate::catalog::index::operator_classes::require_default_btree_operator_class;
 use crate::schema::columns::POSTGRES_SYSTEM_COLUMNS;
 use crate::schema::keys::definition::{
     is_system_column, resolve_system_key_attribute, system_column_index,
@@ -19,11 +20,12 @@ fn reads_system_column(expression: &Expr) -> bool {
     })
 }
 
-/// Fail a CREATE INDEX that reads a system column as `DefineIndex` fails it: once the access method and each attribute are resolved and a unique index is matched against the partition key. `columns` are the table's columns and `partition` its partition key; a statement that reads no system column passes.
+/// Fail a CREATE INDEX that reads a system column as `DefineIndex` fails it: once the access method and each attribute are resolved and a unique index is matched against the partition key. `columns` are the table's columns and `partition` its partition key; a statement that reads no system column passes. The callback resolves ordinary expression types and immutability on demand in attribute order.
 pub fn reject_system_column_index(
     columns: &[ColumnDef],
     statement: &CreateIndex,
     partition: Option<&PartitionSpec>,
+    mut expression_type: impl FnMut(&Expr) -> Result<ColumnType, SQLError>,
 ) -> Result<(), SQLError> {
     let system = statement.columns.iter().any(|key| match key {
         IndexKey::Column(name) => is_system_column(name),
@@ -46,11 +48,23 @@ pub fn reject_system_column_index(
     let declared = |name: &str| columns.iter().any(|column| column.name == name);
     for key in &statement.columns {
         let IndexKey::Column(name) = key else {
+            if let IndexKey::Expression(expression) = key {
+                if !reads_system_column(expression) {
+                    let ty = expression_type(expression)?;
+                    if matches!(access_method.as_str(), "" | "btree") {
+                        require_default_btree_operator_class(&ty)?;
+                    }
+                }
+            }
             continue;
         };
         if is_system_column(name) {
             resolve_system_key_attribute(name, &access_method)?;
-        } else if !declared(name) {
+        } else if let Some(column) = columns.iter().find(|column| column.name == *name) {
+            if matches!(access_method.as_str(), "" | "btree") {
+                require_default_btree_operator_class(&column.ty)?;
+            }
+        } else {
             return Err(SQLError::UnknownColumn(name.clone()));
         }
     }
@@ -101,7 +115,10 @@ mod tests {
     }
 
     fn rejected(sql: &str, partition: Option<&PartitionSpec>) -> (String, String) {
-        let error = reject_system_column_index(&columns(), &index(sql), partition).unwrap_err();
+        let error = reject_system_column_index(&columns(), &index(sql), partition, |_| {
+            panic!("these cases have no ordinary expression key")
+        })
+        .unwrap_err();
         (
             error.sqlstate().unwrap_or_default().to_string(),
             error.to_string(),
@@ -147,7 +164,10 @@ mod tests {
             "CREATE INDEX ON t (a)",
             "CREATE UNIQUE INDEX ON t (b, (a + 1)) INCLUDE (a) WHERE a > 0",
         ] {
-            reject_system_column_index(&columns(), &index(sql), Some(&partition())).unwrap();
+            reject_system_column_index(&columns(), &index(sql), Some(&partition()), |_| {
+                panic!("an index without system references does not enter this validation")
+            })
+            .unwrap();
         }
     }
 
