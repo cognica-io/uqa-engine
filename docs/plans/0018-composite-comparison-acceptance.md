@@ -8,17 +8,17 @@ SQL owns declared and reached-field capabilities, record equality/order, catalog
 
 The named files below are existing independently captured PostgreSQL references under `tests/parity/pg18`. Their existence alone does not close a row: inspect the actual cases, consumer selection and source-matched execution evidence. Public replay must cover memory, native SQLite, SQLite Key/Value and redb, with actual persistent reopening.
 
-| Requirement | Existing reference families | Remaining audit |
+| Requirement | Existing reference families | Reviewed evidence; final platform acceptance pending |
 | --- | --- | --- |
-| Composite creation, I/O, fields, arrays and nesting | `composite_type`, `composite_constructor_lifecycle` | Reconcile declared identities and lifecycle evidence with the original exit conditions. |
-| ADD/DROP/RENAME/ALTER ATTRIBUTE, dependencies and retained tuples | `composite_attribute_*`, `composite_retained_layout`, `composite_tuple_*`, `composite_nested_layout` | Verify live/dropped physical slots, prepared/cursor reads, rollback and reopening; preserve the approved #656 bounds contract. |
-| Scalar equality/order laws and NULL boundaries | `composite_key_semantics`, `composite_expression_comparisons` | Inspect field-family coverage, named/anonymous selection, reached errors, reflexivity, symmetry and transitivity. |
-| Array consumers and declared capabilities | `array_record_comparisons`, `composite_comparison_capabilities` | Check early exits, unsupported field operators, domains, nested containers and empty inputs. |
-| Hash/equality agreement, DISTINCT, grouping and set operations | `composite_key_semantics`, `composite_comparison_capabilities`, `composite_enum_set` | Verify equivalent physical representations and retained descriptors across in-memory and forced-spill paths. |
-| Sorting, ordered aggregates and window peers | `composite_key_semantics`, `composite_enum_sort`, `composite_enum_aggregate`, `composite_enum_window` | Verify field operators, ties, NULL ordering, enum state, descriptors and bounded spill. |
-| Direct/encoded/spilled joins and outer multiplicities | `composite_join_semantics` | Verify actual strategy coverage, SQL equality, reached diagnostics and retained enum identities. |
-| Index probes, uniqueness, FK actions and command overlays | `composite_key_semantics` plus owner tests | Verify the same equality/order classes, representation-changing writes and persistent reopening. |
-| Retained physical/enum consumers | `composite_datum_consumers`, `composite_catalog_array`, `composite_enum_*` | Reconcile shared versus private comparison state and lazy-read behavior with every consumer above. |
+| Composite creation, I/O, fields, arrays and nesting | `composite_type`, `composite_constructor_lifecycle` | The 199-test composite run covers creation/type lifecycle, constructor identity and native/K/V provider declarations; existing values and retained definitions are checked through the same public API. |
+| ADD/DROP/RENAME/ALTER ATTRIBUTE, dependencies and retained tuples | `composite_attribute_*`, `composite_retained_layout`, `composite_tuple_*`, `composite_nested_layout` | The attribute, tuple-width/boundary and retained-layout cases pass, including prepared/view/peer reads, rollback and actual persistent reopening. The explicit out-of-owned-bytes test preserves the approved #656 XX001 contract. |
+| Scalar equality/order laws and NULL boundaries | `composite_key_semantics`, `composite_expression_comparisons` | The original 172-observation matrix, 190 range observations, bpchar and bit supplements pass four providers. Independent law queries test reflexivity, symmetry and transitivity alongside named/anonymous selection and reached diagnostics. |
+| Array consumers and declared capabilities | `array_record_comparisons`, `composite_comparison_capabilities` | All array and capability reference variants pass, covering early exits, reached operator errors, domains, nested values, empty inputs and NULL containers. |
+| Hash/equality agreement, DISTINCT, grouping and set operations | `composite_key_semantics`, `composite_comparison_capabilities`, `composite_enum_set` | The key, capability, retained-enum set and combined matrices pass. Focused Execution evidence separately verifies actual DISTINCT/set spill and equality-key agreement for encoded range/bit values under unchanged allowances. |
+| Sorting, ordered aggregates and window peers | `composite_key_semantics`, `composite_enum_sort`, `composite_enum_aggregate`, `composite_enum_window` | Retained-enum sort, aggregate and window references pass all four providers; combined matrices preserve field ordering and peers. Automatic bounded-work/memory acceptance remains required. |
+| Direct/encoded/spilled joins and outer multiplicities | `composite_join_semantics` | All public join reference variants pass, including outer multiplicities, reached errors, retained enums and reopening. Execution owner tests establish direct/encoded/forced-spill strategy selection and both build sides. |
+| Index probes, uniqueness, FK actions and command overlays | `composite_key_semantics` plus owner tests | Key and range references pass indexed/unindexed FK actions, uniqueness, representation changes, rollback and reopen. All three persistent providers pass concurrent reservation histories; native bit probes retain the existing 400-VM-step bound. |
+| Retained physical/enum consumers | `composite_datum_consumers`, `composite_catalog_array`, `composite_enum_*` | Retained physical-record, catalog-array and enum consumer/call-state references pass, including lazy reads, fresh sessions, physical identities and persistent reopening. |
 
 ## Cross-consumer field reference
 
@@ -69,9 +69,9 @@ Focused Execution checks pass for actual DISTINCT spill, both direct and encoded
 
 - [x] Confirm PR #855 is merged, its delivered issues are closed and current main includes the catalog and release corrections.
 - [x] Preserve the full original task scope and identify the owning crates and existing independent references.
-- [ ] Complete the coverage audit and capture independent PostgreSQL evidence for missing observations.
-- [ ] Fix every reproduced difference in its owning crate, with focused regressions and a preservation argument.
-- [ ] Verify the combined matrix on all providers, reopening and bounded consumer paths at the delivered source.
+- [x] Reconcile the listed record-64 requirements with their actual public/owner cases and capture the missing independent bpchar, range and bit observations.
+- [x] Correct the reproduced bpchar/range/bit differences and the binding/FDW/WASM blockers in their owners, with focused regressions and preservation arguments; verified delivery remains pending.
+- [x] Pass the complete 199-test composite integration selection, including the combined matrices on all providers and actual persistent reopening, against the imported parser correction. Earlier owner evidence covers bounded consumer paths; final automatic platform verification remains below.
 - [ ] Verify actual automatic Linux/macOS performance artifacts, synchronize public contracts and task status, review and merge the bounded follow-up PRs, and remove their branches.
 
 Do not mark the broader composite unit complete from a single fixture, green archive job or closed prerequisite issue. Retain compact fixture provenance and source-matched evidence here; generated machine reports remain outside Git.
@@ -79,3 +79,7 @@ Do not mark the broader composite unit complete from a single fixture, green arc
 ## Integrated bit consumer checkpoint
 
 The packed bit carrier is connected through typed SQL declarations, casts, comparison, exact keys, physical tuple decoding, provider values and actual spills. All nineteen combined public tests pass: the original 172-observation matrix, bpchar, the 190-observation range matrix, the additional 31-observation bit reference and persistent concurrent reservations. Both original and expanded references pass on all four providers and after actual persistent reopening; no original case was removed or relaxed. Twenty-eight focused owner tests additionally verify controlled values, catalog output, physical reads, native SQLite equality probes and BLOBs, spill, HTTP parameter boundaries and SQLite/redb upgrades. Strict Clippy and ownership checks pass. The [bit acceptance ledger](0018-bit-string-acceptance.md) preserves the outstanding binding-artifact and automatic-regression obligations; the broader coverage audit and original record 64 remain active.
+
+## Combined local acceptance
+
+The complete `queries::sql_composites` selection passes 199 tests with zero failures after importing parser revision `26ea4da`. This includes the original matrix and every named composite reference family above, existing type changes and dependency checks, retained physical/enum consumers, concurrent range reservations, provider migrations and actual reopen paths. The audit inspected the references' law queries and the tests' initial/reopen partitioning, rather than treating fixture file presence as execution evidence. The source-matched automatic Linux/macOS checks, review and merge remain the final delivery gate; original record 64 is not marked complete before that gate. Original records 65 onward retain their full requirements.

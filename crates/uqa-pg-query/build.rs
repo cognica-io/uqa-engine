@@ -6,6 +6,9 @@ use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "src/protobuf_codegen.rs"]
+mod protobuf_codegen;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
     let build_path = Path::new(".").join("libpg_query");
@@ -104,13 +107,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Only update src/protobuf.rs if the generated output actually changed,
         // to avoid invalidating Cargo's fingerprint on every build
-        let new_content = std::fs::read(proto_tmp_dir.join("pg_query.rs"))?;
-        let existing = std::fs::read(src_dir.join("protobuf.rs")).unwrap_or_default();
+        let new_content = protobuf_codegen::bounded_node_oneof(std::fs::read_to_string(
+            proto_tmp_dir.join("pg_query.rs"),
+        )?)?;
+        let existing = std::fs::read_to_string(src_dir.join("protobuf.rs")).unwrap_or_default();
         if new_content != existing {
-            std::fs::copy(
-                proto_tmp_dir.join("pg_query.rs"),
-                src_dir.join("protobuf.rs"),
-            )?;
+            std::fs::write(src_dir.join("protobuf.rs"), new_content)?;
         }
 
         // Reset OUT_DIR to the original value

@@ -9643,6 +9643,45 @@
       "capability": "Bit statement and provider retention",
       "workload": "31 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
       "invariant": "Types, modifiers, values, diagnostics, arrays/records, index uniqueness and rollback remain unchanged after provider serialization."
+    },
+    {
+      "package": "uqa-pg-query",
+      "kind": "lib",
+      "test": "message_oneof_matches_prost_wire_state_errors_and_consumption",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-query/src/protobuf_oneof/tests.rs",
+      "capability": "PostgreSQL protobuf decoding",
+      "workload": "Unboxed and boxed variants, same-tag merges, variant switches, every byte prefix, unknown fields and malformed message payloads.",
+      "invariant": "Bounded message construction preserves the independently derived Prost wire bytes, encoded lengths, diagnostics, retained partial-failure state and consumed input."
+    },
+    {
+      "package": "uqa-pg-query",
+      "kind": "lib",
+      "test": "message_oneof_preserves_prost_recursion_limit",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-query/src/protobuf_oneof/tests.rs",
+      "capability": "PostgreSQL protobuf decoding",
+      "workload": "A 120-level nested message decoded into absent, same-variant and different-variant fields.",
+      "invariant": "Isolating variant construction retains the original Prost recursion bound and the same failure, partial state and remaining bytes."
+    },
+    {
+      "package": "uqa-pg-query",
+      "kind": "lib",
+      "test": "node_postprocessing_preserves_generated_tags_types_and_other_messages",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-pg-query/src/protobuf_oneof/tests.rs",
+      "capability": "PostgreSQL protobuf decoding",
+      "workload": "The complete generated PostgreSQL Node schema and malformed/already-transformed generator output.",
+      "invariant": "Deterministic frame isolation preserves every generated tag, payload type and unrelated message and rejects an unexpected generator shape."
     }
   ]
 }

@@ -52,6 +52,8 @@ pub use plpgsql_catalog::{
 };
 mod parse_options;
 pub use parse_options::{parse_with_options, Diagnostic, ParseOptions, ParseOutcome};
+#[macro_use]
+mod protobuf_oneof;
 #[rustfmt::skip]
 pub mod protobuf;
 mod query;
