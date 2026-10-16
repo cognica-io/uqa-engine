@@ -321,7 +321,7 @@ pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
         Value::Enum(value) => return Err(uqa_sql::expr::catalog_output_required(value)),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Temporal(_) | Value::Array(_) | Value::LegacyVector(_) => {
+        Value::Temporal(_) | Value::Array(_) | Value::LegacyVector(_) | Value::BitString(_) => {
             uqa_sql::expr::value_to_string(value)?
         }
         Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {

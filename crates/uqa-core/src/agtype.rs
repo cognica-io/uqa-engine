@@ -182,7 +182,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
             Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => 9,
             Value::Record(_) | Value::Map(_) | Value::Enum(_) => 10,
             Value::Json(text) | Value::JsonB(text) => json_type_ordinal(text),
-            Value::Bytes(_) | Value::Temporal(_) | Value::Datum(_) => 11,
+            Value::Bytes(_) | Value::Temporal(_) | Value::Datum(_) | Value::BitString(_) => 11,
         },
     }
 }
@@ -207,6 +207,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Bytes(_) => "bytea",
             Value::Temporal(_) => "temporal",
             Value::Datum(_) => "datum",
+            Value::BitString(_) => "bit string",
         },
     }
 }
@@ -280,6 +281,9 @@ fn render_plain_into(value: &Value, out: &mut String) {
         Value::Str(s) => render_json_string(s, out),
         Value::FixedChar(s) => render_json_string(s.trim_end_matches(' '), out),
         Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
+        Value::BitString(_) => out.push_str(
+            &serde_json::to_string(value).expect("canonical bit values serialize as tagged JSON"),
+        ),
         Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
         Value::Datum(datum) => {
             let mut hex = String::with_capacity(datum.bytes().len() * 2);
@@ -424,7 +428,7 @@ fn sort_priority(value: &Value) -> u8 {
             Value::Bool(_) => 6,
             Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 7,
             Value::Null => 8,
-            Value::Datum(_) => 9,
+            Value::Datum(_) | Value::BitString(_) => 9,
         },
     }
 }

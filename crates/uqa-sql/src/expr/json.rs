@@ -126,7 +126,9 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
         Value::Bytes(value) => {
             serde_json::Value::String(format!("0x{}", hex_encode(value))).to_string()
         }
-        Value::Temporal(_) => serde_json::Value::String(super::value_to_string(value)?).to_string(),
+        Value::Temporal(_) | Value::BitString(_) => {
+            serde_json::Value::String(super::value_to_string(value)?).to_string()
+        }
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Enum(value) => return Err(super::catalog_output_required(value)),
         Value::Datum(value) => return value_to_json_text(&super::datums::read(value)?),
@@ -319,6 +321,9 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Str(s) => serde_json::Value::String(s.clone()),
         Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(b) => serde_json::Value::String(format!("0x{}", hex_encode(b))),
+        Value::BitString(_) => {
+            serde_json::Value::String(super::value_to_string(v).expect("test bit-string output"))
+        }
         Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
         Value::Json(text) | Value::JsonB(text) => {
             serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))

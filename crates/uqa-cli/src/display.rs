@@ -119,6 +119,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Varchar(None) => "character varying".into(),
         ColumnType::Bpchar => "character".into(),
         ColumnType::Character(length) => format!("character({length})"),
+        ColumnType::Bit(_) | ColumnType::VarBit(_) => ty.sql_name(),
         ColumnType::Real => "real".into(),
         ColumnType::DoublePrecision => "double precision".into(),
         ColumnType::Numeric { precision, scale } => match (precision, scale) {

@@ -241,6 +241,7 @@ fn independent_value(value: &Value) -> bool {
         | Value::Str(_)
         | Value::FixedChar(_)
         | Value::Bytes(_)
+        | Value::BitString(_)
         | Value::Decimal(_)
         | Value::Json(_)
         | Value::JsonB(_) => true,

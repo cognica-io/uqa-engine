@@ -31,6 +31,7 @@ pub(super) fn typeof_value(v: &Value) -> String {
         Value::Str(_) => "text".into(),
         Value::FixedChar(_) => "character".into(),
         Value::Bytes(_) => "bytea".into(),
+        Value::BitString(_) => "bit".into(),
         Value::Temporal(value) => match value {
             TemporalValue::Date { .. } => "date".into(),
             TemporalValue::Time { .. } => "time without time zone".into(),

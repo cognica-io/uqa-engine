@@ -154,6 +154,8 @@ impl<'a> Walker<'a> {
             | ColumnType::Json
             | ColumnType::JsonB
             | ColumnType::Bytea
+            | ColumnType::Bit(_)
+            | ColumnType::VarBit(_)
             | ColumnType::InternalChar
             | ColumnType::Regproc
             | ColumnType::Regprocedure

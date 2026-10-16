@@ -8,6 +8,7 @@
 
 mod array;
 mod binary_oid;
+mod bit_string;
 mod legacy_vector;
 mod temporal;
 
@@ -91,6 +92,24 @@ pub fn cast_value_from_with_control(
         .trim()
         .strip_prefix("pg_catalog.")
         .unwrap_or(base.trim());
+    if matches!(target, "bit" | "\"bit\"" | "varbit" | "bit varying") {
+        let target = crate::ColumnType::from_sql_name_with_control(ty, control)?;
+        return bit_string::cast(v, &target, source_ty, control);
+    }
+    if let Value::BitString(value) = v {
+        let integer_target = match target {
+            "integer" | "int" | "int4" => Some("integer"),
+            "bigint" | "int8" => Some("bigint"),
+            "smallint" | "int2" => Some("smallint"),
+            _ => None,
+        };
+        if let Some(target) = integer_target {
+            return Ok(control.finish(
+                bit_string::integer(value, target, source_ty, control)?,
+                control.empty_reservation(),
+            )?);
+        }
+    }
     if matches!(v, Value::Void)
         && !matches!(
             target,
@@ -566,6 +585,7 @@ fn canonical_cast_source_with_control(
         Value::Float(_) => "double precision",
         Value::Decimal(_) => "numeric",
         Value::Bytes(_) => "bytea",
+        Value::BitString(_) => "bit",
         Value::Temporal(TemporalValue::Date { .. }) => "date",
         Value::Temporal(TemporalValue::Time { .. }) => "time without time zone",
         Value::Temporal(TemporalValue::TimeTz { .. }) => "time with time zone",
@@ -611,6 +631,8 @@ fn canonical_cast_source_with_control(
         "bigint" | "int8" | "bigserial" | "serial8" => "int8",
         "character varying" | "varchar" => "varchar",
         "character" | "char" | "bpchar" => "bpchar",
+        "\"bit\"" | "bit" => "bit",
+        "bit varying" | "varbit" => "varbit",
         "boolean" | "bool" => "bool",
         "double" | "double precision" | "float8" => "float8",
         "real" | "float4" => "float4",

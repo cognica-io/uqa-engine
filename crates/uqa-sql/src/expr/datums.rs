@@ -13,6 +13,7 @@ use uqa_core::{
 };
 
 mod arrays;
+mod bit_string;
 mod compression;
 mod fixed;
 mod malformed;
@@ -249,6 +250,7 @@ fn read_payload(
             };
             Ok(control.finish(value, memory)?)
         }
+        1560 | 1562 => bit_string::read(bytes, control),
         3802 => {
             let (text, memory) =
                 super::json::decode_jsonb_datum_with_control(bytes, control)?.into_parts();

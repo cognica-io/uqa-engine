@@ -327,6 +327,31 @@ pub(super) fn compile_pg_type_name(
             "refcursor" => Ok(ColumnType::RefCursor),
             "name" => Ok(ColumnType::Name),
             "uuid" => Ok(ColumnType::Uuid),
+            "bit" | "varbit" => {
+                use crate::expr::bit_string::BitStringKind;
+                let kind = if raw == "bit" {
+                    BitStringKind::Fixed
+                } else {
+                    BitStringKind::Varying
+                };
+                if type_name.typmods.len() > 1 {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22023".into(),
+                        message: "invalid type modifier".into(),
+                    });
+                }
+                let length = type_name
+                    .typmods
+                    .first()
+                    .map(|node| kind.validate_length(expect_integer_const(node)?))
+                    .transpose()?;
+                // The BIT keyword supplies length one in the parser; quoted/catalog bit retains the absent modifier.
+                Ok(if raw == "bit" {
+                    ColumnType::Bit(length)
+                } else {
+                    ColumnType::VarBit(length)
+                })
+            }
             "varchar" | "character varying" => {
                 if type_name.typmods.len() > 1 {
                     return Err(SQLError::TypeMismatch(format!(

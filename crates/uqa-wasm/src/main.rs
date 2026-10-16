@@ -630,6 +630,9 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
             serde_json::from_str(&value).map_err(|error| format!("invalid SQL JSON value: {error}"))
         }
         Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
+        value @ Value::BitString(_) => Ok(json!(
+            uqa_sql::expr::value_to_string(&value).map_err(|error| error.to_string())?
+        )),
         Value::Temporal(value) => Ok(json!(value.to_sql_string())),
         // Result conversion renders enum columns through the engine catalog before reaching this context-free converter.
         Value::Enum(value) => Err(uqa_sql::expr::catalog_output_required(&value).to_string()),

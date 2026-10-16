@@ -1,0 +1,931 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "version"
+    },
+    {
+      "sql": "SELECT B'101' AS b,X'9a' AS x,B'' AS empty,pg_typeof(B'101')::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "b",
+            "x",
+            "empty",
+            "type"
+          ],
+          "type_oids": [
+            1560,
+            1560,
+            1560,
+            25
+          ],
+          "rows": [
+            [
+              "101",
+              "10011010",
+              "",
+              "bit"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "literals"
+    },
+    {
+      "sql": "SELECT oid::integer,typname,typlen,typbyval,typalign,typstorage,typcategory,typispreferred,typelem::integer,typarray::integer FROM pg_type WHERE oid IN (1560,1561,1562,1563) ORDER BY oid",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "typname",
+            "typlen",
+            "typbyval",
+            "typalign",
+            "typstorage",
+            "typcategory",
+            "typispreferred",
+            "typelem",
+            "typarray"
+          ],
+          "type_oids": [
+            23,
+            19,
+            21,
+            16,
+            18,
+            18,
+            18,
+            16,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1560",
+              "bit",
+              "-1",
+              "f",
+              "i",
+              "x",
+              "V",
+              "f",
+              "0",
+              "1561"
+            ],
+            [
+              "1561",
+              "_bit",
+              "-1",
+              "f",
+              "i",
+              "x",
+              "A",
+              "f",
+              "1560",
+              "0"
+            ],
+            [
+              "1562",
+              "varbit",
+              "-1",
+              "f",
+              "i",
+              "x",
+              "V",
+              "t",
+              "0",
+              "1563"
+            ],
+            [
+              "1563",
+              "_varbit",
+              "-1",
+              "f",
+              "i",
+              "x",
+              "A",
+              "f",
+              "1562",
+              "0"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "builtin_catalog"
+    },
+    {
+      "sql": "SELECT quote_ident('bit'),format_type(1560,NULL),format_type(1560,-1),format_type(1560,3),format_type(1561,-1),format_type(1562,3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "quote_ident",
+            "format_type",
+            "format_type",
+            "format_type",
+            "format_type",
+            "format_type"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"bit\"",
+              "bit",
+              "\"bit\"",
+              "bit(3)",
+              "\"bit\"[]",
+              "bit varying(3)"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "type_formatting"
+    },
+    {
+      "sql": "CREATE TYPE cb_bit_row AS (a bit(3), b varbit); CREATE TABLE cb_bits(id integer PRIMARY KEY,a bit(3), b varbit(9), c pg_catalog.bit, d bit(3)[], e cb_bit_row)",
+      "command_tags": [
+        "CREATE TYPE",
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "declarations"
+    },
+    {
+      "sql": "SELECT attname,atttypid::regtype::text,atttypmod FROM pg_attribute WHERE attrelid='cb_bits'::regclass AND attnum>0 ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "atttypid",
+            "atttypmod"
+          ],
+          "type_oids": [
+            19,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "id",
+              "integer",
+              "-1"
+            ],
+            [
+              "a",
+              "bit",
+              "3"
+            ],
+            [
+              "b",
+              "bit varying",
+              "9"
+            ],
+            [
+              "c",
+              "bit",
+              "-1"
+            ],
+            [
+              "d",
+              "bit[]",
+              "3"
+            ],
+            [
+              "e",
+              "cb_bit_row",
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "catalog"
+    },
+    {
+      "sql": "INSERT INTO cb_bits VALUES (1,B'101',B'1',B'100000000',ARRAY[B'101',B'010'],ROW(B'101',B'1')),(2,B'000',B'100000000',B'',ARRAY[B'000',NULL],ROW(B'000',B'')),(3,NULL,NULL,NULL,NULL,NULL)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "insert"
+    },
+    {
+      "sql": "SELECT id,a,b,c,d::text,e::text FROM cb_bits ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "a",
+            "b",
+            "c",
+            "d",
+            "e"
+          ],
+          "type_oids": [
+            23,
+            1560,
+            1562,
+            1560,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "101",
+              "1",
+              "100000000",
+              "{101,010}",
+              "(101,1)"
+            ],
+            [
+              "2",
+              "000",
+              "100000000",
+              "",
+              "{000,NULL}",
+              "(000,\"\")"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "values"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,a,b,c) VALUES(4,'101','Xff','b1010')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unknown_input"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,B'10')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22026",
+        "message": "bit string length 2 does not match type bit(3)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "fixed_assignment_short"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,B'1010')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22026",
+        "message": "bit string length 4 does not match type bit(3)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "fixed_assignment_long"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,b) VALUES(5,B'1000000000')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "bit string too long for type bit varying(9)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "varying_assignment_long"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,'10z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "\"z\" is not a valid binary digit",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "input_invalid"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,'z')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "\"z\" is not a valid binary digit",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "input_length_first"
+    },
+    {
+      "sql": "SELECT B'1'::bit(3),B'1010'::bit(3),B'1'::varbit(3),B'1010'::varbit(3),'Xf'::bit(3),'Xf'::varbit(3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bit",
+            "bit",
+            "varbit",
+            "varbit",
+            "bit",
+            "varbit"
+          ],
+          "type_oids": [
+            1560,
+            1560,
+            1562,
+            1562,
+            1560,
+            1562
+          ],
+          "rows": [
+            [
+              "100",
+              "101",
+              "1",
+              "101",
+              "111",
+              "111"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "explicit_coercion"
+    },
+    {
+      "sql": "SELECT (-1)::bit(9),5::bigint::bit(9),B'1111'::integer,B'11111111111111111111111111111111'::integer,B'1000000000000000000000000000000000000000000000000000000000000000'::bigint",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bit",
+            "bit",
+            "int4",
+            "int4",
+            "int8"
+          ],
+          "type_oids": [
+            1560,
+            1560,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "111111111",
+              "000000101",
+              "15",
+              "-1",
+              "-9223372036854775808"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "integer_casts"
+    },
+    {
+      "sql": "SELECT B'101'::varbit::integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type bit varying to integer",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "invalid_varbit_integer"
+    },
+    {
+      "sql": "SELECT NULL::bit(3),NULL::varbit(3),NULL::bit(3)[]",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bit",
+            "varbit",
+            "bit"
+          ],
+          "type_oids": [
+            1560,
+            1562,
+            1561
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_casts"
+    },
+    {
+      "sql": "SELECT B'1'=B'1'::varbit,B'1'<B'10'::varbit,B'1'<>B'10000000',B'00000000'<B'000000000',B''<B'0'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?",
+            "?column?"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "mixed_comparison"
+    },
+    {
+      "sql": "SELECT ARRAY[B'1',B'1010']::bit(3)[],ARRAY[B'1',B'1010']::varbit(3)[]",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array",
+            "array"
+          ],
+          "type_oids": [
+            1561,
+            1563
+          ],
+          "rows": [
+            [
+              "{100,101}",
+              "{1,101}"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "array_casts"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,d) VALUES(5,ARRAY[B'1'])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22026",
+        "message": "bit string length 1 does not match type bit(3)",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "array_assignment_error"
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX cb_bits_c_idx ON cb_bits(c)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "unique_index"
+    },
+    {
+      "sql": "SELECT id FROM cb_bits WHERE c=B'100000000' ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "indexed_lookup"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,c) VALUES(5,B'100000000')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cb_bits_c_idx\"",
+        "detail": "Key (c)=(100000000) already exists.",
+        "hint": null
+      },
+      "results": [],
+      "notices": [],
+      "id": "unique_error"
+    },
+    {
+      "sql": "INSERT INTO cb_bits(id,c) VALUES(5,B'10000000')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "zero_extension_distinct"
+    },
+    {
+      "sql": "UPDATE cb_bits SET a=B'010',b=B'00001' WHERE id=1",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "update"
+    },
+    {
+      "sql": "BEGIN; SAVEPOINT b; UPDATE cb_bits SET c=B'00001' WHERE id=1; ROLLBACK TO b; COMMIT",
+      "command_tags": [
+        "BEGIN",
+        "SAVEPOINT",
+        "UPDATE 1",
+        "ROLLBACK",
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "savepoint"
+    },
+    {
+      "sql": "SELECT to_json(B'101'),to_jsonb(B'100000000'),to_json(ARRAY[B'1',B'10'])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_json",
+            "to_jsonb",
+            "to_json"
+          ],
+          "type_oids": [
+            114,
+            3802,
+            114
+          ],
+          "rows": [
+            [
+              "\"101\"",
+              "\"100000000\"",
+              "[\"1\",\"10\"]"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "json"
+    },
+    {
+      "sql": "SELECT id,a,b,c,d::text,e::text FROM cb_bits ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "a",
+            "b",
+            "c",
+            "d",
+            "e"
+          ],
+          "type_oids": [
+            23,
+            1560,
+            1562,
+            1560,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "010",
+              "00001",
+              "100000000",
+              "{101,010}",
+              "(101,1)"
+            ],
+            [
+              "2",
+              "000",
+              "100000000",
+              "",
+              "{000,NULL}",
+              "(000,\"\")"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            [
+              "4",
+              "101",
+              "11111111",
+              "1010",
+              null,
+              null
+            ],
+            [
+              "5",
+              null,
+              null,
+              "10000000",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "values_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM cb_bits WHERE c=B'100000000' ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "index_reopen",
+      "reopen": true
+    },
+    {
+      "sql": "SELECT attname,atttypid::regtype::text,atttypmod FROM pg_attribute WHERE attrelid='cb_bits'::regclass AND attnum>0 ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "atttypid",
+            "atttypmod"
+          ],
+          "type_oids": [
+            19,
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "id",
+              "integer",
+              "-1"
+            ],
+            [
+              "a",
+              "bit",
+              "3"
+            ],
+            [
+              "b",
+              "bit varying",
+              "9"
+            ],
+            [
+              "c",
+              "bit",
+              "-1"
+            ],
+            [
+              "d",
+              "bit[]",
+              "3"
+            ],
+            [
+              "e",
+              "cb_bit_row",
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "catalog_reopen",
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "collector": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "capture_sha256": "dd70509b041ddca0c088108e0c9d94ec1d6f18494472d7104bbb00823af023c3",
+    "source": "Docker PostgreSQL 18.4, isolated uqa_bit_values_20261016 database",
+    "arguments": [
+      "--rows",
+      "--details",
+      "--notices"
+    ],
+    "format_capture_sha256": "79d0f4e6136a875b38573792a1f5b990b2c5237b4aa597b70c20bbaf0c83a8bd"
+  }
+}

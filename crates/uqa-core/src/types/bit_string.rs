@@ -63,6 +63,11 @@ impl BitStringValue {
         &self.bytes
     }
 
+    /// Heap bytes owned by the canonical packed payload, excluding its inline header.
+    pub fn retained_bytes(&self) -> usize {
+        self.bytes.capacity()
+    }
+
     pub fn bit_len(&self) -> u32 {
         self.bit_len
     }

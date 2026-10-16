@@ -329,6 +329,14 @@ impl Copier<'_> {
                 memory.absorb(charge);
                 Value::Bytes(bytes)
             }
+            Value::BitString(value) => {
+                let (bytes, charge) = self.slice(value.as_bytes())?.into_parts();
+                memory.absorb(charge);
+                Value::BitString(
+                    crate::BitStringValue::try_from_packed(bytes, value.bit_len())
+                        .expect("copy preserves canonical packed bits"),
+                )
+            }
             Value::Decimal(value) => {
                 memory.grow(value.retained_bytes())?;
                 Value::Decimal(value.clone())

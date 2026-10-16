@@ -54,6 +54,9 @@ impl Value {
                 control,
             )?,
             (Self::Bytes(left), Self::Bytes(right)) => compare_bytes(left, right, control)?,
+            (Self::BitString(left), Self::BitString(right)) => {
+                left.cmp_with_control(right, control)?
+            }
             (Self::Datum(left), Self::Datum(right)) => compare_datums(left, right, control)?,
             (Self::Enum(left), Self::Enum(right)) => match left.type_oid().cmp(&right.type_oid()) {
                 Ordering::Equal => {
@@ -88,35 +91,42 @@ impl Value {
                     prefix
                 }
             }
-            (Self::Map(left), Self::Map(right)) => {
-                let mut left = left.iter();
-                let mut right = right.iter();
-                loop {
-                    control.check()?;
-                    match (left.next(), right.next()) {
-                        (Some((a, x)), Some((b, y))) => {
-                            let ordering = compare_bytes(a.as_bytes(), b.as_bytes(), control)?;
-                            let ordering = if ordering.is_eq() {
-                                x.cmp_with_control(y, control)?
-                            } else {
-                                ordering
-                            };
-                            if !ordering.is_eq() {
-                                break ordering;
-                            }
-                        }
-                        (Some(_), None) => break Ordering::Greater,
-                        (None, Some(_)) => break Ordering::Less,
-                        (None, None) => break Ordering::Equal,
-                    }
-                }
-            }
+            (Self::Map(left), Self::Map(right)) => compare_maps(left, right, control)?,
             // Remaining native comparisons have inline carriers or only compare variant identities.
             _ => self.cmp(other),
         };
         control.check()?;
         Ok(ordering)
     }
+}
+
+fn compare_maps(
+    left: &std::collections::BTreeMap<String, Value>,
+    right: &std::collections::BTreeMap<String, Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Ordering, ValueRetentionError> {
+    let mut left = left.iter();
+    let mut right = right.iter();
+    let ordering = loop {
+        control.check()?;
+        match (left.next(), right.next()) {
+            (Some((a, x)), Some((b, y))) => {
+                let ordering = compare_bytes(a.as_bytes(), b.as_bytes(), control)?;
+                let ordering = if ordering.is_eq() {
+                    x.cmp_with_control(y, control)?
+                } else {
+                    ordering
+                };
+                if !ordering.is_eq() {
+                    break ordering;
+                }
+            }
+            (Some(_), None) => break Ordering::Greater,
+            (None, Some(_)) => break Ordering::Less,
+            (None, None) => break Ordering::Equal,
+        }
+    };
+    Ok(ordering)
 }
 
 fn compare_datums(

@@ -65,6 +65,8 @@ pub(in crate::type_resolution) fn canonical_routine_type_name_with_control(
         "decimal" | "numeric" => "numeric",
         "character varying" | "varchar" => "varchar",
         "character" | "char" | "bpchar" => "bpchar",
+        "bit" | "\"bit\"" => "bit",
+        "bit varying" | "varbit" => "varbit",
         "bool" | "boolean" => "bool",
         "timestamp without time zone" | "timestamp" => "timestamp",
         "timestamp with time zone" | "timestamptz" => "timestamptz",

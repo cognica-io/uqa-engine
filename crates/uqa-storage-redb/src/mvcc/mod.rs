@@ -37,8 +37,8 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
-/// Writers publish exact physical constraint rows in the definition transaction.
-const RECORD_FORMAT: u64 = 58;
+/// Every owner preserves packed bit values and their SQL type descriptors.
+const RECORD_FORMAT: u64 = 59;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");

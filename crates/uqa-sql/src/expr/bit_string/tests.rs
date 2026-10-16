@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod integration;
+
 fn kind(case: &serde_json::Value) -> BitStringKind {
     match case["kind"].as_str().unwrap() {
         "bit" => BitStringKind::Fixed,

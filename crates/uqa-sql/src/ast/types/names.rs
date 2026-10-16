@@ -84,6 +84,8 @@ impl fmt::Display for TypeName<'_> {
             }
             match self.ty {
                 ColumnType::Varchar(_) => return f.write_str("character varying"),
+                ColumnType::Bit(_) => return f.write_str("bit"),
+                ColumnType::VarBit(_) => return f.write_str("bit varying"),
                 ColumnType::Bpchar | ColumnType::Character(_) => return f.write_str("character"),
                 ColumnType::Numeric { .. } => return f.write_str("numeric"),
                 ColumnType::Vector(_) => return f.write_str("vector"),
@@ -139,6 +141,10 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Json => f.write_str("json"),
             ColumnType::JsonB => f.write_str("jsonb"),
             ColumnType::Bytea => f.write_str("bytea"),
+            ColumnType::Bit(Some(length)) => write!(f, "bit({length})"),
+            ColumnType::Bit(None) => f.write_str("\"bit\""),
+            ColumnType::VarBit(Some(length)) => write!(f, "bit varying({length})"),
+            ColumnType::VarBit(None) => f.write_str("bit varying"),
             ColumnType::InternalChar => f.write_str("\"char\""),
             ColumnType::Regproc => f.write_str("regproc"),
             ColumnType::Regprocedure => f.write_str("regprocedure"),

@@ -262,6 +262,9 @@ fn operand_type_name(
         }
         ScalarExpr::Literal(Value::Int(_)) => return type_name(&ColumnType::BigInteger).map(Some),
         ScalarExpr::Literal(Value::Bytes(_)) => return type_name(&ColumnType::Bytea).map(Some),
+        ScalarExpr::Literal(Value::BitString(_)) => {
+            return type_name(&ColumnType::Bit(None)).map(Some)
+        }
         ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return Ok(None),
         _ => {
             let Some(ty) = inferred_type(expression, schema, params, control)? else {

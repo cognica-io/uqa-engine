@@ -9510,6 +9510,139 @@
       "capability": "Bit-string cancellation and error cleanup",
       "workload": "Reject an invalid final digit after more than 4 KiB of packed production, then invoke input, conversion, integer expansion and output under each cancelled owner.",
       "invariant": "Failure releases partial buffers; original and invoking cancellation remain 57014 without retained reservations."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_tag_roundtrips_nested_values_without_losing_length_or_payload_ownership",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/value/tagged/bit_string.rs",
+      "capability": "Packed bit retention",
+      "workload": "Nested controlled decode and copy plus zero-allocation comparison.",
+      "invariant": "Logical length, canonical bytes and original reservations survive every owned copy."
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bit_string_tags_reject_noncanonical_data_in_controlled_and_ordinary_decoding",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-core/src/types/value/tagged/bit_string.rs",
+      "capability": "Packed bit validation",
+      "workload": "Malformed lengths, hex, padding and missing tagged fields.",
+      "invariant": "Both decoders reject malformed representations and release partial ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_assignment_and_cast_dispatch_keep_the_independent_scalar_contract",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests/integration.rs",
+      "capability": "Typed bit conversion dispatch",
+      "workload": "420 independent PostgreSQL scalar observations through assignment and cast entry points.",
+      "invariant": "Selected input, modifier, integer and diagnostic semantics reach the packed kernels unchanged."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_keyword_and_catalog_declarations_preserve_type_identity_and_modifiers",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/bit_string/tests/integration.rs",
+      "capability": "Bit declaration identity",
+      "workload": "Keyword, quoted/catalog names, modifiers and array identities.",
+      "invariant": "BIT keyword length one remains distinct from unconstrained catalog bit; OIDs and modifiers survive round trips."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bit_string_datums_keep_logical_length_owned_bounds_and_read_allowance",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/bit_string.rs",
+      "capability": "Physical bit retention",
+      "workload": "Both physical OIDs, exact two-byte allowance, short allowance and truncated/malformed owners.",
+      "invariant": "Reads retain only packed bytes, reject out-of-bounds values with XX001 and release failed allocations."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bit_string_exact_keys_preserve_lengths_and_agree_with_physical_value_hashes",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/distinct/encoding/tests.rs",
+      "capability": "Bit equality keys",
+      "workload": "Empty and equal-byte/different-length carriers, physical Datums and nested containers.",
+      "invariant": "Exact keys separate distinct lengths and other carriers; logical and physical equals hash identically."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bit_string_lengths_and_nested_values_survive_actual_binary_spill",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/spill/tests/datums.rs",
+      "capability": "Bit spill retention",
+      "workload": "Zero-budget actual spill of partial bytes, distinct lengths and nested values, plus truncated and malformed records.",
+      "invariant": "Binary restoration preserves complete representation and rejects corrupt padding."
+    },
+    {
+      "package": "uqa-client",
+      "kind": "lib",
+      "test": "bit_string_parameters_do_not_silently_change_type_on_the_existing_wire_protocol",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-client/src/sql_parameter.rs",
+      "capability": "HTTP bit parameter boundary",
+      "workload": "Direct and nested bit carriers at the existing parameter encoder.",
+      "invariant": "Unsupported typed carriers fail before a request; explicit text input preserves every bit digit."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "bit_string_scalar_and_tuple_probes_seek_without_conflating_zero_padded_lengths",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-storage-sqlite/src/btree_index/probe/tests.rs",
+      "capability": "Native bit index seeks",
+      "workload": "Scalar and tuple lookups over 64 and 2048 unrelated entries, equal packed bytes with different logical lengths and absent targets.",
+      "invariant": "Exact and missing probes retain distinct lengths and consume fewer than 400 SQLite instructions independent of collection size."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "bit_string_values_and_retained_consumers_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/tests/queries/sql_composites/consumer_matrix.rs",
+      "capability": "Bit statement and provider retention",
+      "workload": "31 independently captured PostgreSQL statements including three observations after actual persistent reopening on four providers.",
+      "invariant": "Types, modifiers, values, diagnostics, arrays/records, index uniqueness and rollback remain unchanged after provider serialization."
     }
   ]
 }

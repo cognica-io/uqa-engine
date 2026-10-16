@@ -7,6 +7,49 @@
 use super::*;
 use uqa_core::{ArrayValue, EnumLabelKey, EnumValue};
 
+#[test]
+fn bit_string_exact_keys_preserve_lengths_and_agree_with_physical_value_hashes() {
+    let build = std::collections::hash_map::RandomState::new();
+    let mut keys = std::collections::BTreeSet::new();
+    for (bytes, length) in [(vec![], 0), (vec![0x80], 1), (vec![0x80], 8)] {
+        let logical = Value::BitString(
+            uqa_core::BitStringValue::try_from_packed(bytes.clone(), length).unwrap(),
+        );
+        let key = canonical_row_key(std::slice::from_ref(&logical)).unwrap();
+        assert!(keys.insert(key));
+        for oid in [1560, 1562] {
+            let mut payload = vec![((bytes.len() as u8 + 5) << 1) | 1];
+            payload.extend_from_slice(&length.to_le_bytes());
+            payload.extend_from_slice(&bytes);
+            let physical = Value::Datum(uqa_core::DatumValue::new(oid, 0, payload));
+            for (logical, physical) in [
+                (logical.clone(), physical.clone()),
+                (
+                    Value::List(vec![logical.clone()]),
+                    Value::List(vec![physical]),
+                ),
+            ] {
+                let hash =
+                    |value| hash_canonical_row(&build, std::iter::once(Some(value))).unwrap();
+                assert_eq!(hash(&logical), hash(&physical));
+                assert_eq!(
+                    encode_sql_key_with_enum_catalog(std::iter::once(Some(&logical)), None)
+                        .unwrap(),
+                    encode_sql_key_with_enum_catalog(std::iter::once(Some(&physical)), None)
+                        .unwrap()
+                );
+            }
+        }
+    }
+    for other in [
+        Value::Str("1".into()),
+        Value::Bytes(vec![0x80]),
+        Value::Int(1),
+    ] {
+        assert!(keys.insert(canonical_row_key(&[other]).unwrap()));
+    }
+}
+
 struct EnumIdentityCatalog;
 
 impl uqa_sql::expr::enums::EnumLabelCatalog for EnumIdentityCatalog {

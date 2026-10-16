@@ -68,6 +68,7 @@ enum StoredValue {
     Map(BTreeMap<String, StoredValue>),
     Enum(EnumValue),
     Datum(uqa_core::DatumValue),
+    BitString(uqa_core::BitStringValue),
 }
 
 impl From<&Value> for StoredValue {
@@ -81,6 +82,7 @@ impl From<&Value> for StoredValue {
             Value::Str(value) => Self::Str(value.clone()),
             Value::FixedChar(value) => Self::FixedChar(value.clone()),
             Value::Bytes(value) => Self::Bytes(value.clone()),
+            Value::BitString(value) => Self::BitString(value.clone()),
             Value::Temporal(value) => Self::Temporal(value.clone()),
             Value::Decimal(value) => Self::Decimal(value.clone()),
             Value::Json(value) => Self::Json(value.clone()),
@@ -122,6 +124,7 @@ impl StoredValue {
             Self::Str(value) => Value::Str(value),
             Self::FixedChar(value) => Value::FixedChar(value),
             Self::Bytes(value) => Value::Bytes(value),
+            Self::BitString(value) => Value::BitString(value),
             Self::Temporal(value) => Value::Temporal(value),
             Self::Decimal(value) => Value::Decimal(value),
             Self::Json(value) => Value::Json(value),

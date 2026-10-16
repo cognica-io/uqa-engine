@@ -40,6 +40,21 @@ fn range_composite_consumers_match_postgresql(#[case] provider: usize) {
 }
 
 #[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn bit_string_values_and_retained_consumers_match_postgresql(#[case] provider: usize) {
+    verify_reference(
+        provider,
+        serde_json::from_str(include_str!(
+            "../../../../../tests/parity/pg18/bit_string_values_oracle.expected.json"
+        ))
+        .unwrap(),
+    );
+}
+
+#[rstest::rstest]
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]

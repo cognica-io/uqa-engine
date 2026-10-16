@@ -37,6 +37,7 @@ pub(super) enum StoredValue {
     Map(BTreeMap<String, StoredValue>),
     Enum(uqa_core::EnumValue),
     Datum(uqa_core::DatumValue),
+    BitString(uqa_core::BitStringValue),
 }
 
 impl StoredValue {
@@ -50,6 +51,7 @@ impl StoredValue {
             Value::Str(value) => Self::Str(value),
             Value::FixedChar(value) => Self::FixedChar(value),
             Value::Bytes(value) => Self::Bytes(value),
+            Value::BitString(value) => Self::BitString(value),
             Value::Temporal(value) => Self::Temporal(value),
             Value::Decimal(value) => Self::Decimal(value),
             Value::Json(value) => Self::Json(value),
@@ -87,6 +89,7 @@ impl StoredValue {
             Self::Str(value) => Value::Str(value),
             Self::FixedChar(value) => Value::FixedChar(value),
             Self::Bytes(value) => Value::Bytes(value),
+            Self::BitString(value) => Value::BitString(value),
             Self::Temporal(value) => Value::Temporal(value),
             Self::Decimal(value) => Value::Decimal(value),
             Self::Json(value) => Value::Json(value),
@@ -139,6 +142,7 @@ pub(super) fn value_requires_typed_encoding(value: &Value) -> bool {
         Value::Array(_)
         | Value::LegacyVector(_)
         | Value::Bytes(_)
+        | Value::BitString(_)
         | Value::Json(_)
         | Value::JsonB(_) => true,
         _ => false,

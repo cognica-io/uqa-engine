@@ -63,6 +63,7 @@ pub fn value_to_string_with_control(
             )
         }
         Value::Bytes(values) => bytea_to_string_with_control(values, control)?,
+        Value::BitString(value) => super::bit_string::output_with_control(value, control)?,
     })
 }
 

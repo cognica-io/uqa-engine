@@ -305,6 +305,7 @@ fn schema_literal_text(value: &Value) -> Result<String, SQLError> {
         Value::Str(value) | Value::FixedChar(value) => {
             format!("'{}'", value.replace('\'', "''"))
         }
+        Value::BitString(_) => format!("B'{}'", crate::expr::value_to_string(value)?),
         Value::Bytes(value) => {
             let mut hex = String::new();
             for byte in value {

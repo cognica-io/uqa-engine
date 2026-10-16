@@ -368,6 +368,7 @@ fn explicit_expr_type(expr: &Expr) -> Option<&str> {
         Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
         Expr::Literal(Value::Int(_)) => Some("bigint"),
         Expr::Literal(Value::Bytes(_)) => Some("bytea"),
+        Expr::Literal(Value::BitString(_)) => Some("bit"),
         _ => None,
     }
 }

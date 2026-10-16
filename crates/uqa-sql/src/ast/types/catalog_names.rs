@@ -45,7 +45,10 @@ impl fmt::Display for CatalogName<'_> {
             .expect("resolved builtin type has a catalog identifier");
         write!(f, "pg_catalog.\"{name}\"")?;
         match self.0 {
-            ColumnType::Varchar(Some(length)) | ColumnType::Character(length) => {
+            ColumnType::Varchar(Some(length))
+            | ColumnType::Character(length)
+            | ColumnType::Bit(Some(length))
+            | ColumnType::VarBit(Some(length)) => {
                 write!(f, "({length})")
             }
             ColumnType::Numeric {

@@ -75,3 +75,7 @@ Focused Execution checks pass for actual DISTINCT spill, both direct and encoded
 - [ ] Verify actual automatic Linux/macOS performance artifacts, synchronize public contracts and task status, review and merge the bounded follow-up PRs, and remove their branches.
 
 Do not mark the broader composite unit complete from a single fixture, green archive job or closed prerequisite issue. Retain compact fixture provenance and source-matched evidence here; generated machine reports remain outside Git.
+
+## Integrated bit consumer checkpoint
+
+The packed bit carrier is connected through typed SQL declarations, casts, comparison, exact keys, physical tuple decoding, provider values and actual spills. All nineteen combined public tests pass: the original 172-observation matrix, bpchar, the 190-observation range matrix, the additional 31-observation bit reference and persistent concurrent reservations. Both original and expanded references pass on all four providers and after actual persistent reopening; no original case was removed or relaxed. Twenty-eight focused owner tests additionally verify controlled values, catalog output, physical reads, native SQLite equality probes and BLOBs, spill, HTTP parameter boundaries and SQLite/redb upgrades. Strict Clippy and ownership checks pass. The [bit acceptance ledger](0018-bit-string-acceptance.md) preserves the outstanding binding-artifact and automatic-regression obligations; the broader coverage audit and original record 64 remain active.

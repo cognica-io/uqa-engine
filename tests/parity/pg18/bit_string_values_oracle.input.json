@@ -1,0 +1,131 @@
+{
+  "cases": [
+    {
+      "id": "version",
+      "sql": "SELECT version()"
+    },
+    {
+      "id": "literals",
+      "sql": "SELECT B'101' AS b,X'9a' AS x,B'' AS empty,pg_typeof(B'101')::text AS type"
+    },
+    {
+      "id": "builtin_catalog",
+      "sql": "SELECT oid::integer,typname,typlen,typbyval,typalign,typstorage,typcategory,typispreferred,typelem::integer,typarray::integer FROM pg_type WHERE oid IN (1560,1561,1562,1563) ORDER BY oid"
+    },
+    {
+      "id": "type_formatting",
+      "sql": "SELECT quote_ident('bit'),format_type(1560,NULL),format_type(1560,-1),format_type(1560,3),format_type(1561,-1),format_type(1562,3)"
+    },
+    {
+      "id": "declarations",
+      "sql": "CREATE TYPE cb_bit_row AS (a bit(3), b varbit); CREATE TABLE cb_bits(id integer PRIMARY KEY,a bit(3), b varbit(9), c pg_catalog.bit, d bit(3)[], e cb_bit_row)"
+    },
+    {
+      "id": "catalog",
+      "sql": "SELECT attname,atttypid::regtype::text,atttypmod FROM pg_attribute WHERE attrelid='cb_bits'::regclass AND attnum>0 ORDER BY attnum"
+    },
+    {
+      "id": "insert",
+      "sql": "INSERT INTO cb_bits VALUES (1,B'101',B'1',B'100000000',ARRAY[B'101',B'010'],ROW(B'101',B'1')),(2,B'000',B'100000000',B'',ARRAY[B'000',NULL],ROW(B'000',B'')),(3,NULL,NULL,NULL,NULL,NULL)"
+    },
+    {
+      "id": "values",
+      "sql": "SELECT id,a,b,c,d::text,e::text FROM cb_bits ORDER BY id"
+    },
+    {
+      "id": "unknown_input",
+      "sql": "INSERT INTO cb_bits(id,a,b,c) VALUES(4,'101','Xff','b1010')"
+    },
+    {
+      "id": "fixed_assignment_short",
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,B'10')"
+    },
+    {
+      "id": "fixed_assignment_long",
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,B'1010')"
+    },
+    {
+      "id": "varying_assignment_long",
+      "sql": "INSERT INTO cb_bits(id,b) VALUES(5,B'1000000000')"
+    },
+    {
+      "id": "input_invalid",
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,'10z')"
+    },
+    {
+      "id": "input_length_first",
+      "sql": "INSERT INTO cb_bits(id,a) VALUES(5,'z')"
+    },
+    {
+      "id": "explicit_coercion",
+      "sql": "SELECT B'1'::bit(3),B'1010'::bit(3),B'1'::varbit(3),B'1010'::varbit(3),'Xf'::bit(3),'Xf'::varbit(3)"
+    },
+    {
+      "id": "integer_casts",
+      "sql": "SELECT (-1)::bit(9),5::bigint::bit(9),B'1111'::integer,B'11111111111111111111111111111111'::integer,B'1000000000000000000000000000000000000000000000000000000000000000'::bigint"
+    },
+    {
+      "id": "invalid_varbit_integer",
+      "sql": "SELECT B'101'::varbit::integer"
+    },
+    {
+      "id": "null_casts",
+      "sql": "SELECT NULL::bit(3),NULL::varbit(3),NULL::bit(3)[]"
+    },
+    {
+      "id": "mixed_comparison",
+      "sql": "SELECT B'1'=B'1'::varbit,B'1'<B'10'::varbit,B'1'<>B'10000000',B'00000000'<B'000000000',B''<B'0'"
+    },
+    {
+      "id": "array_casts",
+      "sql": "SELECT ARRAY[B'1',B'1010']::bit(3)[],ARRAY[B'1',B'1010']::varbit(3)[]"
+    },
+    {
+      "id": "array_assignment_error",
+      "sql": "INSERT INTO cb_bits(id,d) VALUES(5,ARRAY[B'1'])"
+    },
+    {
+      "id": "unique_index",
+      "sql": "CREATE UNIQUE INDEX cb_bits_c_idx ON cb_bits(c)"
+    },
+    {
+      "id": "indexed_lookup",
+      "sql": "SELECT id FROM cb_bits WHERE c=B'100000000' ORDER BY id"
+    },
+    {
+      "id": "unique_error",
+      "sql": "INSERT INTO cb_bits(id,c) VALUES(5,B'100000000')"
+    },
+    {
+      "id": "zero_extension_distinct",
+      "sql": "INSERT INTO cb_bits(id,c) VALUES(5,B'10000000')"
+    },
+    {
+      "id": "update",
+      "sql": "UPDATE cb_bits SET a=B'010',b=B'00001' WHERE id=1"
+    },
+    {
+      "id": "savepoint",
+      "sql": "BEGIN; SAVEPOINT b; UPDATE cb_bits SET c=B'00001' WHERE id=1; ROLLBACK TO b; COMMIT"
+    },
+    {
+      "id": "json",
+      "sql": "SELECT to_json(B'101'),to_jsonb(B'100000000'),to_json(ARRAY[B'1',B'10'])"
+    },
+    {
+      "id": "values_reopen",
+      "sql": "SELECT id,a,b,c,d::text,e::text FROM cb_bits ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "index_reopen",
+      "sql": "SELECT id FROM cb_bits WHERE c=B'100000000' ORDER BY id",
+      "reopen": true
+    },
+    {
+      "id": "catalog_reopen",
+      "sql": "SELECT attname,atttypid::regtype::text,atttypmod FROM pg_attribute WHERE attrelid='cb_bits'::regclass AND attnum>0 ORDER BY attnum",
+      "reopen": true
+    }
+  ]
+}

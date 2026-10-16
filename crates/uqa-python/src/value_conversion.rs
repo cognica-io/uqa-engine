@@ -69,6 +69,9 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
             Ok(py.import("json")?.call_method1("loads", (value,))?.unbind())
         }
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
+        Value::BitString(_) => uqa_sql::expr::value_to_string(value)
+            .map_err(super::errors::runtime_error)?
+            .into_py_any(py),
         Value::Temporal(value) => temporal_to_string(value).into_py_any(py),
         // Result conversion renders enum columns through the engine catalog before reaching this context-free converter.
         Value::Enum(value) => Err(super::errors::runtime_error(

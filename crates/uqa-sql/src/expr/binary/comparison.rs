@@ -355,6 +355,7 @@ fn compare_nullable_with_catalog(
         | (Value::Decimal(_), Value::Bool(_))
         | (Value::Str(_), Value::Str(_))
         | (Value::FixedChar(_), Value::FixedChar(_))
+        | (Value::BitString(_), Value::BitString(_))
         | (Value::JsonB(_), Value::JsonB(_))
         | (Value::Temporal(_), Value::Temporal(_))
         | (Value::Bool(_), Value::Bool(_))

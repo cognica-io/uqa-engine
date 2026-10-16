@@ -14,6 +14,7 @@ use crate::{
 
 mod allocation;
 use allocation::Workspace;
+mod bit_string;
 mod record;
 mod row;
 
@@ -80,6 +81,7 @@ fn convert(
         return Ok(Value::Temporal(value));
     }
     match tag.as_str() {
+        "bit_string" => return bit_string::decode(&map, workspace).map(Value::BitString),
         "void" if map.len() == 1 => return Ok(Value::Void),
         "float_bits" if map.len() == 2 => {
             if let Some(Value::Str(hex)) = map.get("hex") {

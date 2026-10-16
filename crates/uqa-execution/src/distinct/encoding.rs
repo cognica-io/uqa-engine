@@ -415,6 +415,11 @@ fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             output.push_byte(3)?;
             encode_bytes(value, output)
         }
+        Value::BitString(value) => {
+            output.push_byte(20)?;
+            output.extend_bytes(&value.bit_len().to_be_bytes())?;
+            encode_bytes(value.as_bytes(), output)
+        }
         Value::Temporal(value) => encode_temporal(value, output),
         Value::Json(value) => {
             output.push_byte(8)?;

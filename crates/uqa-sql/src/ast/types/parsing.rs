@@ -160,6 +160,28 @@ impl ColumnType {
             "json" => Ok(Self::Json),
             "jsonb" => Ok(Self::JsonB),
             "bytea" => Ok(Self::Bytea),
+            "bit" | "bit varying" | "varbit" => {
+                use crate::expr::bit_string::BitStringKind;
+                let kind = if base == "bit" {
+                    BitStringKind::Fixed
+                } else {
+                    BitStringKind::Varying
+                };
+                let length = modifier
+                    .map(|text| {
+                        let length = text.parse::<i64>().map_err(|_| crate::SQLError::Routine {
+                            sqlstate: "22023".into(),
+                            message: "invalid type modifier".into(),
+                        })?;
+                        kind.validate_length(length)
+                    })
+                    .transpose()?;
+                Ok(if kind == BitStringKind::Fixed {
+                    Self::Bit(length.or(Some(1)))
+                } else {
+                    Self::VarBit(length)
+                })
+            }
             "\"char\"" => Ok(Self::InternalChar),
             "regproc" => Ok(Self::Regproc),
             "regprocedure" => Ok(Self::Regprocedure),

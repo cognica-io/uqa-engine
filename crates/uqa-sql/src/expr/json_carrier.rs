@@ -39,6 +39,7 @@ pub fn core_value_to_json(value: &Value) -> crate::error::Result<serde_json::Val
             .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
         Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
+        Value::BitString(_) => serde_json::Value::String(super::value_to_string(value)?),
         Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
         Value::Json(text) | Value::JsonB(text) => {
             serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
@@ -115,6 +116,7 @@ pub fn value_to_text_with_control(
         Value::Str(value) | Value::Json(value) | Value::JsonB(value) => control.copy_text(value)?,
         Value::FixedChar(value) => control.copy_text(value.trim_end_matches(' '))?,
         Value::Bytes(value) => super::json::utf8_lossy_with_control(value, control)?,
+        Value::BitString(value) => super::bit_string::output_with_control(value, control)?,
         Value::Temporal(value) => value.to_sql_string_in_interval_style_with_control(
             super::temporal_interval_style(),
             control,

@@ -1,6 +1,10 @@
 # Upgrading UQA Engine
 
-This page describes upgrade requirements for UQA Engine 0.5.4 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.4/docs/manual/reference/10-upgrading.md) when installing the 0.5.4 packages.
+This page describes development-source requirements and UQA Engine 0.5.4 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.5.4/docs/manual/reference/10-upgrading.md) when installing the 0.5.4 packages.
+
+## Development source
+
+Packed bit values and BIT/VARBIT type descriptors require SQLite record format 63 and redb record format 59. Every database owner must use compatible binaries; an older owner could otherwise interpret the new tagged value as a different carrier or lose its logical length. Close all owners and retain a pre-upgrade backup before first open. The existing atomic format upgrade preserves records, histories, receipts and identifier watermarks without rewriting user rows. Native SQLite mapping 17 and shared coordination format 2 are unchanged. Older binaries reject the upgraded database; restore the pre-upgrade backup to return to an older version.
 
 ## 0.5.4
 

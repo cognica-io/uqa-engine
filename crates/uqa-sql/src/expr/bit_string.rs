@@ -48,7 +48,7 @@ impl BitStringKind {
         Ok(length as u32)
     }
 
-    fn check_length(self, length: u32, modifier: i32) -> Result<()> {
+    pub(crate) fn check_length(self, length: u32, modifier: i32) -> Result<()> {
         if modifier <= 0 {
             return Ok(());
         }

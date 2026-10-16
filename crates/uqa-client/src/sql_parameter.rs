@@ -99,7 +99,7 @@ fn scalar_parameter(value: &Value) -> Result<SQLParameter, HttpEngineError> {
         Value::Int(value) => SQLParameter::Int64 { value: *value },
         Value::Float(value) if value.is_finite() => SQLParameter::Float64 { value: *value },
         // Internal carriers retain local type identities; clients send their public values.
-        Value::Float(_) | Value::Enum(_) | Value::Datum(_) => {
+        Value::Float(_) | Value::Enum(_) | Value::Datum(_) | Value::BitString(_) => {
             return Err(HttpEngineError::InvalidParameter);
         }
         Value::Str(value) => SQLParameter::Text {
@@ -129,7 +129,7 @@ fn scalar_parameter(value: &Value) -> Result<SQLParameter, HttpEngineError> {
 
 fn finite_value(value: &Value) -> bool {
     match value {
-        Value::Datum(_) => false,
+        Value::Datum(_) | Value::BitString(_) => false,
         Value::Float(value) => value.is_finite(),
         Value::Array(value) => value.elements().iter().all(finite_value),
         Value::List(values) => values.iter().all(finite_value),
@@ -226,5 +226,22 @@ mod tests {
                 Err(HttpEngineError::InvalidParameter)
             ));
         }
+    }
+
+    #[test]
+    fn bit_string_parameters_do_not_silently_change_type_on_the_existing_wire_protocol() {
+        let bits =
+            Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap());
+        for value in [bits.clone(), Value::List(vec![bits])] {
+            assert!(matches!(
+                SQLParameter::try_from(&SQLParam::scalar(value)),
+                Err(HttpEngineError::InvalidParameter)
+            ));
+        }
+        let text = SQLParam::scalar(Value::Str("100000000".into()));
+        assert_eq!(
+            serde_json::to_value(SQLParameter::try_from(&text).unwrap()).unwrap(),
+            json!({"type": "text", "value": "100000000"})
+        );
     }
 }
