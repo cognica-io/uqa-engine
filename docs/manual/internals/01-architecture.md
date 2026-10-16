@@ -256,3 +256,5 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Graph runtime | [`crates/uqa-graph/src/lib.rs`](../../../crates/uqa-graph/src/lib.rs) |
 
 The longer [system architecture design](../../design/architecture.md) records detailed performance paths and design rationale.
+
+Declared range definitions are owned by SQL's `catalog/range_type.rs`; Execution's `catalog/range_type` persists claims, reconciles private records and derives pinned value descriptors. Engine retains registry generations and adapts the existing definition transaction. [The catalog integration proof](../../plans/0018-declared-range-catalog.md) records ownership and preservation obligations. SQL range declarations and generated constructor routines remain required work.

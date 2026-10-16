@@ -40,6 +40,16 @@ impl TypePrivilegeCatalog for TypeCatalog<'_, '_> {
         let governing = u32::try_from(governing).ok()?;
         if let Some(definition) = self
             .catalog
+            .ranges()
+            .find(|definition| definition.oid == governing)
+        {
+            return Some(TypePrivileges {
+                owner: definition.owner,
+                usage_acl: definition.usage_acl.as_deref(),
+            });
+        }
+        if let Some(definition) = self
+            .catalog
             .shells()
             .find(|definition| definition.oid == governing)
         {

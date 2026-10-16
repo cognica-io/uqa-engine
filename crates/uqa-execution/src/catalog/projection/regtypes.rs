@@ -779,20 +779,28 @@ pub(super) fn relation_identity_by_oid(
     }))
 }
 
-/// The type whose privileges govern `oid`: a generated array type answers with its element type, as `pg_type_aclmask` does. `None` when no type has the OID.
+/// The type whose privileges govern `oid`: generated arrays use their element, and a multirange uses its associated range, as `pg_type_aclmask` does. `None` when no type has the OID.
 pub fn type_privilege_oid(context: &CatalogContext<'_>, oid: i64) -> Result<Option<i64>, SQLError> {
     let catalog = regtype_output_catalog(context)?;
     let Some(entry) = catalog.types.get(&oid) else {
         return Ok(None);
     };
-    if catalog
+    let governing = if catalog
         .types
         .get(&entry.element_oid)
         .is_some_and(|element| element.array_oid == oid)
     {
-        return Ok(Some(entry.element_oid));
-    }
-    Ok(Some(oid))
+        entry.element_oid
+    } else {
+        oid
+    };
+    Ok(Some(
+        context
+            .catalog_read_view()
+            .ranges()
+            .find(|definition| i64::from(definition.multirange.oid) == governing)
+            .map_or(governing, |definition| i64::from(definition.oid)),
+    ))
 }
 
 /// Catalog membership is independent of whether a SQL value carrier represents the type.

@@ -23,6 +23,7 @@ impl Engine {
             uqa_execution::catalog::graph_oids::load(catalog)?;
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
+        self.restore_ranges_from_catalog(catalog)?;
         *self.durable.comments.write() = uqa_execution::catalog::comments::restore(catalog)?;
         self.restore_composites_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
@@ -65,6 +66,8 @@ impl Engine {
             mode.allows_migration(),
         )
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        uqa_execution::catalog::range_type::validate_catalog(&self.restored_catalog_read_view())
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())
     }

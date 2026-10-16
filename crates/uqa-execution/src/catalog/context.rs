@@ -112,17 +112,23 @@ impl CatalogContext<'_> {
         let in_schema = |schema: &str, local: &str| {
             let definitions = &catalog.snapshot().definitions;
             definitions
-                .domains
+                .ranges
                 .values()
-                .filter(|domain| domain.identity.schema == schema)
-                .find_map(|domain| {
-                    if domain.identity.name == local {
-                        Some(domain.column_type())
-                    } else if domain.array_type_name() == local {
-                        Some(ColumnType::Array(Box::new(domain.column_type())))
-                    } else {
-                        None
-                    }
+                .find_map(|definition| definition.named_type(schema, local))
+                .or_else(|| {
+                    definitions
+                        .domains
+                        .values()
+                        .filter(|domain| domain.identity.schema == schema)
+                        .find_map(|domain| {
+                            if domain.identity.name == local {
+                                Some(domain.column_type())
+                            } else if domain.array_type_name() == local {
+                                Some(ColumnType::Array(Box::new(domain.column_type())))
+                            } else {
+                                None
+                            }
+                        })
                 })
                 .or_else(|| {
                     definitions

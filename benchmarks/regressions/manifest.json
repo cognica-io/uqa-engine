@@ -10768,6 +10768,136 @@
       "capability": "Admitted declared range physical production",
       "workload": "Cancel either owner or fail the selected composite descriptor lookup after range output construction has begun, beside an earlier retained value.",
       "invariant": "The first catalog failure keeps its SQLSTATE; both independent cancellation owners return 57014, partial output is released and the earlier result stays owned."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "declared_range_type_names_preserve_identity_across_independent_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/range_type/tests.rs",
+      "capability": "Declared range type metadata",
+      "workload": "Rename primary and associated multirange metadata independently and restore their serialized identities.",
+      "invariant": "Declared names never enter builtin-only metadata; all immutable OIDs and selected endpoint layout survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_registry_rejects_aliasing_names_oids_and_retired_role_incarnations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/range_type/tests.rs",
+      "capability": "Declared range structural authority",
+      "workload": "Corrupt object incarnations, four OID claims, independent names, role authority and bound support.",
+      "invariant": "Malformed or aliasing registries fail before publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_records_require_all_four_exact_claims_and_a_known_format",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests.rs",
+      "capability": "Declared range durable claims",
+      "workload": "Round-trip four type claims, then remove each or add foreign claims and malformed format/records.",
+      "invariant": "Restoration preserves exact definition bytes and rejects every incomplete or unknown record set.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_publication_preserves_independent_changes_and_rejects_stale_replacement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests.rs",
+      "capability": "Declared range publication",
+      "workload": "Independent publications, multirange rename, stale delete and current delete.",
+      "invariant": "Independent definitions survive; stale changes fail; deletion removes exactly its own four claims.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declared_range_catalog_rows_match_postgresql_type_range_and_dependency_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/projections.rs",
+      "capability": "Declared range catalog observations",
+      "workload": "Project four types, range metadata and dependencies against independently captured PostgreSQL 18.4 rows.",
+      "invariant": "Actual type layout, selected support OIDs and internal dependency ownership match PostgreSQL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "independent_range_names_and_arrays_resolve_by_current_identity_and_parent_privilege",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/projections.rs",
+      "capability": "Declared range identity lookup",
+      "workload": "Resolve renamed multirange and independently retained array names by both name and OID.",
+      "invariant": "All four names retain identity; multirange and both arrays use the primary range privilege authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_descriptors_share_both_oids_and_retain_their_generation_without_repeat_allocations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/snapshots.rs",
+      "capability": "Declared range descriptor memory",
+      "workload": "128 repeated lookups on a retained view, empty catalog lookup and replacement by a new generation.",
+      "invariant": "Repeated lookup performs zero allocations; both OIDs share one descriptor; the old generation survives replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "restored_ranges_reject_cross_family_identity_and_namespace_collisions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/snapshots.rs",
+      "capability": "Declared range complete catalog claims",
+      "workload": "Collide range and array OIDs/names with a shell and use a self-referencing endpoint.",
+      "invariant": "No malformed complete catalog generation is exposed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "declared_range_generations_survive_provider_refresh_savepoints_and_reopen",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/ranges.rs",
+      "capability": "Declared range retained state",
+      "workload": "Native SQLite, SQLite K/V and redb private definitions, peer publication, rollback/savepoints, reopen and physical observation.",
+      "invariant": "Private records survive refresh, rollback restores identity, retained views keep old descriptors, and reopened values preserve their admitted bounds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "range_claim_validation_borrows_unrelated_catalog_identities_without_projecting_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/range_type/tests/snapshots.rs",
+      "capability": "Declared range catalog validation memory",
+      "workload": "Validate one declared range against zero and 512 unrelated row and array type identities.",
+      "invariant": "Validation borrows catalog identities, projects no complete catalog rows and retains less than 16KB of temporary allocation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -28,9 +28,9 @@ pub enum CatalogObject {
         kind: RelationKind,
         name: String,
     },
-    /// An enum or a domain.
+    /// A standalone user-defined type.
     Type(u32),
-    /// The array type of an enum, a domain or a relation's row type, which is part of its element type.
+    /// A generated array type, which is part of its element type.
     ArrayType {
         element: u32,
     },
@@ -82,7 +82,7 @@ pub enum CatalogObject {
 /// A type the catalog defines, by the object it belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TypeObject {
-    /// An enum or a domain.
+    /// A standalone user-defined type.
     Defined,
     Array {
         element: u32,

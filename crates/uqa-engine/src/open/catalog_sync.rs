@@ -250,6 +250,12 @@ impl Engine {
             snapshot.shells,
             &snapshot.roles,
         )?;
+        snapshot.ranges = uqa_execution::catalog::range_type::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.ranges,
+            snapshot.ranges,
+            &snapshot.roles,
+        )?;
         snapshot.comments = uqa_execution::catalog::comments::merge_private(
             self.storage.catalog.as_deref(),
             &current.comments,

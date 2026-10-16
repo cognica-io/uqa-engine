@@ -12,6 +12,7 @@ pub mod domain;
 pub mod enum_type;
 pub mod foreign;
 pub mod identity;
+pub mod range_type;
 pub mod security;
 pub mod sequence;
 pub mod shell_type;
@@ -47,6 +48,7 @@ mod snapshot_read;
 pub struct CatalogReadView {
     snapshot: Arc<CatalogReadSnapshot>,
     relation_descriptors: Arc<composite_type::relations::RelationDescriptorCache>,
+    range_descriptors: Option<Arc<range_type::RangeDescriptors>>,
     dependencies: Arc<projection::DependencyCatalogCache>,
     index_relations: Arc<cache::CatalogDerivation<projection::IndexRelations>>,
     constraint_definitions: Arc<cache::CatalogDerivation<projection::ConstraintDefinitions>>,
@@ -128,6 +130,7 @@ pub struct CatalogDefinitionSnapshot {
 
     pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
     pub enums: Arc<enum_type::EnumRegistry>,
+    pub ranges: Arc<range_type::RangeRegistry>,
     pub shells: Arc<shell_type::ShellRegistry>,
     pub comments: Arc<comments::CommentRegistry>,
     pub composites: Arc<composite_type::CompositeRegistry>,
@@ -163,9 +166,11 @@ pub struct CatalogDefinitionSnapshot {
 
 impl CatalogReadView {
     pub fn new(snapshot: CatalogReadSnapshot) -> Self {
+        let range_descriptors = (!snapshot.definitions.ranges.is_empty()).then(Arc::default);
         Self {
             snapshot: Arc::new(snapshot),
             relation_descriptors: Arc::default(),
+            range_descriptors,
             dependencies: Arc::default(),
             index_relations: Arc::default(),
             constraint_definitions: Arc::default(),

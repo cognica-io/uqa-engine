@@ -537,6 +537,10 @@ impl CatalogReadView {
         self.snapshot.definitions.shells.values()
     }
 
+    pub fn ranges(&self) -> impl Iterator<Item = &uqa_sql::catalog::range_type::StoredRange> {
+        self.snapshot.definitions.ranges.values()
+    }
+
     pub fn composites(
         &self,
     ) -> impl Iterator<Item = &uqa_sql::catalog::composite_type::StoredComposite> {

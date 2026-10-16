@@ -23,7 +23,9 @@ mod identity_claims;
 pub use identity_claims::{
     catalog_oid_in_use, largest_catalog_oid, validate_catalog_identity_claim,
 };
-pub(crate) use identity_claims::{legacy_relation_claims, relation_claims};
+pub(crate) use identity_claims::{
+    legacy_relation_claims, non_range_type_oid_in_use, relation_claims, type_oid_in_use,
+};
 
 mod expression_nodes;
 mod request;
@@ -125,7 +127,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgType => {
             pg_catalog::build_requested_pg_type(context, catalog, resolution, request)?
         }
-        VirtualRelation::PgRange => build_pg_range(),
+        VirtualRelation::PgRange => pg_catalog::build_pg_range_with_catalog(catalog),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
         VirtualRelation::PgProc => {
             pg_proc::build_requested_pg_proc(context, catalog, resolution, request)?
@@ -402,8 +404,8 @@ pub fn snapshot_table_relation_oid(
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_authid,
     build_pg_database, build_pg_enum, build_pg_index, build_pg_indexes, build_pg_language,
-    build_pg_matviews, build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables,
-    build_pg_user, build_pg_views,
+    build_pg_matviews, build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_user,
+    build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
 pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};

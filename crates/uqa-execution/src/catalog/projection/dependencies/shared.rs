@@ -239,6 +239,17 @@ impl DependencyBuilder<'_> {
                     .map(|entry| (entry.role, entry.grantor)),
             );
         }
+        for definition in catalog.ranges() {
+            self.record_owned(
+                (database, ObjectAddress::whole(TYPE_CLASS, definition.oid)),
+                definition.owner,
+                definition
+                    .usage_acl
+                    .iter()
+                    .flatten()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
         for domain in catalog.domains() {
             self.record_owned(
                 (database, ObjectAddress::whole(TYPE_CLASS, domain.oid)),
