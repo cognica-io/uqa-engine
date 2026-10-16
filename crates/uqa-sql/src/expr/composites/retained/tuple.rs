@@ -12,7 +12,16 @@ use crate::ColumnType;
 use uqa_core::{DatumValue, Value};
 
 mod encoding;
-pub(crate) use encoding::array_payload;
+pub(crate) use encoding::{array_payload, array_payload_with_control};
+
+pub(crate) fn record_bytes_with_control(
+    fields: &[(String, Value)],
+    descriptor: &CompositeTypeDescriptor,
+    catalog: Option<&dyn super::super::CompositeTypeCatalog>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Vec<u8>>, crate::SQLError> {
+    Ok(encoding::encode_with_control(fields, descriptor, catalog, control)?.bytes)
+}
 
 pub(crate) fn record_bytes(
     fields: &[(String, Value)],

@@ -40,6 +40,49 @@ fn jsonb_physical_scalar_and_nested_bytes_match_postgresql() {
 }
 
 #[test]
+fn jsonb_physical_production_admits_parser_numeric_sort_and_output_buffers() {
+    let expected = bytes(OBJECT_BYTES);
+    for limit in [0, 32, 128, 512, 1024, 4096, 16384] {
+        let memory = MemoryBudget::new(limit);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let result = encode_jsonb_datum_with_control(OBJECT_TEXT, &control);
+        match &result {
+            Ok(bytes) => {
+                assert_eq!(&**bytes, &expected);
+                assert_eq!(memory.used(), bytes.capacity());
+                assert_eq!(bytes.reserved_bytes(), bytes.capacity());
+            }
+            Err(error) => assert_eq!(error.sqlstate(), Some("53200")),
+        }
+        if limit == 16384 {
+            assert!(result.is_ok());
+        }
+        drop(result);
+        assert_eq!(memory.used(), 0);
+    }
+    for cancel_original in [false, true] {
+        let memory = MemoryBudget::new(16384);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        assert_eq!(
+            encode_jsonb_datum_with_control(OBJECT_TEXT, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn jsonb_physical_read_preserves_entry_offsets_and_object_order() {
     // Noncanonical key order and offset stride are valid iterator inputs; output must not re-sort.
     let physical = bytes("02000020010000000200008000000030000000207a61");

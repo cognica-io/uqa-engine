@@ -8,7 +8,7 @@
 
 use crate::{
     catalog::{
-        node_tree::{decode_temporal_datum, encode_temporal_datum},
+        node_tree::{decode_temporal_datum, encode_temporal_datum_inline},
         type_metadata::{pg_type_len, pg_type_oid},
     },
     ColumnType,
@@ -39,8 +39,8 @@ pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
         (ColumnType::Real, Value::Float(value)) => u64::from(real_bits(*value)),
         (ColumnType::DoublePrecision, Value::Float(value)) => value.to_bits(),
         (ty, Value::Temporal(value)) if temporal(ty) => {
-            let bytes = encode_temporal_datum(value, pg_type_oid(ty)).ok()?;
-            u64::from_le_bytes(bytes.try_into().ok()?)
+            let (bytes, length) = encode_temporal_datum_inline(value, pg_type_oid(ty)).ok()?;
+            u64::from_le_bytes(bytes[..length].try_into().ok()?)
         }
         _ => return None,
     })

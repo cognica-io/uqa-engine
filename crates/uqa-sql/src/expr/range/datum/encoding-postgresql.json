@@ -1,0 +1,372 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {
+    "source": "Docker PostgreSQL 18.4, disposable database, independently captured pg_attrdef.adbin and output",
+    "image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "collector_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
+    "input_sha256": "6e0fd33f9fc5d7e630b7259b53c2054fdd361cd3aff39f910aafd5f6f06bd0d8",
+    "raw_sha256": "afd0110c86e5a445ab6d924f8a574a3711364c24b62f24f42ed65081807204a0"
+  },
+  "cases": [
+    {
+      "id": "physical_text_range",
+      "endpoint": "text",
+      "multirange": false,
+      "bounds": [
+        [
+          "01axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "01zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ]
+      ],
+      "range_oid": 36580,
+      "multirange_oid": 36578,
+      "node": "{CONST :consttype 36580 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 296 [ 160 4 0 0 228 142 0 0 36 2 0 0 48 49 97 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 0 0 0 76 2 0 0 48 49 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 6 ]}",
+      "output": "[01axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,01zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz]"
+    },
+    {
+      "id": "physical_text_multi",
+      "endpoint": "text",
+      "multirange": true,
+      "bounds": [
+        [
+          "00a",
+          "00z"
+        ],
+        [
+          "01axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "01zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ],
+        [
+          "02a",
+          "02z"
+        ],
+        [
+          "03axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "03zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ],
+        [
+          "04a",
+          "04z"
+        ],
+        [
+          "05axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "05zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ],
+        [
+          "06a",
+          "06z"
+        ],
+        [
+          "07axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "07zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ],
+        [
+          "08a",
+          "08z"
+        ]
+      ],
+      "range_oid": 36580,
+      "multirange_oid": 36578,
+      "node": "{CONST :consttype 36578 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 1248 [ 128 19 0 0 226 142 0 0 9 0 0 0 8 0 0 0 32 1 0 0 8 0 0 0 80 2 0 128 8 0 0 0 32 1 0 0 8 0 0 0 160 4 0 128 6 6 6 6 6 6 6 6 6 0 0 0 9 48 48 97 9 48 48 122 36 2 0 0 48 49 97 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 0 0 0 76 2 0 0 48 49 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 0 9 48 50 97 9 48 50 122 36 2 0 0 48 51 97 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 0 0 0 76 2 0 0 48 51 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 0 9 48 52 97 9 48 52 122 36 2 0 0 48 53 97 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 0 0 0 76 2 0 0 48 53 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 0 9 48 54 97 9 48 54 122 36 2 0 0 48 55 97 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 0 0 0 76 2 0 0 48 55 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 122 0 9 48 56 97 9 48 56 122 ]}",
+      "output": "{[00a,00z],[01axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,01zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz],[02a,02z],[03axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,03zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz],[04a,04z],[05axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,05zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz],[06a,06z],[07axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,07zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz],[08a,08z]}"
+    },
+    {
+      "id": "physical_text_empty",
+      "endpoint": "text",
+      "multirange": true,
+      "bounds": [],
+      "range_oid": 36580,
+      "multirange_oid": 36578,
+      "node": "{CONST :consttype 36578 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 226 142 0 0 0 0 0 0 ]}",
+      "output": "{}"
+    },
+    {
+      "id": "physical_uuid_range",
+      "endpoint": "uuid",
+      "multirange": false,
+      "bounds": [
+        [
+          "00000000-0000-0000-0000-000000000004",
+          "00000000-0000-0000-0000-000000000005"
+        ]
+      ],
+      "range_oid": 36608,
+      "multirange_oid": 36606,
+      "node": "{CONST :consttype 36608 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 41 [ 164 0 0 0 0 143 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 5 6 ]}",
+      "output": "[00000000-0000-0000-0000-000000000004,00000000-0000-0000-0000-000000000005]"
+    },
+    {
+      "id": "physical_uuid_multi",
+      "endpoint": "uuid",
+      "multirange": true,
+      "bounds": [
+        [
+          "00000000-0000-0000-0000-000000000001",
+          "00000000-0000-0000-0000-000000000002"
+        ],
+        [
+          "00000000-0000-0000-0000-000000000004",
+          "00000000-0000-0000-0000-000000000005"
+        ],
+        [
+          "00000000-0000-0000-0000-000000000007",
+          "00000000-0000-0000-0000-000000000008"
+        ],
+        [
+          "00000000-0000-0000-0000-00000000000a",
+          "00000000-0000-0000-0000-00000000000b"
+        ],
+        [
+          "00000000-0000-0000-0000-00000000000d",
+          "00000000-0000-0000-0000-00000000000e"
+        ],
+        [
+          "00000000-0000-0000-0000-000000000010",
+          "00000000-0000-0000-0000-000000000011"
+        ],
+        [
+          "00000000-0000-0000-0000-000000000013",
+          "00000000-0000-0000-0000-000000000014"
+        ],
+        [
+          "00000000-0000-0000-0000-000000000016",
+          "00000000-0000-0000-0000-000000000017"
+        ],
+        [
+          "00000000-0000-0000-0000-000000000019",
+          "00000000-0000-0000-0000-00000000001a"
+        ]
+      ],
+      "range_oid": 36608,
+      "multirange_oid": 36606,
+      "node": "{CONST :consttype 36606 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 341 [ 84 5 0 0 254 142 0 0 9 0 0 0 32 0 0 0 32 0 0 0 32 0 0 0 128 0 0 128 32 0 0 0 32 0 0 0 32 0 0 0 0 1 0 128 6 6 6 6 6 6 6 6 6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 10 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 11 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 13 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 14 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 16 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 19 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 22 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 23 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 25 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 26 ]}",
+      "output": "{[00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002],[00000000-0000-0000-0000-000000000004,00000000-0000-0000-0000-000000000005],[00000000-0000-0000-0000-000000000007,00000000-0000-0000-0000-000000000008],[00000000-0000-0000-0000-00000000000a,00000000-0000-0000-0000-00000000000b],[00000000-0000-0000-0000-00000000000d,00000000-0000-0000-0000-00000000000e],[00000000-0000-0000-0000-000000000010,00000000-0000-0000-0000-000000000011],[00000000-0000-0000-0000-000000000013,00000000-0000-0000-0000-000000000014],[00000000-0000-0000-0000-000000000016,00000000-0000-0000-0000-000000000017],[00000000-0000-0000-0000-000000000019,00000000-0000-0000-0000-00000000001a]}"
+    },
+    {
+      "id": "physical_uuid_empty",
+      "endpoint": "uuid",
+      "multirange": true,
+      "bounds": [],
+      "range_oid": 36608,
+      "multirange_oid": 36606,
+      "node": "{CONST :consttype 36606 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 254 142 0 0 0 0 0 0 ]}",
+      "output": "{}"
+    },
+    {
+      "id": "physical_timetz_range",
+      "endpoint": "timetz",
+      "multirange": false,
+      "bounds": [
+        [
+          "01:00:00+03",
+          "01:30:00+03"
+        ]
+      ],
+      "range_oid": 36636,
+      "multirange_oid": 36634,
+      "node": "{CONST :consttype 36636 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 37 [ 148 0 0 0 28 143 0 0 0 164 147 214 0 0 0 0 208 213 255 255 0 0 0 0 0 118 221 65 1 0 0 0 208 213 255 255 6 ]}",
+      "output": "[01:00:00+03,01:30:00+03]"
+    },
+    {
+      "id": "physical_timetz_multi",
+      "endpoint": "timetz",
+      "multirange": true,
+      "bounds": [
+        [
+          "00:00:00+03",
+          "00:30:00+03"
+        ],
+        [
+          "01:00:00+03",
+          "01:30:00+03"
+        ],
+        [
+          "02:00:00+03",
+          "02:30:00+03"
+        ],
+        [
+          "03:00:00+03",
+          "03:30:00+03"
+        ],
+        [
+          "04:00:00+03",
+          "04:30:00+03"
+        ],
+        [
+          "05:00:00+03",
+          "05:30:00+03"
+        ],
+        [
+          "06:00:00+03",
+          "06:30:00+03"
+        ],
+        [
+          "07:00:00+03",
+          "07:30:00+03"
+        ],
+        [
+          "08:00:00+03",
+          "08:30:00+03"
+        ]
+      ],
+      "range_oid": 36636,
+      "multirange_oid": 36634,
+      "node": "{CONST :consttype 36634 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 344 [ 96 5 0 0 26 143 0 0 9 0 0 0 32 0 0 0 32 0 0 0 32 0 0 0 128 0 0 128 32 0 0 0 32 0 0 0 32 0 0 0 0 1 0 128 6 6 6 6 6 6 6 6 6 0 0 0 0 0 0 0 0 0 0 0 208 213 255 255 0 0 0 0 0 210 73 107 0 0 0 0 208 213 255 255 0 0 0 0 0 164 147 214 0 0 0 0 208 213 255 255 0 0 0 0 0 118 221 65 1 0 0 0 208 213 255 255 0 0 0 0 0 72 39 173 1 0 0 0 208 213 255 255 0 0 0 0 0 26 113 24 2 0 0 0 208 213 255 255 0 0 0 0 0 236 186 131 2 0 0 0 208 213 255 255 0 0 0 0 0 190 4 239 2 0 0 0 208 213 255 255 0 0 0 0 0 144 78 90 3 0 0 0 208 213 255 255 0 0 0 0 0 98 152 197 3 0 0 0 208 213 255 255 0 0 0 0 0 52 226 48 4 0 0 0 208 213 255 255 0 0 0 0 0 6 44 156 4 0 0 0 208 213 255 255 0 0 0 0 0 216 117 7 5 0 0 0 208 213 255 255 0 0 0 0 0 170 191 114 5 0 0 0 208 213 255 255 0 0 0 0 0 124 9 222 5 0 0 0 208 213 255 255 0 0 0 0 0 78 83 73 6 0 0 0 208 213 255 255 0 0 0 0 0 32 157 180 6 0 0 0 208 213 255 255 0 0 0 0 0 242 230 31 7 0 0 0 208 213 255 255 0 0 0 0 ]}",
+      "output": "{[00:00:00+03,00:30:00+03],[01:00:00+03,01:30:00+03],[02:00:00+03,02:30:00+03],[03:00:00+03,03:30:00+03],[04:00:00+03,04:30:00+03],[05:00:00+03,05:30:00+03],[06:00:00+03,06:30:00+03],[07:00:00+03,07:30:00+03],[08:00:00+03,08:30:00+03]}"
+    },
+    {
+      "id": "physical_timetz_empty",
+      "endpoint": "timetz",
+      "multirange": true,
+      "bounds": [],
+      "range_oid": 36636,
+      "multirange_oid": 36634,
+      "node": "{CONST :consttype 36634 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 16 [ 64 0 0 0 26 143 0 0 0 0 0 0 0 0 0 0 ]}",
+      "output": "{}"
+    },
+    {
+      "id": "physical_jsonb_range",
+      "endpoint": "jsonb",
+      "multirange": false,
+      "bounds": [
+        [
+          "4.00",
+          "5.000"
+        ]
+      ],
+      "range_oid": 36664,
+      "multirange_oid": 36662,
+      "node": "{CONST :consttype 36664 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 43 [ 172 0 0 0 56 143 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 4 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 5 0 6 ]}",
+      "output": "[4.00,5.000]"
+    },
+    {
+      "id": "physical_jsonb_multi",
+      "endpoint": "jsonb",
+      "multirange": true,
+      "bounds": [
+        [
+          "1.00",
+          "2.000"
+        ],
+        [
+          "4.00",
+          "5.000"
+        ],
+        [
+          "7.00",
+          "8.000"
+        ],
+        [
+          "10.00",
+          "11.000"
+        ],
+        [
+          "13.00",
+          "14.000"
+        ],
+        [
+          "16.00",
+          "17.000"
+        ],
+        [
+          "19.00",
+          "20.000"
+        ],
+        [
+          "22.00",
+          "23.000"
+        ],
+        [
+          "25.00",
+          "26.000"
+        ]
+      ],
+      "range_oid": 36664,
+      "multirange_oid": 36662,
+      "node": "{CONST :consttype 36662 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 380 [ 240 5 0 0 54 143 0 0 9 0 0 0 36 0 0 0 36 0 0 0 36 0 0 0 144 0 0 128 36 0 0 0 36 0 0 0 36 0 0 0 32 1 0 128 6 6 6 6 6 6 6 6 6 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 1 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 2 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 4 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 5 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 7 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 8 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 10 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 11 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 13 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 14 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 16 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 17 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 19 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 20 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 22 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 23 0 0 0 35 1 0 0 80 8 0 0 144 32 0 0 0 0 129 25 0 35 1 0 0 80 8 0 0 144 32 0 0 0 128 129 26 0 0 0 ]}",
+      "output": "{[1.00,2.000],[4.00,5.000],[7.00,8.000],[10.00,11.000],[13.00,14.000],[16.00,17.000],[19.00,20.000],[22.00,23.000],[25.00,26.000]}"
+    },
+    {
+      "id": "physical_jsonb_empty",
+      "endpoint": "jsonb",
+      "multirange": true,
+      "bounds": [],
+      "range_oid": 36664,
+      "multirange_oid": 36662,
+      "node": "{CONST :consttype 36662 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 54 143 0 0 0 0 0 0 ]}",
+      "output": "{}"
+    },
+    {
+      "id": "physical_smallint_range",
+      "endpoint": "smallint",
+      "multirange": false,
+      "bounds": [
+        [
+          "4",
+          "5"
+        ]
+      ],
+      "range_oid": 36692,
+      "multirange_oid": 36690,
+      "node": "{CONST :consttype 36692 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 13 [ 52 0 0 0 84 143 0 0 4 0 5 0 6 ]}",
+      "output": "[4,5]"
+    },
+    {
+      "id": "physical_smallint_multi",
+      "endpoint": "smallint",
+      "multirange": true,
+      "bounds": [
+        [
+          "1",
+          "2"
+        ],
+        [
+          "4",
+          "5"
+        ],
+        [
+          "7",
+          "8"
+        ],
+        [
+          "10",
+          "11"
+        ],
+        [
+          "13",
+          "14"
+        ],
+        [
+          "16",
+          "17"
+        ],
+        [
+          "19",
+          "20"
+        ],
+        [
+          "22",
+          "23"
+        ],
+        [
+          "25",
+          "26"
+        ]
+      ],
+      "range_oid": 36692,
+      "multirange_oid": 36690,
+      "node": "{CONST :consttype 36690 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 90 [ 104 1 0 0 82 143 0 0 9 0 0 0 4 0 0 0 4 0 0 0 4 0 0 0 16 0 0 128 4 0 0 0 4 0 0 0 4 0 0 0 32 0 0 128 6 6 6 6 6 6 6 6 6 0 1 0 2 0 4 0 5 0 7 0 8 0 10 0 11 0 13 0 14 0 16 0 17 0 19 0 20 0 22 0 23 0 25 0 26 0 ]}",
+      "output": "{[1,2],[4,5],[7,8],[10,11],[13,14],[16,17],[19,20],[22,23],[25,26]}"
+    },
+    {
+      "id": "physical_smallint_empty",
+      "endpoint": "smallint",
+      "multirange": true,
+      "bounds": [],
+      "range_oid": 36692,
+      "multirange_oid": 36690,
+      "node": "{CONST :consttype 36690 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 82 143 0 0 0 0 0 0 ]}",
+      "output": "{}"
+    }
+  ]
+}

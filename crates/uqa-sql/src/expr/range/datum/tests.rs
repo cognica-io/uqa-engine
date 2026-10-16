@@ -8,6 +8,8 @@ use super::*;
 use crate::catalog::{node_tree, type_metadata};
 use uqa_core::{memory::MemoryBudget, CancellationToken, DatumValue};
 
+mod production;
+
 struct Names;
 
 impl node_tree::deparse::ExpressionNames for Names {

@@ -22,7 +22,9 @@ pub(super) use production::{
     json_concat_with_control, json_delete_values_with_control, json_extract_operator_with_control,
     json_path_function_with_control, quote_with_control, utf8_lossy_with_control, JsonbInput,
 };
-pub(crate) use production::{decode_jsonb_datum_with_control, encode_jsonb_datum};
+pub(crate) use production::{
+    decode_jsonb_datum_with_control, encode_jsonb_datum, encode_jsonb_datum_with_control,
+};
 
 pub(super) use path::{jsonpath_candidate, jsonpath_match};
 

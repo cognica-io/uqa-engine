@@ -23,6 +23,7 @@ pub use construction::{
 mod descriptor;
 pub use descriptor::RangeValueDescriptor;
 pub(crate) mod datum;
+pub use datum::{declared_multirange_datum_with_control, declared_range_datum_with_control};
 mod input;
 mod production;
 mod relationships;

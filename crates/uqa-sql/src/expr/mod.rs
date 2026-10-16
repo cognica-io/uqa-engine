@@ -43,6 +43,7 @@ pub(crate) use json::{decode_jsonb_datum_with_control, encode_jsonb_datum};
 pub use json::{validate_json_object_key_type, value_to_json_text};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
+    declared_multirange_datum_with_control, declared_range_datum_with_control,
     multirange_from_ranges, multirange_from_ranges_with_operations, parse_multirange,
     parse_multirange_with_operations, parse_range, parse_range_with_operations, range_bound_flags,
     range_from_bounds_with_operations, CanonicalMultirange, CanonicalRange, RangeComparisonValue,

@@ -188,7 +188,9 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
             ColumnType::Array(_)
             | ColumnType::Composite(_)
             | ColumnType::Range(_)
-            | ColumnType::Multirange(_),
+            | ColumnType::Multirange(_)
+            | ColumnType::DeclaredRange(_)
+            | ColumnType::DeclaredMultirange(_),
         ) => retained_constant_bytes(value, ty)?,
         (Value::Decimal(value), ColumnType::Numeric { .. }) => varlena(&numeric::encode(value)?)?,
         (Value::Temporal(value), _) => temporal::encode(value, pg_type_oid(representation))?,

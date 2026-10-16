@@ -11,7 +11,14 @@ use super::{
     ProductionVec, SQLError, Value, ABSOLUTE_OFFSET, EMPTY, LOWER_INCLUSIVE, LOWER_INFINITE,
     UPPER_INCLUSIVE, UPPER_INFINITE,
 };
-use crate::catalog::type_metadata::{pg_type_len, pg_type_oid};
+use crate::{
+    catalog::type_metadata::{pg_type_len, pg_type_oid, pg_type_storage},
+    expr::{
+        composites::CompositeTypeCatalog,
+        datums::encoding::{append, header, pad_to},
+        range::RangeValueDescriptor,
+    },
+};
 
 /// The surrounding tuple or catalog constant owns the outer varlena header.
 pub(crate) fn encode(text: &str, ty: &ColumnType) -> Result<Vec<u8>, SQLError> {
@@ -22,7 +29,7 @@ pub(crate) fn encode(text: &str, ty: &ColumnType) -> Result<Vec<u8>, SQLError> {
     })
 }
 
-pub(super) fn encode_with_control(
+pub(crate) fn encode_with_control(
     text: &str,
     ty: &ColumnType,
     control: &ProductionControl<'_>,
@@ -33,20 +40,22 @@ pub(super) fn encode_with_control(
     match ty {
         ColumnType::Range(subtype) => {
             let range = super::super::parse_range_with_control(text, *subtype, control)?;
-            write_bounds(&range, &mut bytes, control)?;
+            write_bounds(&range, &subtype.scalar_type(), None, &mut bytes, control)?;
             bytes.push_copy(flags(&range))?;
         }
         ColumnType::Multirange(subtype) => {
             let ranges = super::super::parse_multirange_with_control(text, *subtype, control)?;
-            write_multirange(&ranges, &mut bytes, control)?;
+            write_multirange(&ranges, &subtype.scalar_type(), None, &mut bytes, control)?;
         }
         _ => return Err(corrupt("non-range payload type")),
     }
     Ok(bytes.finish()?)
 }
 
-fn write_multirange(
-    ranges: &CanonicalMultirange,
+fn write_multirange<I>(
+    ranges: &CanonicalMultirange<I>,
+    endpoint: &ColumnType,
+    catalog: Option<&dyn CompositeTypeCatalog>,
     bytes: &mut ProductionVec<'_, u8>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
@@ -54,7 +63,7 @@ fn write_multirange(
     let count_word = u32::try_from(count).map_err(|_| corrupt("too many ranges"))?;
     append(bytes, &count_word.to_le_bytes())?;
     let flags_start = 8 + count.saturating_sub(1) * 4;
-    let start = align(flags_start + count + 4, &ranges.subtype.scalar_type())? - 4;
+    let start = align(flags_start + count + 4, endpoint)? - 4;
     pad_to(bytes, start)?;
     let mut previous = 0;
     for (index, range) in ranges.ranges.iter().enumerate() {
@@ -74,16 +83,13 @@ fn write_multirange(
         }
         previous = offset;
         bytes.as_mut_slice()[flags_start + index] = flags(range);
-        write_bounds(range, bytes, control)?;
-        pad_to(
-            bytes,
-            align(bytes.len() + 4, &ranges.subtype.scalar_type())? - 4,
-        )?;
+        write_bounds(range, endpoint, catalog, bytes, control)?;
+        pad_to(bytes, align(bytes.len() + 4, endpoint)? - 4)?;
     }
     Ok(())
 }
 
-fn flags(range: &CanonicalRange) -> u8 {
+fn flags<I>(range: &CanonicalRange<I>) -> u8 {
     if range.empty {
         return EMPTY;
     }
@@ -104,52 +110,95 @@ fn flags(range: &CanonicalRange) -> u8 {
     lower | upper
 }
 
-fn write_bounds(
-    range: &CanonicalRange,
+fn write_bounds<I>(
+    range: &CanonicalRange<I>,
+    ty: &ColumnType,
+    catalog: Option<&dyn CompositeTypeCatalog>,
     bytes: &mut ProductionVec<'_, u8>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    let ty = range.subtype.scalar_type();
     for value in [range.lower.as_ref(), range.upper.as_ref()]
         .into_iter()
         .flatten()
     {
         control.check()?;
-        if let Value::Decimal(number) = value {
-            let payload =
-                crate::catalog::node_tree::encode_numeric_datum_with_control(number, control)?;
-            if payload.len() < 127 {
+        let payload = crate::expr::datums::encoding::encode(value, ty, catalog, control)?;
+        let length = pg_type_len(ty);
+        if length == -1 {
+            if payload.len() < 127 && pg_type_storage(ty) != "p" {
                 bytes.push_copy(((payload.len() as u8 + 1) << 1) | 1)?;
             } else {
-                pad_to(bytes, align(bytes.len() + 4, &ty)? - 4)?;
-                let size = u32::try_from(payload.len() + 4)
-                    .ok()
-                    .and_then(|size| size.checked_mul(4))
-                    .ok_or_else(|| corrupt("numeric bound too large"))?;
-                append(bytes, &size.to_le_bytes())?;
+                pad_to(bytes, align(bytes.len() + 4, ty)? - 4)?;
+                append(bytes, &header(payload.len())?)?;
             }
-            append(bytes, &payload)?;
         } else {
-            let bits = crate::expr::composites::datum::encode_bits(value, &ty)
-                .ok_or_else(|| corrupt("invalid native range bound"))?;
-            append(bytes, &bits.to_le_bytes()[..pg_type_len(&ty) as usize])?;
+            if usize::try_from(length).ok() != Some(payload.len()) {
+                return Err(corrupt("invalid range bound width"));
+            }
+            pad_to(bytes, align(bytes.len() + 4, ty)? - 4)?;
         }
+        append(bytes, &payload)?;
     }
     Ok(())
 }
 
-fn append(bytes: &mut ProductionVec<'_, u8>, source: &[u8]) -> Result<(), SQLError> {
-    bytes.reserve(source.len())?;
-    for byte in source {
-        bytes.push_copy(*byte)?;
+/// Preserve a completed range's identity and admitted bounds in the physical carrier, without repeating any selected construction operation.
+pub fn declared_range_datum_with_control(
+    range: &CanonicalRange<u32>,
+    descriptor: &RangeValueDescriptor,
+    catalog: Option<&dyn CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    check_identity(range.subtype, descriptor)?;
+    let mut bytes = ProductionVec::new(*control);
+    append(&mut bytes, &descriptor.range_oid.to_le_bytes())?;
+    write_bounds(range, &descriptor.endpoint, catalog, &mut bytes, control)?;
+    bytes.push_copy(flags(range))?;
+    finish_datum(descriptor.range_oid, bytes, control)
+}
+
+/// The caller supplies an already normalized multirange; serialization neither sorts members nor invokes canonicalization.
+pub fn declared_multirange_datum_with_control(
+    ranges: &CanonicalMultirange<u32>,
+    descriptor: &RangeValueDescriptor,
+    catalog: Option<&dyn CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    check_identity(ranges.subtype, descriptor)?;
+    for range in &ranges.ranges {
+        control.check()?;
+        check_identity(range.subtype, descriptor)?;
+    }
+    let mut bytes = ProductionVec::new(*control);
+    append(&mut bytes, &descriptor.multirange_oid.to_le_bytes())?;
+    write_multirange(ranges, &descriptor.endpoint, catalog, &mut bytes, control)?;
+    finish_datum(descriptor.multirange_oid, bytes, control)
+}
+
+fn check_identity(oid: u32, descriptor: &RangeValueDescriptor) -> Result<(), SQLError> {
+    if oid == 0
+        || oid != descriptor.range_oid
+        || descriptor.multirange_oid == 0
+        || oid == descriptor.multirange_oid
+    {
+        return Err(corrupt("inconsistent range type descriptor"));
     }
     Ok(())
 }
 
-fn pad_to(bytes: &mut ProductionVec<'_, u8>, length: usize) -> Result<(), SQLError> {
-    bytes.reserve(length.saturating_sub(bytes.len()))?;
-    while bytes.len() < length {
-        bytes.push_copy(0)?;
-    }
-    Ok(())
+fn finish_datum(
+    oid: u32,
+    mut bytes: ProductionVec<'_, u8>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let length = bytes.len();
+    let header = header(length)?;
+    append(&mut bytes, &[0; 4])?;
+    bytes.as_mut_slice().copy_within(..length, 4);
+    bytes.as_mut_slice()[..4].copy_from_slice(&header);
+    let (datum, memory) =
+        uqa_core::DatumValue::with_control(oid, 0, bytes.finish()?, control)?.into_parts();
+    Ok(control.finish(Value::Datum(datum), memory)?)
 }

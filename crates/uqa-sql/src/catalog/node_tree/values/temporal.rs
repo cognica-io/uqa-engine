@@ -14,7 +14,17 @@ const EPOCH_DAYS: i32 = 10_957;
 const EPOCH_MICROS: i64 = 946_684_800_000_000;
 
 pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLError> {
-    let bytes = match (value, oid) {
+    let (bytes, length) = encode_inline(value, oid)?;
+    Ok(bytes[..length].to_vec())
+}
+
+/// Temporal Datums fit in sixteen bytes; callers can admit their destination before copying without allocating scalar scratch.
+pub(crate) fn encode_inline(
+    value: &TemporalValue,
+    oid: i64,
+) -> Result<([u8; 16], usize), SQLError> {
+    let mut bytes = [0; 16];
+    let length = match (value, oid) {
         (TemporalValue::Date { days }, 1082) => {
             let days = if value.is_finite() {
                 days.checked_sub(EPOCH_DAYS)
@@ -22,19 +32,25 @@ pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLErro
             } else {
                 *days
             };
-            i64::from(days).to_le_bytes().to_vec()
+            bytes[..8].copy_from_slice(&i64::from(days).to_le_bytes());
+            8
         }
-        (TemporalValue::Time { micros }, 1083) => micros.to_le_bytes().to_vec(),
+        (TemporalValue::Time { micros }, 1083) => {
+            bytes[..8].copy_from_slice(&micros.to_le_bytes());
+            8
+        }
         (TemporalValue::Timestamp { micros }, 1114)
-        | (TemporalValue::TimestampTz { micros }, 1184) => (match value.infinity() {
-            Some(TemporalInfinity::Negative) => i64::MIN,
-            Some(TemporalInfinity::Positive) => i64::MAX,
-            None => micros
-                .checked_sub(EPOCH_MICROS)
-                .ok_or_else(|| invalid("timestamp Datum overflow"))?,
-        })
-        .to_le_bytes()
-        .to_vec(),
+        | (TemporalValue::TimestampTz { micros }, 1184) => {
+            let micros = match value.infinity() {
+                Some(TemporalInfinity::Negative) => i64::MIN,
+                Some(TemporalInfinity::Positive) => i64::MAX,
+                None => micros
+                    .checked_sub(EPOCH_MICROS)
+                    .ok_or_else(|| invalid("timestamp Datum overflow"))?,
+            };
+            bytes[..8].copy_from_slice(&micros.to_le_bytes());
+            8
+        }
         (
             TemporalValue::TimeTz {
                 micros,
@@ -45,11 +61,9 @@ pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLErro
             let offset = offset_minutes
                 .checked_mul(-60)
                 .ok_or_else(|| invalid("time zone Datum overflow"))?;
-            micros
-                .to_le_bytes()
-                .into_iter()
-                .chain(offset.to_le_bytes())
-                .collect()
+            bytes[..8].copy_from_slice(&micros.to_le_bytes());
+            bytes[8..12].copy_from_slice(&offset.to_le_bytes());
+            12
         }
         (
             TemporalValue::Interval {
@@ -58,15 +72,15 @@ pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLErro
                 micros,
             },
             1186,
-        ) => micros
-            .to_le_bytes()
-            .into_iter()
-            .chain(days.to_le_bytes())
-            .chain(months.to_le_bytes())
-            .collect(),
+        ) => {
+            bytes[..8].copy_from_slice(&micros.to_le_bytes());
+            bytes[8..12].copy_from_slice(&days.to_le_bytes());
+            bytes[12..].copy_from_slice(&months.to_le_bytes());
+            16
+        }
         _ => return Err(invalid("temporal Datum differs from its declared type")),
     };
-    Ok(bytes)
+    Ok((bytes, length))
 }
 
 pub(crate) fn decode(bytes: &[u8], oid: i64) -> Result<TemporalValue, SQLError> {

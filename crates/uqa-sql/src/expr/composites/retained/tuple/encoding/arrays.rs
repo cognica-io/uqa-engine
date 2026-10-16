@@ -6,17 +6,43 @@
 
 //! Inline array datums keep their physical element identity, bounds and null bitmap.
 
-use super::{
-    align, datum, fixed, pg_type_align, pg_type_len, width, ColumnType, Descriptors, Value,
-};
+use super::{align, pg_type_align, pg_type_len, Descriptors, Value};
 use crate::catalog::type_metadata::{builtin_scalar_type, pg_type_oid};
-use uqa_core::{memory::ProductionControl, ArrayValue};
+use crate::{
+    expr::{
+        composites::CompositeTypeCatalog,
+        datums::encoding::{append, encode, header, invalid, pad_to},
+    },
+    ColumnType, SQLError,
+};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    ArrayValue,
+};
 
 pub(crate) fn payload(
     array: &ArrayValue,
-    mut element: &ColumnType,
+    element: &ColumnType,
     descriptors: &Descriptors,
 ) -> Option<Vec<u8>> {
+    payload_with_control(
+        array,
+        element,
+        Some(descriptors),
+        &ProductionControl::uncontrolled(),
+    )
+    .ok()?
+    .into_uncontrolled()
+    .ok()
+}
+
+pub(crate) fn payload_with_control(
+    array: &ArrayValue,
+    mut element: &ColumnType,
+    catalog: Option<&dyn CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>, SQLError> {
+    control.check()?;
     while let ColumnType::Array(inner) = element {
         element = inner;
     }
@@ -24,66 +50,75 @@ pub(crate) fn payload(
         .element_type_oid()
         .unwrap_or(pg_type_oid(element) as u32);
     let element = builtin_scalar_type(oid)
-        .or_else(|| (pg_type_oid(element) == i64::from(oid)).then_some(element))?;
+        .or_else(|| (pg_type_oid(element) == i64::from(oid)).then_some(element))
+        .ok_or_else(invalid)?;
     let dimensions = array.dimensions();
     if dimensions.len() > 6 {
-        return None;
+        return Err(invalid());
     }
-    let control = ProductionControl::uncontrolled();
-    let mut cursor = array.elements_with_control(&control).ok()?;
+    let mut cursor = array.elements_with_control(control)?;
     let mut has_null = false;
     let mut count = 0_usize;
-    while let Some(value) = cursor.next_element().ok()? {
+    while let Some(value) = cursor.next_element()? {
         has_null |= matches!(value, Value::Null);
-        count = count.checked_add(1)?;
+        count = count.checked_add(1).ok_or_else(invalid)?;
     }
-    let bitmap = 16_usize.checked_add(dimensions.len().checked_mul(8)?)?;
+    drop(cursor);
+    let bitmap = 16 + dimensions.len() * 8;
     let start = align(
-        bitmap.checked_add(if has_null { count.div_ceil(8) } else { 0 })?,
+        bitmap
+            .checked_add(if has_null { count.div_ceil(8) } else { 0 })
+            .ok_or_else(invalid)?,
         b'd',
-    )?;
-    let mut bytes = vec![0; start];
-    bytes[4..8].copy_from_slice(&(dimensions.len() as i32).to_le_bytes());
+    )
+    .ok_or_else(invalid)?;
+    let mut bytes = ProductionVec::new(*control);
+    pad_to(&mut bytes, start)?;
+    bytes.as_mut_slice()[4..8].copy_from_slice(&(dimensions.len() as i32).to_le_bytes());
     if has_null {
-        bytes[8..12].copy_from_slice(&i32::try_from(start).ok()?.to_le_bytes());
+        bytes.as_mut_slice()[8..12]
+            .copy_from_slice(&i32::try_from(start).map_err(|_| invalid())?.to_le_bytes());
     }
-    bytes[12..16].copy_from_slice(&oid.to_le_bytes());
+    bytes.as_mut_slice()[12..16].copy_from_slice(&oid.to_le_bytes());
     for (index, dimension) in dimensions.iter().enumerate() {
         let offset = 16 + index * 4;
-        bytes[offset..offset + 4].copy_from_slice(&i32::try_from(*dimension).ok()?.to_le_bytes());
+        bytes.as_mut_slice()[offset..offset + 4].copy_from_slice(
+            &i32::try_from(*dimension)
+                .map_err(|_| invalid())?
+                .to_le_bytes(),
+        );
     }
     for (index, bound) in array.lower_bounds().iter().enumerate() {
         let offset = 16 + dimensions.len() * 4 + index * 4;
-        bytes[offset..offset + 4].copy_from_slice(&bound.to_le_bytes());
+        bytes.as_mut_slice()[offset..offset + 4].copy_from_slice(&bound.to_le_bytes());
     }
-    let mut cursor = array.elements_with_control(&control).ok()?;
+    let mut cursor = array.elements_with_control(control)?;
     let mut index = 0;
-    while let Some(value) = cursor.next_element().ok()? {
+    while let Some(value) = cursor.next_element()? {
         if !matches!(value, Value::Null) {
             if has_null {
-                bytes[bitmap + index / 8] |= 1 << (index % 8);
+                bytes.as_mut_slice()[bitmap + index / 8] |= 1 << (index % 8);
             }
-            bytes.resize(align(bytes.len(), pg_type_align(element).as_bytes()[0])?, 0);
+            let aligned =
+                align(bytes.len(), pg_type_align(element).as_bytes()[0]).ok_or_else(invalid)?;
+            pad_to(&mut bytes, aligned)?;
             let length = pg_type_len(element);
+            let payload = encode(value, element, catalog, control)?;
             if length == -1 {
-                let payload = super::payload(value, element, descriptors)?;
-                let header = u32::try_from(payload.len().checked_add(4)?)
-                    .ok()?
-                    .checked_mul(4)?;
-                bytes.extend_from_slice(&header.to_le_bytes());
-                bytes.extend_from_slice(&payload);
-            } else if let Some(length) = width(length) {
-                bytes.extend_from_slice(
-                    &datum::encode_bits(value, element)?.to_le_bytes()[..length],
-                );
-            } else {
-                bytes.extend_from_slice(&fixed(value, element)?);
+                append(&mut bytes, &header(payload.len())?)?;
+            } else if payload.len() != usize::try_from(length).map_err(|_| invalid())? {
+                return Err(invalid());
             }
-            bytes.resize(align(bytes.len(), pg_type_align(element).as_bytes()[0])?, 0);
+            append(&mut bytes, &payload)?;
+            let aligned =
+                align(bytes.len(), pg_type_align(element).as_bytes()[0]).ok_or_else(invalid)?;
+            pad_to(&mut bytes, aligned)?;
         }
         index += 1;
     }
-    Some(bytes.split_off(4))
+    let (mut bytes, memory) = bytes.finish()?.into_parts();
+    bytes.drain(..4);
+    Ok(control.finish(bytes, memory)?)
 }
 
 #[cfg(test)]

@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve PostgreSQL endpoint alignment when observing declared multirange physical values, including UUID and smallint bounds.
+
 - Match PostgreSQL range-constructor flag diagnostics, quoted endpoint output and numeric multirange bound spelling, including large groups of equal bounds and typed constructors with empty members.
 
 - Preserve the invoking memory owner when constructing anonymous rows without field metadata, preventing a panic while retaining cancellation and resource release.

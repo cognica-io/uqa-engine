@@ -16,12 +16,14 @@ pub mod deparse;
 pub mod expressions;
 mod values;
 pub use values::constant_with_source as constant;
+#[cfg(test)]
+pub(crate) use values::numeric::encode as encode_numeric_datum;
 pub(crate) use values::numeric::{
-    decode_with_control as decode_numeric_datum_with_control, encode as encode_numeric_datum,
+    decode_with_control as decode_numeric_datum_with_control,
     encode_with_control as encode_numeric_datum_with_control,
 };
 pub(crate) use values::temporal::{
-    decode as decode_temporal_datum, encode as encode_temporal_datum,
+    decode as decode_temporal_datum, encode_inline as encode_temporal_datum_inline,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

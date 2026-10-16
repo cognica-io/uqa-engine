@@ -12,12 +12,20 @@ use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, Value};
 
 mod tuple;
-pub(crate) use tuple::{array_payload, record_bytes};
+pub(crate) use tuple::{
+    array_payload, array_payload_with_control, record_bytes, record_bytes_with_control,
+};
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) type Descriptors = BTreeMap<u32, Arc<CompositeTypeDescriptor>>;
+
+impl super::CompositeTypeCatalog for Descriptors {
+    fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
+        Ok(self.get(&oid).cloned())
+    }
+}
 
 /// The original admitted datum and its field types, retained independently of subsequent descriptor interpretations.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
