@@ -102,7 +102,7 @@ pub use binary::{
     eval_value_comparison_truth_with_engine, integer_width_for_literal, integer_width_for_type,
     truthy, type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
-    visit_record_image_fields_with_catalog, IntegerWidth,
+    visit_record_image_fields_with_catalog, with_btree_input, BTreeInput, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
 pub use casting::{

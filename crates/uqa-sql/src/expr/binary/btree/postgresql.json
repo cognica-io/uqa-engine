@@ -1,0 +1,90 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "docker_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+  "cases": [
+    {
+      "name": "integer_via_oid_negative",
+      "sql": "SELECT sign(pg_catalog.btoidcmp((-1)::integer,1::integer))::integer",
+      "order": 1,
+      "type": "integer",
+      "operator_class": "oid_ops",
+      "left": "-1",
+      "right": "1",
+      "left_datum_hex": "ffffffff",
+      "right_datum_hex": "01000000",
+      "datum_sql": "CREATE TABLE input_capture_0 (l integer DEFAULT '-1'::integer, r integer DEFAULT '1'::integer); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_0'::regclass"
+    },
+    {
+      "name": "integer_via_oid_boundary",
+      "sql": "SELECT sign(pg_catalog.btoidcmp((-2147483648)::integer,2147483647::integer))::integer",
+      "order": 1,
+      "type": "integer",
+      "operator_class": "oid_ops",
+      "left": "-2147483648",
+      "right": "2147483647",
+      "left_datum_hex": "00000080",
+      "right_datum_hex": "ffffff7f",
+      "datum_sql": "CREATE TABLE input_capture_1 (l integer DEFAULT '-2147483648'::integer, r integer DEFAULT '2147483647'::integer); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_1'::regclass"
+    },
+    {
+      "name": "varchar_via_bpchar_padding",
+      "sql": "SELECT sign(pg_catalog.bpcharcmp('a'::varchar COLLATE \"C\",'a '::varchar COLLATE \"C\"))::integer",
+      "order": 0,
+      "type": "varchar",
+      "operator_class": "bpchar_ops",
+      "left": "a",
+      "right": "a ",
+      "left_datum_hex": "1400000061",
+      "right_datum_hex": "180000006120",
+      "datum_sql": "CREATE TABLE input_capture_2 (l varchar DEFAULT 'a'::varchar, r varchar DEFAULT 'a '::varchar); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_2'::regclass"
+    },
+    {
+      "name": "varchar_via_bpchar_pattern_padding",
+      "sql": "SELECT sign(pg_catalog.btbpchar_pattern_cmp('a'::varchar,'a '::varchar))::integer",
+      "order": 0,
+      "type": "varchar",
+      "operator_class": "bpchar_pattern_ops",
+      "left": "a",
+      "right": "a ",
+      "left_datum_hex": "1400000061",
+      "right_datum_hex": "180000006120",
+      "datum_sql": "CREATE TABLE input_capture_3 (l varchar DEFAULT 'a'::varchar, r varchar DEFAULT 'a '::varchar); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_3'::regclass"
+    },
+    {
+      "name": "varchar_via_text_padding",
+      "sql": "SELECT sign(pg_catalog.bttextcmp('a'::varchar COLLATE \"C\",'a '::varchar COLLATE \"C\"))::integer",
+      "order": -1,
+      "type": "varchar",
+      "operator_class": "text_ops",
+      "left": "a",
+      "right": "a ",
+      "left_datum_hex": "1400000061",
+      "right_datum_hex": "180000006120",
+      "datum_sql": "CREATE TABLE input_capture_4 (l varchar DEFAULT 'a'::varchar, r varchar DEFAULT 'a '::varchar); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_4'::regclass"
+    },
+    {
+      "name": "oidvector_native_order",
+      "sql": "SELECT sign(pg_catalog.btoidvectorcmp('1 20'::oidvector,'2'::oidvector))::integer",
+      "order": 1,
+      "type": "oidvector",
+      "operator_class": "oidvector_ops",
+      "left": "1 20",
+      "right": "2",
+      "left_datum_hex": "8000000001000000000000001a00000002000000000000000100000014000000",
+      "right_datum_hex": "7000000001000000000000001a000000010000000000000002000000",
+      "datum_sql": "CREATE TABLE input_capture_5 (l oidvector DEFAULT '1 20'::oidvector, r oidvector DEFAULT '2'::oidvector); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_5'::regclass"
+    },
+    {
+      "name": "oidvector_array_order",
+      "sql": "SELECT sign(pg_catalog.btarraycmp('1 20'::oidvector,'2'::oidvector))::integer",
+      "order": -1,
+      "type": "oidvector",
+      "operator_class": "array_ops",
+      "left": "1 20",
+      "right": "2",
+      "left_datum_hex": "8000000001000000000000001a00000002000000000000000100000014000000",
+      "right_datum_hex": "7000000001000000000000001a000000010000000000000002000000",
+      "datum_sql": "CREATE TABLE input_capture_6 (l oidvector DEFAULT '1 20'::oidvector, r oidvector DEFAULT '2'::oidvector); SELECT jsonb_object_agg(a.attname,d.adbin::text) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='input_capture_6'::regclass"
+    }
+  ]
+}

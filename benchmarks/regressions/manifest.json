@@ -11488,6 +11488,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_input_observation_matches_postgresql_binary_interpretation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/btree/tests.rs",
+      "capability": "Selected native B-tree input interpretation",
+      "workload": "Seven independent PostgreSQL selected-support comparisons, fourteen captured physical Datums and every logical/physical pairing.",
+      "invariant": "The selected class, including binary-compatible non-default classes and vector-versus-array order, preserves PostgreSQL observations and releases decoding scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_btree_input_observation_borrows_vectors_and_preserves_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/btree/tests.rs",
+      "capability": "Controlled selected input observation",
+      "workload": "Borrowed catalog-vector arrays, unsigned integer interpretation, admitted character copies, consumer failures and cancellation before/inside callbacks.",
+      "invariant": "Zero-copy paths require no memory; required copies share the caller allowance and release it after success/error; both cancellation owners propagate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_btree_input_keys_preserve_postgresql_classes_through_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/btree/tests.rs",
+      "capability": "Selected native input equality keys",
+      "workload": "Seven PostgreSQL comparison classes and fourteen physical inputs through exact keys, in-memory membership and one-byte forced spill.",
+      "invariant": "Physical and logical inputs have identical keys, key equality agrees with selected comparison equality and memory/spill partitions coincide.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_btree_input_keys_share_array_and_record_image_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/distinct/encoding/btree/tests.rs",
+      "capability": "Controlled selected input key ownership",
+      "workload": "Borrowed vector-array framing, scale-distinct record images, exhausted allowances and independently cancelled owners.",
+      "invariant": "Keys reuse existing array/image bytes, retain only their output lease and release all temporary/partial output on 53200 or 57014.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

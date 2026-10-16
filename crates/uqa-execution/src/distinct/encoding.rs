@@ -15,7 +15,9 @@ use uqa_core::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
+mod btree;
 mod output;
+pub use btree::btree_input_binary_key_with_catalog_and_control;
 mod ranges;
 mod record_images;
 mod reservations;
@@ -351,20 +353,44 @@ fn encode_value_with_control(
     output: &mut impl KeyOutput,
     control: &ProductionControl<'_>,
 ) -> ExecResult<()> {
+    encode_frames_with_control(
+        Some((value, None)),
+        Frames::new(control.budget()),
+        output,
+        control,
+    )
+}
+
+fn encode_array_with_control(
+    array: &uqa_core::ArrayValue,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
+    control.check().map_err(output::resource_error)?;
+    encode_array_header(array, output)?;
     let mut stack = Frames::new(control.budget());
-    let mut current = Some((value, None));
+    if !array.elements().is_empty() {
+        stack.push(Children::Array(
+            array.elements().iter(),
+            array.element_type_oid(),
+        ))?;
+    }
+    encode_frames_with_control(None, stack, output, control)
+}
+
+fn encode_frames_with_control<'a>(
+    mut current: Option<(&'a Value, Option<u32>)>,
+    mut stack: Frames<'a>,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
     loop {
         control.check().map_err(output::resource_error)?;
         if let Some((value, oid)) = current.take() {
             if !ranges::encode_declared_range(value, oid, output, control)? {
                 match value {
                     Value::Array(array) => {
-                        output.push_byte(12)?;
-                        encode_len(array.lower_bounds().len(), output)?;
-                        for lower_bound in array.lower_bounds() {
-                            output.extend_bytes(&lower_bound.to_le_bytes())?;
-                        }
-                        encode_len(array.elements().len(), output)?;
+                        encode_array_header(array, output)?;
                         if !array.elements().is_empty() {
                             stack.push(Children::Array(
                                 array.elements().iter(),
@@ -458,6 +484,18 @@ fn encode_selected_value(
         }
     }
     encode_value_with_control(value, output, control)
+}
+
+fn encode_array_header(
+    array: &uqa_core::ArrayValue,
+    output: &mut impl KeyOutput,
+) -> ExecResult<()> {
+    output.push_byte(12)?;
+    encode_len(array.lower_bounds().len(), output)?;
+    for lower_bound in array.lower_bounds() {
+        output.extend_bytes(&lower_bound.to_le_bytes())?;
+    }
+    encode_len(array.elements().len(), output)
 }
 
 /// Encode a value without nested values; containers are framed by [`encode_value`].

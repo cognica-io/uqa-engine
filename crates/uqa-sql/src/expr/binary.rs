@@ -10,7 +10,9 @@ use super::{eval, time, BinaryOp, EvalContext, Expr, Result, SQLError, SQLParam,
 
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod btree;
 mod comparison;
+pub use btree::{with_btree_input, BTreeInput};
 mod selected;
 pub use selected::{
     compare_selected_grouping_values_with_catalog, compare_selected_values_with_catalog,
