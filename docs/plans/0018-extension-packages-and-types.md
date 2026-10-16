@@ -97,6 +97,8 @@ Implement `CREATE TYPE ... AS (...)` with a standalone composite relation row, t
 
 Generalize the built-in range subtype set to catalog-resolved subtypes with operator-class, collation, `canonical` and `subtype_diff` validation, the generated multirange type and `pg_range` rows. Exit evidence: PostgreSQL 18.4 oracle suite including enum and text subtypes, and reopen tests.
 
+The [range implementation boundaries](0018-user-defined-ranges.md) preserve this complete requirement while separating selected semantics, typed endpoint retention, atomic declaration publication, observing consumers and public acceptance. The [#917 built-in input correction](0018-range-input-acceptance.md) is a focused prerequisite, not completion of the user-defined range unit.
+
 ### Package registry and pre-open options
 
 Add package manifests with canonical bounded encoding and digest, a sealed registry split into descriptor, optimizer and runtime parts, and Engine options accepted by every constructor that opens or restores storage, including sibling sessions and binding equivalents. A database requiring an unavailable or incompatible implementation fails before decoding. Exit evidence: owner tests for canonical digests and validation, and open/reopen failures before decoder invocation.
