@@ -1,6 +1,6 @@
 # Declared range support and admitted equality keys
 
-This work follows the catalog-generation unit in [PR #944](https://github.com/cognica-io/uqa-engine/pull/944) and preserves original record 65. The completed source changes provide caller-controlled SQL equality keys and shared built-in B-tree class metadata. Binding stored operator classes and collations, invoking selected support, SQL declarations and generated constructors remain active requirements; these shared interfaces alone do not complete them.
+This work follows the catalog-generation unit in merged [PR #944](https://github.com/cognica-io/uqa-engine/pull/944) (`90b4c1ebe`) and preserves original record 65. The completed source changes provide caller-controlled SQL equality keys and shared built-in B-tree class metadata. Binding stored operator classes and collations, invoking selected support, SQL declarations and generated constructors remain active requirements; these shared interfaces alone do not complete them.
 
 ## Ownership and implementation
 
